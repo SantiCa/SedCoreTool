@@ -30,7 +30,7 @@ Updated 14 November 2026.
   macOS and Linux (the desktop end-to-end test with the engine experiment off and on, the package check and the packaged-runtime start). It was
   the first time the engine work was built on macOS and Linux; it found three faults, all fixed (see the card). Still not covered, and on the
   release checklist: launching the *packaged* program on macOS and Linux, Intel Macs, clean machines.
-- **Next step:** M8.4.1, after the maintainer answers the five decisions listed under M8.4. Also open: card H5 (the `e2e` job must pass ten
+- **Next step:** M8.4.1 (the five decisions are answered). Also open: card H5 (the `e2e` job must pass ten
   consecutive pushes).
 - **Reminder for whoever talks to the maintainer:** the maintainer accepted the two acceptance levels on
   13 November 2026 and asked to be **reminded to run the release-gate tests** (the release checklist below:
@@ -394,9 +394,10 @@ Cards are done in order. Each one claims the development gate only.
   rules, stale-result rejection, cancellation, queueing and the error state are tested in `tests/app/engine-analysis.test.mjs`
   (17 tests; 23 deliberate faults caught, two needed extra tests first). The six sections of the public example match the JavaScript
   reference (exact counts, indices and nulls, 1e-9 floats) in `tests/e2e/desktop.mjs` with the bundled runtime, before and after an edit;
-  with the experiment off the same file passes unchanged. Not done: undo/redo and save → reopen under the flag were not exercised
-  separately (the revision key covers them by construction); the figures, data and map tabs refresh through `setMode` after a publish,
-  which was not checked visually.
+  with the experiment off the same file passes unchanged. Closed on 14 November 2026 (closing M8.3): the desktop end-to-end test now also undoes and
+  redoes the deletion and compares every result with the reference after each step, then opens the data, figures, map, log and section tabs and requires
+  no page error; save → reopen was already covered by the restart steps of the same test. Limits: the tab check confirms that each tab opens without an
+  error, it does not compare their content, and the new assertions were not mutation-tested; run on Windows locally and not yet by the workflows.
 
 #### M8.3.8 - Acceptance measurements and decision — state: Done (measured and corrected 14 November 2026)
 

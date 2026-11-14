@@ -234,6 +234,28 @@ try {
   assert.notEqual(edited, before);
   const afterEdit = await p.evaluate(compareWithReference);
   assert.deepEqual(afterEdit.mismatches, [], 'after a deletion the new result matches the reference too');
+  // Undo and redo go through the same analysis path (M8.3.7 left them unchecked): every result must match the reference again.
+  await p.evaluate(() => document.getElementById('undoBtn').click());
+  assert.equal(await p.evaluate(signature), before, 'undo restores the trace');
+  const afterUndo = await p.evaluate(compareWithReference);
+  assert.deepEqual(afterUndo.mismatches, [], 'after undo the result matches the reference');
+  assert.ok(afterUndo.bins > 100, 'undo leaves the intervals in place');
+  await p.evaluate(() => document.getElementById('redoBtn').click());
+  assert.equal(await p.evaluate(signature), edited, 'redo removes the trace again');
+  const afterRedo = await p.evaluate(compareWithReference);
+  assert.deepEqual(afterRedo.mismatches, [], 'after redo the result matches the reference');
+  // The tabs that read the intervals must show them without a page error (checked only by eye in M8.3.7).
+  const tabs = await p.evaluate(async () => {
+    const seen = {};
+    for (const id of ['modeData', 'modeFig', 'modeGeo', 'modeLog', 'modeSection']) {
+      document.getElementById(id).click();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      seen[id] = { pressed: document.getElementById(id).getAttribute('aria-pressed'), rows: document.querySelectorAll('#dataTable tr, #figArea svg, #geoArea svg').length };
+    }
+    return seen;
+  });
+  for (const [id, state] of Object.entries(tabs)) assert.equal(state.pressed, 'true', `${id} opens`);
+  assert.deepEqual(errors, [], 'no page error while the tabs show engine results');
   await close(run); run = null;
   run = await start();
   await run.page.waitForFunction(() => window.ichantool.S.sections.length === 6, { timeout: 60000 });
