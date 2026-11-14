@@ -446,3 +446,257 @@ def test_the_least_recently_used_counts_are_dropped_first(monkeypatch):
     memo_run(inputs, memo, key(1))                                                 # 1 is used again: 2 is now the oldest
     memo_run(inputs, memo, key(3))
     assert sorted(entry[0] for entry in memo["counts"]) == [f"{1:064x}", f"{3:064x}"]
+
+
+# ---- counting only the rows that were written (card M8.4.5) -----------------------------------------------------------------
+
+def byte_ranges(rows, width, item):
+    return [[first * width * item, end * width * item] for first, end in rows]
+
+
+def edit(inputs, rng, rows, *, labels=True, exclusion=True):
+    """A copy of the inputs with random valid edits inside the image rows [first, end) of `rows`."""
+    out = altered(inputs, lambda i: None)
+    ids = [o["id"] for o in inputs["objects"]]
+    for first, end in rows:
+        if labels:
+            block = out["labels"][first:end]
+            mask = rng.random(block.shape) < 0.3
+            block[mask] = rng.choice([0] + ids, size=int(mask.sum()))
+        if exclusion:
+            block = out["exclude"][first:end]
+            block[rng.random(block.shape) < 0.2] ^= 1
+    return out
+
+
+def derived_run(base, edited, rows, memo, *, labels=True, exclusion=True):
+    """Count `base` (so the memo holds it), then `edited` as a derivation of it. Returns the result and the number of rows counted for it."""
+    memo_run(base, memo)
+    width = base["labels"].shape[1]
+    derived = {}
+    if labels:
+        derived["labels"] = {"sha256": hashes_of(base)["labels"], "ranges": byte_ranges(rows, width, 4)}
+    if exclusion:
+        derived["exclude"] = {"sha256": hashes_of(base)["exclude"], "ranges": byte_ranges(rows, width, 1)}
+    snapshot = section_intervals.parse(edited, hashes=hashes_of(edited), memo=memo, derived=derived)
+    return snapshot, section_intervals.run(snapshot, memo=memo)
+
+
+def rows_counted(spy_calls):
+    return sum(calls for calls in spy_calls)
+
+
+@pytest.fixture
+def counted_rows(monkeypatch):
+    rows = []
+    real = section_intervals.object_row_counts
+
+    def spy(labels, *args, **kwargs):
+        rows.append(labels.shape[0])
+        return real(labels, *args, **kwargs)
+
+    monkeypatch.setattr(section_intervals, "object_row_counts", spy)
+    return rows
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_counting_from_the_base_equals_counting_everything_and_touches_only_the_written_rows(seed, counted_rows):
+    base = inputs_of(fixtures.load("large-mixed"))
+    rng = np.random.default_rng(seed)
+    height = base["labels"].shape[0]
+    y0, y1 = base["settings"]["roi"]["y0"], base["settings"]["roi"]["y1"]
+    choices = [[(10, 25)], [(0, 3)], [(height - 4, height)], [(y0 - 2, y0 + 3)], [(y1 - 3, y1 + 2)], [(40, 41)],
+               [(5, 12), (300, 320), (1500, 1510)], [(0, height)], [(y0, y1)], [(y0 + 7, y0 + 8), (y0 + 8, y0 + 9)]]
+    rows = [(max(0, a), min(height, b)) for a, b in choices[seed % len(choices)]]
+    edited = edit(base, rng, rows)
+    expected = section_intervals.run(section_intervals.parse(edited))                         # counted from nothing (the spy sees it too)
+    memo = section_intervals.new_memo()
+    memo_run(base, memo)
+    counted_rows.clear()
+    width = base["labels"].shape[1]
+    derived = {"labels": {"sha256": hashes_of(base)["labels"], "ranges": byte_ranges(rows, width, 4)},
+               "exclude": {"sha256": hashes_of(base)["exclude"], "ranges": byte_ranges(rows, width, 1)}}
+    snapshot = section_intervals.parse(edited, hashes=hashes_of(edited), memo=memo, derived=derived)
+    got = section_intervals.run(snapshot, memo=memo)
+    same(got, expected)
+    assert snapshot.base_count_key is not None
+    inside = sum(max(0, min(end, y1) - max(first, y0)) for first, end in snapshot.changed_rows)
+    assert sum(counted_rows) == inside, f"counted {sum(counted_rows)} rows for {inside} written rows inside the ROI (everything is {y1 - y0})"
+
+
+def test_only_labels_or_only_the_exclusion_can_be_the_derived_one(counted_rows):
+    base = inputs_of(fixtures.load("large-mixed"))
+    rng = np.random.default_rng(99)
+    rows = [(20, 30)]
+    for labels, exclusion in ((True, False), (False, True)):
+        edited = edit(base, rng, rows, labels=labels, exclusion=exclusion)
+        memo = section_intervals.new_memo()
+        snapshot, got = derived_run(base, edited, rows, memo, labels=labels, exclusion=exclusion)
+        assert snapshot.changed_rows == [(20, 30)]
+        same(got, section_intervals.run(section_intervals.parse(edited)))
+
+
+def test_without_the_base_counts_or_with_other_conditions_everything_is_counted(counted_rows):
+    base = inputs_of(fixtures.load("large-mixed"))
+    rng = np.random.default_rng(5)
+    rows = [(20, 30)]
+    edited = edit(base, rng, rows)
+    height = base["labels"].shape[0]
+    width = base["labels"].shape[1]
+    derived = {"labels": {"sha256": hashes_of(base)["labels"], "ranges": byte_ranges(rows, width, 4)},
+               "exclude": {"sha256": hashes_of(base)["exclude"], "ranges": byte_ranges(rows, width, 1)}}
+    expected = section_intervals.run(section_intervals.parse(edited))
+    roi_rows = base["settings"]["roi"]["y1"] - base["settings"]["roi"]["y0"]
+
+    def full_count_after(memo, inputs=edited, derived=derived):
+        counted_rows.clear()
+        got = section_intervals.run(section_intervals.parse(inputs, hashes=hashes_of(inputs), memo=memo, derived=derived), memo=memo)
+        return got, sum(counted_rows)
+
+    empty = section_intervals.new_memo()                                                    # the base was never counted here
+    got, n = full_count_after(empty)
+    assert n == roi_rows
+    same(got, expected)
+    memo = section_intervals.new_memo()
+    memo_run(base, memo)
+    for label, change in (("another ROI", lambda i: i["settings"]["roi"].update(y0=i["settings"]["roi"]["y0"] + 1)),
+                          ("another class table", lambda i: i["settings"].update(include_predictions=not i["settings"]["include_predictions"],
+                                                                                 count_candidates=not i["settings"]["count_candidates"])),
+                          ("another number of classes", lambda i: i["classes"].append({"id": "extra", "name": "Extra", "counts": True}))):
+        other = altered(edited, change)
+        got, n = full_count_after(memo, other)
+        reference = section_intervals.run(section_intervals.parse(other))
+        same(got, reference)
+        assert n >= (roi_rows - 1), f"{label}: the base counts do not apply, everything is counted"
+    got, n = full_count_after(memo, edited, {"labels": derived["labels"]})                  # the exclusion changed too but is not declared as derived
+    assert n == roi_rows
+    same(got, expected)
+    other_stacks = {**hashes_of(edited), "stack_offsets": "1" * 64}
+    counted_rows.clear()
+    snapshot = section_intervals.parse(edited, hashes=other_stacks, memo=memo, derived=derived)
+    assert snapshot.base_count_key[2] == "1" * 64 and snapshot.base_count_key not in memo["counts"], "other stack tables: no base"
+    assert height > 0
+
+
+def test_a_derived_mask_is_checked_only_where_it_was_written_and_a_bad_value_there_is_refused():
+    base = inputs_of(fixtures.load("large-mixed"))
+    width = base["labels"].shape[1]
+    memo = section_intervals.new_memo()
+    memo_run(base, memo)
+    derived = {"labels": {"sha256": hashes_of(base)["labels"], "ranges": byte_ranges([(20, 30)], width, 4)},
+               "exclude": {"sha256": hashes_of(base)["exclude"], "ranges": byte_ranges([(20, 30)], width, 1)}}
+    bad_label = altered(base, lambda i: i["labels"].__setitem__((25, 3), 9999))
+    with pytest.raises(MethodError) as error:
+        section_intervals.parse(bad_label, hashes=hashes_of(bad_label), memo=memo, derived=derived)
+    assert (error.value.code, error.value.field) == ("INVALID_BUFFER", "labels")
+    bad_exclusion = altered(base, lambda i: i["exclude"].__setitem__((25, 3), 2))
+    with pytest.raises(MethodError) as error:
+        section_intervals.parse(bad_exclusion, hashes=hashes_of(bad_exclusion), memo=memo, derived=derived)
+    assert (error.value.code, error.value.field) == ("INVALID_BUFFER", "exclude")
+    assert len(memo["labels_ok"]) == 1 and len(memo["exclude_ok"]) == 1, "a refused mask is not remembered"
+
+
+def test_ranges_are_turned_into_merged_rows_inside_the_image():
+    spec = lambda *ranges: {"sha256": "x", "ranges": [list(r) for r in ranges]}                    # noqa: E731
+    assert section_intervals.changed_rows([spec((0, 1))], [40], 10) == [(0, 1)]
+    assert section_intervals.changed_rows([spec((39, 41))], [40], 10) == [(0, 2)], "a range that crosses a row boundary"
+    assert section_intervals.changed_rows([spec((80, 120), (160, 200))], [40], 10) == [(2, 3), (4, 5)]
+    assert section_intervals.changed_rows([spec((40, 80), (80, 120))], [40], 10) == [(1, 3)], "neighbours merge"
+    assert section_intervals.changed_rows([spec((40, 120)), spec((100, 160))], [40, 40], 10) == [(1, 4)], "two masks merge"
+    assert section_intervals.changed_rows([spec((360, 440))], [40], 10) == [(9, 10)], "clipped to the image"
+    assert section_intervals.changed_rows([spec((4, 5))], [4], 10) == [(1, 2)]
+    assert section_intervals.changed_rows([], [], 10) == []
+
+
+def test_a_derived_mask_whose_base_was_not_seen_here_is_checked_completely():
+    base = inputs_of(fixtures.load("large-mixed"))
+    width = base["labels"].shape[1]
+    derived = {"labels": {"sha256": hashes_of(base)["labels"], "ranges": byte_ranges([(20, 30)], width, 4)},
+               "exclude": {"sha256": hashes_of(base)["exclude"], "ranges": byte_ranges([(20, 30)], width, 1)}}
+    for label, change, field in (("a bad label outside the written rows", lambda i: i["labels"].__setitem__((500, 3), 9999), "labels"),
+                                 ("a bad exclusion outside the written rows", lambda i: i["exclude"].__setitem__((500, 3), 2), "exclude")):
+        bad = altered(base, change)
+        for memo in (section_intervals.new_memo(), None):                       # nothing is known about the base
+            with pytest.raises(MethodError) as error:
+                section_intervals.parse(bad, hashes=hashes_of(bad) if memo is not None else None, memo=memo, derived=derived)
+            assert (error.value.code, error.value.field) == ("INVALID_BUFFER", field), label
+
+
+def object_rows(inputs, object_id):
+    rows = np.unique(np.nonzero(inputs["labels"] == object_id)[0])
+    return [(int(rows.min()), int(rows.max()) + 1)]
+
+
+def free_objects(inputs):
+    """Objects that have pixels and belong to no overlap stack: they can be deleted without breaking the stack table."""
+    stacked = set() if inputs["stack_members"] is None else {int(v) for v in inputs["stack_members"]}
+    return [o["id"] for o in inputs["objects"] if o["id"] not in stacked and (inputs["labels"] == o["id"]).any()]
+
+
+def count_derived(base, edited, rows, memo, counted_rows):
+    width = base["labels"].shape[1]
+    derived = {"labels": {"sha256": hashes_of(base)["labels"], "ranges": byte_ranges(rows, width, 4)}}
+    counted_rows.clear()
+    got = section_intervals.run(section_intervals.parse(edited, hashes=hashes_of(edited), memo=memo, derived=derived), memo=memo)
+    return got, sum(counted_rows)
+
+
+def test_deleting_or_adding_an_object_counts_only_its_rows_and_a_reassigned_class_counts_everything(counted_rows):
+    base = inputs_of(fixtures.load("large-mixed"))
+    roi = base["settings"]["roi"]
+    ids = [o["id"] for o in base["objects"]]
+    victim = next(i for i in free_objects(base) if (base["labels"][roi["y0"]:roi["y1"]] == i).any() and object_rows(base, i)[0][1] - object_rows(base, i)[0][0] < 200)
+    rows = object_rows(base, victim)
+    inside = sum(max(0, min(end, roi["y1"]) - max(first, roi["y0"])) for first, end in rows)
+
+    deleted = altered(base, lambda i: (i["labels"].__setitem__(i["labels"] == victim, 0),
+                                       i["objects"].__setitem__(slice(None), [o for o in i["objects"] if o["id"] != victim])))
+    expected = section_intervals.run(section_intervals.parse(deleted))
+    memo = section_intervals.new_memo()
+    memo_run(base, memo)
+    got, n = count_derived(base, deleted, rows, memo, counted_rows)
+    same(got, expected)
+    assert n == inside, f"a deletion counted {n} rows for {inside}"
+
+    added_id = max(ids) + 1                                                                   # undo of the deletion under a new id: an addition
+    added = altered(deleted, lambda i: (i["labels"].__setitem__(base["labels"] == victim, added_id),
+                                        i["objects"].append({"id": added_id, "class_id": i["classes"][0]["id"], "predicted_class_id": None,
+                                                             "confidence": 0})))
+    expected = section_intervals.run(section_intervals.parse(added))
+    got, n = count_derived(deleted, added, rows, memo, counted_rows)
+    same(got, expected)
+    assert n == inside, f"an addition counted {n} rows for {inside}"
+
+    other = next(o for o in base["objects"] if o["id"] != victim and o["class_id"] and (base["labels"][roi["y0"]:roi["y1"]] == o["id"]).any())
+    new_class = next(c["id"] for c in base["classes"] if c["counts"] and c["id"] != other["class_id"])
+    reassigned = altered(deleted, lambda i: next(o for o in i["objects"] if o["id"] == other["id"]).update(class_id=new_class))
+    expected = section_intervals.run(section_intervals.parse(reassigned))
+    got, n = count_derived(base, reassigned, rows, memo, counted_rows)                    # declared as derived from the base, with a reassignment
+    same(got, expected)
+    assert n == roi["y1"] - roi["y0"], "a class reassigned to an object listed in both versions needs a full count"
+
+
+def test_a_deleted_object_whose_pixels_remain_outside_the_written_rows_is_refused(counted_rows):
+    base = inputs_of(fixtures.load("large-mixed"))
+    victim = max(free_objects(base), key=lambda i: (lambda r: r[0][1] - r[0][0])(object_rows(base, i)))
+    first, end = object_rows(base, victim)[0]
+    half = [(first, (first + end) // 2)]                                                      # only half of its rows are rewritten
+    broken = altered(base, lambda i: (i["labels"][half[0][0]:half[0][1]].__setitem__(i["labels"][half[0][0]:half[0][1]] == victim, 0),
+                                      i["objects"].__setitem__(slice(None), [o for o in i["objects"] if o["id"] != victim])))
+    assert (broken["labels"] == victim).any(), "the test needs pixels of the deleted object outside the written rows"
+    memo = section_intervals.new_memo()
+    memo_run(base, memo)
+    with pytest.raises(MethodError) as error:
+        count_derived(base, broken, half, memo, counted_rows)
+    assert (error.value.code, error.value.field) == ("INVALID_BUFFER", "labels")
+
+
+def test_the_tables_of_remembered_counts_leave_with_them(monkeypatch):
+    inputs, memo = inputs_of(fixtures.load("basic-four-intervals")), section_intervals.new_memo()
+    monkeypatch.setattr(section_intervals, "MEMO_COUNT_ENTRIES", 2)
+    for k in range(5):
+        memo_run(inputs, memo, {**hashes_of(inputs), "labels": f"{k:064x}"})
+    assert set(memo["count_tables"]) == set(memo["counts"]) and len(memo["counts"]) == 2
+    monkeypatch.setattr(section_intervals, "MEMO_COUNT_BYTES", 1)
+    memo_run(inputs, memo, {**hashes_of(inputs), "labels": "f" * 64})
+    assert not memo["counts"] and not memo["count_tables"]

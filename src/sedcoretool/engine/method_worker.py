@@ -1,7 +1,7 @@
 """Long-lived worker that runs scientific methods, one job at a time: ``python -I -B -u method_worker.py``.
 
 Start-up (the interpreter and NumPy) costs about 0.7 s, so the coordinator keeps one worker and sends it jobs. Each job is the
-absolute path of a ``job.json`` ({method, cancel_path, output_dir, inputs: {name: {path, dtype, shape, sha256}}}) written on one line
+absolute path of a ``job.json`` ({method, cancel_path, output_dir, inputs: {name: {path, dtype, shape, sha256[, derived_from]}}}) written on one line
 to stdin; the coordinator never imports NumPy. Numeric inputs are mapped read-only and released before the answer is sent, so
 the coordinator can delete them; metadata tables are decoded with the same strict JSON rules the transport uses. Results are
 written, packed one after another, to ONE file ``<output_dir>/result.bin`` (little-endian, C order, each column starting at a multiple
@@ -93,6 +93,7 @@ def run(job_file, modules, memos=None):
     tables = memos.setdefault('tables', {}) if memos is not None else None
     inputs = {name: None for name in method.INPUT_NAMES}        # an optional input that was not supplied stays None
     hashes = {name: spec.get('sha256') for name, spec in job['inputs'].items()}
+    derived = {name: spec['derived_from'] for name, spec in job['inputs'].items() if spec.get('derived_from')}
     for name, spec in job['inputs'].items():
         path = Path(spec['path'])
         if spec['dtype'] == 'utf8json':
@@ -100,7 +101,7 @@ def run(job_file, modules, memos=None):
         else:
             inputs[name] = np.memmap(path, dtype=NUMPY_DTYPES[spec['dtype']], mode='r', shape=tuple(spec['shape']))
     try:
-        result = method.run(method.parse(inputs, hashes=hashes, memo=memo), cancelled=cancel_path.exists, memo=memo)
+        result = method.run(method.parse(inputs, hashes=hashes, memo=memo, derived=derived), cancelled=cancel_path.exists, memo=memo)
     except Cancelled:
         return {'cancelled': True}
     except MethodError as error:

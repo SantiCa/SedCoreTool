@@ -23,6 +23,9 @@ import { analysisRevision, buildIntervalSnapshot, maskIdentity, resultToBins } f
 export function createEngineAnalysis({ client, project, onChange, maskChanges }) {
   /** How many times a change of some rows was refused and the whole mask had to be sent (the page's record and the engine's disagreed). */
   let deriveFallbacks = 0;
+  /** The stages of the last analyses (at most 20), for measurements: how the masks travelled and where the time went. */
+  /** @type {{mode: string, snapshot_ms: number, upload_ms: number, engine_ms: number, download_ms: number}[]} */
+  const recent = [];
   /** @type {WeakMap<object, Job>} */
   const jobs = new WeakMap();
   /** Jobs wait here: the engine runs one calculation at a time and a page may hold only a few (engine-ipc.js). */
@@ -52,7 +55,11 @@ export function createEngineAnalysis({ client, project, onChange, maskChanges })
       if (mode === 'derive' && (!taken || taken.all)) mode = 'full';
       try {
         const options = mode === 'derive' ? { masks: /** @type {const} */ ('derive'), change: taken } : { masks: mode === 'full' };
-        return await client.analyze(buildIntervalSnapshot(section, project(), options), { signal, owner: section, maskKey });
+        const started = performance.now(), snapshot = buildIntervalSnapshot(section, project(), options), built = performance.now() - started;
+        const result = await client.analyze(snapshot, { signal, owner: section, maskKey });
+        recent.push({ mode, snapshot_ms: built, ...(result.timing ?? {}) });
+        if (recent.length > 20) recent.shift();
+        return result;
       } catch (error) {
         if (taken) maskChanges?.restore(section, taken);                      // the engine did not get it: it is still to be sent
         const code = /** @type {any} */ (error)?.code;
@@ -138,7 +145,7 @@ export function createEngineAnalysis({ client, project, onChange, maskChanges })
     /** How many changes of some rows the engine refused so far (each cost a full upload instead of a small one). */
     deriveFallbacks: () => deriveFallbacks,
     /** Counters for tests and measurements: masks sent whole, masks sent as changed rows, changes the engine refused. */
-    stats: () => ({ ...(/** @type {any} */ (client).stats?.() ?? {}), deriveFallbacks }),
+    stats: () => ({ ...(/** @type {any} */ (client).stats?.() ?? {}), deriveFallbacks, recent: recent.map((job) => ({ ...job })) }),
     /** Lets the engine drop everything it kept for `section` (the section is closed or replaced). */
     forget: (/** @type {any} */ section) => { jobs.get(section)?.controller.abort(); jobs.delete(section); client.forget?.(section); },
     /** @returns {AnalysisState | undefined} */

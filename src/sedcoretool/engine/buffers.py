@@ -6,7 +6,7 @@ import os
 import re
 import shutil
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
@@ -37,6 +37,8 @@ class StagedBuffer:
     shape: tuple = ()
     derived: bool = False       # starts as a copy of a committed buffer; chunks may come at any ascending offsets
     written: int = 0            # derived buffers: the end of the last chunk
+    base_hash: str = ''         # derived buffers: the SHA-256 of the buffer they were copied from
+    changes: list = field(default_factory=list)   # derived buffers: [start, end) byte ranges written after the copy
 
 
 class BufferStore:
@@ -95,7 +97,7 @@ class BufferStore:
         except OSError:
             self.release(handle)
             raise RequestError('INTERNAL') from None
-        value.derived = True
+        value.derived, value.base_hash = True, base.expected_hash
         return {'handle': handle}
 
     def get(self, handle, *, committed=False):
@@ -119,6 +121,7 @@ class BufferStore:
                 stream.write(data)
             value.written = offset + length
             value.received += length
+            value.changes.append([offset, offset + length])
             return {'next_offset': value.written}
         if value.committed or data is None or length != len(data) or offset != value.received or offset + length > value.length:
             raise RequestError('INVALID_BUFFER')

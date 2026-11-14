@@ -761,3 +761,75 @@ def test_the_table_memory_is_bounded(tmp_path, monkeypatch, worker_module):
         path.write_bytes(json.dumps({"k": k}).encode())
         assert worker.decoded_table(path, f"{k:064x}", tables) == {"k": k}
     assert list(tables) == [f"{k:064x}" for k in (4, 5, 6)]
+
+
+def test_a_job_on_a_derived_mask_names_what_was_written_and_gives_the_result_of_a_fresh_calculation():
+    fixture = fixtures.load("large-mixed")
+    coordinator, session = new_coordinator()
+    try:
+        handles, settings_hash = upload(coordinator, fixture)
+        first = analysis(session, handles, settings_hash)
+        coordinator.receive(first)
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][first["id"]]["status"] == "ok"
+        labels = fixtures.array(fixture["inputs"]["labels"]).copy()
+        ids = [o["id"] for o in fixture["inputs"]["objects"]]
+        labels[100:110] = np.resize(np.array(ids + [0]), labels[100:110].shape)
+        data, row_bytes = labels.tobytes(), labels.shape[1] * 4
+        derived = coordinator.store.derive({"base": handles["labels"], "dtype": "i32le", "shape": list(labels.shape), "byte_length": len(data),
+                                            "sha256": hashlib.sha256(data).hexdigest()})["handle"]
+        coordinator.store.append({"handle": derived, "offset": 100 * row_bytes, "byte_length": 10 * row_bytes}, data[100 * row_bytes:110 * row_bytes])
+        coordinator.store.commit({"handle": derived})
+        current = {**handles, "labels": derived}
+        second = analysis(session, current, settings_hash)
+        coordinator.receive(second)
+        description = json.loads((coordinator.active["worker"].directory / "job.json").read_text(encoding="utf-8"))
+        assert description["inputs"]["labels"]["derived_from"] == {"sha256": coordinator.store.buffers[handles["labels"]].expected_hash,
+                                                                   "ranges": [[100 * row_bytes, 110 * row_bytes]]}
+        assert all("derived_from" not in spec for name, spec in description["inputs"].items() if name != "labels")
+        run_until_idle(coordinator)
+        response = frames(coordinator)[0][second["id"]]
+        assert response["status"] == "ok", response
+        columns = download(coordinator, session, response["result"])
+        direct = section_intervals.run(section_intervals.parse({**inputs_from(fixture), "labels": labels}))
+        assert columns.keys() == direct.columns.keys()
+        for key in columns:
+            np.testing.assert_array_equal(columns[key], direct.columns[key], err_msg=key)
+    finally:
+        coordinator.close()
+
+
+def test_the_worker_recounts_only_the_rows_it_is_told_were_written(tmp_path, worker_module, monkeypatch):
+    worker, modules = worker_module
+    fixture = fixtures.load("large-mixed")
+    rows = []
+    real = section_intervals.object_row_counts
+    monkeypatch.setattr(section_intervals, "object_row_counts", lambda labels, *a, **k: rows.append(labels.shape[0]) or real(labels, *a, **k))
+    memos = {}
+    base_job = worker_job(tmp_path, fixture, "base")
+    assert worker.run(base_job, modules, memos)["ok"]
+    base_hash = json.loads(base_job.read_text())["inputs"]["labels"]["sha256"]
+    roi = fixture["inputs"]["settings"]["roi"]
+    rows.clear()
+
+    labels = fixtures.array(fixture["inputs"]["labels"]).copy()
+    ids = [o["id"] for o in fixture["inputs"]["objects"]]
+    first, end = roi["y0"] + 30, roi["y0"] + 42
+    labels[first:end] = np.resize(np.array(ids + [0]), labels[first:end].shape)
+    job_file = worker_job(tmp_path, fixture, "edited")
+    description = json.loads(job_file.read_text())
+    spec = description["inputs"]["labels"]
+    Path(spec["path"]).write_bytes(labels.tobytes())
+    spec["sha256"] = hashlib.sha256(labels.tobytes()).hexdigest()
+    row_bytes = labels.shape[1] * 4
+    spec["derived_from"] = {"sha256": base_hash, "ranges": [[first * row_bytes, end * row_bytes]]}
+    job_file.write_text(json.dumps(description))
+
+    answer = worker.run(job_file, modules, memos)
+    assert answer["ok"]
+    assert sum(rows) == end - first, f"counted {sum(rows)} rows for {end - first} written rows"
+    description["inputs"]["labels"].pop("derived_from")                         # the same job without the information: everything is counted
+    job_file.write_text(json.dumps(description))
+    rows.clear()
+    worker.run(job_file, modules, {})
+    assert sum(rows) == roi["y1"] - roi["y0"]

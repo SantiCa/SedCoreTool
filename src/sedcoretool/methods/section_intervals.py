@@ -52,7 +52,25 @@ MEMO_CHECKS = 64                          # remembered validations of masks
 def new_memo() -> dict:
     """What a long-lived caller (the engine worker) keeps between jobs: validations that passed and the row counts of masks it has
     seen. Every entry is indexed by the SHA-256 of the buffers it came from, so nothing stale can be used. Pass it to `parse` and `run`."""
-    return {"exclude_ok": set(), "labels_ok": set(), "counts": OrderedDict()}
+    return {"exclude_ok": set(), "labels_ok": set(), "counts": OrderedDict(), "count_tables": {}}
+
+
+def changed_rows(specs, shapes_row_bytes, height: int) -> list:
+    """The image rows [first, end), merged and sorted, that a derived buffer had written into it after it was copied from its base.
+
+    `specs` are the `derived_from` descriptions of the masks (`{sha256, ranges: [[start, end) bytes]}`) and `shapes_row_bytes` the bytes per
+    image row of each. Every byte outside these ranges is the base's, because the coordinator wrote the ranges itself."""
+    rows = []
+    for spec, row_bytes in zip(specs, shapes_row_bytes):
+        for start, end in spec["ranges"]:
+            rows.append((start // row_bytes, min(height, (end - 1) // row_bytes + 1)))
+    merged = []
+    for first, end in sorted(rows):
+        if merged and first <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((first, end))
+    return merged
 
 
 def _remember(checks: set, key) -> None:
@@ -81,6 +99,9 @@ class Snapshot:
     age_model: tuple[np.ndarray, np.ndarray, np.ndarray | None, np.ndarray | None]   # depth, age, min, max
     manual: list[tuple[float, float, int | None, int | None]]
     count_key: tuple | None = None                  # identity of everything the row counts depend on; None = not cacheable
+    base_count_key: tuple | None = None             # labels, exclusion, stacks, ROI and number of classes of the masks these were copied from
+    present: np.ndarray | None = None               # which object ids are listed
+    changed_rows: list | None = None                # image rows [first, end) written after that copy
 
 
 @dataclass
@@ -214,18 +235,20 @@ def _stacks(offsets, members, present: np.ndarray) -> tuple[np.ndarray, np.ndarr
     return offsets, members
 
 
-def _check_labels(labels: np.ndarray, present: np.ndarray, stack_rows: int) -> None:
-    """Every positive label must be a listed object and every negative one a listed stack (whole image, not only the ROI)."""
+def _check_labels(labels: np.ndarray, present: np.ndarray, stack_rows: int, rows: list | None = None) -> None:
+    """Every positive label must be a listed object and every negative one a listed stack (whole image, not only the ROI).
+    With `rows` only those image rows [first, end) are looked at: the caller knows that the others were checked before."""
     seen = np.zeros(present.size, dtype=bool)
-    for start in range(0, labels.shape[0], CHUNK_ROWS):
-        block = labels[start:start + CHUNK_ROWS]
-        if block.min() <= -stack_rows:
-            fail("INVALID_BUFFER", "labels")
-        positive = block[block > 0]
-        if positive.size:
-            if positive.max() >= present.size:
+    for first, last in [(0, labels.shape[0])] if rows is None else rows:
+        for start in range(first, last, CHUNK_ROWS):
+            block = labels[start:min(last, start + CHUNK_ROWS)]
+            if block.min() <= -stack_rows:
                 fail("INVALID_BUFFER", "labels")
-            seen[positive] = True
+            positive = block[block > 0]
+            if positive.size:
+                if positive.max() >= present.size:
+                    fail("INVALID_BUFFER", "labels")
+                seen[positive] = True
     if np.any(seen & ~present):
         fail("INVALID_BUFFER", "labels")
 
@@ -263,12 +286,15 @@ def _manual(value):
     return parsed
 
 
-def parse(inputs: dict, *, hashes: dict | None = None, memo: dict | None = None) -> Snapshot:
+def parse(inputs: dict, *, hashes: dict | None = None, memo: dict | None = None, derived: dict | None = None) -> Snapshot:
     """Validate ``inputs`` (contract §4) and return a ``Snapshot``; raises ``MethodError`` naming the field at fault.
 
     ``hashes`` (input name -> SHA-256 of its buffer, already verified by the caller) and ``memo`` (``new_memo()``) let a long-lived
     caller skip, for masks it has validated before, the full-image checks and, in ``run``, the counting. Every rule is still applied
     to a mask the memo has not seen; the tables are always validated.
+
+    ``derived`` (input name -> ``{sha256, ranges}``, from the coordinator) says that a mask was made by copying an earlier buffer and writing
+    the given byte ranges: if the memo holds the earlier buffer's checks and counts, only those rows are checked and counted again.
 
     Numeric inputs are NumPy arrays of the contract's dtypes (``labels`` ``<i4`` [height, width], ``exclude`` ``u1``,
     ``stack_offsets`` and ``stack_members`` ``<u4``; ``stack_members`` may be None when there is no overlap); the
@@ -280,8 +306,13 @@ def parse(inputs: dict, *, hashes: dict | None = None, memo: dict | None = None)
     if exclude.shape != labels.shape:
         fail("INVALID_BUFFER", "exclude")
     exclude_key = hashes.get("exclude") if hashes and memo is not None else None
+    derived = (derived or {}) if memo is not None else {}
+    width = labels.shape[1]
+    height = labels.shape[0]
+    rows_of = {name: changed_rows([derived[name]], [width * (4 if name == "labels" else 1)], height) for name in ("labels", "exclude") if name in derived}
     if exclude_key is None or exclude_key not in memo["exclude_ok"]:
-        if exclude.max() > 1:
+        base_checked = memo is not None and "exclude" in derived and derived["exclude"]["sha256"] in memo["exclude_ok"]
+        if any(exclude[first:end].max() > 1 for first, end in rows_of["exclude"]) if base_checked else exclude.max() > 1:
             fail("INVALID_BUFFER", "exclude")
         if exclude_key is not None:
             _remember(memo["exclude_ok"], exclude_key)
@@ -293,7 +324,8 @@ def parse(inputs: dict, *, hashes: dict | None = None, memo: dict | None = None)
     if hashes and memo is not None and hashes.get("labels"):
         labels_key = (hashes["labels"], hashes.get("stack_offsets"), hashes.get("stack_members"), hashlib.sha256(present.tobytes()).hexdigest())
     if labels_key is None or labels_key not in memo["labels_ok"]:
-        _check_labels(labels, present, offsets.size - 1)
+        base_key = (derived["labels"]["sha256"], *labels_key[1:]) if labels_key is not None and "labels" in derived else None
+        _check_labels(labels, present, offsets.size - 1, rows_of["labels"] if base_key is not None and base_key in memo["labels_ok"] else None)
         if labels_key is not None:
             _remember(memo["labels_ok"], labels_key)
     x0, y0, x1, y1 = settings["roi"]
@@ -303,14 +335,27 @@ def parse(inputs: dict, *, hashes: dict | None = None, memo: dict | None = None)
     if hashes and memo is not None and hashes.get("labels") and hashes.get("exclude") and hashes.get("stack_offsets"):
         count_key = (hashes["labels"], hashes["exclude"], hashes["stack_offsets"], hashes.get("stack_members"), settings["roi"], len(class_ids),
                      hashlib.sha256(table.tobytes()).hexdigest())
+    base_count_key, rows = None, None
+    if count_key is not None and rows_of:
+        base_count_key = (derived["labels"]["sha256"] if "labels" in derived else count_key[0],
+                          derived["exclude"]["sha256"] if "exclude" in derived else count_key[1], *count_key[2:6])
+        rows = changed_rows([derived[name] for name in rows_of], [width * (4 if name == "labels" else 1) for name in rows_of], height)
     return Snapshot(labels=labels, exclude=exclude, roi=settings["roi"], top=settings["top"], bottom=settings["bottom"],
                     units=settings["units"], bin_cm=settings["bin_cm"], min_valid=settings["min_valid"],
                     no_data_pad_cm=settings["no_data_pad_cm"], n_classes=len(class_ids), class_of_object=table,
                     stack_offsets=offsets, stack_members=members, schemes=settings["schemes"],
-                    age_model=_age_model(inputs["age_model"]), manual=_manual(inputs["manual_indices"]), count_key=count_key)
+                    age_model=_age_model(inputs["age_model"]), manual=_manual(inputs["manual_indices"]), count_key=count_key,
+                    base_count_key=base_count_key, changed_rows=rows, present=present)
 
 
 # ---- run -------------------------------------------------------------------------------------------------------------
+
+def _count_rows(s: Snapshot, first: int, end: int):
+    """Counts of the ROI rows [first, end) (relative to the ROI's first row)."""
+    x0, y0, x1, y1 = s.roi
+    window = (slice(y0 + first, y0 + end), slice(x0, x1))
+    return object_row_counts(s.labels[window], s.exclude[window] == 0, s.class_of_object, s.n_classes, s.stack_offsets, s.stack_members)
+
 
 def _count(s: Snapshot, report, cancelled):
     x0, y0, x1, y1 = s.roi
@@ -319,13 +364,49 @@ def _count(s: Snapshot, report, cancelled):
         if cancelled():
             raise Cancelled()
         end = min(y1 - y0, start + CHUNK_ROWS)
-        window = (slice(y0 + start, y0 + end), slice(x0, x1))
-        part = object_row_counts(s.labels[window], s.exclude[window] == 0, s.class_of_object, s.n_classes, s.stack_offsets, s.stack_members)
+        part = _count_rows(s, start, end)
         valid.append(part.valid)
         bio.append(part.bio)
         cls.append(part.cls)
         report("counting", end, y1 - y0)
     return np.concatenate(valid), np.concatenate(bio), np.concatenate(cls)
+
+
+def _compatible_base(s: Snapshot, memo: dict):
+    """Counts of the base masks that the rows outside `s.changed_rows` can keep, or None.
+
+    The base must have the same labels and exclusion it was derived from, the same stack tables, ROI and number of classes, and the same
+    effective class for every object listed in both. An object listed only in the base (deleted) cannot occur in the unchanged rows,
+    because `parse` validates the whole new label image whenever the list of objects changed; an object listed only now (added) cannot
+    occur there either, because the base image was validated without it. A class reassigned to an object listed in both changes rows
+    anywhere, so it needs a full count."""
+    for key in reversed(memo["counts"]):
+        if key[:6] != s.base_count_key or key not in memo["count_tables"]:
+            continue
+        table, present = memo["count_tables"][key]
+        size = max(table.size, s.class_of_object.size)
+        both = np.zeros(size, dtype=bool)
+        both[:min(present.size, s.present.size)] = present[:min(present.size, s.present.size)] & s.present[:min(present.size, s.present.size)]
+        old, new = np.full(size, -1, dtype=np.intp), np.full(size, -1, dtype=np.intp)
+        old[:table.size], new[:s.class_of_object.size] = table, s.class_of_object
+        if np.array_equal(old[both], new[both]):
+            return memo["counts"][key]
+    return None
+
+
+def _count_from_base(s: Snapshot, base, cancelled):
+    """The counts of the base masks with the rows written since recounted; identical to counting everything, much cheaper for a small edit."""
+    x0, y0, x1, y1 = s.roi
+    valid, bio, cls = (array.copy() for array in base)
+    for first, end in s.changed_rows:
+        first, end = max(first, y0) - y0, min(end, y1) - y0                  # image rows -> ROI rows, clipped
+        for start in range(max(first, 0), end, CHUNK_ROWS):
+            if cancelled():
+                raise Cancelled()
+            stop = min(end, start + CHUNK_ROWS)
+            part = _count_rows(s, start, stop)
+            valid[start:stop], bio[start:stop], cls[start:stop] = part.valid, part.bio, part.cls
+    return valid, bio, cls
 
 
 def _pad_no_data(no_data: np.ndarray, depth_top: np.ndarray, depth_bottom: np.ndarray, pad: float) -> np.ndarray:
@@ -344,21 +425,26 @@ def _pad_no_data(no_data: np.ndarray, depth_top: np.ndarray, depth_bottom: np.nd
 def _counts(s: Snapshot, report, cancelled, memo: dict | None):
     """Row counts of the snapshot: from the memo when the same masks, ROI and class table were counted before."""
     cache = memo["counts"] if memo is not None and s.count_key is not None else None
+    x0, y0, x1, y1 = s.roi
     if cache is not None and s.count_key in cache:
         cache.move_to_end(s.count_key)
-        x0, y0, x1, y1 = s.roi
         report("counting", y1 - y0, y1 - y0)
         return cache[s.count_key]
-    counted = _count(s, report, cancelled)
+    base = _compatible_base(s, memo) if cache is not None and s.base_count_key is not None and s.changed_rows is not None else None
+    counted = _count_from_base(s, base, cancelled) if base is not None else _count(s, report, cancelled)
+    if base is not None:
+        report("counting", y1 - y0, y1 - y0)
     if cache is not None:
         for array in counted:
             array.flags.writeable = False      # shared between jobs from now on
         cache[s.count_key] = counted
+        memo["count_tables"][s.count_key] = (s.class_of_object, s.present)
         while len(cache) > MEMO_COUNT_ENTRIES or sum(a.nbytes for entry in cache.values() for a in entry) > MEMO_COUNT_BYTES:
             if len(cache) == 1:
                 cache.clear()               # a single entry larger than the bound is not kept
+                memo["count_tables"].clear()
                 break
-            cache.popitem(last=False)
+            memo["count_tables"].pop(cache.popitem(last=False)[0], None)
     return counted
 
 

@@ -243,7 +243,9 @@ class Coordinator:
         (directory / 'out').mkdir(parents=True)
         buffers = {name: self.store.buffers[handle] for name, handle in payload['inputs'].items()}
         # expected_hash is the SHA-256 the coordinator verified when the buffer was committed (or adopted).
-        specification = {name: {'path': str(value.path), 'dtype': value.dtype, 'shape': list(value.shape), 'sha256': value.expected_hash}
+        specification = {name: {'path': str(value.path), 'dtype': value.dtype, 'shape': list(value.shape), 'sha256': value.expected_hash,
+                                # What this coordinator itself wrote into a copy of an earlier buffer: every other byte equals the base's.
+                                **({'derived_from': {'sha256': value.base_hash, 'ranges': [list(item) for item in value.changes]}} if value.derived else {})}
                          for name, value in buffers.items()}
         job_file = directory / 'job.json'
         job_file.write_text(json.dumps({'method': payload['method'], 'cancel_path': str(directory / 'cancel'),

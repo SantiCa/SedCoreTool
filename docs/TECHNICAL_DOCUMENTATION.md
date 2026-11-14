@@ -2857,7 +2857,13 @@ float64 column is finite, and adopts it as one committed `u8` buffer charged to 
 the layout (one file because every file open costs about 2 ms on Windows; the first version wrote and re-read about 35).
 The worker also remembers, indexed by the SHA-256 that the coordinator verified for each input buffer, the masks it has validated, the
 row counts of masks it has counted (16 entries and 64 MiB at most) and up to 64 decoded metadata tables; a job that changes only the
-settings (the interval size) therefore skips validation, counting and decoding, and the memory is lost with the worker. `buffer.read {handle, offset, byte_length}` downloads any
+settings (the interval size) therefore skips validation, counting and decoding, and the memory is lost with the worker. A mask made
+with `buffer.derive` (an edit, card M8.4.4) arrives with the hash of its base and the byte ranges the coordinator wrote into the copy;
+when the worker remembers the base's checks and counts for the same ROI, number of classes and stack tables, and every object listed
+in both versions has the same effective class (so deleting or adding a trace qualifies, reassigning a class does not), it counts
+only the image rows of those ranges and copies the other rows' counts from the base; the whole label image is still validated when
+the list of objects changed (about 3-6 ms per section), (`section_intervals.changed_rows`,
+`_count_from_base`; identical to a full count, tested on random edits including rows at the ROI edges). Otherwise it does everything. `buffer.read {handle, offset, byte_length}` downloads any
 committed buffer in ranges of at most 1 MiB: the JSON response is followed by exactly one binary frame. A rejected input is an
 error response naming the field; a worker that crashes, ends before answering, sends an answer the coordinator does not approve,
 lies about its files or exceeds 120 s is `INTERNAL` and nothing is adopted, and the next job gets a new worker. A cancellation
