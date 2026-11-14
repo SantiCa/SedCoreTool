@@ -61,9 +61,10 @@ JSON canonicalisation. Equal content under a different revision can reuse immuta
 must still carry the requesting revision. Closing a project releases its queued jobs, snapshots and results;
 process restart creates a new session and invalidates every old handle.
 
-M8.4 changes ownership in a separate delivery: engine/native services own source pixels, masks and derived
-arrays; the renderer receives tiles and summaries and submits revisioned edit commands. Specify a staged edit
-journal and one persistence coordinator before that transition. Do not create two independent writers. Keep
+M8.4 (revised 14 November 2026): the renderer stays the owner of live masks, edit history and saving. The engine keeps a
+verified copy of each section's analysis inputs, updated with the changed rows (card M8.4.4), so that the edit path never waits for
+it and an engine failure cannot change an edit or a save. Only source images for multi-gigabyte files (part C) and analysis
+results are engine-owned, with tiles and summaries sent to the renderer; there is still exactly one writer of a project. Keep
 atomic saves, recoverable backup, native samples, history and the compatibility identifiers in AGENTS.md.
 
 ## 3. Private transport v1

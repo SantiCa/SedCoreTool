@@ -45,7 +45,7 @@ chooses which are required for 1.0.
 | An implemented advanced-statistics module | M6.1–M6.6 | Use the accepted Python engine contract; methods are not reimplemented independently in the interface. |
 | Radiographs alongside core photographs and records | M7.1–M7.4 | Use engine image/data services for native samples and measurements, with shared depth coordinates. |
 
-M2.3.1 is the first large-image contract inside M8.4. M6.1 and M7.1 define scientific/input contracts after
+**M2.3 is required for 1.0** (maintainer, 14 November 2026) and is delivered as part C of M8.4. M2.3.1 is the first large-image contract inside it. M6.1 and M7.1 define scientific/input contracts after
 the relevant engine/data services are accepted. Large radiographs depend on M2.3's bounded image path. Each
 phase must be small enough to review and roll back independently; statistical methods are added one at a time.
 Benchmarks use public or generated data; unpublished images are never committed.
@@ -72,7 +72,7 @@ M1.1 (editing history), M1.2 (interrupted saves), M1.2.1 and M1.2.3 are complete
 
 M2.1 (large tables) and M2.2 (large images) are complete ([history](roadmap-history.md#m2---large-projects-and-responsive-display)).
 
-- [ ] **M2.3 - Multi-gigabyte image workflows.** Extend the measured M2.2 scope to individual source files
+- [ ] **M2.3 - Multi-gigabyte image workflows (required for 1.0).** Extend the measured M2.2 scope to individual source files
       of several gigabytes and larger decoded rasters, including native grayscale/16-bit images. Raising
       the current input/memory limits alone is not an implementation of this task. Delivered through M8.4.
   - [ ] **M2.3.1 - Define fixtures, hardware and responsiveness targets.** Build deterministic 2, 4 and 8 GiB

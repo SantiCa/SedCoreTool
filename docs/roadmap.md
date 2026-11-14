@@ -37,9 +37,9 @@ Updated 14 November 2026.
   macOS and Linux, clean Windows machine, cold-cache first launch, saturated CPUs, package sizes, and the
   numerical/timing/memory/recovery gates). Remind him when a milestone of M8 finishes and before any flag is
   switched on by default or a version with the engine is announced.
-- **Decisions waiting for the maintainer:** the five questions at the start of [M8.4](#m84---engine-resident-section-data-and-fast-analysis)
-  and the flags in the table below that need a promote/remove decision. Decided on 13 November 2026: acceptance levels (accepted), scope of
-  1.0 (below), publication of V0.149. Decided on 14 November 2026: a milestone gate on macOS and Linux closes every milestone.
+- **Decisions waiting for the maintainer:** only the flags in the table below that need a promote/remove decision. Decided on 13 November 2026:
+  acceptance levels (accepted), scope of 1.0 (below), publication of V0.149. Decided on 14 November 2026: a milestone gate on macOS and Linux
+  closes every milestone; the five decisions of M8.4 (answers recorded there, among them **multi-gigabyte images are required for 1.0**).
 - **Last full checks: passed** on 14 November 2026 after the corrections following V0.150 (branch `work/2026-11-13`, run one after another on the
   maintainer's Windows computer): `pytest -q` 605 passed / 8 skipped; `npm test` 295 passed; `npm run typecheck` (no new diagnostics);
   `sync_version.py --check`; `ruff check src tests tools`; standalone build; `tests/e2e/smoke.mjs` (three consecutive runs, no slow page call
@@ -80,10 +80,10 @@ Decided by the maintainer on 13 November 2026.
 
 - **In:** M8 complete (one scientific engine; desktop packages for Windows, macOS and Linux passing the release
   gate); **advanced statistics (M6.1–M6.6)** and **radiographs (M7.1–M7.4)**, both built on the engine and its
-  image/data services (so after M8.4); M5.1 compatibility and reproducibility; M5.2 scientific validation and
+  image/data services (so after M8.4 parts A and B); M5.1 compatibility and reproducibility; M5.2 scientific validation and
   documentation, including a comparison with expert estimates on real cores; software paper and archived release (DOI).
-- **Not required:** optional acceleration (M4), a new interface shell (M9), multi-gigabyte images beyond what M8.4
-  and M7 need (M2.3 as a whole).
+- **Also in (decided 14 November 2026):** individual images of several gigabytes (M2.3.1–M2.3.5), delivered as part C of M8.4.
+- **Not required:** optional acceleration (M4), a new interface shell (M9).
 - **Consequence for the order:** after M8.6 the next milestones are M6 and M7, in that order unless the
   maintainer changes it; their cards are written by a design session when M8.4 has passed its milestone gate,
   because they use the engine's image and data services.
@@ -474,31 +474,33 @@ slow because it moves the whole label image for every analysis, even when only a
 hashing in the page are not the main cost (6 ms and 15 ms in Node 22). Moving image ownership to the engine, as the
 earlier summary proposed, would not remove that cost for editing: every brush stroke would then cross two processes.
 
-**Decisions for the maintainer (answer before M8.4.1):**
+**Decisions of the maintainer (14 November 2026, all five answered):**
 
-1. **Who owns live masks.** Proposal: the renderer keeps live editing, undo/redo and saving, as decision D1 says;
-   the engine holds a verified copy of each section's analysis inputs, which the renderer updates with the changed
-   rows. This withdraws the last paragraph of contract §2 (engine-owned masks, edit commands sent to the engine,
-   tiles sent back), unless the maintainer prefers it.
-2. **Multi-gigabyte images leave M8.4.** The scope of 1.0 already excludes M2.3 as a whole, while the earlier
-   summary said M8.4 implements M2.3.1-M2.3.5. Proposal: M2.3 returns to the later milestones; what M8.5, M6 and M7
-   need from engine-held images and tables is part B of M8.4 (below), designed after part A.
-3. **Timing scenarios.** Contract §7 defines one "warm end-to-end median". Proposal: evaluate that same formula on
-   three named warm scenarios: (a) the interval size changes on all sections, (b) one edit, its undo and its redo on
-   the largest section, (c) an unchanged re-analysis. Cold opening of a project is reported separately, as §7 already
-   allows. This names what is measured; the limit does not change. §7 may be changed only after this decision.
-4. **When V0.151 goes to `master`:** after part A (M8.4.1-M8.4.7, the speed of the engine path), or only after
-   part B as well (several more weeks of work on the branch).
-5. **Engine restart after a coordinator failure.** Today the engine stays unavailable until the program restarts.
-   Proposal: the error state of a section offers "Retry", which starts a new engine session and resubmits only the
-   current snapshots (contract §3 already requires fresh tokens), plus at most one automatic restart per program
-   session, announced to the user. Alternative: manual retry only.
+1. **Who owns live masks: the renderer**, on the condition that the program stays as fast, fluid and protected against errors as
+   possible. The renderer keeps live editing, undo/redo and saving (decision D1); the engine holds a verified copy of each
+   section's analysis inputs, which the renderer updates with the changed rows. This withdraws the last paragraph of contract §2
+   (engine-owned masks, edit commands sent to the engine, tiles sent back). The condition becomes acceptance criteria (card M8.4.4):
+   the edit path never waits for the engine; the renderer's data is always authoritative and a failure of the engine, of a transfer
+   or of the copy never loses or changes an edit or a saved project; a copy that is not proven identical (full SHA-256) is never
+   used; input-to-next-frame during an edit is not worse with the engine on than off.
+2. **Multi-gigabyte images are required for 1.0** (the maintainer rejected moving them after 1.0). M2.3.1–M2.3.5 are delivered as
+   **part C of M8.4**, after the engine holds source images (M8.4.8); V0.151 does not wait for them. They also constrain M8.5:
+   from slice (b) on, an image method works on regions of an engine-held image, never on a whole decoded raster.
+3. **Timing scenarios: accepted.** Contract §7's "warm end-to-end median" is evaluated on three named warm scenarios: (a) the
+   interval size changes on all sections, (b) one edit, its undo and its redo on the largest section, (c) an unchanged re-analysis.
+   Cold opening of a project is reported separately, as §7 already allows. The limits do not change.
+4. **V0.151 goes to `master` after part A** (M8.4.1–M8.4.7), not after part B.
+5. **Engine restart: accepted.** The error state of a section offers "Retry", which starts a new engine session and resubmits
+   only the current snapshots (contract §3 already requires fresh tokens), plus at most one automatic restart per program session,
+   announced to the user.
 
 **Outcome of part A.** With the experiment on, changing a setting re-analyses without uploading any image, and an
 edit uploads only the changed rows; scenarios (a)-(c) meet the matched-timing gate on the maintainer's Windows
-computer and the memory peak gate is evaluated. Nothing changes with the experiment off; no fallback to JavaScript.
+computer and the memory peak gate is evaluated. Nothing changes with the experiment off; no fallback to JavaScript. The maintainer
+wants an efficient program (14 November 2026): part A is not finished while a scenario still fails; if M8.4.5 does not fix it, a
+design session adds the next card instead of accepting the failure.
 
-#### M8.4.1 - Measure the scenarios and give every gate a verdict — state: Ready after M8.3.9 and decisions 1-3
+#### M8.4.1 - Measure the scenarios and give every gate a verdict — state: Ready
 
 - **Goal:** `tools/measure_engine_analysis.mjs` reports pass or fail for matched timing on scenarios (a)-(c) and for
   the memory peak, and records a baseline before any optimisation.
@@ -582,6 +584,12 @@ computer and the memory peak gate is evaluated. Nothing changes with the experim
   overlap codes everywhere, report all rows); `engineclient.js`; `tools/build_standalone.py` (`ORDER`); tests.
 - **Do not touch:** the editing tools, edit history and saving; the rule that a buffer is committed only when its full
   SHA-256 matches.
+- **Guarantees (maintainer's condition for decision 1):** (1) the edit path never waits for the engine: the changed rows are sent
+  afterwards, in the background, and a newer edit replaces a pending send; (2) the renderer's data is the only source of truth: any
+  engine, transfer or copy failure leaves the edit, the undo history and the last good save exactly as they were and shows an error
+  state (no JavaScript fallback); (3) a derived copy is used only after its full SHA-256 equals the renderer's; (4) input-to-next-frame
+  p95 during a stroke with the engine on is not worse than with it off (measured by `tools/measure_engine_analysis.mjs`); (5) a test
+  kills the engine in the middle of a send and requires an unchanged project and a successful save.
 - **Steps:**
   1. The page hashes the current labels and exclusion in full (15 ms for 24.6 MB in Node 22) and sends only the changed
      row ranges; unknown ranges mean a full upload.
@@ -598,7 +606,7 @@ computer and the memory peak gate is evaluated. Nothing changes with the experim
 - Only if scenario (b) still fails after M8.4.4: the worker recounts the changed rows of a derived buffer and reuses
   the base's row counts when the effective classes did not change. A design session writes the card if it is needed.
 
-#### M8.4.6 - Restart after a coordinator failure — state: Ready after decision 5
+#### M8.4.6 - Restart after a coordinator failure — state: Ready
 
 - **Goal:** the behaviour chosen in decision 5, with fresh tokens and only current snapshots resubmitted (contract
   §3). **Tests:** the kill cases of `tools/measure_engine_analysis.mjs` and `tests/app/engine-analysis.test.mjs`
@@ -620,6 +628,9 @@ computer and the memory peak gate is evaluated. Nothing changes with the experim
       in the worker with NumPy.
 - [ ] **M8.4.9 - Engine-held record tables.** Snapshots of depth/age records and data tables for M8.5a, M8.5d and M6.
 - [ ] **M8.4.10 - Milestone gate of part B.**
+- [ ] **M8.4.11 and later - Part C: multi-gigabyte images (M2.3.1–M2.3.5).** Cards written by a design session after M8.4.8,
+      from the tasks in [roadmap-future.md](roadmap-future.md#m2---large-projects-and-responsive-display); it ends with its own
+      milestone gate. Required for 1.0.
 
 ### M8.5 and M8.6 - summaries
 
@@ -707,7 +718,7 @@ Not scheduled. Details, acceptance criteria and the backlog are in [roadmap-futu
 | Area | Tasks |
 |---|---|
 | Editing and recovery | M1.2.2 remaining desktop hangs |
-| Large images | M2.3.1–M2.3.5 (were to be delivered through M8.4; proposed to move after 1.0, decision 2 of M8.4) |
+| Large images | M2.3.1–M2.3.5 (required for 1.0; delivered as part C of M8.4) |
 | Analysis and U-Net | M3.1.6, M3.1.7, M3.2.4, M3.2.5, M3.3.2, M3.3.4 |
 | Optional acceleration | M4.1.1 Rust kernel, M4.1.2 GPU |
 | Release readiness | M5.1, M5.2, M5.4, M5.5 |
