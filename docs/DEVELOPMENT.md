@@ -135,14 +135,15 @@ the roadmap. State in the report what was **not** measured.
   `python tools/sync_version.py` copies the number from `DELIVERY` in `app/js/app.js` to the other files; rebuild
   the runtime afterwards (§4).
 - `.github/workflows/tests.yml` runs the test suites on pushes and pull requests; `.github/workflows/desktop.yml`
-  builds Windows, macOS and Linux packages on a version tag or on a manual run. A manual run with
-  `draft_release=false` produces artifacts without a release. Never push a tag only to get a build: tags publish.
-- **Milestone gate** ([AGENTS.md §6](../AGENTS.md#6-working-on-a-task)): push the work branch, then start *Desktop
-  builds* by hand on that branch (GitHub web page: Actions → Desktop builds → Run workflow → branch → `draft_release`
-  off; the `gh` command is not installed on the maintainer's computer). It prepares the bundled runtime, runs
-  `tests/e2e/desktop.mjs` with the engine experiment on (and off once card M8.3.9 adds that step), packages and
-  checks the package on Windows, macOS
-  (Apple Silicon runner) and Linux. The `tests` workflow must pass on the same commit. Results can be read without
+  builds Windows, macOS and Linux packages on every push of a `work/**` branch (build and test only), on a version
+  tag, or on a manual run. A manual run with `draft_release=false` produces artifacts without a release. Never push
+  a tag only to get a build: tags publish.
+- **Milestone gate** ([AGENTS.md §6](../AGENTS.md#6-working-on-a-task)): push the work branch; *Desktop builds* starts
+  by itself (a newer push cancels the older run of the same branch; it can also be started by hand from Actions →
+  Desktop builds → Run workflow, `draft_release` off). It prepares the bundled runtime, runs `tests/e2e/desktop.mjs`
+  with the engine experiment off and on, packages and checks the package on Windows, macOS (Apple Silicon runner)
+  and Linux; the later steps run even when an earlier one failed, so one run reports every failure. The `tests`
+  workflow must pass on the same commit. Results can be read without
   logging in: `GET https://api.github.com/repos/SantiCa/SedCoreTool/actions/runs/<run id>/jobs` and, for a failed
   job, `GET .../check-runs/<job id>/annotations` (60 unauthenticated requests per hour). Record the run id, commit
   and per-system result in the roadmap status.

@@ -169,8 +169,8 @@ Done when:    observable acceptance criteria.
 - **Three acceptance levels.** The *development gate* lets work continue to the next card: the card's tests and the
   session checks pass on the maintainer's workstation and the feature stays behind its flag. The *milestone gate*
   closes every milestone (for example M8.3 before the first card of M8.4) and every slice of M8.5: the GitHub
-  workflows `tests` and *Desktop builds* (started by hand on the work branch, `draft_release` off) pass on Windows,
-  macOS and Linux on the same commit, including the desktop end-to-end test with the engine experiment on and off
+  workflows `tests` and *Desktop builds* (both run on every push of a `work/**` branch) pass on Windows, macOS and
+  Linux on the same commit, including the desktop end-to-end test with the engine experiment on and off
   and the package check; each failure is fixed, or recorded with its message and a decision of the maintainer,
   before the next milestone starts. The *release gate* is required before a flag is switched on by default or a
   version is published to users: every supported platform, clean machines, and the performance and recovery gates

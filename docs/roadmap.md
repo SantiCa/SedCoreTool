@@ -30,8 +30,9 @@ Updated 14 November 2026.
   The bundled runtime, the engine process and the engine experiment of M8.2-M8.3 have been built and run only on Windows. The `tests`
   workflow does run the Python engine tests on macOS and Linux, with the runner's Python, not the bundled runtime.
 - **Next step:** card M8.3.9, the milestone gate of M8.2-M8.3 on Windows, macOS and Linux (rule added to AGENTS.md §6 on the maintainer's
-  request of 14 November 2026: every milestone ends with cross-platform checks). It needs the maintainer to start *Desktop builds* on the
-  work branch. Then M8.4.1, after the maintainer answers the decisions listed under M8.4. Also open: card H5 (the `e2e` job must pass ten
+  request of 14 November 2026: every milestone ends with cross-platform checks). In progress: *Desktop builds* now runs on every push of the
+  work branch (the maintainer asked the assistant to start the build itself). Then M8.4.1, after the maintainer answers the decisions listed
+  under M8.4. Also open: card H5 (the `e2e` job must pass ten
   consecutive pushes).
 - **Reminder for whoever talks to the maintainer:** the maintainer accepted the two acceptance levels on
   13 November 2026 and asked to be **reminded to run the release-gate tests** (the release checklist below:
@@ -57,7 +58,7 @@ every platform and performance gate had to pass before the next task could start
 | Level | Needed for | What must be true |
 |---|---|---|
 | **Development gate** | Starting the next card | The card's "Done when" holds; its tests and the session checks pass on the maintainer's Windows workstation; anything unfinished is behind a flag that is off by default; evidence states what was not measured. |
-| **Milestone gate** (added 14 November 2026) | Starting the next milestone or M8.5 slice; integrating a version into `master` | On one commit of the work branch: the `tests` workflow and a manual run of *Desktop builds* pass on Windows, macOS (Apple Silicon runner) and Linux, including `tests/e2e/desktop.mjs` with the engine experiment on and off and the package check ([how: DEVELOPMENT §8](DEVELOPMENT.md#8-versions-ci-and-releases)). Each failure is fixed, or recorded with its message and a decision of the maintainer. It is the last card of every milestone. |
+| **Milestone gate** (added 14 November 2026) | Starting the next milestone or M8.5 slice; integrating a version into `master` | On one commit of the work branch: the `tests` and *Desktop builds* workflows (both run on every push of a `work/**` branch) pass on Windows, macOS (Apple Silicon runner) and Linux, including `tests/e2e/desktop.mjs` with the engine experiment on and off and the package check ([how: DEVELOPMENT §8](DEVELOPMENT.md#8-versions-ci-and-releases)). Each failure is fixed, or recorded with its message and a decision of the maintainer. It is the last card of every milestone. |
 | **Release gate** | Switching a flag on by default, or publishing a version to users | Everything in the [release checklist](#release-checklist): all supported platforms, clean machines, and the numerical, timing, memory and recovery gates of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates). |
 
 Never report the release gate as met from development or milestone evidence. A failed gate is recorded with its
@@ -423,7 +424,7 @@ Cards are done in order. Each one claims the development gate only.
   (no flag-off sample of the Electron tree); parity, responsiveness, cancellation, cycles and kills pass. The cost is data movement (M8.4).
   The experiment stays off by default.
 
-#### M8.3.9 - Milestone gate of M8.2 and M8.3 on Windows, macOS and Linux — state: Ready (next)
+#### M8.3.9 - Milestone gate of M8.2 and M8.3 on Windows, macOS and Linux — state: In progress
 
 - **Goal:** the engine work of M8.2-M8.3 is built and tested on the three systems before M8.4 builds on it. Today it
   has run only on Windows: *Desktop builds* last ran on 8 November 2026 (V0.84, failed).
@@ -431,16 +432,17 @@ Cards are done in order. Each one claims the development gate only.
   [DEVELOPMENT §8](DEVELOPMENT.md#8-versions-ci-and-releases); `.github/workflows/desktop.yml`; card H5 (how CI
   failures were read and fixed without logs).
 - **Change:** `.github/workflows/desktop.yml` (add a run of `tests/e2e/desktop.mjs` with the experiment off, next to
-  the existing run with it on, on every system); whatever a failure shows to be broken, each fix with its own test;
-  this card's result; the status block; the release checklist.
+  the existing run with it on, on every system; run on every push of a `work/**` branch, because the maintainer asked
+  the assistant to start the build and only the maintainer can start a manual run; later steps run even after an
+  earlier failure); whatever a failure shows to be broken, each fix with its own test; this card's result; the
+  status block; the release checklist.
 - **Do not touch:** the `release` job and its conditions (no tag, no draft, no Release); `master`; the experiment
   default; tolerances and deadlines of the tests (a failure is fixed or recorded, never relaxed).
 - **Steps:**
-  1. Add the flag-off step to `desktop.yml`; commit; push the work branch (allowed). Confirm the `tests` workflow
-     passes on that commit.
-  2. Ask the maintainer to start *Desktop builds* on `work/2026-11-13` with `draft_release` off.
-  3. Read the result through the public API. For each failing system: find the cause from the annotations or by
-     reproducing it, fix it on the branch with a test, push, ask for a new run. Separate failures of the program
+  1. Make the workflow changes; commit; push the work branch (allowed). Both workflows start by themselves.
+  2. Confirm the `tests` workflow passes on that commit.
+  3. Read the *Desktop builds* result through the public API. For each failing system: find the cause from the annotations or by
+     reproducing it, fix it on the branch with a test, push (which starts a new run). Separate failures of the program
      from failures of the runner (for example a missing system library on Linux) and record which is which.
   4. Record the run id, commit, per-system result, the duration of the runtime preparation and the size of every
      artifact (partial evidence for the "package sizes" item of the release checklist; the CI artifact is not the
