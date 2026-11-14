@@ -17,7 +17,7 @@
     "dist": "node scripts/build.js"
   },
   "devDependencies": {
-    "electron": "45.2.2",
+    "electron": "45.3.0",
     "electron-builder": "26.18.0",
     "onnxruntime-web": "1.31.1"
   },
