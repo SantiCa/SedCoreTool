@@ -26,13 +26,11 @@ Updated 14 November 2026.
   with a pending state, stale-result rejection, cancellation and an error state, never falling back to JavaScript. Measurements of card
   M8.3.8: [summary](validation/M8.3.8-engine-analysis-summary.md). **The engine path is 30-60 times slower than JavaScript and fails the
   matched-timing gate of contract §7**; about 90 % of the time is moving the label image on every analysis (design review of 14 November 2026).
-- **Never run on macOS or Linux:** the *Desktop builds* workflow last ran on 8 November 2026 (V0.84, failed), before the engine existed.
-  The bundled runtime, the engine process and the engine experiment of M8.2-M8.3 have been built and run only on Windows. The `tests`
-  workflow does run the Python engine tests on macOS and Linux, with the runner's Python, not the bundled runtime.
-- **Next step:** card M8.3.9, the milestone gate of M8.2-M8.3 on Windows, macOS and Linux (rule added to AGENTS.md §6 on the maintainer's
-  request of 14 November 2026: every milestone ends with cross-platform checks). In progress: *Desktop builds* now runs on every push of the
-  work branch (the maintainer asked the assistant to start the build itself). Then M8.4.1, after the maintainer answers the decisions listed
-  under M8.4. Also open: card H5 (the `e2e` job must pass ten
+- **Milestone gate of M8.2-M8.3 (card M8.3.9): passed on 14 November 2026**, commit `89512c1`: `tests` and *Desktop builds* succeeded on Windows,
+  macOS and Linux (the desktop end-to-end test with the engine experiment off and on, the package check and the packaged-runtime start). It was
+  the first time the engine work was built on macOS and Linux; it found three faults, all fixed (see the card). Still not covered, and on the
+  release checklist: launching the *packaged* program on macOS and Linux, Intel Macs, clean machines.
+- **Next step:** M8.4.1, after the maintainer answers the five decisions listed under M8.4. Also open: card H5 (the `e2e` job must pass ten
   consecutive pushes).
 - **Reminder for whoever talks to the maintainer:** the maintainer accepted the two acceptance levels on
   13 November 2026 and asked to be **reminded to run the release-gate tests** (the release checklist below:
@@ -101,7 +99,7 @@ command line call the same code directly.
 |---|---|---|
 | 1 | M8.1 Inventory and engine contract | done ([V0.141](../CHANGELOG.md#v0141--2026-11-12)) |
 | 2 | M8.2 Engine process, bundled runtime, packaging | done at the development gate; milestone gate in card M8.3.9; release items in the checklist |
-| 3 | **M8.3 First scientific slice: section intervals** | **done at the development gate; milestone gate M8.3.9 next** |
+| 3 | **M8.3 First scientific slice: section intervals** | **done; milestone gate M8.3.9 passed (14 Nov 2026)** |
 | 4 | M8.4 Engine-resident section data and fast analysis | cards below, proposed by the design review of 14 November 2026; five decisions pending |
 | 5 | M8.5 Remaining methods, one slice at a time | cards written when M8.4 passes its milestone gate |
 | 6 | M8.6 Release gate, default-on, duplicate JavaScript science removed, HTML version frozen | idem |
@@ -424,7 +422,7 @@ Cards are done in order. Each one claims the development gate only.
   (no flag-off sample of the Electron tree); parity, responsiveness, cancellation, cycles and kills pass. The cost is data movement (M8.4).
   The experiment stays off by default.
 
-#### M8.3.9 - Milestone gate of M8.2 and M8.3 on Windows, macOS and Linux — state: In progress
+#### M8.3.9 - Milestone gate of M8.2 and M8.3 on Windows, macOS and Linux — state: Done (14 Nov 2026, branch `work/2026-11-13`)
 
 - **Goal:** the engine work of M8.2-M8.3 is built and tested on the three systems before M8.4 builds on it. Today it
   has run only on Windows: *Desktop builds* last ran on 8 November 2026 (V0.84, failed).
@@ -452,6 +450,15 @@ Cards are done in order. Each one claims the development gate only.
   the same commit, or each remaining failure is recorded here with its message and the maintainer has decided what
   to do. Claims the milestone gate only: packaged start-up on macOS/Linux, Intel Macs and clean machines stay on the
   release checklist.
+- **Result (14 November 2026):** run on commit `89512c1` succeeded on Windows (5 min 37 s), Linux (2 min 44 s) and macOS (6 min 2 s) including
+  runtime preparation, both desktop end-to-end runs and the package check; `tests` succeeded on the same commit. CI artifact sizes (unsigned,
+  not the product): Windows 376 MiB, macOS 320 MiB, Linux 388 MiB. The first run found three faults, none in the engine's behaviour: (1) `check-package.js`
+  still expected only `buffer.digest/1` from the packaged engine (all systems); (2) the macOS universal build refused the native libraries in
+  `PIL/.dylibs`, because the `x64ArchFiles` glob does not enter dot folders; (3) after (2), the merged `app.asar` of the universal bundle was empty (28 bytes),
+  so the package check failed; `mergeASARs: false` fixed it, but **the reason the merge emptied the archive is not known** (the registers show the merge
+  running for 0.1 s). The check now also names what an archive contains when it fails. Also: the interrupted-saves test read Spanish
+  messages in windows that were already open on an English host (all systems). Not covered: the packaged program was built and its runtime started
+  by the check, but not launched with a window on macOS or Linux.
 
 ### M8.4 - Engine-resident section data and fast analysis
 

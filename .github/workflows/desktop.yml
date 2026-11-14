@@ -86,18 +86,9 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'   # unsigned builds (no paid certificates)
-          DEBUG: ${{ runner.os == 'macOS' && 'electron-universal*' || '' }}   # temporary: why is the merged app.asar empty (card M8.3.9)
       - name: Check packaged application data
         run: node scripts/check-package.js
         if: ${{ !cancelled() }}
-      - name: List the macOS bundle (temporary diagnosis, card M8.3.9)
-        if: ${{ !cancelled() && runner.os == 'macOS' }}
-        run: |
-          R=dist/mac-universal/SedCoreTool.app/Contents/Resources
-          ls -la dist dist/mac-universal "$R" | grep -v lproj
-          find "$R" -maxdepth 3 -not -path '*lproj*' -not -path '*engine-runtime/*/*/*' | head -60
-          find dist -name '*.asar*' | head
-          find dist -maxdepth 2 -name '*temp*' | head
       - uses: actions/upload-artifact@v7
         with:
           name: sedcoretool-${{ matrix.os }}
