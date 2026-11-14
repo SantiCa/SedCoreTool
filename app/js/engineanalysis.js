@@ -16,7 +16,8 @@ import { analysisRevision, buildIntervalSnapshot, maskIdentity, resultToBins } f
  * With `maskChanges` (maskchanges.js) the engine can be given only the rows that changed since it last received the masks (M8.4.4);
  * `canDerive` says whether it holds masks that such a change can be applied to.
  * @param {{client: {analyze: (snapshot: any, options: {signal: AbortSignal, owner?: object, maskKey?: string}) => Promise<any>,
- *     hasMasks?: (owner: object, maskKey: string) => boolean, canDerive?: (owner: object, section: any) => boolean, forget?: (owner: object) => void},
+ *     hasMasks?: (owner: object, maskKey: string) => boolean, canDerive?: (owner: object, section: any) => boolean, forget?: (owner: object) => void,
+ *     releaseAll?: () => void},
  *   project: () => import('./sectionanalysis.js').AnalysisProject, onChange: (section: any) => void,
  *   maskChanges?: ReturnType<typeof import('./maskchanges.js').createMaskChanges>}} deps
  */
@@ -154,6 +155,8 @@ export function createEngineAnalysis({ client, project, onChange, maskChanges })
     })).then(() => undefined),
     /** Forgets the state of a section so that the next request runs again (after a failure the user retries). */
     retry: (/** @type {any} */ section) => { jobs.get(section)?.controller.abort(); jobs.delete(section); client.forget?.(section); },
+    /** A project is being replaced: the engine drops everything it kept for the sections of the old one. */
+    releaseAll: () => client.releaseAll?.(),
     /** How many changes of some rows the engine refused so far (each cost a full upload instead of a small one). */
     deriveFallbacks: () => deriveFallbacks,
     /** Counters for tests and measurements: masks sent whole, masks sent as changed rows, changes the engine refused. */

@@ -730,3 +730,13 @@ test('the controller keeps the stages of its last analyses for measurements, at 
   }
   recent[0].mode = 'changed'; assert.equal(analysis.stats().recent[0].mode !== 'changed', true, 'a copy, not the record itself');
 });
+
+test('releaseAll on the analysis controller hands back everything the engine kept, for a project that is being replaced', async () => {
+  const a = section(1, { w: 40, h: 60 }), b = section(2, { w: 40, h: 60 }), p = project();
+  const { bridge, analysis } = engineFor(a, () => p);
+  await analysis.request(a);
+  b._mv++; await analysis.request(b);
+  assert.ok(bridge.buffers.size >= 9);
+  analysis.releaseAll(); await flush();
+  assert.equal(bridge.buffers.size, 0);
+});

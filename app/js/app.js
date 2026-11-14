@@ -500,7 +500,6 @@ function setLabel(op, i, v) {
   op.lm.push(i, old < 0 ? ids : old);
   if (old < 0 || v < 0) op.stackChanged = true;
   L[i] = v;
-  maskChanges.mark(op.s, i);
 }
 /* V0.20: overlapping traces. With «Superponer» a new trace keeps what is underneath; without it, it replaces it (as before). */
 const six = (s) => s._six || (s._six = stackIndex(s.stacks));
@@ -544,7 +543,7 @@ function dropIds(op, set) {
     else if (st[-v].some((x) => set.has(x))) setLabel(op, i, codeFor(st[-v].filter((x) => !set.has(x)), st, six(s)));
   }
 }
-function setEx(op, i, v) { const E = op.s.exclude; if (E[i] !== v) { op.ex.push(i, E[i]); E[i] = v; maskChanges.mark(op.s, i); } }
+function setEx(op, i, v) { const E = op.s.exclude; if (E[i] !== v) { op.ex.push(i, E[i]); E[i] = v; } }
 function grow(op, x, y) { const e = op.ext; if (x < e.x0) e.x0 = x; if (y < e.y0) e.y0 = y; if (x > e.x1) e.x1 = x; if (y > e.y1) e.y1 = y; }
 
 let ovHint = false;
@@ -569,7 +568,14 @@ function finishPixelOp(op, target = 0) {
   afterChange(s);
 }
 
+/** Tells the engine path which rows an operation wrote. Read from the operation's own history lists when it is confirmed, not per pixel: the
+ *  record cost about 8 ns for every pixel written (50 ms for a whole 6-Mpixel image) even with the engine switched off. */
+function reportWrittenRows(op) {
+  for (const range of [indexRangeOfPairs(op.lm), indexRangeOfPairs(op.ex)]) if (range) maskChanges.markRange(op.s, range.first, range.last);
+}
+
 function commitOp(op) {
+  reportWrittenRows(op);
   for (const [id, previous] of op.objs) if (!previous && !op.s.objects.has(id)) op.objs.delete(id);
   if (!op.lm.length && !op.ex.length && !op.objs.size) return;
   S.redo.length = 0;
@@ -618,7 +624,7 @@ function replayEditHistory(from, to, forward) {
 function swapEditStep(op, forward) {
   const s = op.s;
   swapHistoryPixels(s.labels, s.exclude, op.lm, op.ex, s.stacks, op.stackChanged ? six(s) : null, forward);
-  for (const range of [indexRangeOfPairs(op.lm), indexRangeOfPairs(op.ex)]) if (range) maskChanges.markRange(s, range.first, range.last);
+  reportWrittenRows(op);
   if (op.stackChanged) compactSectionStacks(s);
   swapHistoryTraces(op);
   [s.nextId, op.nextId] = [op.nextId, s.nextId];
@@ -2901,6 +2907,7 @@ async function loadProject(p) {
   const source = p;
   blankStart = false;
   resetState(); loading = true; loadMigrated = false; clearTimeout(saveTimer);
+  engineAnalysis?.releaseAll();   // the engine keeps the masks of the sections it analysed; the old project's are no longer needed
   readOnlyProject = (p?.version || 0) > FORMAT_VERSION;   // V0.36: written by a newer SedCoreTool
   try {
     p = upgradeProject(p);
