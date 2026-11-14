@@ -20,7 +20,7 @@ function checkExamples(archive, expected) {
     .sort();
   const all = listPackage(path.join(dist, archive)).map((file) => file.replaceAll('\\', '/').replace(/^\/+/, ''));
   // Names what the archive holds, so a failure on another system can be understood from the log alone.
-  const hint = `; ${all.length} entries, top level: ${[...new Set(all.map((file) => file.split('/')[0]))].slice(0, 20).join(', ')}; coastline entries: ${all.filter((file) => file.includes('land-50m')).join(', ') || 'none'}; archives in dist: ${archives.join(', ')}`;
+  const hint = `; ${all.length} entries, top level: ${[...new Set(all.map((file) => file.split('/')[0]))].slice(0, 20).join(', ')}; coastline entries: ${all.filter((file) => file.includes('land-50m')).join(', ') || 'none'}; archives in dist: ${archives.join(', ')}; ${archive} is ${fs.statSync(path.join(dist, archive)).size} bytes; next to it: ${fs.readdirSync(path.dirname(path.join(dist, archive))).slice(0, 30).join(', ')}`;
   assert.deepEqual(examples, expected, `Only the coastline may be packaged as example data in ${archive}${hint}`);
   console.log(`Packaged data verified: ${archive}`);
 }
