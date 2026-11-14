@@ -107,31 +107,39 @@ const engineBuffer = (dtype, shape, data) => ({ dtype, shape, data });
  * non-finite required numbers are rejected rather than replaced. `stack_members` is null when no overlap exists
  * (an empty buffer cannot be transferred). The schemes are the two fixed ones of this program, with the
  * first-match tier rule that `core.js::classify` uses.
+ * With `masks: false` the four mask buffers (`labels`, `exclude`, `stack_offsets`, `stack_members`) are not copied and are
+ * null: the caller already has them in the engine for the same `maskIdentity` (card M8.4.2).
  * @param {any} s section as kept by the interface
  * @param {AnalysisProject} project
+ * @param {{masks?: boolean}} [options]
  */
-export function buildIntervalSnapshot(s, project) {
+export function buildIntervalSnapshot(s, project, { masks = true } = {}) {
   const { classes, settings, ageModel } = project;
   const pixels = s.w * s.h;
   const stacks = /** @type {(number[] | null)[]} */ (s.stacks || [null]);
-  const offsets = new Uint32Array(stacks.length + 1);
-  let total = 0;
-  for (let k = 0; k < stacks.length; k++) { offsets[k] = total; total += stacks[k]?.length ?? 0; }
-  offsets[stacks.length] = total;
-  const members = new Uint32Array(total);
-  let at = 0;
-  for (const row of stacks) for (const id of row ?? []) members[at++] = id;
-  const exclude = new Uint8Array(pixels);
-  if (s.exclude) for (let i = 0; i < pixels; i++) exclude[i] = s.exclude[i] ? 1 : 0;
+  /** @type {{offsets: Uint32Array, members: Uint32Array, total: number} | null} */
+  let stackBuffers = null;
+  if (masks) {
+    const offsets = new Uint32Array(stacks.length + 1);
+    let total = 0;
+    for (let k = 0; k < stacks.length; k++) { offsets[k] = total; total += stacks[k]?.length ?? 0; }
+    offsets[stacks.length] = total;
+    const members = new Uint32Array(total);
+    let at = 0;
+    for (const row of stacks) for (const id of row ?? []) members[at++] = id;
+    stackBuffers = { offsets, members, total };
+  }
+  const exclude = new Uint8Array(masks ? pixels : 0);
+  if (masks && s.exclude) for (let i = 0; i < pixels; i++) exclude[i] = s.exclude[i] ? 1 : 0;
   const ranged = !!(ageModel && ageModel.min && ageModel.max);
   return {
-    labels: engineBuffer('i32le', [s.h, s.w], Int32Array.from(s.labels)),
-    exclude: engineBuffer('u8', [s.h, s.w], exclude),
+    labels: masks ? engineBuffer('i32le', [s.h, s.w], Int32Array.from(s.labels)) : null,
+    exclude: masks ? engineBuffer('u8', [s.h, s.w], exclude) : null,
     objects: [...s.objects.values()].map((/** @type {AnalysisObject} */ o) => ({
       id: o.id, class_id: o.cls || null, predicted_class_id: o.pred || null, confidence: Number.isFinite(o.conf) ? o.conf : 0 })),
     classes: classes.map((c) => ({ id: c.id, name: c.name ?? c.id, counts: !!c.counts })),
-    stack_offsets: engineBuffer('u32le', [offsets.length], offsets),
-    stack_members: total ? engineBuffer('u32le', [total], members) : null,
+    stack_offsets: stackBuffers ? engineBuffer('u32le', [stackBuffers.offsets.length], stackBuffers.offsets) : null,
+    stack_members: stackBuffers?.total ? engineBuffer('u32le', [stackBuffers.total], stackBuffers.members) : null,
     settings: {
       width: s.w, height: s.h, roi: { x0: s.roi.x0, y0: s.roi.y0, x1: s.roi.x1, y1: s.roi.y1 },
       top: finiteNumber('top', s.top), bottom: finiteNumber('bottom', s.bottom), units: s.units,
@@ -190,6 +198,19 @@ export function referenceColumns(s, project) {
   nullable('manual_ii', 'i32le', [B], bins.map((b) => b.iim));
   nullable('indices', 'i32le', [B, 2], bins.flatMap((b) => [b.BI, b.ii]));
   return { dimensions: { bins: B, classes: C, schemes: 2 }, columns };
+}
+
+/**
+ * Identity of the four mask buffers of the snapshot (`labels`, `exclude`, `stack_offsets`, `stack_members`): two equal identities mean
+ * the same buffers. It is the invariant that the row-count cache `_rc` of the JavaScript calculation relies on: every change of a mask
+ * moves the mask version `_mv` (`beginOp`, `afterChange`, the mask setters); the stack table is added because it is edited in place.
+ * @param {any} s
+ * @returns {string}
+ */
+export function maskIdentity(s) {
+  const stacks = /** @type {(number[] | null)[]} */ (s.stacks || [null]);
+  let members = 0; for (const row of stacks) members += row?.length ?? 0;
+  return `${s._mv || 0}|${s.w}x${s.h}|${stacks.length}:${members}`;
 }
 
 /**

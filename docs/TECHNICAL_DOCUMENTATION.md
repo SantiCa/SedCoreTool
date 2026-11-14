@@ -2861,7 +2861,7 @@ after 30 s. Progress events are not sent yet.
 `buffer.begin`, `chunk`, `commit` and `release` stage data in private temporary files. Validate shape/dtype/
 declared size before allocation; enforce exact offsets, length, SHA-256, finite f64 data and strict metadata
 before commit. Buffers are immutable after commit; releasing a queued/active snapshot revokes new access but
-keeps its file pinned until admitted work finishes. Limits: 128 live handles, 256 MiB per numeric buffer,
+keeps its file pinned until admitted work finishes. Limits: 256 live handles, 256 MiB per numeric buffer,
 4 MiB per metadata buffer, 512 MiB admitted session budget with a 16 MiB transient reserve. Metadata reserves
 64 times its byte length for parsing/object overhead. The session's staged bytes fit below the planned 1 GiB
 scratch-disk cap; this does not claim total RSS or multi-gigabyte support. Main owns the temporary root and
@@ -2886,6 +2886,16 @@ clients may retain a bounded 64 KiB tail. Native math thread environment limits 
 to max(1,min(4,logical CPUs−1)); the digest imports no numerical library and a method worker imports NumPy only, never
 training libraries. Runtime identity
 distinguishes `bundled-verified` from `unverified-development`; only the former uses the resource manifest.
+
+**Inputs kept between analyses (card M8.4.2).** `app/js/engineclient.js` keeps the committed input buffers of a section in the engine after a
+successful analysis, for up to 16 sections and 256 MiB (least recently used first; a section larger than the bound is released
+after each analysis). The four masks (`labels`, `exclude`, `stack_offsets`, `stack_members`) are valid for one *mask identity*
+(`sectionanalysis.js::maskIdentity`: mask version, size and the number and members of the overlap stacks, i.e. the invariant of the
+JavaScript row-count cache); each table is valid for the SHA-256 of its bytes. An analysis whose masks are resident leaves them out
+of the snapshot and uploads only the tables whose bytes changed (an interval-size change sends the settings table alone); a changed
+mask identity uploads the four masks and releases the ones they replace. Buffers that the engine no longer knows (it restarted) give
+`RESIDENT_LOST` and the controller uploads a full snapshot once. A failed or cancelled analysis leaves the resident buffers as they
+were and releases what it uploaded. The engine accepts 256 live buffers; the bridge 512 tokens per page.
 
 The [M8.1 contract](roadmap-engine-contract.md) specifies later scientific inputs/results and predeclared
 acceptance gates. Current transport/worker regression tests exercise corruption, admission, cancellation,

@@ -3,7 +3,7 @@
 // This module decides when a section needs a new analysis, keeps its state (pending, ready, error) and publishes a
 // result only if the section's revision is still the one that was requested. It never computes bins itself and never
 // falls back to the JavaScript calculation: a failure is shown as an error state. No DOM; the client is passed in.
-import { analysisRevision, buildIntervalSnapshot, resultToBins } from './sectionanalysis.js';
+import { analysisRevision, buildIntervalSnapshot, maskIdentity, resultToBins } from './sectionanalysis.js';
 
 /**
  * @typedef {{state: 'pending'} | {state: 'ready'} | {state: 'error', code: string, field: string | null}} AnalysisState
@@ -11,7 +11,10 @@ import { analysisRevision, buildIntervalSnapshot, resultToBins } from './section
  */
 
 /**
- * @param {{client: {analyze: (snapshot: any, options: {signal: AbortSignal}) => Promise<any>},
+ * The client may keep a section's inputs in the engine between analyses (M8.4.2): then `hasMasks` tells whether the snapshot can leave
+ * the masks out, `forget` releases a section's inputs and `analyze` rejects with `RESIDENT_LOST` when the engine no longer has them.
+ * @param {{client: {analyze: (snapshot: any, options: {signal: AbortSignal, owner?: object, maskKey?: string}) => Promise<any>,
+ *     hasMasks?: (owner: object, maskKey: string) => boolean, forget?: (owner: object) => void},
  *   project: () => import('./sectionanalysis.js').AnalysisProject, onChange: (section: any) => void}} deps
  */
 export function createEngineAnalysis({ client, project, onChange }) {
@@ -27,6 +30,23 @@ export function createEngineAnalysis({ client, project, onChange }) {
     running = true;
     try { for (let next = queue.shift(); next; next = queue.shift()) await next(); }
     finally { running = false; }
+  }
+
+  /**
+   * One analysis of `section` at its current state. The masks are left out of the snapshot when the engine already has them for the
+   * same mask identity; if it turns out that it lost them (it restarted) they are uploaded again, once.
+   * @param {any} section @param {AbortSignal} signal
+   */
+  async function analyseWithResidentInputs(section, signal) {
+    const maskKey = maskIdentity(section);
+    for (let attempt = 0; ; attempt++) {
+      const masks = attempt > 0 || !client.hasMasks?.(section, maskKey);
+      try { return await client.analyze(buildIntervalSnapshot(section, project(), { masks }), { signal, owner: section, maskKey }); }
+      catch (error) {
+        if (masks || /** @type {any} */ (error)?.code !== 'RESIDENT_LOST' || attempt > 0) throw error;
+        client.forget?.(section);
+      }
+    }
   }
 
   /** @param {any} section @param {Job} job */
@@ -62,7 +82,7 @@ export function createEngineAnalysis({ client, project, onChange }) {
         let published = false;
         try {
           if (!isCurrent(section, job)) { renew(section, job); return; }
-          const result = await client.analyze(buildIntervalSnapshot(section, project()), { signal: controller.signal });
+          const result = await analyseWithResidentInputs(section, controller.signal);
           if (!isCurrent(section, job)) { renew(section, job); return; }   // edited, replaced or cancelled while the engine worked: change nothing
           section.bins = resultToBins(result);
           section.analysis = { state: 'ready' };
@@ -97,7 +117,9 @@ export function createEngineAnalysis({ client, project, onChange }) {
       }
     })).then(() => undefined),
     /** Forgets the state of a section so that the next request runs again (after a failure the user retries). */
-    retry: (/** @type {any} */ section) => { jobs.get(section)?.controller.abort(); jobs.delete(section); },
+    retry: (/** @type {any} */ section) => { jobs.get(section)?.controller.abort(); jobs.delete(section); client.forget?.(section); },
+    /** Lets the engine drop everything it kept for `section` (the section is closed or replaced). */
+    forget: (/** @type {any} */ section) => { jobs.get(section)?.controller.abort(); jobs.delete(section); client.forget?.(section); },
     /** @returns {AnalysisState | undefined} */
     stateOf: (/** @type {any} */ section) => section?.analysis,
   };

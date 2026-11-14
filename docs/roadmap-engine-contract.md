@@ -122,6 +122,11 @@ between pairs. A partial pair, unexpected binary frame, EOF or malformed frame i
 cleans it up and reports failure without touching live data. Main applies the same bounded streaming policy
 at the renderer IPC boundary; reading a whole buffer to split it afterwards does not satisfy the contract.
 
+Reuse of inputs (card M8.4.2, client side): a client may keep the committed input buffers of a section between analyses and name them in later
+`section.analyze` requests, bounded by 16 sections and 256 MiB and valid only for the identity of the data they hold (masks) or the
+SHA-256 of their bytes (tables). Because those buffers stay live, the engine admits 256 handles per session (it was 128) and the bridge 512
+tokens per page; the byte budget is unchanged.
+
 Initial limits: 256 MiB per buffer; 512 MiB per engine session for all staged/committed buffers, queued-job
 snapshots, results and admitted scratch arrays together; 1 GiB private scratch-disk cap. Admission uses checked
 size estimates including conversion and overlapping class layers; reject before allocation when the estimate

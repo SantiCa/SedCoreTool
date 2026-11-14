@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 
-from sedcoretool.engine.buffers import TRANSIENT_RESERVE, BufferStore
+from sedcoretool.engine.buffers import MAX_HANDLES, TRANSIENT_RESERVE, BufferStore
 from sedcoretool.engine.protocol import (
     HEADER,
     MAX_CHUNK,
@@ -114,13 +114,13 @@ def test_small_buffers_cannot_bypass_the_live_handle_limit():
     store = BufferStore()
     descriptor = {'dtype': 'u8', 'shape': [1], 'byte_length': 1, 'sha256': hashlib.sha256(b'a').hexdigest()}
     try:
-        for _ in range(128):
+        for _ in range(MAX_HANDLES):
             store.begin(descriptor)
         with pytest.raises(RequestError, match='LIMIT_EXCEEDED'):
             store.begin(descriptor)
         store.release(next(iter(store.buffers)))
         store.begin(descriptor)
-        assert len(store.buffers) == 128
+        assert len(store.buffers) == MAX_HANDLES == 256
     finally:
         store.close()
 

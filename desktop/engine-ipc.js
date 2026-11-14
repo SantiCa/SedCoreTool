@@ -3,7 +3,7 @@
 // handles; it works with tokens that only this module can map to engine handles, and only for the page that made them.
 const { randomUUID } = require('node:crypto');
 
-const MAX_CHUNK = 1048576, MAX_BUFFER = 256 * 1024 * 1024, MAX_TOKENS_PER_PAGE = 256, MAX_RELEASE = 64, MAX_ANALYSES_PER_PAGE = 5;
+const MAX_CHUNK = 1048576, MAX_BUFFER = 256 * 1024 * 1024, MAX_TOKENS_PER_PAGE = 512, MAX_RELEASE = 64, MAX_ANALYSES_PER_PAGE = 5;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const DTYPES = new Set(['u8', 'i32le', 'u32le', 'u64le', 'f64le', 'utf8json']);

@@ -522,7 +522,7 @@ design session adds the next card instead of accepting the failure.
 - **Done when:** the baseline is committed with a verdict for every gate and scenario. Expected today: (a) and (b) fail.
 - **Result (14 November 2026):** [baseline](validation/M8.4-baseline-summary.md). (a) fails (public 1,779 ms against a limit of 51 ms; synthetic 3,730 ms), (b) fails (358 ms against 59; 569 against 68), (c) passes, the memory peak passes (880 MiB against 1,052; 1,010 against 1,092) and parity passes. New: `tools/engine_gates.mjs` (the rules of §7 as pure functions, 7 tests) and the `scenarios` phase of the measuring tool, which now also samples the memory of the flag-off run. The edit is the deletion of a trace, not a paint stroke (the contract text says so).
 
-#### M8.4.2 - Section inputs stay resident in the engine — state: Ready after M8.4.1
+#### M8.4.2 - Section inputs stay resident in the engine — state: Done (14 Nov 2026, branch `work/2026-11-13`)
 
 - **Goal:** when the mask did not change, an analysis uploads only the five JSON tables; labels, exclusion and
   overlap stacks already in the engine are reused.
@@ -546,6 +546,7 @@ design session adds the next card instead of accepting the failure.
   edit everything is; eviction order and byte bound; release on close; a restarted engine. Python: the new caps.
   Desktop end-to-end: an interval-size change with the experiment on matches the JavaScript reference. Measure (a).
 - **Done when:** the tests pass and scenario (a) is measured and recorded (it may still fail until M8.4.3).
+- **Result (14 November 2026):** `engineclient.js` keeps each section's four masks (valid for one `maskIdentity`) and five tables (valid for their SHA-256) in the engine; an interval-size change uploads only the settings table. 14 new tests in `engine-analysis.test.mjs` (reuse, replacement, eviction by bytes and by section count, a section too large to keep, restart of the engine, abort, full engine budget) and 12 deliberate faults, all caught; one existing queue test waited on the wrong promise and now waits on the current request's. Caps raised: 256 live handles in the engine (`MAX_HANDLES`, was 128), 512 tokens per page. Measured (2 pairs, development evidence): interval change 782 ms public (was 1,779) and 1,452 ms synthetic (was 3,730); edit/undo/redo 363 and 620 ms (unchanged); still failing, as the card allowed. The memory peak passes but the synthetic margin is small (1,075 MiB against a limit of 1,081). The remaining cost per section (about 130-180 ms) is the engine's recount and the 35 result buffers: card M8.4.3.
 
 #### M8.4.3 - Row counts reused in the engine; one result buffer per job — state: Ready after M8.4.2
 

@@ -16,6 +16,7 @@ else:
     from protocol import MAX_CHUNK, MAX_METADATA, ProtocolError, RequestError, require_fields, require_integer, strict_json
 
 MAX_BUFFER = 256 * MAX_CHUNK
+MAX_HANDLES = 256     # live buffers: a page keeps the inputs of up to 16 sections (9 buffers each) between analyses (card M8.4.2)
 SESSION_BUDGET = 512 * MAX_CHUNK
 TRANSIENT_RESERVE = 16 * MAX_CHUNK
 ITEM_BYTES = {'u8': 1, 'i32le': 4, 'u32le': 4, 'u64le': 8, 'f64le': 8, 'utf8json': 1}
@@ -44,7 +45,7 @@ class BufferStore:
 
     def begin(self, payload):
         require_fields(payload, ('dtype', 'shape', 'byte_length', 'sha256'))
-        if len(self.buffers) >= 128:
+        if len(self.buffers) >= MAX_HANDLES:
             raise RequestError('LIMIT_EXCEEDED')
         dtype, shape = payload['dtype'], payload['shape']
         if not isinstance(dtype, str) or dtype not in ITEM_BYTES:
@@ -125,7 +126,7 @@ class BufferStore:
 
         The file moves into the store (it must be on the same filesystem) after the same checks a client upload gets,
         so a worker cannot publish data that does not match the size, shape or hash it declared."""
-        if len(self.buffers) >= 128:
+        if len(self.buffers) >= MAX_HANDLES:
             raise RequestError('LIMIT_EXCEEDED')
         if not isinstance(dtype, str) or dtype not in ITEM_BYTES or dtype == 'utf8json':
             raise RequestError('INVALID_BUFFER', 'dtype')

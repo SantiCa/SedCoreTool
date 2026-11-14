@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { analysisRevision, buildIntervalSnapshot, computeSectionBins, referenceColumns, resultToBins } from '../../app/js/sectionanalysis.js';
+import { analysisRevision, buildIntervalSnapshot, computeSectionBins, maskIdentity, referenceColumns, resultToBins } from '../../app/js/sectionanalysis.js';
 import { createEngineClient, EngineError } from '../../app/js/engineclient.js';
 import { createEngineAnalysis } from '../../app/js/engineanalysis.js';
 
@@ -84,6 +84,7 @@ function memoryBridge({ state = 'ready', answer = 'reference', failAt = null } =
       return { offset, bytes: new Uint8Array(b.data.subarray(offset, offset + length)) }; },
     analyzeSection: async (request) => {
       calls.push(['analyze', request]);
+      for (const token of Object.values(request.inputs)) if (!buffers.has(token)) return { error: { code: 'INVALID_BUFFER', field: 'token' } };
       if (hold) await new Promise((resolve) => { const done = hold; hold = null; done(() => resolve()); });
       if (answer === 'error') return { error: { code: 'UNSUPPORTED_INPUT', field: 'settings.roi' } };
       if (answer === 'cancelled') return { cancelled: true };
@@ -267,12 +268,12 @@ test('sections are analysed one at a time, in request order', async () => {
 test('a request that was replaced while it waited in the queue never reaches the engine', async () => {
   const p = project(), client = manualClient(p), a = section(1), b = section(2);
   const analysis = createEngineAnalysis({ client, project: () => p, onChange() {} });
-  void analysis.request(a); const queued = analysis.request(b); await flush();
-  b._mv++; void analysis.request(b);                    // b changes while a is still running
+  void analysis.request(a); void analysis.request(b); await flush();
+  b._mv++; const current = analysis.request(b);         // b changes while a is still running
   client.pending[0].finish(referenceColumns(a, p)); await flush(); await flush();
   assert.equal(client.pending.length, 2, 'one request for b, the current one');
   assert.equal(client.pending[1].snapshot.settings.width, b.w);
-  client.pending[1].finish(referenceColumns(b, p)); await queued;
+  client.pending[1].finish(referenceColumns(b, p)); await current;   // the promise of the request that is current, not of the replaced one
   assert.equal(b.analysis.state, 'ready');
 });
 
@@ -303,4 +304,191 @@ test('analyzeSections does not resolve while a section it awaits is still waitin
   client.pending[1].finish(referenceColumns(s, p));
   await all;
   assert.deepEqual(s.analysis, { state: 'ready' });
+});
+
+// ---- inputs that stay in the engine between analyses (card M8.4.2) -----------------------------------------------------
+
+const begins = (bridge) => bridge.log.filter((entry) => entry === 'begin').length;
+const analysesOf = (bridge) => bridge.calls.filter(([kind]) => kind === 'analyze').map(([, request]) => request);
+/** One analysis the way engineanalysis.js makes it: masks only when the engine does not have them for this mask identity. */
+async function analyseResident(client, bridge, s, p) {
+  bridge.setReference(referenceColumns(s, p));
+  const maskKey = maskIdentity(s), masks = !client.hasMasks(s, maskKey);
+  return client.analyze(buildIntervalSnapshot(s, p, { masks }), { owner: s, maskKey });
+}
+
+test('a snapshot built without masks carries no mask buffer and the same tables', () => {
+  const s = section(3), p = project(), full = buildIntervalSnapshot(s, p), light = buildIntervalSnapshot(s, p, { masks: false });
+  for (const name of ['labels', 'exclude', 'stack_offsets', 'stack_members']) assert.equal(light[name], null, name);
+  for (const name of ['objects', 'classes', 'settings', 'age_model', 'manual_indices']) assert.deepEqual(light[name], full[name], name);
+});
+
+test('the mask identity moves with the mask version, the size and the stack table, and with nothing else', () => {
+  const base = maskIdentity(section(5));
+  assert.equal(maskIdentity(section(5)), base);
+  const edits = { version: (s) => { s._mv++; }, width: (s) => { s.w++; }, height: (s) => { s.h++; }, stack: (s) => { s.stacks.push([1]); }, member: (s) => { s.stacks[7].push(3); } };
+  for (const [name, edit] of Object.entries(edits)) { const s = section(5); edit(s); assert.notEqual(maskIdentity(s), base, name); }
+  const s = section(5); s.roi.y1--; s.top += 1; s.objects.get(1).cls = 'b'; s.manual.length = 0;
+  assert.equal(maskIdentity(s), base, 'settings, objects and ROI are not part of the masks');
+});
+
+test('after the first analysis, a change of interval size uploads only the settings table and keeps everything else in the engine', async () => {
+  const s = section(3, { w: 600, h: 700 }), p = project(), bridge = memoryBridge(), client = createEngineClient(bridge);
+  const first = await analyseResident(client, bridge, s, p);
+  assert.deepEqual(resultToBins(first), computeSectionBins(s, p).bins);
+  assert.equal(begins(bridge), 9, 'four masks and five tables the first time');
+  assert.equal(bridge.buffers.size, 9, 'the nine inputs stay in the engine; only the result columns were released');
+  const held = new Set(bridge.buffers.keys());
+  bridge.log.length = 0;
+  const q = project({ settings: { binCm: 5.3 } });
+  const second = await analyseResident(client, bridge, s, q);
+  assert.deepEqual(resultToBins(second), computeSectionBins(s, q).bins, 'the new interval size is the one analysed');
+  assert.equal(begins(bridge), 1, 'only the settings table is uploaded');
+  assert.equal(bridge.log.filter((entry) => entry === 'append').length, 1);
+  assert.equal(bridge.buffers.size, 9, 'still nine inputs, the old settings replaced by the new');
+  const request = analysesOf(bridge)[1];
+  const reused = ['labels', 'exclude', 'stack_offsets', 'stack_members', 'objects', 'classes', 'age_model', 'manual_indices'];
+  for (const name of reused) assert.ok(held.has(request.inputs[name]), `${name} is the buffer that was already in the engine`);
+  assert.ok(!held.has(request.inputs.settings), 'settings is new');
+  assert.equal(request.settings_hash, sha(new TextEncoder().encode(JSON.stringify(buildIntervalSnapshot(s, q, { masks: false }).settings))));
+});
+
+test('a repeated analysis with nothing changed uploads nothing', async () => {
+  const s = section(3), p = project(), bridge = memoryBridge(), client = createEngineClient(bridge);
+  await analyseResident(client, bridge, s, p); bridge.log.length = 0;
+  await analyseResident(client, bridge, s, p);
+  assert.equal(begins(bridge), 0);
+});
+
+test('a changed mask version uploads the four masks again and releases the ones they replace', async () => {
+  const s = section(3), p = project(), bridge = memoryBridge(), client = createEngineClient(bridge);
+  await analyseResident(client, bridge, s, p);
+  const oldMasks = analysesOf(bridge)[0].inputs; bridge.released.length = 0; bridge.log.length = 0;
+  s._mv++; s.labels[200] = 2;
+  const result = await analyseResident(client, bridge, s, p);
+  assert.deepEqual(resultToBins(result), computeSectionBins(s, p).bins);
+  assert.equal(begins(bridge), 4, 'labels, exclude and the two stack tables; the five tables are unchanged');
+  for (const name of ['labels', 'exclude', 'stack_offsets', 'stack_members']) assert.ok(bridge.released.includes(oldMasks[name]), `old ${name} released`);
+  assert.equal(bridge.buffers.size, 9);
+  assert.ok(!client.hasMasks(s, 'an older identity'));
+  assert.ok(client.hasMasks(s, maskIdentity(s)));
+});
+
+test('a snapshot without masks is refused when the engine does not hold them', async () => {
+  const s = section(3), p = project(), bridge = memoryBridge(), client = createEngineClient(bridge);
+  bridge.setReference(referenceColumns(s, p));
+  await assert.rejects(client.analyze(buildIntervalSnapshot(s, p, { masks: false }), { owner: s, maskKey: maskIdentity(s) }), { code: 'RESIDENT_LOST' });
+  assert.equal(bridge.log.length, 0, 'nothing was uploaded');
+  await analyseResident(client, bridge, s, p);
+  s._mv++;                                                              // the held masks are for another identity
+  await assert.rejects(client.analyze(buildIntervalSnapshot(s, p, { masks: false }), { owner: s, maskKey: maskIdentity(s) }), { code: 'RESIDENT_LOST' });
+});
+
+test('buffers the engine no longer knows (it restarted) make the analysis ask for a full snapshot, and the section recovers', async () => {
+  const s = section(3), p = project(), bridge = memoryBridge(), client = createEngineClient(bridge);
+  const answer = bridge.analyzeSection;
+  bridge.analyzeSection = async (request) => {
+    for (const token of Object.values(request.inputs)) if (!bridge.buffers.has(token)) return { error: { code: 'INVALID_BUFFER', field: 'token' } };
+    bridge.setReference(referenceColumns(s, p)); return answer(request);
+  };
+  const analysis = createEngineAnalysis({ client, project: () => p, onChange() {} });
+  await analysis.request(s);
+  assert.equal(s.analysis.state, 'ready');
+  bridge.buffers.clear();                                               // a new engine session: every old buffer is gone
+  s.roi.y1--; bridge.log.length = 0;                                    // only the interval table changes, so the masks would be reused
+  await analysis.request(s);
+  assert.equal(s.analysis.state, 'ready', 'the section recovered by itself');
+  assert.deepEqual(s.bins, computeSectionBins(s, p).bins);
+  assert.equal(begins(bridge), 10, 'the failed attempt had uploaded the new settings table; then all nine inputs went up again');
+  assert.equal(bridge.buffers.size, 9, 'and nothing from the failed attempt is left behind');
+  assert.equal(analysesOf(bridge).length, 2, 'the first analysis and the full one (the refused attempt is answered before the recording function)');
+});
+
+test('the least recently used section is dropped when the byte budget is full, and the section in use is never dropped', async () => {
+  const a = section(1, { w: 40, h: 50 }), b = section(2, { w: 40, h: 50 }), c = section(3, { w: 40, h: 50 }), p = project();
+  const bridge = memoryBridge(), perSection = 40 * 50 * 5 + 100;       // labels and exclude dominate; the small tables are well below this
+  const client = createEngineClient(bridge, { residentBytes: perSection * 2 + 4000 });
+  await analyseResident(client, bridge, a, p); await analyseResident(client, bridge, b, p);
+  assert.equal(client.residentSections(), 2);
+  await analyseResident(client, bridge, a, p);                          // a was used last: b is the oldest
+  await analyseResident(client, bridge, c, p);
+  assert.ok(client.hasMasks(a, maskIdentity(a)) && client.hasMasks(c, maskIdentity(c)), 'a and c are resident');
+  assert.ok(!client.hasMasks(b, maskIdentity(b)), 'b was dropped');
+  assert.ok(client.residentBytes() <= perSection * 2 + 4000);
+  assert.equal(bridge.buffers.size, client.residentSections() * 9, 'the engine holds exactly what the client says it holds');
+});
+
+test('a section too large to keep is analysed and then released completely', async () => {
+  const s = section(3), p = project(), bridge = memoryBridge(), client = createEngineClient(bridge, { residentBytes: 1000 });
+  const result = await analyseResident(client, bridge, s, p);
+  assert.deepEqual(resultToBins(result), computeSectionBins(s, p).bins);
+  assert.equal(bridge.buffers.size, 0);
+  assert.equal(client.residentSections(), 0);
+  assert.ok(!client.hasMasks(s, maskIdentity(s)));
+});
+
+test('at most the configured number of sections stays resident', async () => {
+  const bridge = memoryBridge(), client = createEngineClient(bridge, { residentSections: 3 }), p = project(), sections = [1, 2, 3, 4, 5].map((n) => section(n, { w: 20, h: 40 }));
+  for (const s of sections) await analyseResident(client, bridge, s, p);
+  assert.equal(client.residentSections(), 3);
+  assert.deepEqual(sections.map((s) => client.hasMasks(s, maskIdentity(s))), [false, false, true, true, true]);
+  assert.equal(bridge.buffers.size, 27);
+});
+
+test('the engine reporting a full budget makes the client drop other sections and try once more', async () => {
+  const a = section(1, { w: 20, h: 40 }), b = section(2, { w: 20, h: 40 }), p = project(), bridge = memoryBridge(), client = createEngineClient(bridge);
+  await analyseResident(client, bridge, a, p);
+  const begin = bridge.beginBuffer; let refused = 0;
+  bridge.beginBuffer = async (descriptor) => { if (refused < 1 && bridge.buffers.size >= 9) { refused++; return { error: { code: 'LIMIT_EXCEEDED', field: 'byte_length' } }; } return begin(descriptor); };
+  const result = await analyseResident(client, bridge, b, p);
+  assert.equal(refused, 1);
+  assert.deepEqual(resultToBins(result), computeSectionBins(b, p).bins);
+  assert.ok(!client.hasMasks(a, maskIdentity(a)), 'a was dropped to make room');
+  assert.ok(client.hasMasks(b, maskIdentity(b)));
+});
+
+test('an analysis that fails or is aborted keeps what was resident and releases what it uploaded', async () => {
+  const s = section(3), p = project(), bridge = memoryBridge(), client = createEngineClient(bridge);
+  await analyseResident(client, bridge, s, p);
+  const before = new Set(bridge.buffers.keys());
+  s._mv++;
+  const answer = bridge.analyzeSection; bridge.analyzeSection = async () => ({ error: { code: 'UNSUPPORTED_INPUT', field: 'settings.roi' } });
+  await assert.rejects(analyseResident(client, bridge, s, p), { code: 'UNSUPPORTED_INPUT' });
+  assert.deepEqual(new Set(bridge.buffers.keys()), before, 'the new masks were released, the old ones are still there');
+  bridge.analyzeSection = answer;
+  const controller = new AbortController(); bridge.setReference(referenceColumns(s, p));
+  const running = client.analyze(buildIntervalSnapshot(s, p), { owner: s, maskKey: maskIdentity(s), signal: controller.signal });
+  controller.abort();
+  await assert.rejects(running, { name: 'AbortError' });
+  assert.deepEqual(new Set(bridge.buffers.keys()), before);
+  assert.ok(!client.hasMasks(s, maskIdentity(s)), 'the held masks belong to the older identity');
+});
+
+test('forget and releaseAll hand every resident buffer back to the engine', async () => {
+  const a = section(1, { w: 20, h: 40 }), b = section(2, { w: 20, h: 40 }), p = project(), bridge = memoryBridge(), client = createEngineClient(bridge);
+  await analyseResident(client, bridge, a, p); await analyseResident(client, bridge, b, p);
+  client.forget(a); await flush();
+  assert.equal(bridge.buffers.size, 9);
+  client.releaseAll(); await flush();
+  assert.equal(bridge.buffers.size, 0);
+  assert.equal(client.residentSections(), 0);
+});
+
+test('through the analysis controller: an interval change reuses the masks, an edit does not, and every result is the reference', async () => {
+  const s = section(3, { w: 300, h: 400 }); let p = project(), uploadedMasks = 0;
+  const bridge = memoryBridge(), client = createEngineClient(bridge);
+  const answer = bridge.analyzeSection;
+  bridge.analyzeSection = async (request) => { bridge.setReference(referenceColumns(s, p)); return answer(request); };
+  const begin = bridge.beginBuffer; bridge.beginBuffer = async (descriptor) => { if (descriptor.dtype !== 'utf8json') uploadedMasks++; return begin(descriptor); };
+  const analysis = createEngineAnalysis({ client, project: () => p, onChange() {} });
+  await analysis.request(s);
+  assert.equal(uploadedMasks, 4); assert.deepEqual(s.bins, computeSectionBins(s, p).bins);
+  p = project({ settings: { binCm: 6.1 } }); await analysis.request(s);
+  assert.equal(uploadedMasks, 4, 'the interval size changed: no mask went up');
+  assert.deepEqual(s.bins, computeSectionBins(s, p).bins);
+  s._mv++; s.labels[500] = 3; await analysis.request(s);
+  assert.equal(uploadedMasks, 8, 'a mask edit uploads the masks');
+  assert.deepEqual(s.bins, computeSectionBins(s, p).bins);
+  analysis.forget(s); await flush();
+  assert.equal(bridge.buffers.size, 0, 'closing a section releases everything it held');
 });
