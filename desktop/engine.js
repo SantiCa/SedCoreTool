@@ -8,7 +8,7 @@ const { controlFrame, frame, ControlReader } = require('./engine-protocol');
 
 // Methods the engine may advertise in its handshake; anything else makes the engine unavailable.
 const ADVERTISED_METHODS = new Set(['buffer.digest/1', 'section.intervals/1']);
-const OPERATIONS = new Set(['hello', 'buffer.begin', 'buffer.chunk', 'buffer.commit', 'buffer.release', 'buffer.read', 'buffer.digest', 'section.analyze', 'job.cancel', 'shutdown']);
+const OPERATIONS = new Set(['hello', 'buffer.begin', 'buffer.derive', 'buffer.chunk', 'buffer.commit', 'buffer.release', 'buffer.read', 'buffer.digest', 'section.analyze', 'job.cancel', 'shutdown']);
 // The engine ends every analysis within its own 120 s deadline; up to four more wait in its queue. This is only the backstop
 // against a coordinator that stops answering, and it ends the whole session (see `request`).
 const ANALYSIS_TIMEOUT_MS = 10 * 60 * 1000;

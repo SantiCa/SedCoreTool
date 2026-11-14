@@ -90,17 +90,35 @@ function createEngineIpc({ engine }) {
       tokens.set(token, { owner, session, handle, state: 'staging', length, next: 0, dtype, shape, sha256 });
       return { token };
     },
+    /** A new buffer that starts as a copy of the committed buffer `baseToken` (same type, shape and length) and receives only the parts that
+     *  changed, at ascending offsets, before `commitBuffer`; the engine accepts the result only if its whole content has the declared SHA-256. */
+    async deriveBuffer(owner, baseToken, descriptor) {
+      const base = own(owner, baseToken, { committed: true });
+      if (!isPlain(descriptor) || Object.keys(descriptor).sort().join() !== 'byte_length,dtype,sha256,shape') reject('INVALID_REQUEST', 'descriptor');
+      const { dtype, shape, byte_length: length, sha256 } = descriptor;
+      if (dtype === 'utf8json' || dtype !== base.dtype) reject('INVALID_REQUEST', 'dtype');
+      if (!Array.isArray(shape) || shape.length !== base.shape.length || !shape.every((n, i) => n === base.shape[i])) reject('INVALID_REQUEST', 'shape');
+      if (length !== base.length) reject('INVALID_REQUEST', 'byte_length');
+      if (typeof sha256 !== 'string' || !SHA256.test(sha256)) reject('INVALID_REQUEST', 'sha256');
+      if (countOf(owner) >= MAX_TOKENS_PER_PAGE) reject('LIMIT_EXCEEDED', 'tokens');
+      const { handle } = await engine.request('buffer.derive', { base: base.handle, dtype, shape, byte_length: length, sha256 });
+      const session = engine.session(), token = randomUUID();
+      tokens.set(token, { owner, session, handle, state: 'staging', length, next: 0, dtype, shape: [...shape], sha256, derived: true });
+      return { token };
+    },
     async appendBuffer(owner, token, offset, data) {
       const entry = own(owner, token, { committed: false }), bytes = bytesOf(data);
       if (!bytes || bytes.length < 1 || bytes.length > MAX_CHUNK) reject('INVALID_REQUEST', 'bytes');
-      if (!isCount(offset) || offset !== entry.next || offset + bytes.length > entry.length) reject('INVALID_REQUEST', 'offset');
+      // A derived buffer takes its parts at ascending, non-overlapping offsets; any other buffer takes them in order, without gaps.
+      const inOrder = entry.derived ? isCount(offset) && offset >= entry.next : offset === entry.next;
+      if (!isCount(offset) || !inOrder || offset + bytes.length > entry.length) reject('INVALID_REQUEST', 'offset');
       entry.next = offset + bytes.length;   // reserved before the first await, so two appends cannot take the same offset
       try { return await engine.request('buffer.chunk', { handle: entry.handle, offset, byte_length: bytes.length }, Buffer.from(bytes)); }
       catch (error) { tokens.delete(token); throw error; }   // a rejected chunk leaves the engine buffer unusable
     },
     async commitBuffer(owner, token) {
       const entry = own(owner, token, { committed: false });
-      if (entry.next !== entry.length) reject('INVALID_BUFFER', 'byte_length');
+      if (!entry.derived && entry.next !== entry.length) reject('INVALID_BUFFER', 'byte_length');
       const result = await engine.request('buffer.commit', { handle: entry.handle });
       entry.state = 'committed';
       return { token, byte_length: result.byte_length, sha256: result.sha256 };

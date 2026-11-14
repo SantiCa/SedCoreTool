@@ -131,6 +131,8 @@ class Coordinator:
             raise ProtocolError('handshake required')
         if operation == 'buffer.begin':
             return self.store.begin(payload)
+        if operation == 'buffer.derive':
+            return self.store.derive(payload)
         if operation == 'buffer.chunk':
             return self.store.append(payload, data)
         if operation == 'buffer.commit':

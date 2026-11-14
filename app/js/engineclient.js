@@ -42,7 +42,7 @@ export const RESIDENT_BYTES = 256 * 1048576, RESIDENT_SECTIONS = 16;
 
 /**
  * @param {{status: () => Promise<any>, beginBuffer: Function, appendBuffer: Function, commitBuffer: Function,
- *   analyzeSection: Function, cancel: Function, readBuffer: Function, release: Function}} bridge
+ *   analyzeSection: Function, cancel: Function, readBuffer: Function, release: Function, deriveBuffer?: Function}} bridge
  * @param {{readyTimeoutMs?: number, residentBytes?: number, residentSections?: number}} [options]
  */
 export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentBytes = RESIDENT_BYTES, residentSections = RESIDENT_SECTIONS } = {}) {
@@ -56,6 +56,8 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
   /** @type {Set<ResidentEntry>} */
   const entries = new Set();
   let clock = 0;
+  /** How masks reached the engine so far: whole, or as the changed rows of what it held. */
+  const stats = { fullMaskUploads: 0, derivations: 0 };
 
   /** @param {string[]} tokens */
   async function releaseTokens(tokens) {
@@ -112,6 +114,36 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
     return token;
   }
 
+  /**
+   * A mask that differs from the one the engine holds only in some rows: the engine copies `baseToken`, the changed rows are sent into
+   * the copy, and the engine commits it only if the whole content has the SHA-256 the page computed from the real array. Any refusal is
+   * reported as `DERIVE_FAILED`: the caller then sends the whole mask.
+   * @param {string} baseToken @param {{dtype: string, shape: number[], derive: {first: number, end: number, bytes: Uint8Array, sha256: Promise<string>}}} spec
+   * @param {AbortSignal | undefined} signal @param {Set<string>} tokens
+   */
+  async function putDerived(baseToken, spec, signal, tokens) {
+    if (signal?.aborted) throw abortError();
+    const { first, bytes } = spec.derive, width = spec.shape[1];
+    const total = spec.shape.reduce((n, d) => n * d, 1) * (spec.dtype === 'i32le' ? 4 : 1);
+    if (typeof bridge.deriveBuffer !== 'function') throw new EngineError('DERIVE_FAILED');
+    const begun = await bridge.deriveBuffer(baseToken, { dtype: spec.dtype, shape: spec.shape, byte_length: total, sha256: await spec.derive.sha256 });
+    if (isFailure(begun)) throw new EngineError('DERIVE_FAILED');
+    const { token } = begun;
+    tokens.add(token);
+    const start = first * width * (spec.dtype === 'i32le' ? 4 : 1);
+    try {
+      for (let offset = 0; offset < bytes.length; offset += CHUNK_BYTES) {
+        if (signal?.aborted) throw abortError();
+        unwrap(await bridge.appendBuffer(token, start + offset, bytes.slice(offset, offset + CHUNK_BYTES)));
+      }
+      unwrap(await bridge.commitBuffer(token));
+    } catch (error) {
+      if (error instanceof EngineError && error.code !== 'ENGINE_UNAVAILABLE') throw new EngineError('DERIVE_FAILED');
+      throw error;
+    }
+    return token;
+  }
+
   /** The packed result buffer, read in ranges of at most 1 MiB and checked against the hash the engine reported. */
   async function download(/** @type {{token: string, byte_length: number, sha256: string}} */ output) {
     const bytes = new Uint8Array(output.byte_length);
@@ -151,6 +183,11 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
   function hasMasks(/** @type {object} */ owner, /** @type {string} */ maskKey) {
     const entry = byOwner.get(owner);
     return !!entry && entry.maskKey === maskKey && !!entry.inputs.labels && !!entry.inputs.exclude && !!entry.inputs.stack_offsets;
+  }
+  /** True when the engine holds complete masks of the size of `section`, so that a change of some rows can be sent instead of all of them. */
+  function canDerive(/** @type {object} */ owner, /** @type {{w: number, h: number}} */ section) {
+    const entry = byOwner.get(owner), pixels = section.w * section.h;
+    return !!entry && entry.inputs.labels?.bytes === 4 * pixels && entry.inputs.exclude?.bytes === pixels;
   }
   function forget(/** @type {object} */ owner) { const entry = byOwner.get(owner); if (entry) drop(entry); }
   function releaseAll() { for (const entry of [...entries]) drop(entry); }
@@ -210,7 +247,7 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
     /** @type {Record<string, string>} */
     const inputs = {};
     const makeSpace = owner ? () => makeRoom(entry, Infinity) : undefined;
-    let reused = false;
+    let reused = false, derivedMasks = false;
     try {
       if (snapshot.labels === null) {
         if (!owner || !entry || entry.maskKey !== maskKey || !entry.inputs.labels || !entry.inputs.exclude || !entry.inputs.stack_offsets) throw new EngineError('RESIDENT_LOST');
@@ -219,12 +256,20 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
         entry.used = ++clock;
       } else {
         const masks = MASK_INPUTS.filter((name) => snapshot[name]);
-        if (owner) makeRoom(entry, masks.reduce((sum, name) => sum + bytesOf(snapshot[name].data).length, 0));
+        const sizeOf = (/** @type {any} */ spec) => (spec.derive ? spec.shape.reduce((/** @type {number} */ n, /** @type {number} */ d) => n * d, 1) * (spec.dtype === 'i32le' ? 4 : 1) : bytesOf(spec.data).length);
+        if (owner) makeRoom(entry, masks.reduce((sum, name) => sum + sizeOf(snapshot[name]), 0));
         for (const name of masks) {
-          const bytes = bytesOf(snapshot[name].data);
-          const token = await put(bytes, snapshot[name].dtype, snapshot[name].shape, signal, transient, undefined, makeSpace);
+          const spec = snapshot[name];
+          let token;
+          if (spec.derive) {
+            if (!owner || !entry?.inputs[name]) throw new EngineError('DERIVE_FAILED');
+            token = await putDerived(entry.inputs[name].token, spec, signal, transient);
+            derivedMasks = true;
+          } else {
+            token = await put(bytesOf(spec.data), spec.dtype, spec.shape, signal, transient, undefined, makeSpace);
+          }
           inputs[name] = token;
-          fresh[name] = { token, identity: maskKey ?? '', bytes: bytes.length };
+          fresh[name] = { token, identity: maskKey ?? '', bytes: sizeOf(spec) };
         }
       }
       let settingsHash = '';
@@ -262,6 +307,7 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
         columns[name] = { data: cells[name], ...(cells[`${name}_valid`] ? { valid: cells[`${name}_valid`] } : {}) };
       }
       const finished = performance.now();
+      if (MASK_INPUTS.some((name) => fresh[name])) stats[derivedMasks ? 'derivations' : 'fullMaskUploads']++;
       if (owner) keep(owner, entry, fresh, maskKey, transient);
       return { dimensions: result.dimensions, columns, provenance: result.provenance,
         timing: { upload_ms: uploaded - started, engine_ms: analysed - uploaded, download_ms: finished - analysed } };
@@ -271,5 +317,5 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
     }
   }
 
-  return { analyze, ready, hasMasks, forget, releaseAll, residentBytes: residentTotal, residentSections: () => entries.size };
+  return { analyze, ready, hasMasks, canDerive, forget, releaseAll, residentBytes: residentTotal, residentSections: () => entries.size, stats: () => ({ ...stats }) };
 }

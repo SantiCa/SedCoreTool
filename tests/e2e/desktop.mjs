@@ -56,7 +56,7 @@ async function close(run) {
   } finally { clearTimeout(timer); run.browser.disconnect(); }
 }
 
-const BRIDGE_OPERATIONS = ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'readBuffer', 'release', 'status'];   // plus the boolean `enabled`
+const BRIDGE_OPERATIONS = ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'deriveBuffer', 'readBuffer', 'release', 'status'];   // plus the boolean `enabled`
 const fixture = JSON.parse(readFileSync(new URL('../fixtures/section-intervals/basic-four-intervals.json', import.meta.url), 'utf8'));
 
 /** Runs in the page: uploads a reference fixture through window.corantoolDesktop.engine, analyses it and reads one result column. */
@@ -245,6 +245,14 @@ try {
   assert.equal(await p.evaluate(signature), edited, 'redo removes the trace again');
   const afterRedo = await p.evaluate(compareWithReference);
   assert.deepEqual(afterRedo.mismatches, [], 'after redo the result matches the reference');
+  if (engineOn) {
+    // The deletion, its undo and its redo reached the engine as changed rows (M8.4.4); a refused change would show as a fallback.
+    const stats = await p.evaluate(() => window.ichantool.engineStats());
+    assert.ok(stats.derivations >= 3, `edit, undo and redo were sent as changed rows: ${JSON.stringify(stats)}`);
+    assert.equal(stats.deriveFallbacks, 0, `the engine never refused a change: ${JSON.stringify(stats)}`);
+  } else {
+    assert.equal(await p.evaluate(() => window.ichantool.engineStats()), null, 'without the experiment there is no engine statistic');
+  }
   // The tabs that read the intervals must show them without a page error (checked only by eye in M8.3.7).
   const tabs = await p.evaluate(async () => {
     const seen = {};

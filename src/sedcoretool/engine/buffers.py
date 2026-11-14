@@ -4,6 +4,7 @@ import hashlib
 import math
 import os
 import re
+import shutil
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +35,8 @@ class StagedBuffer:
     pins: int = 0
     released: bool = False
     shape: tuple = ()
+    derived: bool = False       # starts as a copy of a committed buffer; chunks may come at any ascending offsets
+    written: int = 0            # derived buffers: the end of the last chunk
 
 
 class BufferStore:
@@ -74,6 +77,27 @@ class BufferStore:
         self.reserved += charge
         return {'handle': handle}
 
+    def derive(self, payload):
+        """A staging buffer that starts as a copy of the committed buffer `base` and ends as a new, different one.
+
+        The descriptor (dtype, shape, length) must be the base's: only the content may differ. The client then sends only the parts that
+        changed, with `buffer.chunk` at ascending, non-overlapping offsets, and `buffer.commit` accepts the result only when the whole
+        content has the declared SHA-256, exactly as for a buffer sent in full. A client that missed a change therefore gets a refused
+        commit, never a wrong buffer. The base is not touched. Metadata buffers cannot be derived."""
+        require_fields(payload, ('base', 'dtype', 'shape', 'byte_length', 'sha256'))
+        base = self.get(payload['base'], committed=True)
+        if base.dtype == 'utf8json' or payload['dtype'] != base.dtype or payload['shape'] != list(base.shape) or payload['byte_length'] != base.length:
+            raise RequestError('INVALID_BUFFER', 'base')
+        handle = self.begin({key: payload[key] for key in ('dtype', 'shape', 'byte_length', 'sha256')})['handle']
+        value = self.buffers[handle]
+        try:
+            shutil.copyfile(base.path, value.path)
+        except OSError:
+            self.release(handle)
+            raise RequestError('INTERNAL') from None
+        value.derived = True
+        return {'handle': handle}
+
     def get(self, handle, *, committed=False):
         if not isinstance(handle, str):
             raise RequestError('INVALID_BUFFER', 'handle')
@@ -87,6 +111,15 @@ class BufferStore:
         value = self.get(payload['handle'])
         offset = require_integer(payload['offset'], 'offset')
         length = require_integer(payload['byte_length'], 'byte_length', 1, MAX_CHUNK)
+        if value.derived:
+            if value.committed or data is None or length != len(data) or offset < value.written or offset + length > value.length:
+                raise RequestError('INVALID_BUFFER')
+            with value.path.open('r+b') as stream:
+                stream.seek(offset)
+                stream.write(data)
+            value.written = offset + length
+            value.received += length
+            return {'next_offset': value.written}
         if value.committed or data is None or length != len(data) or offset != value.received or offset + length > value.length:
             raise RequestError('INVALID_BUFFER')
         with value.path.open('ab') as stream:
@@ -97,7 +130,7 @@ class BufferStore:
     def commit(self, payload):
         require_fields(payload, ('handle',))
         value = self.get(payload['handle'])
-        if value.received != value.length:
+        if value.received != value.length and not value.derived:
             raise RequestError('INVALID_BUFFER')
         if not value.committed:
             self.verify(value)

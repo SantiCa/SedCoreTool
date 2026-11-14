@@ -241,3 +241,20 @@ test('a buffer.read answer that does not match its request makes the engine unav
     await client.stop();
   }
 });
+
+test('buffer.derive through the real client and engine: a copy that takes only the changed parts, and a hash that must match', { skip: !python }, async (t) => {
+  const client = await clientFixture(t);
+  const data = Buffer.from(Array.from({ length: 300000 }, (_, i) => (i * 5 + 1) % 253)), base = await upload(client, data);
+  const edited = Buffer.from(data); edited.fill(250, 1000, 1500); edited.fill(251, 200000, 200010);
+  const sha = createHash('sha256').update(edited).digest('hex'), descriptor = { dtype: 'u8', shape: [data.length], byte_length: data.length, sha256: sha };
+  const { handle } = await client.request('buffer.derive', { base, ...descriptor });
+  await client.request('buffer.chunk', { handle, offset: 1000, byte_length: 500 }, edited.subarray(1000, 1500));
+  await client.request('buffer.chunk', { handle, offset: 200000, byte_length: 10 }, edited.subarray(200000, 200010));
+  assert.deepEqual((await client.request('buffer.commit', { handle })).sha256, sha);
+  assert.ok((await client.request('buffer.read', { handle, offset: 0, byte_length: 4096 })).bytes.equals(edited.subarray(0, 4096)));
+  assert.ok((await client.request('buffer.read', { handle: base, offset: 1000, byte_length: 8 })).bytes.equals(data.subarray(1000, 1008)), 'the base is untouched');
+  const missed = (await client.request('buffer.derive', { base, ...descriptor })).handle;          // announces the edit and sends nothing
+  await assert.rejects(client.request('buffer.commit', { handle: missed }), { code: 'INVALID_BUFFER' });
+  await assert.rejects(client.request('buffer.derive', { base, ...descriptor, shape: [data.length - 1], byte_length: data.length - 1 }), { code: 'INVALID_BUFFER' });
+  assert.equal(client.status().state, 'ready');
+});

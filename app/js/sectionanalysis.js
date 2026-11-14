@@ -92,6 +92,29 @@ export function computeSectionBins(s, project) {
   return { bins, rowCache };
 }
 
+/** @param {ArrayBuffer} digest @returns {string} */
+const hexOfDigest = (digest) => [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+/**
+ * The label and exclusion masks of `s` as a change of the masks the engine holds: the rows `[first, end)` copied now, and the hash of
+ * the complete current array (`crypto.subtle.digest` takes its copy of the data when it is called, so the hash, the copied rows and
+ * the mask identity all describe the same moment). Null when this cannot be done, so that the whole mask is sent.
+ * @param {any} s @param {{first: number, end: number}} change
+ */
+function deriveMasks(s, change) {
+  if (!s.exclude || !(s.labels instanceof Int32Array) || !(s.exclude instanceof Uint8Array)) return null;
+  const excluded = /** @type {Uint8Array} */ (s.exclude);
+  for (let i = 0; i < excluded.length; i++) if (excluded[i] > 1) return null;      // the full snapshot turns every non-zero value into 1
+  const labelBytes = new Uint8Array(s.labels.buffer, s.labels.byteOffset, s.labels.byteLength);
+  const excludeBytes = new Uint8Array(excluded.buffer, excluded.byteOffset, excluded.byteLength);
+  const first = Math.max(0, Math.min(change.first, s.h)), end = Math.max(first, Math.min(change.end, s.h));
+  /** @param {Uint8Array} all @param {string} dtype @param {number} itemBytes */
+  const describe = (all, dtype, itemBytes) => ({ dtype, shape: [s.h, s.w], data: new Uint8Array(0), derive: {
+    first, end, bytes: all.slice(first * s.w * itemBytes, end * s.w * itemBytes),
+    sha256: crypto.subtle.digest('SHA-256', /** @type {any} */ (all)).then(hexOfDigest) } });
+  return { labels: describe(labelBytes, 'i32le', 4), exclude: describe(excludeBytes, 'u8', 1) };
+}
+
 /** @param {string} name @param {unknown} value @returns {number} */
 function finiteNumber(name, value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new RangeError(`${name} must be a finite number`);
@@ -109,17 +132,22 @@ const engineBuffer = (dtype, shape, data) => ({ dtype, shape, data });
  * first-match tier rule that `core.js::classify` uses.
  * With `masks: false` the four mask buffers (`labels`, `exclude`, `stack_offsets`, `stack_members`) are not copied and are
  * null: the caller already has them in the engine for the same `maskIdentity` (card M8.4.2).
+ * With `masks: 'derive'` and `change` (the rows `[first, end)` that differ from the masks the engine holds) `labels` and `exclude` carry
+ * only those rows, a copy of them and the SHA-256 of the whole current mask, taken at this moment (card M8.4.4); the stack tables are
+ * complete. If `exclude` is missing or holds a value other than 0 or 1 the snapshot is the complete one.
  * @param {any} s section as kept by the interface
  * @param {AnalysisProject} project
- * @param {{masks?: boolean}} [options]
+ * @param {{masks?: boolean | 'derive', change?: {first: number, end: number} | null}} [options]
  */
-export function buildIntervalSnapshot(s, project, { masks = true } = {}) {
+export function buildIntervalSnapshot(s, project, { masks = true, change = null } = {}) {
   const { classes, settings, ageModel } = project;
   const pixels = s.w * s.h;
+  const derived = masks === 'derive' && change ? deriveMasks(s, change) : null;
+  const withMasks = !!masks;      // true for the full and the derived forms: both carry the stack tables
   const stacks = /** @type {(number[] | null)[]} */ (s.stacks || [null]);
   /** @type {{offsets: Uint32Array, members: Uint32Array, total: number} | null} */
   let stackBuffers = null;
-  if (masks) {
+  if (withMasks) {
     const offsets = new Uint32Array(stacks.length + 1);
     let total = 0;
     for (let k = 0; k < stacks.length; k++) { offsets[k] = total; total += stacks[k]?.length ?? 0; }
@@ -129,12 +157,12 @@ export function buildIntervalSnapshot(s, project, { masks = true } = {}) {
     for (const row of stacks) for (const id of row ?? []) members[at++] = id;
     stackBuffers = { offsets, members, total };
   }
-  const exclude = new Uint8Array(masks ? pixels : 0);
-  if (masks && s.exclude) for (let i = 0; i < pixels; i++) exclude[i] = s.exclude[i] ? 1 : 0;
+  const exclude = new Uint8Array(withMasks && !derived ? pixels : 0);
+  if (withMasks && !derived && s.exclude) for (let i = 0; i < pixels; i++) exclude[i] = s.exclude[i] ? 1 : 0;
   const ranged = !!(ageModel && ageModel.min && ageModel.max);
   return {
-    labels: masks ? engineBuffer('i32le', [s.h, s.w], Int32Array.from(s.labels)) : null,
-    exclude: masks ? engineBuffer('u8', [s.h, s.w], exclude) : null,
+    labels: derived ? derived.labels : withMasks ? engineBuffer('i32le', [s.h, s.w], Int32Array.from(s.labels)) : null,
+    exclude: derived ? derived.exclude : withMasks ? engineBuffer('u8', [s.h, s.w], exclude) : null,
     objects: [...s.objects.values()].map((/** @type {AnalysisObject} */ o) => ({
       id: o.id, class_id: o.cls || null, predicted_class_id: o.pred || null, confidence: Number.isFinite(o.conf) ? o.conf : 0 })),
     classes: classes.map((c) => ({ id: c.id, name: c.name ?? c.id, counts: !!c.counts })),

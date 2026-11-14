@@ -55,7 +55,7 @@ const analysisRequest = (inputs, change = {}) => ({ requestKey: uuid(), method: 
 
 test('the bridge offers exactly the documented operations and never an engine operation by name', async () => {
   const ipc = createEngineIpc({ engine: fakeEngine({ answers: fakeAnswers() }) });
-  assert.deepEqual([...ipc.OPERATIONS].sort(), ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'readBuffer', 'release']);
+  assert.deepEqual([...ipc.OPERATIONS].sort(), ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'deriveBuffer', 'readBuffer', 'release']);
   for (const name of ['request', 'buffer.begin', 'shutdown', '__proto__', 'constructor', 'toString', 'hasOwnProperty', 7, null, undefined]) {
     assert.deepEqual(await ipc.call(1, name), { error: { code: 'UNSUPPORTED_METHOD' } }, String(name));
   }
@@ -462,4 +462,55 @@ test('the bundled runtime runs reference fixtures end to end through the bridge'
   await runFixturesThrough(service, SAMPLE);
   const names = readdirSync(FIXTURES).filter((file) => file.endsWith('.json')).map((file) => file.slice(0, -5));
   assert.ok(SAMPLE.every((name) => names.includes(name)), 'every sampled fixture exists');
+});
+
+// ---- buffers derived from a committed one (card M8.4.4) -----------------------------------------------------------------
+
+test('deriveBuffer starts a copy of a committed buffer and takes the changed parts at ascending offsets', async () => {
+  const engine = fakeEngine({ answers: { ...fakeAnswers(), 'buffer.derive': () => ({ handle: uuid() }) } });
+  const ipc = createEngineIpc({ engine }), bytes = Buffer.alloc(5000, 7);
+  const base = await committed(ipc, 1, bytes);
+  const changed = Buffer.from(bytes); changed.fill(9, 1000, 1010); changed.fill(8, 3000, 3005);
+  const derived = await ipc.call(1, 'deriveBuffer', base, descriptor({ byte_length: 5000, shape: [5000], sha256: sha(changed) }));
+  assert.equal(derived.error, undefined, JSON.stringify(derived.error));
+  const sent = engine.calls.find((call) => call.op === 'buffer.derive').payload;
+  assert.deepEqual(Object.keys(sent).sort(), ['base', 'byte_length', 'dtype', 'sha256', 'shape']);
+  assert.ok(!JSON.stringify(derived).includes(sent.base) && /^[0-9a-f-]{36}$/.test(derived.token) && derived.token !== base);
+  assert.equal((await ipc.call(1, 'appendBuffer', derived.token, 1000, changed.subarray(1000, 1010))).error, undefined);
+  assert.equal((await ipc.call(1, 'appendBuffer', derived.token, 3000, changed.subarray(3000, 3005))).error, undefined);
+  for (const [offset, length] of [[2000, 10], [3003, 4], [0, 10], [4995, 10]]) {
+    assert.equal((await ipc.call(1, 'appendBuffer', derived.token, offset, Buffer.alloc(length))).error?.code, 'INVALID_REQUEST', `${offset}+${length}`);
+  }
+  assert.equal((await ipc.call(1, 'commitBuffer', derived.token)).error, undefined, 'a derived buffer commits without every byte being sent');
+  assert.equal((await ipc.call(1, 'readBuffer', derived.token, 0, 1)).error?.code ?? 'readable', 'readable');
+  assert.equal((await ipc.call(2, 'readBuffer', derived.token, 0, 1)).error.code, 'INVALID_BUFFER', 'owned by this page only');
+});
+
+test('an ordinary buffer still needs every byte and its parts in order', async () => {
+  const ipc = createEngineIpc({ engine: fakeEngine({ answers: fakeAnswers() }) });
+  const { token } = await ipc.call(1, 'beginBuffer', descriptor({ byte_length: 4000, shape: [4000] }));
+  assert.equal((await ipc.call(1, 'appendBuffer', token, 1000, Buffer.alloc(10))).error.code, 'INVALID_REQUEST', 'a gap');
+  assert.equal((await ipc.call(1, 'appendBuffer', token, 0, Buffer.alloc(10))).error, undefined);
+  assert.equal((await ipc.call(1, 'commitBuffer', token)).error.code, 'INVALID_BUFFER', 'incomplete');
+});
+
+test('deriveBuffer refuses everything that is not a derivation of a committed buffer of this page', async () => {
+  const engine = fakeEngine({ answers: { ...fakeAnswers(), 'buffer.derive': () => ({ handle: uuid() }) } });
+  const ipc = createEngineIpc({ engine }), bytes = Buffer.alloc(100, 1);
+  const base = await committed(ipc, 1, bytes), table = await committed(ipc, 1, Buffer.from('{"a":1}'), 'utf8json');
+  const staging = (await ipc.call(1, 'beginBuffer', descriptor())).token;
+  const good = descriptor({ byte_length: 100, shape: [100], sha256: sha(bytes) });
+  const cases = [
+    [base, null, 'INVALID_REQUEST'], [base, { ...good, extra: 1 }, 'INVALID_REQUEST'], [base, { ...good, dtype: 'i32le' }, 'INVALID_REQUEST'],
+    [base, { ...good, shape: [10, 10] }, 'INVALID_REQUEST'], [base, { ...good, byte_length: 99 }, 'INVALID_REQUEST'], [base, { ...good, sha256: 'A'.repeat(64) }, 'INVALID_REQUEST'],
+    [table, descriptor({ dtype: 'utf8json', byte_length: 7, shape: [7], sha256: sha(Buffer.from('{"a":1}')) }), 'INVALID_REQUEST'],
+    [staging, good, 'INVALID_BUFFER'], [uuid(), good, 'INVALID_BUFFER'], [7, good, 'INVALID_BUFFER'],
+  ];
+  for (const [token, value, code] of cases) assert.equal((await ipc.call(1, 'deriveBuffer', token, value)).error?.code, code, JSON.stringify([token === base ? 'base' : 'other', value]));
+  assert.equal((await ipc.call(2, 'deriveBuffer', base, good)).error.code, 'INVALID_BUFFER', 'another page cannot derive from this page\'s buffer');
+  assert.ok(!engine.calls.some((call) => call.op === 'buffer.derive'), 'the engine never saw a refused request');
+  const many = createEngineIpc({ engine });
+  const kept = await committed(many, 1, bytes);
+  for (let i = 1; i < MAX_TOKENS_PER_PAGE; i++) assert.ok((await many.call(1, 'beginBuffer', descriptor())).token);
+  assert.equal((await many.call(1, 'deriveBuffer', kept, good)).error.code, 'LIMIT_EXCEEDED');
 });

@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { analysisRevision, buildIntervalSnapshot, computeSectionBins, maskIdentity, referenceColumns, resultToBins } from '../../app/js/sectionanalysis.js';
 import { createEngineClient, EngineError } from '../../app/js/engineclient.js';
 import { createEngineAnalysis } from '../../app/js/engineanalysis.js';
+import { createMaskChanges } from '../../app/js/maskchanges.js';
 
 const CLASSES = [{ id: 'a', name: 'A', counts: true }, { id: 'b', name: 'B', counts: true }, { id: 'n', name: 'N', counts: false }, { id: 'undet', name: 'undet', counts: true }];
 const SETTINGS = { includePred: true, predThr: 0.5, countCandidates: true, binCm: 3.7, minValid: 20, noDataPad: 2 };
@@ -530,4 +531,187 @@ test('through the analysis controller: an interval change reuses the masks, an e
   assert.deepEqual(s.bins, computeSectionBins(s, p).bins);
   analysis.forget(s); await flush();
   assert.equal(bridge.buffers.size, 0, 'closing a section releases everything it held');
+});
+
+// ---- only the rows that changed travel after an edit (card M8.4.4) -------------------------------------------------------
+
+/** A memory bridge that also derives buffers the way the engine does: a copy of the base, parts written at ascending offsets, and a commit
+ *  that is refused unless the whole content has the declared hash. */
+function derivingBridge(options) {
+  const bridge = memoryBridge(options), stats = { derived: 0, appended: 0, refused: 0 };
+  bridge.stats = stats;
+  bridge.deriveBuffer = async (baseToken, descriptor) => {
+    const base = bridge.buffers.get(baseToken);
+    if (!base || !base.committed) return { error: { code: 'INVALID_BUFFER', field: 'token' } };
+    const token = crypto.randomUUID(); stats.derived++;
+    bridge.buffers.set(token, { ...descriptor, data: new Uint8Array(base.data), next: 0, committed: false, derived: true });
+    return { token };
+  };
+  const append = bridge.appendBuffer;
+  bridge.appendBuffer = async (token, offset, bytes) => {
+    const b = bridge.buffers.get(token); stats.appended += bytes.length;
+    if (!b?.derived) return append(token, offset, bytes);
+    assert.ok(offset >= b.next && offset + bytes.length <= b.byte_length && bytes.length <= 1048576, 'chunks of a derived buffer ascend and stay inside');
+    b.data.set(bytes, offset); b.next = offset + bytes.length; return { next_offset: b.next };
+  };
+  const commit = bridge.commitBuffer;
+  bridge.commitBuffer = async (token) => {
+    const b = bridge.buffers.get(token);
+    if (b?.derived) {
+      if (sha(b.data) !== b.sha256) { stats.refused++; return { error: { code: 'INVALID_BUFFER', field: 'sha256' } }; }
+      b.committed = true; return { token, byte_length: b.byte_length, sha256: b.sha256 };
+    }
+    return commit(token);
+  };
+  return bridge;
+}
+
+function engineFor(s, p, { fail = null } = {}) {
+  const bridge = derivingBridge(), client = createEngineClient(bridge), changes = createMaskChanges();
+  const answer = bridge.analyzeSection;
+  bridge.analyzeSection = async (request) => { if (fail?.()) return { error: { code: 'INTERNAL' } }; bridge.setReference(referenceColumns(s, p())); return answer(request); };
+  const analysis = createEngineAnalysis({ client, project: p, maskChanges: changes, onChange() {} });
+  return { bridge, client, changes, analysis };
+}
+
+/** An edit the way the interface makes it: pixels written, reported, and the mask version moved. */
+function paint(s, changes, from, to, label, { report = true } = {}) {
+  s._mv++;
+  for (let i = from; i < to; i++) { s.labels[i] = label; if (report) changes.mark(s, i); }
+}
+
+test('after an edit only the changed rows travel, and the result is the reference', async () => {
+  const s = section(3, { w: 400, h: 600 }); let p = project();
+  const { bridge, client, changes, analysis } = engineFor(s, () => p);
+  await analysis.request(s);
+  assert.equal(bridge.stats.derived, 0);
+  const total = bridge.stats.appended; bridge.stats.appended = 0;
+  paint(s, changes, 4000, 4600, 3);                                                   // rows 10 and 11
+  await analysis.request(s);
+  assert.equal(s.analysis.state, 'ready');
+  assert.deepEqual(s.bins, computeSectionBins(s, p).bins);
+  assert.equal(bridge.stats.derived, 2, 'labels and exclusion were derived');
+  assert.equal(bridge.stats.refused, 0);
+  assert.ok(bridge.stats.appended < total * 0.1, `the edit sent ${bridge.stats.appended} of ${total} bytes`);
+  assert.equal(analysis.deriveFallbacks(), 0);
+  assert.ok(client.hasMasks(s, maskIdentity(s)), 'the engine holds the new masks');
+  assert.equal(bridge.buffers.size, 9, 'the replaced masks were released');
+  // The same again, then an exclusion edit: the record starts again from nothing each time.
+  bridge.stats.appended = 0;
+  s._mv++; for (let i = 100000; i < 100400; i++) { s.exclude[i] = 1; changes.mark(s, i); }
+  await analysis.request(s);
+  assert.deepEqual(s.bins, computeSectionBins(s, p).bins);
+  assert.ok(bridge.stats.appended < total * 0.1);
+  assert.equal(bridge.stats.refused, 0);
+});
+
+test('an edit that was not reported is caught by the hash: the whole mask is sent and the result is still right', async () => {
+  const s = section(5, { w: 300, h: 400 }), p = project();
+  const { bridge, changes, analysis } = engineFor(s, () => p);
+  await analysis.request(s);
+  paint(s, changes, 6000, 6300, 2);                                                   // reported
+  s.labels[30000] += 1;                                                               // written by code that did not report it (always a different value)
+  await analysis.request(s);
+  assert.equal(bridge.stats.refused, 1, 'the engine refused a mask that did not have the declared hash');
+  assert.equal(analysis.deriveFallbacks(), 1);
+  assert.equal(s.analysis.state, 'ready');
+  assert.deepEqual(s.bins, computeSectionBins(s, p).bins, 'not a wrong result');
+  assert.equal(bridge.buffers.size, 9);
+});
+
+test('a replaced, rotated or renumbered mask is sent whole', async () => {
+  const s = section(5, { w: 200, h: 300 }), p = project();
+  const { bridge, changes, analysis } = engineFor(s, () => p);
+  await analysis.request(s);
+  bridge.stats.derived = 0; s._mv++; s.labels[10] = 2; changes.markAll(s);
+  await analysis.request(s);
+  assert.equal(bridge.stats.derived, 0);
+  assert.deepEqual(s.bins, computeSectionBins(s, p).bins);
+});
+
+test('a change that did not reach the engine is still to be sent', async () => {
+  const s = section(5, { w: 200, h: 300 }), p = project(); let fail = false;
+  const { bridge, changes, analysis } = engineFor(s, () => p, { fail: () => fail });
+  await analysis.request(s);
+  paint(s, changes, 3000, 3100, 3);
+  fail = true;
+  await analysis.request(s);
+  assert.equal(s.analysis.state, 'error');
+  fail = false; bridge.stats.derived = 0; bridge.stats.appended = 0;
+  paint(s, changes, 12000, 12100, 2);                                                 // the user edits again; the first change is still owed to the engine
+  await analysis.request(s);
+  assert.equal(s.analysis.state, 'ready');
+  assert.deepEqual(s.bins, computeSectionBins(s, p).bins);
+  assert.equal(bridge.stats.derived, 2, 'the change that failed to arrive was sent again as rows');
+  assert.equal(bridge.stats.refused, 0, 'and it was complete: the engine accepted it');
+  assert.equal(analysis.deriveFallbacks(), 0);
+  assert.ok(bridge.stats.appended < 200 * 300 * 5 * 0.3, "rows between the two strokes travel too: the record is one interval");
+});
+
+test('masks of another size are never derived from', async () => {
+  const s = section(5, { w: 200, h: 300 }), p = project();
+  const { client, analysis } = engineFor(s, () => p);
+  await analysis.request(s);
+  assert.equal(client.canDerive(s, s), true);
+  assert.equal(client.canDerive(s, { w: 200, h: 250 }), false, 'fewer rows');
+  assert.equal(client.canDerive(s, { w: 300, h: 300 }), false, 'wider');
+  assert.equal(client.canDerive({}, s), false, 'a section the engine has never seen');
+});
+
+test('an engine that forgot the masks gets them whole', async () => {
+  const s = section(5, { w: 200, h: 300 }), p = project();
+  const { bridge, changes, analysis } = engineFor(s, () => p);
+  await analysis.request(s);
+  bridge.buffers.clear();                                                             // a new engine session
+  paint(s, changes, 3000, 3100, 3);
+  await analysis.request(s);
+  assert.equal(s.analysis.state, 'ready');
+  assert.deepEqual(s.bins, computeSectionBins(s, p).bins);
+  assert.equal(bridge.buffers.size, 9);
+});
+
+test('an exclusion mask with a value other than 0 or 1 is not derived (the full snapshot turns every non-zero value into 1)', () => {
+  const s = section(5, { w: 200, h: 300 }), p = project();
+  const change = { first: 2, end: 4 };
+  const clean = buildIntervalSnapshot(s, p, { masks: 'derive', change });
+  assert.ok(clean.labels.derive && clean.exclude.derive);
+  s.exclude[7] = 2;
+  const unclean = buildIntervalSnapshot(s, p, { masks: 'derive', change });
+  assert.ok(!unclean.labels.derive && unclean.labels.data.length === s.w * s.h, 'the complete snapshot');
+  const noExclusion = { ...section(5, { w: 200, h: 300 }), exclude: undefined };
+  assert.ok(!buildIntervalSnapshot(noExclusion, p, { masks: 'derive', change }).labels.derive);
+  assert.ok(!buildIntervalSnapshot(section(5), p, { masks: 'derive', change: null }).labels.derive, 'no change given: complete');
+});
+
+test('a derived snapshot carries the changed rows and the hash of the whole mask as it is now', async () => {
+  const s = section(7, { w: 120, h: 200 }), p = project(), change = { first: 20, end: 25 };
+  const snapshot = buildIntervalSnapshot(s, p, { masks: 'derive', change });
+  const bytes = new Uint8Array(s.labels.buffer, s.labels.byteOffset, s.labels.byteLength);
+  assert.deepEqual(snapshot.labels.derive.bytes, bytes.slice(20 * 120 * 4, 25 * 120 * 4));
+  assert.equal(await snapshot.labels.derive.sha256, sha(bytes));
+  assert.deepEqual(snapshot.exclude.derive.bytes, s.exclude.slice(20 * 120, 25 * 120));
+  assert.equal(await snapshot.exclude.derive.sha256, sha(s.exclude));
+  s.labels[20 * 120] = 6;                                                             // a later write does not change what was taken
+  assert.notDeepEqual(snapshot.labels.derive.bytes, new Uint8Array(s.labels.buffer, 20 * 120 * 4, 5 * 120 * 4));
+  assert.equal(snapshot.stack_offsets.dtype, 'u32le', 'the stack tables are complete');
+  assert.equal(snapshot.objects.length, buildIntervalSnapshot(s, p).objects.length);
+  const empty = buildIntervalSnapshot(s, p, { masks: 'derive', change: { first: 0, end: 0 } });
+  assert.equal(empty.labels.derive.bytes.length, 0);
+});
+
+test('a derived upload can be aborted and leaves what the engine held', async () => {
+  const s = section(5, { w: 200, h: 300 }), p = project();
+  const { bridge, changes, analysis } = engineFor(s, () => p);
+  await analysis.request(s);
+  const held = new Set(bridge.buffers.keys());
+  paint(s, changes, 3000, 3100, 3);
+  const slow = bridge.commitBuffer; let release; const gate = new Promise((resolve) => { release = resolve; });
+  bridge.commitBuffer = async (token) => { await gate; return slow(token); };
+  const running = analysis.request(s);
+  await flush(); await flush();
+  analysis.forget(s);                                                                 // the section is closed during the upload
+  release();
+  await running;
+  await flush();
+  assert.ok(bridge.buffers.size <= held.size, 'nothing from the aborted upload is left');
 });

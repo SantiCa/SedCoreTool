@@ -13,6 +13,7 @@ import pytest
 from sedcoretool.engine.buffers import MAX_HANDLES, TRANSIENT_RESERVE, BufferStore
 from sedcoretool.engine.protocol import (
     HEADER,
+    JSON_FRAME,
     MAX_CHUNK,
     MAX_JSON,
     ProtocolError,
@@ -405,3 +406,162 @@ def test_packing_respects_the_handle_limit(tmp_path):
             store.adopt_packed(path, length, digest, layout)
     finally:
         store.close()
+
+
+# ---- buffers derived from a committed one (card M8.4.4) ---------------------------------------------------------------------
+
+def derive_descriptor(base_handle, data, dtype="u8", shape=None):
+    return {"base": base_handle, "dtype": dtype, "shape": shape or [len(data)], "byte_length": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+
+
+def test_a_derived_buffer_is_the_base_with_the_changed_parts_replaced():
+    store = BufferStore()
+    base = bytes(range(200)) * 5000                                    # 1 MB
+    try:
+        handle = committed(store, base)
+        edited = bytearray(base)
+        edited[300_000:300_100] = b"\xff" * 100
+        edited[700_000:700_005] = b"\x01" * 5
+        derived = store.derive(derive_descriptor(handle, bytes(edited)))["handle"]
+        assert store.append({"handle": derived, "offset": 300_000, "byte_length": 100}, b"\xff" * 100) == {"next_offset": 300_100}
+        assert store.append({"handle": derived, "offset": 700_000, "byte_length": 5}, b"\x01" * 5) == {"next_offset": 700_005}
+        assert store.commit({"handle": derived})["sha256"] == hashlib.sha256(bytes(edited)).hexdigest()
+        assert store.buffers[derived].path.read_bytes() == bytes(edited) and store.buffers[derived].committed
+        assert store.buffers[handle].path.read_bytes() == base, "the base is untouched"
+        assert store.reserved == TRANSIENT_RESERVE + 2 * len(base), "the copy is charged to the session budget"
+        with pytest.raises(RequestError):
+            store.append({"handle": derived, "offset": 800_000, "byte_length": 1}, b"x")   # immutable once committed
+    finally:
+        store.close()
+
+
+def test_a_derived_buffer_with_no_change_commits_and_a_change_that_was_missed_does_not():
+    store = BufferStore()
+    base = b"0123456789" * 1000
+    try:
+        handle = committed(store, base)
+        same = store.derive(derive_descriptor(handle, base))["handle"]
+        assert store.commit({"handle": same})["sha256"] == hashlib.sha256(base).hexdigest()
+        edited = bytearray(base)
+        edited[10:20] = b"X" * 10
+        missed = store.derive(derive_descriptor(handle, bytes(edited)))["handle"]           # the client announces an edit but sends nothing
+        with pytest.raises(RequestError) as refusal:
+            store.commit({"handle": missed})
+        assert (refusal.value.code, refusal.value.field) == ("INVALID_BUFFER", "sha256")
+        assert not store.buffers[missed].committed, "a buffer whose content is not the declared one never commits"
+        wrong = store.derive(derive_descriptor(handle, bytes(edited)))["handle"]
+        store.append({"handle": wrong, "offset": 10, "byte_length": 10}, b"Y" * 10)         # the wrong bytes
+        with pytest.raises(RequestError) as refusal:
+            store.commit({"handle": wrong})
+        assert refusal.value.field == "sha256"
+    finally:
+        store.close()
+
+
+def test_chunks_of_a_derived_buffer_must_ascend_and_stay_inside():
+    store = BufferStore()
+    base = bytes(1000)
+    try:
+        handle = committed(store, base)
+        derived = store.derive(derive_descriptor(handle, base))["handle"]
+        store.append({"handle": derived, "offset": 100, "byte_length": 50}, bytes(50))
+        for offset, length in ((120, 10), (149, 5), (0, 10), (990, 11), (1000, 1)):          # behind, overlapping, before, past the end
+            with pytest.raises(RequestError):
+                store.append({"handle": derived, "offset": offset, "byte_length": length}, bytes(length))
+        store.append({"handle": derived, "offset": 150, "byte_length": 10}, bytes(10))      # touching is fine
+        with pytest.raises(RequestError):
+            store.append({"handle": derived, "offset": 200, "byte_length": 10}, bytes(9))    # length and data disagree
+        with pytest.raises(RequestError):
+            store.append({"handle": derived, "offset": 200, "byte_length": 10}, None)
+    finally:
+        store.close()
+
+
+def test_only_a_committed_buffer_of_the_same_kind_can_be_a_base():
+    store = BufferStore()
+    data = bytes(64)
+    try:
+        handle = committed(store, data)
+        meta = committed(store, b'{"a":1}', "utf8json")
+        staged = store.begin({"dtype": "u8", "shape": [64], "byte_length": 64, "sha256": hashlib.sha256(data).hexdigest()})["handle"]
+        released = committed(store, b"released bytes!!")
+        store.release(released)
+        for descriptor in (
+                derive_descriptor(staged, data),                                            # not committed
+                derive_descriptor(released, b"released bytes!!"),                           # released
+                derive_descriptor(str(uuid4()), data),                                      # unknown
+                derive_descriptor(meta, b'{"a":1}', "utf8json"),                            # metadata cannot be derived
+                {**derive_descriptor(handle, data), "dtype": "i32le", "shape": [16]},        # another type
+                {**derive_descriptor(handle, data), "shape": [8, 8]},                        # another shape
+                {**derive_descriptor(handle, data), "byte_length": 63},                      # another length
+                {**derive_descriptor(handle, data), "sha256": "Z" * 64},
+                {**derive_descriptor(handle, data), "base": 5},
+        ):
+            reserved, count = store.reserved, len(store.buffers)
+            with pytest.raises(RequestError):
+                store.derive(descriptor)
+            assert store.reserved == reserved and len(store.buffers) == count, "a refused derive leaves nothing behind"
+        with pytest.raises(RequestError):
+            store.derive({key: value for key, value in derive_descriptor(handle, data).items() if key != "sha256"})
+    finally:
+        store.close()
+
+
+def test_deriving_respects_the_budget_and_the_handle_limit():
+    store = BufferStore(budget=TRANSIENT_RESERVE + 150)
+    data = bytes(100)
+    try:
+        handle = committed(store, data)
+        with pytest.raises(RequestError, match="LIMIT_EXCEEDED"):
+            store.derive(derive_descriptor(handle, data))
+        assert store.reserved == TRANSIENT_RESERVE + 100 and len(store.buffers) == 1 and len(list(Path(store.directory.name).iterdir())) == 1
+    finally:
+        store.close()
+    store = BufferStore()
+    try:
+        handle = committed(store, data)
+        for _ in range(MAX_HANDLES - 1):
+            store.begin({"dtype": "u8", "shape": [1], "byte_length": 1, "sha256": hashlib.sha256(b"a").hexdigest()})
+        with pytest.raises(RequestError, match="LIMIT_EXCEEDED"):
+            store.derive(derive_descriptor(handle, data))
+    finally:
+        store.close()
+
+
+def test_a_derived_buffer_works_through_the_coordinator_and_analyses_like_a_buffer_sent_in_full():
+    import io
+    from uuid import uuid4 as new_id
+
+    coordinator = Coordinator(io.BytesIO(), version="test", runtime_id="0" * 64)
+    session = str(new_id())
+
+    def send(operation, payload, data=None):
+        message = {"v": 1, "kind": "request", "session": session, "id": str(new_id()), "op": operation, "payload": payload}
+        coordinator.receive(message, data)
+        stream = io.BytesIO(coordinator.output.getvalue())
+        found = None
+        while frame := read_frame(stream):
+            if frame[0] == JSON_FRAME:
+                value = strict_json(frame[1])
+                if value["id"] == message["id"]:
+                    found = value
+        return found
+
+    try:
+        assert send("hello", {"protocol": 1})["status"] == "ok"
+        base = bytes(range(256)) * 20
+        begun = send("buffer.begin", {"dtype": "u8", "shape": [len(base)], "byte_length": len(base), "sha256": hashlib.sha256(base).hexdigest()})
+        send("buffer.chunk", {"handle": begun["result"]["handle"], "offset": 0, "byte_length": len(base)}, base)
+        send("buffer.commit", {"handle": begun["result"]["handle"]})
+        edited = bytearray(base)
+        edited[1000:1010] = b"Q" * 10
+        derived = send("buffer.derive", {"base": begun["result"]["handle"], "dtype": "u8", "shape": [len(base)], "byte_length": len(base),
+                                         "sha256": hashlib.sha256(bytes(edited)).hexdigest()})
+        assert derived["status"] == "ok", derived
+        assert send("buffer.chunk", {"handle": derived["result"]["handle"], "offset": 1000, "byte_length": 10}, b"Q" * 10)["result"] == {"next_offset": 1010}
+        assert send("buffer.commit", {"handle": derived["result"]["handle"]})["status"] == "ok"
+        refused = send("buffer.derive", {"base": derived["result"]["handle"], "dtype": "i32le", "shape": [len(base) // 4], "byte_length": len(base),
+                                         "sha256": "0" * 64})
+        assert refused["status"] == "error" and refused["error"]["code"] == "INVALID_BUFFER"
+    finally:
+        coordinator.close()

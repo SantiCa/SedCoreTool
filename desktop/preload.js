@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('corantoolDesktop', {
     enabled: ipcRenderer.sendSync('engine:enabled') === true,
     status: () => ipcRenderer.invoke('engine:status'),
     beginBuffer: (descriptor) => ipcRenderer.invoke('engine:beginBuffer', descriptor),
+    deriveBuffer: (baseToken, descriptor) => ipcRenderer.invoke('engine:deriveBuffer', baseToken, descriptor),
     appendBuffer: (token, offset, bytes) => ipcRenderer.invoke('engine:appendBuffer', token, offset, bytes),
     commitBuffer: (token) => ipcRenderer.invoke('engine:commitBuffer', token),
     analyzeSection: (request) => ipcRenderer.invoke('engine:analyzeSection', request),

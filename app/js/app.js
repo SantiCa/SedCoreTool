@@ -4,6 +4,7 @@ import { pxPerCm, depthAtRow, rowAtDepth } from './sectiondepth.js';
 import { effectiveClassId, effectiveClassIndex, computeSectionBins, binRowsOfSection } from './sectionanalysis.js';
 import { createEngineClient } from './engineclient.js';
 import { createEngineAnalysis } from './engineanalysis.js';
+import { createMaskChanges, indexRangeOfPairs } from './maskchanges.js';
 export { pxPerCm, depthAtRow, rowAtDepth };
 import { withProvenance, ageModelText, bioturbationTable, objectsTable } from './exportio.js';
 
@@ -68,6 +69,9 @@ function newSection({ name, file, w, h, orig, orig16 = null, ds = 1, labels = nu
   return /** @type {typeof s & import('./state.js').SectionState} */ (s);
 }
 
+/** Which rows of each section's masks changed since the engine last received them (maskchanges.js). A hint for the engine path, see there. */
+const maskChanges = createMaskChanges();
+
 /* ───────────── V0.1: images on disk, pixels in memory only while a section is in use ───────────── */
 const MEM = { px: [], mask: [], pinned: new Set(), pxBudget: 9e8, maskBudget: 5e8 };
 /** A mask layer stored packed (RLE array) and unpacked on first access; `init` = array, { rle } or null (empty). */
@@ -77,7 +81,7 @@ function lazyMask(s, key, Type, init) {
   Object.defineProperty(s, key, {
     enumerable: true, configurable: true,
     get() { if (!arr) { arr = rleDecode(rle, s.w * s.h, Type); rle = null; maskTouch(s); } return arr; },
-    set(v) { arr = v; rle = null; s._mv = (s._mv || 0) + 1; },
+    set(v) { arr = v; rle = null; s._mv = (s._mv || 0) + 1; maskChanges.markAll(s); },
   });
   // V0.2: the RLE of an unchanged mask is reused (saving no longer re-encodes every section every time)
   let cache = null;
@@ -496,6 +500,7 @@ function setLabel(op, i, v) {
   op.lm.push(i, old < 0 ? ids : old);
   if (old < 0 || v < 0) op.stackChanged = true;
   L[i] = v;
+  maskChanges.mark(op.s, i);
 }
 /* V0.20: overlapping traces. With «Superponer» a new trace keeps what is underneath; without it, it replaces it (as before). */
 const six = (s) => s._six || (s._six = stackIndex(s.stacks));
@@ -505,6 +510,7 @@ function compactSectionStacks(s, force = false) {
   s._stackEdits = (s._stackEdits || 0) + 1;
   if (!force && s._stackEdits < 32 && s.stacks.length < (s._stackLimit || 64)) return;
   s.stacks = compactStacks(s.labels, s.stacks);
+  maskChanges.markAll(s);                       // the overlap codes of the label image were renumbered
   s._six = null;
   s._stackEdits = 0;
   s._stackLimit = Math.max(64, 2 * s.stacks.length);
@@ -538,7 +544,7 @@ function dropIds(op, set) {
     else if (st[-v].some((x) => set.has(x))) setLabel(op, i, codeFor(st[-v].filter((x) => !set.has(x)), st, six(s)));
   }
 }
-function setEx(op, i, v) { const E = op.s.exclude; if (E[i] !== v) { op.ex.push(i, E[i]); E[i] = v; } }
+function setEx(op, i, v) { const E = op.s.exclude; if (E[i] !== v) { op.ex.push(i, E[i]); E[i] = v; maskChanges.mark(op.s, i); } }
 function grow(op, x, y) { const e = op.ext; if (x < e.x0) e.x0 = x; if (y < e.y0) e.y0 = y; if (x > e.x1) e.x1 = x; if (y > e.y1) e.y1 = y; }
 
 let ovHint = false;
@@ -612,6 +618,7 @@ function replayEditHistory(from, to, forward) {
 function swapEditStep(op, forward) {
   const s = op.s;
   swapHistoryPixels(s.labels, s.exclude, op.lm, op.ex, s.stacks, op.stackChanged ? six(s) : null, forward);
+  for (const range of [indexRangeOfPairs(op.lm), indexRangeOfPairs(op.ex)]) if (range) maskChanges.markRange(s, range.first, range.last);
   if (op.stackChanged) compactSectionStacks(s);
   swapHistoryTraces(op);
   [s.nextId, op.nextId] = [op.nextId, s.nextId];
@@ -1090,7 +1097,7 @@ export function effClassArray(s) { return effectiveClassIndex(s, S.classes, S.se
 const analysisProject = () => ({ classes: S.classes, settings: S.settings, ageModel: S.age.model, ageUnits: S.age.units });
 let engineRefresh = 0;
 const engineBridge = /** @type {any} */ (window).corantoolDesktop?.engine;
-const engineAnalysis = engineBridge?.enabled === true ? createEngineAnalysis({ client: createEngineClient(engineBridge), project: analysisProject, onChange: () => {
+const engineAnalysis = engineBridge?.enabled === true ? createEngineAnalysis({ client: createEngineClient(engineBridge), project: analysisProject, maskChanges, onChange: () => {
   clearTimeout(engineRefresh);
   engineRefresh = setTimeout(() => { renderResults(); requestRender(); if (mode === 'log') scheduleLog(0); else if (mode !== 'section') setMode(mode); }, 50);
 } }) : null;
@@ -4362,4 +4369,4 @@ initializeDiagnostics({
 const startupReady = startup();
 
 // Exposed for automated tests.
-window.ichantool = { S, ready: startupReady, saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, setTool, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };
+window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, setTool, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };
