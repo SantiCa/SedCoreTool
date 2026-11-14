@@ -365,5 +365,7 @@ test('desktop resources select one native x64 runtime or both fixed macOS archit
     assert.deepEqual(Array.from(config.extraResources.filter((entry) => entry.to.startsWith('engine-runtime/')), (entry) => entry.to),
       targets.map((target) => `engine-runtime/${target}`));
   }
-  assert.equal(desktopBuildConfig('darwin').config.mac.x64ArchFiles, 'Contents/Resources/engine-runtime/**');
+  // The second alternative covers the wheels' `.dylibs` folders, which `**` skips (macOS build of 14 November 2026).
+  assert.equal(desktopBuildConfig('darwin').config.mac.x64ArchFiles,
+    '{Contents/Resources/engine-runtime/**,Contents/Resources/engine-runtime/**/.*/**}');
 });

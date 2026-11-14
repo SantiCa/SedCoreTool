@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 /** Exercise real IndexedDB transactions and staged filesystem writes with deterministic failures. */
 export async function verifyInterruptedSaves(browser, url, { navigate = true } = {}) {
   const page = await browser.newPage(), errors = [];
-  // The checks below read Spanish messages; the browser language is whatever the host has (English on the GitHub Linux runner).
+  // The checks below read Spanish messages; the browser language is whatever the host has (English on the GitHub runners).
   await page.evaluateOnNewDocument(() => { try { localStorage.setItem('ichantool.lang', 'es'); } catch { /* storage blocked */ } });
+  let storedLanguage;   // set only for a desktop window, whose stored choice is put back at the end
   page.on('pageerror', (error) => errors.push(error.message));
   try {
     await page.exposeFunction('reopenInterruptedSave', async (source, expected) => {
@@ -37,6 +38,13 @@ export async function verifyInterruptedSaves(browser, url, { navigate = true } =
     });
     if (navigate) await page.goto(url, { waitUntil: 'networkidle0' });
     await page.waitForFunction(() => window.ichantool);
+    // A desktop window is already loaded when it is handed over (navigating it again would close it), so the line above
+    // came too late for it: switch its language now and restore the stored choice afterwards for the later checks.
+    if (!navigate) storedLanguage = await page.evaluate(async () => {
+      const before = localStorage.getItem('ichantool.lang');
+      (await import('./js/i18n.js')).setLang('es');
+      return before;
+    });
     const results = await page.evaluate(async () => {
       const I = window.ichantool, storage = await import('./js/storage.js');
       const { markDirty } = await import('./js/app.js');
@@ -313,5 +321,11 @@ export async function verifyInterruptedSaves(browser, url, { navigate = true } =
     for (const [name, passed] of Object.entries(results)) assert.equal(passed, true, name + ': ' + JSON.stringify(results));
     assert.deepEqual(errors, [], 'interrupted saves produce no uncaught page errors');
     console.log('Interrupted saves: IndexedDB rollback, folder preservation, visible failure and retry verified.');
-  } finally { await page.close(); }
+  } finally {
+    if (storedLanguage !== undefined) {
+      await page.evaluate((value) => { if (value === null) localStorage.removeItem('ichantool.lang'); else localStorage.setItem('ichantool.lang', value); }, storedLanguage)
+        .catch(() => {});
+    }
+    await page.close();
+  }
 }

@@ -210,4 +210,4 @@ function createEngineService({ enabled, packaged, executable, sourceDirectory, r
   };
 }
 
-module.exports = { EngineClient, terminateTree, createEngineService };
+module.exports = { EngineClient, terminateTree, createEngineService, ADVERTISED_METHODS };
