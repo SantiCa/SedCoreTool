@@ -60,7 +60,8 @@ calculates everything itself; with it on, the interval table of each section com
 | Job runner in the engine process: `section.analyze` runs a registered method in the engine's long-lived worker process (one job at a time, replaced after any anomaly), results are adopted as committed buffers and downloaded with `buffer.read` | built (M8.3.5) | §3.1, §4 |
 | Renderer-facing engine bridge (`engine-ipc.js`, `engineclient.js`, `engineanalysis.js`) | **built, experimental, off by default** (M8.3.6–M8.3.7) | §3.2, §3.3 |
 | Section intervals calculated by the engine (`section.intervals/1`) and shown by the interface | **built, experimental, off by default** (M8.3.7); slower than JavaScript, see the M8.3.8 evidence | contract §4–§5 |
-| Section inputs kept resident in the engine between analyses, remaining methods | **planned** (M8.4, M8.5) | roadmap |
+| Section inputs kept in the engine between analyses; edits sent as changed rows (`buffer.derive`); remembered counts; one packed result | **built, experimental, off by default** (M8.4.2-M8.4.5); timing gate of contract §7 not met | §4, contract §3 |
+| Several sections in one request; restart of the engine; engine-held source images and tables; remaining methods | **planned** (M8.4.6-M8.4.11, M8.5) | roadmap |
 
 The engine experiment is enabled only by the environment variable `SEDCORETOOL_ENGINE_EXPERIMENT=1`. Keep that
 default until M8.6.
@@ -179,9 +180,10 @@ Rules of this path:
   section pending (no bins); `engineanalysis.js` calls the controller's `onChange` when a result is published, which
   redraws, and exports await `analyzeSections(sections)` so they never write a pending section (decided in M8.3.7
   instead of turning every render path asynchronous).
-- **Every analysis uploads every input today.** The label image and the exclusion mask (about 30 MB for a
-  6-Mpixel section) cross the page, the main process and the engine for every revision, even when only a setting
-  changed. This is most of the measured time (M8.3.8); M8.4 keeps them resident in the engine.
+- **Inputs stay in the engine (M8.4.2-M8.4.5).** The masks of a section (about 30 MB for 6 Mpixel) are sent once; a change of a
+  setting sends only the settings table, and an edit sends only the rows that changed, which the engine applies to a copy and accepts
+  only if the whole result has the page's SHA-256 (`maskchanges.js`, `buffer.derive`). The renderer stays the owner of the masks,
+  the edit history and the saves; the engine's copy is a verified cache and its failure never changes an edit or a save.
 - Buffers and metadata never travel as JSON arrays or base64. Missing values travel as a value column plus a
   `<name>_valid` column, never as NaN or a magic number.
 

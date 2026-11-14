@@ -38,6 +38,12 @@ Updated 14 November 2026.
   the engine it falls inside the chain of calls), 10 ms the snapshot and full hash in the page, about 50 ms the upload (the objects table and
   both masks are derived and fully re-hashed by the engine), about 20 ms the engine. With the full-content hash that the maintainer's condition
   of decision 1 requires and the page thread shared with drawing, this design cannot reach about 60 ms; see the decision below.
+- **Review of M8.4.1-M8.4.5 (14 November 2026, second design session):** no scientific or safety fault found in the code; two defects fixed
+  (the change record cost about 8 ns for every pixel written, also with the engine off, and the engine's copies of the old project were not
+  released when a project was replaced); documents that still said "every analysis uploads every input" corrected; the guarantee about an
+  engine dying mid-transfer got its test; **M8.4 is not finished and M8.5 must not start**: M8.4.6-M8.4.8 (part A), M8.4.9-M8.4.11 (part B,
+  the cards were written in this review) and part C remain, plus the timing decision. The browser test `smoke.mjs` could not be run locally in
+  the review (starting the local server was refused); the `e2e` job of GitHub runs it on every push.
 - **Next step:** the maintainer's answer to the timing question below; meanwhile M8.4.6 (several sections in one request, for scenario (a))
   and M8.4.7 (restart) can proceed. Also open: card H5 (the `e2e` job must pass ten
   consecutive pushes).
@@ -690,26 +696,89 @@ design session adds the next card instead of accepting the failure.
 #### M8.4.8 - Milestone gate of part A — state: after M8.4.7
 
 - **Goal:** the measurement of M8.4.1 repeated on the final state, with a verdict for every gate and scenario, and the
-  milestone gate on Windows, macOS and Linux. If decision 4 chose "after part A", V0.151 follows when the maintainer
-  asks for it.
+  milestone gate on Windows, macOS and Linux. V0.151 follows when the maintainer asks for it (decision 4: after part A).
+- **Also measured here (review of 14 November 2026, items the earlier cards promised and did not measure):**
+  1. Guarantee (4) of M8.4.4: input-to-next-frame p95 during a paint stroke with the engine on is not worse than with it off
+     (the `responsiveness` phase of the tool measures an interval-size change; add a stroke: 60 injected pointer moves while
+     the brush writes and the previous edit's analysis is in flight).
+  2. A coordinator killed in the middle of a derived transfer (desktop end-to-end, not only the Node test): the section shows
+     the error, the project is unchanged, and the save that follows succeeds and reopens.
+  3. The `smoke.mjs` browser test run locally (it needs the server of DEVELOPMENT §2), and the three-system *Desktop builds*
+     on the final commit.
+  4. The outcome of the timing decision (roadmap status): the verdict of §7 or of the replacement limits.
 
-**Part B (summaries; cards written by a design session after M8.4.8).**
+**Part B - what M8.5 needs from the engine (cards written in the design review of 14 November 2026).**
 
-- [ ] **M8.4.9 - Engine-held source images.** A section's source image is imported once into the engine at its
-      native bit depth, read back by region at a requested scale, identified by SHA-256 and kept in a bounded cache.
-      Needed by M8.5b (filters, detection, object features), M8.5e (U-Net inference) and M7 (radiographs). Decoder
-      parity (browser decoding against Pillow, 16-bit TIFF) is its own fixture set. Known trap: the coordinator
-      checks float buffers in pure Python (63 ns per value, about 1 s per 128 MiB); large float data must be checked
-      in the worker with NumPy.
-- [ ] **M8.4.10 - Engine-held record tables.** Snapshots of depth/age records and data tables for M8.5a, M8.5d and M6.
-- [ ] **M8.4.11 - Milestone gate of part B.**
-- [ ] **M8.4.12 and later - Part C: multi-gigabyte images (M2.3.1–M2.3.5).** Cards written by a design session after M8.4.9,
-      from the tasks in [roadmap-future.md](roadmap-future.md#m2---large-projects-and-responsive-display); it ends with its own
-      milestone gate. Required for 1.0.
+Why part B exists: the image methods of M8.5b/e and the table methods of M8.5a/d would otherwise upload their inputs on every
+call, which is exactly what made the first slice 30-60 times slower than JavaScript. Design choice recorded here: **in part B the
+engine receives the pixels the interface has already decoded** (the working array after downsampling, crop and rotation), once per
+section, and does not decode image files itself. Reason: the renderer's decoders (browser decoding, `tiff.js`, the downsampling
+factor) are the authority for what a section's pixels are; a second decoder in the engine would need its own proof of identity
+for every format and would still disagree on JPEG. The engine decodes files only in part C, where a multi-gigabyte file cannot
+be decoded by the interface at all, and that card will carry the parity evidence.
+
+#### M8.4.9 - Section pixels resident in the engine — state: Ready after M8.4.8
+
+- **Goal:** a section's working pixels (8-bit RGBA `orig` and, when present, 16-bit `orig16`) are in the engine under an identity,
+  so that a method takes handles instead of an upload. No scientific method changes.
+- **Read first:** `app/js/engineclient.js` (the resident-input code of M8.4.2); `app/js/app.js` where pixels are created or replaced
+  (`newSection`, the loader near `s.orig = r.rgba`, `cut` at crop, `rotate90`, the downsample reload near `s.ds = k2`); contract §3
+  (limits) and §4; `src/sedcoretool/engine/buffers.py`, `specs.py`.
+- **Change:**
+  1. Extract the resident-input registry of `engineclient.js` (owner, name, identity, token, bytes, least-recently-used, bounds,
+     eviction, `keep`, `forget`) into a pure module `app/js/residentstore.js` with its own tests; `engineclient.js` uses it. No behaviour
+     change: the existing 47 tests pass unchanged (this is the review's request for modularity: masks, pixels and tables will share it).
+  2. Add the type `u16le` end to end (`buffers.py` `ITEM_BYTES`, `specs.py` `NUMPY_DTYPES`/`CONTRACT_DTYPES`, `engine-ipc.js` `DTYPES`,
+     `engineclient.js` `OUTPUT_TYPES`, contract §3), with the same tests the other types have.
+  3. `sectionanalysis.js` (or a new pure module `sectionpixels.js`): `pixelIdentity(section)`, the SHA-256 of the working array bytes
+     plus its width, height and bit depth, computed when the pixels are loaded or replaced and stored on the section (`s._pxid`), never
+     per analysis (hashing 24 MB costs about 15 ms); `buildPixelBuffers(section)` returns `{rgba: u8[h,w,4], rgba16?: u16le[h,w,4]}` as views.
+  4. `engineclient.js`: `ensurePixels(owner, section)` uploads those buffers when the resident identity differs and returns their tokens;
+     they count against a pixel budget of their own in the registry. A section whose pixels do not fit is not resident (part C).
+  5. Budgets: the engine's session budget is 512 MiB. Masks (up to 256 MiB), pixels (up to 192 MiB) and the transient reserve do not
+     fit together with working copies. Decide with a measurement of the public example and the generated project, then record in
+     contract §3 either lower resident bounds or a session budget of 768 MiB (the disk cap stays 1 GiB). Do not raise it without the
+     measurement.
+- **Do not touch:** the interface's own use of `orig`/`orig16` and its memory management (`MEM`, `pxTouch`): the renderer still holds
+  its copy until part C; the saved project; any method.
+- **Tests:** registry unit tests (eviction order, bounds, identity change replaces and releases, forget); identity changes on
+  crop, rotation, downsampling and reload, and not on a settings change; upload of a 16-bit section end to end through the real
+  engine (bytes read back equal); a section that does not fit is not kept; release on project replacement; mutation tests; the
+  desktop end-to-end with the experiment on and off; memory peak measured with pixels resident (record it, compare with §7).
+- **Done when:** the tests pass, the memory peak is recorded against the §7 limit, and a probe method (a test-only method that
+  sums a region of the resident pixels) reads the same bytes as the interface holds.
+
+#### M8.4.10 - Record tables resident in the engine — state: Ready after M8.4.9
+
+- **Goal:** the tables that M8.5a, M8.5d and M6 consume (depth/age records, data tables, multiproxy series) can be held in the engine
+  in one columnar format, so those methods take handles. No scientific method changes.
+- **Read first:** M8.4.9 (the registry); contract §4-§5 (the convention for missing values: a value column and a `<name>_valid`
+  column, never NaN); `app/js/log.js`, `geo.js` (`featureSeries`, `buildSamples`), `sheet.js` for the shapes of the tables.
+- **Change:** a pure module `app/js/tablesnapshot.js`: `buildTableSnapshot(columns)` takes named numeric columns (plain arrays,
+  null for missing) and returns `f64le` value columns, `u8` validity columns, the names and units as a small `utf8json` table and an
+  identity; limits (columns, rows, bytes) stated and enforced; decoding on the engine side in a helper of `methods/validation.py`
+  (`table(inputs, name, columns)`) that rejects a shape, a non-finite valid value or a name that is not allowed, naming the field. Contract
+  §4 gets a "tables" paragraph. Resident through `residentstore.js`.
+- **Do not touch:** the interface's tables and formulas; saved projects.
+- **Tests:** round trip of random tables with missing values, exact for every value and every missing slot; rejection cases for the
+  helper; limits; the identity changes with any value, name or unit and with nothing else; a probe method that returns column sums.
+- **Done when:** the tests pass and the probe through the real engine equals the interface's own sums.
+
+#### M8.4.11 - Milestone gate of part B — state: after M8.4.10
+
+- **Goal:** the milestone gate (Windows, macOS, Linux on one commit) for parts A and B together, and the memory and timing evidence of
+  M8.4.9 repeated on the final commit. M8.5 may start only after this card and the maintainer's answer on timing.
+- [ ] **M8.4.12 and later - Part C: multi-gigabyte images (M2.3.1–M2.3.5).** Cards written by a design session after M8.4.9, and the
+      first of them decides, with a measurement, whether the engine decodes files itself (the decision recorded above).
+      From the tasks in [roadmap-future.md](roadmap-future.md#m2---large-projects-and-responsive-display); it ends with its own
+      milestone gate. Required for 1.0. Known trap for any card that moves float data: the coordinator checks float64 buffers in
+      pure Python (63 ns per value, about 1 s per 128 MiB); large float data must be checked in the worker with NumPy.
 
 ### M8.5 and M8.6 - summaries
 
-Cards are written by a design session when the previous milestone passes its milestone gate.
+Cards are written by a design session when the previous milestone passes its milestone gate. **Prerequisites of M8.5:** the milestone gate of
+M8.4 part B (card M8.4.11: resident pixels and tables), the maintainer's answer on timing, and for slice (b) onwards the decision of part C on
+how regions of large images reach a method.
 
 - [ ] **M8.5 - Migrate the remaining scientific methods,** one slice at a time with the recipe of
       [ARCHITECTURE §5.1](ARCHITECTURE.md#51-add-or-migrate-a-scientific-method): (a) depth/age parsing and

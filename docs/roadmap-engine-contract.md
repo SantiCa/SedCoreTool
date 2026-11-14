@@ -7,9 +7,11 @@ source inspection and author-run repository checks; no independent reviewer is a
 This is the specification for M8.2–M8.6. M8.2 and M8.3 implement part of it behind the default-off experiment
 flag: the transport, staged buffers, `buffer.read`, `section.analyze` with `section.intervals/1` and the job
 execution model of §3 ([current behaviour and limits](TECHNICAL_DOCUMENTATION.md#262-experimental-engine-process)).
-**Not implemented yet** (14 November 2026): progress events, the content-keyed reuse of §2 (every analysis uploads
-and recomputes everything), retry after `ENGINE_UNAVAILABLE`, and everything after M8.3. The matched-timing gate of
-§7 fails on the first slice and its memory-peak gate was not evaluated (M8.3.8 evidence). Without the flag, the
+**Not implemented yet** (14 November 2026): progress events, the batch request for several sections, retry after
+`ENGINE_UNAVAILABLE`, engine-held source images and tables, and everything after M8.4.5. Implemented since M8.3 (cards
+M8.4.2-M8.4.5): inputs kept in the engine between analyses, remembered counts, one packed result, `buffer.derive` and the recount of
+written rows. The matched-timing gate of §7 still fails for the interval-size change and for edit/undo/redo (see the roadmap); the
+memory-peak gate passes. Without the flag, the
 desktop/browser calculations, Python API, file formats and defaults are unchanged.
 Protocol version 1 and method `section.intervals/1` below are separate versioned contracts. Changing
 scientific semantics requires a new method version and explicit acceptance, even if the wire format fits.

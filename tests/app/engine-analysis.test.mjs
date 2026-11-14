@@ -740,3 +740,26 @@ test('releaseAll on the analysis controller hands back everything the engine kep
   analysis.releaseAll(); await flush();
   assert.equal(bridge.buffers.size, 0);
 });
+
+test('the engine dying in the middle of sending changed rows leaves the edit and the arrays as they were, shows an error, and the section recovers', async () => {
+  const s = section(5, { w: 200, h: 300 }), p = project();
+  const { bridge, changes, analysis } = engineFor(s, () => p);
+  await analysis.request(s);
+  paint(s, changes, 3000, 3100, 3);
+  const labels = Int32Array.from(s.labels), exclude = Uint8Array.from(s.exclude), version = s._mv, objects = s.objects.size;
+  const append = bridge.appendBuffer; let dead = true;
+  bridge.appendBuffer = async (...args) => (dead ? { error: { code: 'ENGINE_UNAVAILABLE' } } : append(...args));
+  await analysis.request(s);
+  assert.deepEqual(s.analysis, { state: 'error', code: 'ENGINE_UNAVAILABLE', field: null }, 'a visible error, no fallback to JavaScript');
+  assert.deepEqual(s.bins, []);
+  assert.deepEqual(s.labels, labels); assert.deepEqual(s.exclude, exclude);
+  assert.equal(s._mv, version); assert.equal(s.objects.size, objects);
+  assert.equal(bridge.buffers.size, 9, 'what the failed transfer created was released and what the engine held is still there');
+  dead = false; bridge.stats.refused = 0;
+  paint(s, changes, 9000, 9100, 2);                                                  // the user edits again
+  await analysis.request(s);
+  assert.equal(s.analysis.state, 'ready');
+  assert.deepEqual(s.bins, computeSectionBins(s, p).bins);
+  assert.equal(bridge.stats.refused, 0, 'the change that failed to arrive was delivered with the new one');
+  assert.equal(analysis.deriveFallbacks(), 0);
+});
