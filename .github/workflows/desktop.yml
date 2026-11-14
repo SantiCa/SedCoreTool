@@ -86,7 +86,7 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'   # unsigned builds (no paid certificates)
-          DEBUG: ${{ runner.os == 'macOS' && 'electron-universal*,electron-builder' || '' }}   # temporary: why is the merged app.asar empty (card M8.3.9)
+          DEBUG: ${{ runner.os == 'macOS' && 'electron-universal*' || '' }}   # temporary: why is the merged app.asar empty (card M8.3.9)
       - name: Check packaged application data
         run: node scripts/check-package.js
         if: ${{ !cancelled() }}

@@ -368,4 +368,5 @@ test('desktop resources select one native x64 runtime or both fixed macOS archit
   // The second alternative covers the wheels' `.dylibs` folders, which `**` skips (macOS build of 14 November 2026).
   assert.equal(desktopBuildConfig('darwin').config.mac.x64ArchFiles,
     '{Contents/Resources/engine-runtime/**,Contents/Resources/engine-runtime/**/.*/**}');
+  assert.equal(desktopBuildConfig('darwin').config.mac.mergeASARs, false);
 });
