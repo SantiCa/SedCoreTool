@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 if __package__:
@@ -84,13 +85,88 @@ class DigestJob(WorkerJob):
                 and type(result['byte_length']) is int and result['byte_length'] >= 0)
 
 
-class MethodJob(WorkerJob):
-    """Runs one registered scientific method in ``method_worker.py`` from a job description file the coordinator wrote."""
+class MethodRunner:
+    """The long-lived ``method_worker.py`` process. It runs one job at a time and answers each with exactly one JSON frame.
+
+    Starting it costs the interpreter and NumPy (about 0.7 s), which is why it is kept between jobs. Any anomaly (an
+    unexpected, unapproved or missing frame, a write failure, a kill) ends the process; the coordinator then starts a new one
+    for the next job, so a damaged worker never serves a second job."""
+
+    def __init__(self, script):
+        self.process = subprocess.Popen(
+            [sys.executable, '-I', '-B', '-u', str(script or Path(__file__).resolve().with_name('method_worker.py'))],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
+        )
+        self.lock = threading.Lock()
+        self.waiting = None                    # the job whose answer is expected
+        self.idle_since = time.monotonic()
+        self.reader = threading.Thread(target=self.read_answers, daemon=True)
+        self.reader.start()
+
+    def alive(self):
+        return self.process.poll() is None
+
+    def submit(self, job):
+        with self.lock:
+            self.waiting = job
+        try:
+            self.process.stdin.write(str(job.job_file).encode('utf-8') + b'\n')
+            self.process.stdin.flush()
+        except OSError:
+            self.kill()                        # the reader then ends the job without a result
+
+    def read_answers(self):
+        try:
+            while (frame := read_frame(self.process.stdout)) is not None:
+                if frame[0] != JSON_FRAME:
+                    raise ProtocolError('unexpected binary frame')
+                answer = strict_json(frame[1])
+                with self.lock:
+                    job, self.waiting = self.waiting, None
+                if job is None:
+                    raise ProtocolError('answer without a job')
+                if not job.accepts(answer):
+                    job.drained.set()          # the job ends without a result, then the worker is stopped below
+                    raise ProtocolError('unapproved answer')
+                job.result = answer
+                self.idle_since = time.monotonic()
+                job.drained.set()
+        except (ProtocolError, OSError):
+            self.kill()
+        finally:
+            with self.lock:
+                job, self.waiting = self.waiting, None
+            if job is not None:
+                job.drained.set()              # the process ended without answering
+
+    def kill(self):
+        if self.process.poll() is None:
+            self.process.kill()
+
+    def close(self):
+        self.kill()
+        self.process.wait(timeout=1)
+        self.reader.join(timeout=1)
+        self.process.stdin.close()
+        self.process.stdout.close()
+
+
+class MethodJob:
+    """One job on a ``MethodRunner``: the coordinator's handle on it, with the same surface as ``WorkerJob``.
+
+    ``deadline`` is the longest the coordinator lets the job run, in seconds. ``result`` is the approved answer, or ``None``
+    when the worker died, sent something else, or was killed."""
 
     deadline = 120
 
-    def __init__(self, job_file, cancel_path, *, script=None):
-        super().__init__([sys.executable, '-I', '-B', '-u', str(script or Path(__file__).resolve().with_name('method_worker.py')), str(job_file)], cancel_path)
+    def __init__(self, runner, job_file, cancel_path):
+        self.runner = runner
+        self.job_file = job_file
+        self.cancel_path = cancel_path
+        self.result = None
+        self.drained = threading.Event()
+        runner.submit(self)
 
     def accepts(self, result):
         if not isinstance(result, dict):
@@ -101,6 +177,20 @@ class MethodJob(WorkerJob):
             error = result['error']
             return isinstance(error, dict) and set(error) == {'code', 'field'} and isinstance(error['code'], str)
         return set(result) == {'ok', 'dimensions', 'columns'} and result['ok'] is True and isinstance(result['columns'], dict)
+
+    def cancel(self):
+        self.cancel_path.touch(exist_ok=True)
+
+    def kill(self):
+        self.runner.kill()
+
+    def finished(self):
+        return self.drained.is_set()
+
+    def close(self):
+        if self.result is None:
+            self.runner.kill()                 # an unanswered job leaves no worker behind
+        self.cancel_path.unlink(missing_ok=True)
 
 
 def digest_file(source, cancel_path, output):

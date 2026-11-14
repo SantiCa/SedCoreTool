@@ -279,15 +279,19 @@ def fake_worker(tmp_path, body):
     return script
 
 
+# A stand-in for method_worker.py: the job file path arrives as one line on stdin, the answer is one frame on stdout. These
+# scripts answer one job and exit; the coordinator must cope with that as it does with a worker that crashes.
 COLUMN_FRAME = (
     "import json, sys\nfrom pathlib import Path\nsys.path.insert(0, {engine!r})\nfrom protocol import write_json\n"
-    "job = json.loads(Path(sys.argv[1]).read_text())\nout = Path(job['output_dir'])\n")
+    "job = json.loads(Path(sys.stdin.readline().strip()).read_text())\nout = Path(job['output_dir'])\n")
 
 
 @pytest.mark.parametrize("label,body,code", [
     ("exits with an error", "raise SystemExit(1)\n", "INTERNAL"),
     ("writes nothing", "pass\n", "INTERNAL"),
     ("writes garbage", "sys = __import__('sys'); sys.stdout.buffer.write(b'not a frame')\n", "INTERNAL"),
+    ("answers with a shape that is none of the three", "write_json(sys.stdout.buffer, {'foo': 1})\n", "INTERNAL"),
+    ("answers twice", "write_json(sys.stdout.buffer, {'cancelled': True})\nwrite_json(sys.stdout.buffer, {'cancelled': True})\n", "INTERNAL"),
     ("reports an unknown error code", "write_json(sys.stdout.buffer, {'error': {'code': 'TEAPOT', 'field': None}})\n", "INTERNAL"),
     ("reports a field that is not a name", "write_json(sys.stdout.buffer, {'error': {'code': 'INVALID_BUFFER', 'field': '../etc'}})\n", "INTERNAL"),
     ("claims a file that does not exist", "write_json(sys.stdout.buffer, {'ok': True, 'dimensions': {'bins': 1, 'classes': 1, 'schemes': 1},"
@@ -300,10 +304,6 @@ COLUMN_FRAME = (
                               " 'byte_length': 4, 'sha256': '" + hashlib.sha256(bytes(4)).hexdigest() + "'}}})\n", "INTERNAL"),
     ("names a path as a column", "write_json(sys.stdout.buffer, {'ok': True, 'dimensions': {'bins': 1, 'classes': 1, 'schemes': 1},"
                                  " 'columns': {'../x': {'dtype': 'u32le', 'shape': [1], 'byte_length': 4, 'sha256': '0' * 64}}})\n", "INTERNAL"),
-    ("exits with an error after a valid result",
-     "import hashlib\ndata = bytes(4)\n(out / 'row_start.bin').write_bytes(data)\n"
-     "write_json(sys.stdout.buffer, {'ok': True, 'dimensions': {'bins': 1, 'classes': 1, 'schemes': 1}, 'columns': {'row_start':"
-     " {'dtype': 'u32le', 'shape': [1], 'byte_length': 4, 'sha256': hashlib.sha256(data).hexdigest()}}})\nraise SystemExit(3)\n", "INTERNAL"),
     ("declares less than the file holds, with the hash of the file",
      "import hashlib\ndata = bytes(8)\n(out / 'row_start.bin').write_bytes(data)\n"
      "write_json(sys.stdout.buffer, {'ok': True, 'dimensions': {'bins': 1, 'classes': 1, 'schemes': 1}, 'columns': {'row_start':"
@@ -330,6 +330,192 @@ def test_a_misbehaving_worker_is_an_internal_error_and_adopts_nothing(tmp_path, 
         assert coordinator.store.reserved == baseline and len(coordinator.store.buffers) == count, f"{label}: nothing is adopted"
         assert all(coordinator.store.buffers[h].pins == 0 for h in handles.values())
         assert not [p for p in Path(coordinator.store.directory.name).iterdir() if p.name.startswith("job-")]
+    finally:
+        coordinator.close()
+
+
+VALID_ANSWER = (
+    "import hashlib\ndata = bytes(4)\n(out / 'row_start.bin').write_bytes(data)\n"
+    "write_json(sys.stdout.buffer, {'ok': True, 'dimensions': {'bins': 1, 'classes': 1, 'schemes': 1}, 'columns': {'row_start':"
+    " {'dtype': 'u32le', 'shape': [1], 'byte_length': 4, 'sha256': hashlib.sha256(data).hexdigest()}}})\n")
+
+
+def test_the_stand_in_worker_of_these_tests_can_succeed(tmp_path):
+    # Control for the parametrised test above: without it every case could pass because the stand-in itself is broken.
+    coordinator, session = new_coordinator(method_script=fake_worker(tmp_path, COLUMN_FRAME.format(engine=str(ENGINE)) + VALID_ANSWER))
+    try:
+        handles, settings_hash = upload(coordinator, fixtures.load("basic-four-intervals"))
+        job = analysis(session, handles, settings_hash)
+        coordinator.receive(job)
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][job["id"]]["status"] == "ok"
+    finally:
+        coordinator.close()
+
+
+def test_a_worker_that_dies_after_a_checked_answer_is_replaced_for_the_next_job(tmp_path):
+    # The answer is verified on its own (frame, sizes, hashes, finite values), so a late crash does not undo it; the damaged
+    # process is never given another job.
+    coordinator, session = new_coordinator(method_script=fake_worker(tmp_path, COLUMN_FRAME.format(engine=str(ENGINE)) + VALID_ANSWER + "raise SystemExit(3)\n"))
+    try:
+        handles, settings_hash = upload(coordinator, fixtures.load("basic-four-intervals"))
+        pids = []
+        for _ in range(2):
+            job = analysis(session, handles, settings_hash)
+            coordinator.receive(job)
+            pids.append(coordinator.runner.process.pid)
+            run_until_idle(coordinator)
+            assert frames(coordinator)[0][job["id"]]["status"] == "ok"
+            coordinator.runner.process.wait(timeout=10)
+        assert pids[0] != pids[1]
+    finally:
+        coordinator.close()
+
+
+def test_one_worker_process_serves_consecutive_analyses_and_ends_with_the_engine():
+    fixture = fixtures.load("basic-four-intervals")
+    coordinator, session = new_coordinator()
+    try:
+        handles, settings_hash = upload(coordinator, fixture)
+        pids, answers = [], []
+        for _ in range(3):
+            job = analysis(session, handles, settings_hash)
+            coordinator.receive(job)
+            pids.append(coordinator.runner.process.pid)
+            run_until_idle(coordinator)
+            answers.append(frames(coordinator)[0][job["id"]])
+        assert len(set(pids)) == 1 and all(answer["status"] == "ok" for answer in answers)
+        assert answers[0]["result"]["outputs"].keys() == answers[2]["result"]["outputs"].keys()
+        runner = coordinator.runner
+    finally:
+        coordinator.close()
+    assert coordinator.runner is None and runner.process.poll() is not None
+
+
+def test_inputs_can_be_deleted_as_soon_as_the_answer_arrives_while_the_worker_lives():
+    # The worker maps its inputs; on Windows a file that is still mapped cannot be deleted, so the worker must unmap before it
+    # answers (the page releases a section's buffers right after the result arrives).
+    coordinator, session = new_coordinator()
+    try:
+        handles, settings_hash = upload(coordinator, fixtures.load("basic-four-intervals"))
+        job = analysis(session, handles, settings_hash)
+        coordinator.receive(job)
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][job["id"]]["status"] == "ok" and coordinator.runner.alive()
+        paths = [coordinator.store.buffers[handle].path for handle in handles.values()]
+        for handle in handles.values():
+            coordinator.store.release(handle)
+        assert not any(path.exists() for path in paths)
+    finally:
+        coordinator.close()
+
+
+def test_abandoning_a_running_job_ends_its_worker_so_its_answer_cannot_reach_another_job():
+    coordinator, session = new_coordinator()
+    try:
+        handles, settings_hash = upload(coordinator, fixtures.load("large-mixed"))
+        job = analysis(session, handles, settings_hash)
+        coordinator.receive(job)
+        runner = coordinator.runner
+        coordinator.cancel_all()
+        assert runner.process.wait(timeout=10) is not None and coordinator.active is None
+        assert frames(coordinator)[0][job["id"]]["status"] == "cancelled"
+        after = analysis(session, handles, settings_hash)
+        coordinator.receive(after)
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][after["id"]]["status"] == "ok" and coordinator.runner is not runner
+    finally:
+        coordinator.close()
+
+
+def test_a_worker_stuck_inside_an_abandoned_job_is_killed(tmp_path):
+    # Only the coordinator can end this worker: it has read its job and then does nothing, so a surviving process would
+    # answer an old job later, to whoever is waiting by then.
+    script = fake_worker(tmp_path, "import sys, time\nsys.stdin.readline()\ntime.sleep(120)\n")
+    coordinator, session = new_coordinator(method_script=script)
+    try:
+        handles, settings_hash = upload(coordinator, fixtures.load("basic-four-intervals"))
+        job = analysis(session, handles, settings_hash)
+        coordinator.receive(job)
+        runner = coordinator.runner
+        time.sleep(0.5)
+        coordinator.cancel_all()
+        assert runner.process.wait(timeout=10) is not None
+    finally:
+        coordinator.close()
+
+
+def test_a_worker_stops_by_itself_when_the_coordinator_is_gone():
+    process = subprocess.Popen([sys.executable, "-I", "-B", "-u", str(ENGINE / "method_worker.py")],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    try:
+        process.stdin.close()                                       # what the coordinator's death looks like to the worker
+        assert process.wait(timeout=60) == 1
+    finally:
+        process.kill()
+        process.stdout.close()
+
+
+def test_the_idle_clock_restarts_when_a_job_is_answered():
+    coordinator, session = new_coordinator()
+    try:
+        handles, settings_hash = upload(coordinator, fixtures.load("basic-four-intervals"))
+        job = analysis(session, handles, settings_hash)
+        coordinator.receive(job)
+        started = coordinator.runner.idle_since
+        run_until_idle(coordinator)
+        assert coordinator.runner.idle_since > started
+    finally:
+        coordinator.close()
+
+
+def test_a_killed_worker_costs_one_job_and_the_next_gets_a_new_process():
+    coordinator, session = new_coordinator()
+    try:
+        handles, settings_hash = upload(coordinator, fixtures.load("basic-four-intervals"))
+        first = analysis(session, handles, settings_hash)
+        coordinator.receive(first)
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][first["id"]]["status"] == "ok"
+        pid = coordinator.runner.process.pid
+        coordinator.runner.kill()
+        coordinator.runner.process.wait(timeout=10)
+        second = analysis(session, handles, settings_hash)
+        coordinator.receive(second)
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][second["id"]]["status"] == "ok" and coordinator.runner.process.pid != pid
+        third = analysis(session, handles, settings_hash)
+        coordinator.receive(third)
+        coordinator.runner.kill()                                   # killed in the middle of a job
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][third["id"]]["error"]["code"] == "INTERNAL"
+        assert not [p for p in Path(coordinator.store.directory.name).iterdir() if p.name.startswith("job-")]
+        fourth = analysis(session, handles, settings_hash)
+        coordinator.receive(fourth)
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][fourth["id"]]["status"] == "ok"
+    finally:
+        coordinator.close()
+
+
+def test_an_idle_worker_is_stopped_and_started_again_when_needed():
+    coordinator, session = new_coordinator()
+    try:
+        coordinator.runner_idle_seconds = 0.2
+        handles, settings_hash = upload(coordinator, fixtures.load("basic-four-intervals"))
+        first = analysis(session, handles, settings_hash)
+        coordinator.receive(first)
+        run_until_idle(coordinator)
+        runner = coordinator.runner
+        deadline = time.monotonic() + 10
+        while coordinator.runner is not None and time.monotonic() < deadline:
+            coordinator.poll()
+            time.sleep(0.02)
+        assert coordinator.runner is None and runner.process.poll() is not None
+        second = analysis(session, handles, settings_hash)
+        coordinator.receive(second)
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][second["id"]]["status"] == "ok"
     finally:
         coordinator.close()
 
@@ -401,13 +587,17 @@ def test_a_method_worker_does_not_load_pandas_or_the_public_package():
 
 def test_the_liveness_watcher_starts_only_after_numpy_and_the_methods_are_imported():
     # On Windows a thread blocked reading the stdin pipe made `import numpy` hang in a clean environment (GitHub runner,
-    # 13 November 2026), while Anaconda's NumPy was unaffected. Guard the start order in the worker's entry point.
+    # 13 November 2026), while Anaconda's NumPy was unaffected. The reader thread of the job loop is that thread now: it must
+    # be started by `serve`, which the entry point calls only after `load_modules()`, and nothing else may start a thread first.
     import ast
 
     tree = ast.parse((ENGINE / "method_worker.py").read_text(encoding="utf-8"))
     main = next(node for node in tree.body if isinstance(node, ast.If) and "__main__" in ast.dump(node.test))
     calls = [ast.unparse(statement) for statement in main.body]
     imports = next(i for i, call in enumerate(calls) if "load_modules()" in call)
-    watcher = next(i for i, call in enumerate(calls) if "watch_coordinator" in call)
-    assert imports < watcher, calls
-
+    serving = next(i for i, call in enumerate(calls) if "serve(" in call)
+    assert imports < serving, calls
+    serve = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "serve")
+    assert any("Thread(" in ast.unparse(statement) for statement in serve.body), "serve starts the reader thread"
+    outside = [ast.unparse(node) for node in tree.body if not isinstance(node, ast.FunctionDef) and node is not main and "Thread" in ast.unparse(node)]
+    assert not outside, outside

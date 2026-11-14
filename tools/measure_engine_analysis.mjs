@@ -108,15 +108,11 @@ async function analyseAt(page, binCm) {
 
 // ---- process-tree sampling ------------------------------------------------------------------------------------------
 
-/** One PowerShell process samples the tree (Electron under node_modules plus the bundled runtime) in a loop; the cadence is whatever it achieves and is reported. */
-function startSampler() {
-  const prefixes = [path.dirname(electron), path.join(root, 'desktop', 'runtime')].map((p) => p.replace(/'/g, "''"));
-  // The process list is rebuilt every eighth round (a full scan costs a few hundred ms); every round reads the working sets of the known processes only.
-  const script = `$p=@(${prefixes.map((p) => `'${p}'`).join(',')}); $sw=[Diagnostics.Stopwatch]::StartNew(); $ids=@(); $i=0; while($true){ ` +
-    `if($i % 8 -eq 0){ $ids=@(Get-CimInstance Win32_Process | Where-Object { $e=$_.ExecutablePath; $e -and ($p | Where-Object { $e.StartsWith($_,[StringComparison]::OrdinalIgnoreCase) }) } | ForEach-Object { $_.ProcessId }) }; $i++; ` +
-    `$m = if($ids.Count){ Get-Process -Id $ids -ErrorAction SilentlyContinue | Measure-Object WorkingSet64 -Sum } else { $null }; ` +
-    `Write-Output ("{0}|{1}|{2}" -f $sw.ElapsedMilliseconds, $(if($m){$m.Count}else{0}), $(if($m){$m.Sum}else{0})); Start-Sleep -Milliseconds 25 }`;
-  const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+/** `tools/process_tree_sampler.py` sums the working sets of the Electron main process and all its descendants (Electron, the engine
+ *  coordinator, the method worker) every 25 ms; the cadence it really achieves is measured and reported with each summary. */
+function startSampler(rootPid) {
+  const python = execFileSync('py', ['-3.12', '-c', 'import sys; print(sys.executable)'], { encoding: 'utf8', windowsHide: true }).trim();
+  const child = spawn(python, [path.join(root, 'tools', 'process_tree_sampler.py'), String(rootPid), '25'], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
   const samples = []; let buffer = '';
   child.stdout.on('data', (bytes) => {
     buffer += bytes; const lines = buffer.split(String.fromCharCode(10)); buffer = lines.pop();
@@ -206,7 +202,7 @@ if (want('responsiveness')) {
   log('responsiveness and memory', largest);
   const results = {};
   for (const mode of ['off', 'on']) {
-    const session = await start(mode), sampler = mode === 'on' ? startSampler() : null;
+    const session = await start(mode), sampler = mode === 'on' ? startSampler(session.child.pid) : null;
     try {
       await loadFixture(session.page, largest); await sleep(1500);
       const idle = sampler ? summarise(sampler.samples.slice(-20)) : null;
@@ -283,7 +279,7 @@ if (want('cancel')) {
 
 if (want('cycles')) {
   log('cycles');
-  const session = await start('on'), sampler = startSampler();
+  const session = await start('on'), sampler = startSampler(session.child.pid);
   try {
     const cycles = []; await sleep(3000);
     // Cycle -1 is the warm-up of the contract ("after warm-up"): it is run exactly like the others and not counted.

@@ -2817,7 +2817,7 @@ windows can finish loading without a redundant navigation through the desktop cl
 
 Implementation: `desktop/engine.js` (main-process lifecycle/client), `desktop/engine-ipc.js` (the page bridge: `status`, `beginBuffer`, `appendBuffer` (at most 1 MiB, contiguous offsets), `commitBuffer`, `analyzeSection`, `cancel`, `readBuffer`, `release`; only the top frame of an `app://` page may call; at most 256 buffers and 5 running analyses per page; tokens are released when the page navigates, reloads, crashes or closes; a failed call resolves to `{error: {code, field?}}`), `desktop/engine-protocol.js` (framing),
 `src/sedcoretool/engine/{protocol,buffers,specs,server,worker}.py` (standard-library coordinator, staged data, input tables and
-worker-process wrappers) and `method_worker.py` (the script that runs a scientific method in its own process). This experiment is disabled unless `SEDCORETOOL_ENGINE_EXPERIMENT=1`.
+worker-process wrappers) and `method_worker.py` (the long-lived script that runs scientific methods, one job at a time, in its own process). This experiment is disabled unless `SEDCORETOOL_ENGINE_EXPERIMENT=1`.
 It uses the verified bundled runtime (§26.3), or an explicitly selected absolute `SEDCORETOOL_ENGINE_PYTHON`
 path in source development only. A missing or invalid bundle reports unavailable; packaged applications never
 use that override or search for a user's interpreter. The browser and standalone file do not launch a process. With the experiment on, the interval table of every section is calculated by the engine's `section.intervals/1` (below) and the
@@ -2847,12 +2847,16 @@ isolated subprocess and returns `{sha256,byte_length}`; it tests transport and w
 (`section.analyze`, inputs and results in the [engine contract](roadmap-engine-contract.md) §3–§5) calculates the interval
 table of a section from nine input buffers: the coordinator checks the request's identity fields, that the `settings` buffer's
 SHA-256 equals `settings_hash`, and every handle's dtype and rank, pins the inputs, and queues the job. The job runs in
-`method_worker.py` (NumPy only; the public package and pandas are not loaded), which validates every input and writes the
+`method_worker.py` (NumPy only; the public package and pandas are not loaded), a worker the coordinator starts with the first job
+and keeps for the next ones (starting it costs about 0.7 s): the coordinator sends it the path of a job description on stdin and it
+answers each job with one frame. The worker validates every input and writes the
 result columns to files; the coordinator re-checks each file (size, shape, SHA-256, finite floats) and adopts it as a committed
 buffer charged to the session budget, then answers with the handles. `buffer.read {handle, offset, byte_length}` downloads any
 committed buffer in ranges of at most 1 MiB: the JSON response is followed by exactly one binary frame. A rejected input is an
-error response naming the field; a worker that crashes, exits with an error, lies about its files or exceeds 120 s is
-`INTERNAL` and nothing is adopted. Progress events are not sent yet.
+error response naming the field; a worker that crashes, ends before answering, sends an answer the coordinator does not approve,
+lies about its files or exceeds 120 s is `INTERNAL` and nothing is adopted, and the next job gets a new worker. A cancellation
+that the worker does not acknowledge within 1.5 s, an abandoned job and the end of the engine kill the worker; an idle worker stops
+after 30 s. Progress events are not sent yet.
 
 `buffer.begin`, `chunk`, `commit` and `release` stage data in private temporary files. Validate shape/dtype/
 declared size before allocation; enforce exact offsets, length, SHA-256, finite f64 data and strict metadata

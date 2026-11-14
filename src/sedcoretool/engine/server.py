@@ -31,7 +31,7 @@ if __package__:
         write_json,
     )
     from .specs import METHOD_INPUTS, SECTION_INTERVALS, SETTINGS_INPUT
-    from .worker import DigestJob, MethodJob
+    from .worker import DigestJob, MethodJob, MethodRunner
 else:
     # Isolated Python excludes both PYTHONPATH and the script directory. Only our fixed source is added.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -52,13 +52,14 @@ else:
         write_json,
     )
     from specs import METHOD_INPUTS, SECTION_INTERVALS, SETTINGS_INPUT
-    from worker import DigestJob, MethodJob
+    from worker import DigestJob, MethodJob, MethodRunner
 
 METHODS = ('buffer.digest/1', SECTION_INTERVALS)
 WORKER_ERROR_CODES = ('INVALID_REQUEST', 'UNSUPPORTED_METHOD', 'UNSUPPORTED_INPUT', 'INVALID_BUFFER', 'LIMIT_EXCEEDED', 'INTERNAL')
 FIELD_NAME = re.compile(r'[A-Za-z0-9_.\[\]]{1,128}')
 COLUMN_NAME = re.compile(r'[A-Za-z][A-Za-z_]{0,63}')
 HEX64 = re.compile('[0-9a-f]{64}')
+RUNNER_IDLE_SECONDS = 30         # an idle method worker holds memory (NumPy, the last job's arrays); it is started again when needed
 
 
 class Coordinator:
@@ -74,6 +75,8 @@ class Coordinator:
         self.store = BufferStore(scratch_directory=scratch_directory)
         self.jobs = deque()
         self.active = None
+        self.runner = None
+        self.runner_idle_seconds = RUNNER_IDLE_SECONDS
         self.closing = False
 
     def response(self, request, status='ok', result=None, error=None):
@@ -241,9 +244,22 @@ class Coordinator:
         job_file = directory / 'job.json'
         job_file.write_text(json.dumps({'method': payload['method'], 'cancel_path': str(directory / 'cancel'),
                                         'output_dir': str(directory / 'out'), 'inputs': specification}), encoding='utf-8')
-        worker = MethodJob(job_file, directory / 'cancel', script=self.method_script)
+        worker = MethodJob(self.method_runner(), job_file, directory / 'cancel')
         worker.directory = directory
         return worker
+
+    def method_runner(self):
+        """The long-lived worker for scientific methods; a new one when there is none yet or the last one ended."""
+        if self.runner is not None and not self.runner.alive():
+            self.stop_runner()
+        if self.runner is None:
+            self.runner = MethodRunner(self.method_script)
+        return self.runner
+
+    def stop_runner(self):
+        runner, self.runner = self.runner, None
+        if runner is not None:
+            runner.close()
 
     @staticmethod
     def discard(worker):
@@ -271,6 +287,8 @@ class Coordinator:
         active = self.active
         if active is None:
             self.start_next()
+            if self.active is None and self.runner is not None and time.monotonic() - self.runner.idle_since >= self.runner_idle_seconds:
+                self.stop_runner()
             return
         worker = active['worker']
         if active['cancel_at'] is not None and time.monotonic() - active['cancel_at'] >= 1.5:
@@ -303,7 +321,7 @@ class Coordinator:
             if active['cancel_at'] is not None:
                 self.finish(request, 'cancelled')
                 return
-            if result is None or worker.process.returncode != 0 or result.get('cancelled'):
+            if result is None or result.get('cancelled'):
                 raise RequestError('INTERNAL')
             if 'error' in result:
                 code, field = result['error']['code'], result['error']['field']
@@ -365,7 +383,10 @@ class Coordinator:
         try:
             self.cancel_all(notify=False)
         finally:
-            self.store.close()
+            try:
+                self.stop_runner()
+            finally:
+                self.store.close()
 
 
 def read_requests(stream, inbox):

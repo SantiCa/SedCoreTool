@@ -22,11 +22,12 @@ Updated 14 November 2026.
 - **Checks:** see the last line of this block; it is rewritten at the end of every session.
 - **Where we are:** M8.1 and M8.2 are done at the development gate (Windows). M8.3 is complete: with `SEDCORETOOL_ENGINE_EXPERIMENT=1` the
   desktop program calculates the interval table of every section in the Python engine and shows it, with a pending state, stale-result
-  rejection, cancellation and an error state, never falling back to JavaScript. The measurements of card M8.3.8 are recorded in
+  rejection, cancellation and an error state, never falling back to JavaScript. The measurements of card M8.3.8 (first and corrected) are recorded in
   [docs/validation/M8.3.8-engine-analysis-summary.md](validation/M8.3.8-engine-analysis-summary.md).
-- **Next step:** the maintainer's decision recorded under card M8.3.8: continue to M8.4, or correct first. Recommended: correct first
-  (a persistent worker process, cheaper transfer of the label image, a memory sampler at the contract's 25 ms cadence, then re-measure
-  the ten-cycle memory gate, which failed by +110 MiB). Also open: card H5 (the `e2e` job on Linux).
+- **Next step:** M8.4 (cards to be written by a design session). The corrections after M8.3.8 are done: a long-lived method worker, a 25 ms
+  memory sampler, a second measurement in which every gate passes (see the Result of card M8.3.8). Left open on purpose: restart of the
+  engine after the coordinator dies (needs a decision on how the interface retries), the label-image upload (removed by M8.4).
+  Also open: card H5 (the `e2e` job must pass ten consecutive pushes).
 - **Reminder for whoever talks to the maintainer:** the maintainer accepted the two acceptance levels on
   13 November 2026 and asked to be **reminded to run the release-gate tests** (the release checklist below:
   macOS and Linux, clean Windows machine, cold-cache first launch, saturated CPUs, package sizes, and the
@@ -34,12 +35,13 @@ Updated 14 November 2026.
   switched on by default or a version with the engine is announced.
 - **Decisions waiting for the maintainer:** only the flags in the table below that need a promote/remove decision.
   Decided on 13 November 2026: acceptance levels (accepted), scope of 1.0 (below), publication of V0.149.
-- **Last full checks: passed** on 14 November 2026 at the V0.150 state, run one after another on the maintainer's Windows computer:
-  `pytest -q` 594 passed / 8 skipped; `npm test` 295 passed; `npm run typecheck` (no new diagnostics); `sync_version.py --check`;
-  `ruff check src tests tools`; standalone build; `tests/e2e/desktop.mjs` with the engine experiment on (six sections equal to the JavaScript
-  reference before and after an edit) and off, bundled runtime rebuilt first (`prepare.js`, then `prepare_engine_runtime.py`). The
-  measurements of card M8.3.8 are separate evidence. **GitHub workflow `tests`** on the commit before V0.150: all Python jobs, `checks` and
-  `web-app` pass; the `e2e` job still fails on the Linux navigation-preview check (card H5).
+- **Last full checks: passed** on 14 November 2026 after the corrections following V0.150 (branch `work/2026-11-13`, run one after another on the
+  maintainer's Windows computer): `pytest -q` 605 passed / 8 skipped; `npm test` 295 passed; `npm run typecheck` (no new diagnostics);
+  `sync_version.py --check`; `ruff check src tests tools`; standalone build; `tests/e2e/smoke.mjs` (three consecutive runs, no slow page call
+  over 5 s); `tests/e2e/desktop.mjs` with the engine experiment on and off, bundled runtime rebuilt first (`prepare.js`, then
+  `prepare_engine_runtime.py`). The corrected measurements of card M8.3.8 are separate evidence. **GitHub workflow `tests`:** all jobs pass on
+  the work branch since commit `522f8ad`; on `master` (V0.150) only `e2e` fails, fixed on the branch and reaching `master` with the next
+  version. The corrections after V0.150 are not pushed yet.
 
 ## How work is accepted
 
@@ -387,7 +389,7 @@ Cards are done in order. Each one claims the development gate only.
   separately (the revision key covers them by construction); the figures, data and map tabs refresh through `setMode` after a publish,
   which was not checked visually.
 
-#### M8.3.8 - Acceptance measurements and decision — state: Done (measured 14 November 2026; waiting for the maintainer's decision)
+#### M8.3.8 - Acceptance measurements and decision — state: Done (measured and corrected 14 November 2026)
 
 - **Goal:** the gates of contract §7 are measured on the first slice and the maintainer decides what follows.
 - **Change:** a measuring tool under `tools/`, evidence under `docs/validation/`, the release checklist above.
@@ -403,8 +405,11 @@ Cards are done in order. Each one claims the development gate only.
   cancellation, worker and coordinator kills. Fail: the ten-cycle memory gate (+109.7 MiB, gate +64). Not met: the 25 ms memory cadence
   (0.9 s). Timing is reported: the engine is about 60 to 160 times slower than the JavaScript calculation on these inputs (4.2 s against
   27 ms; 6.9 s against 110 ms), mostly per-job overhead. The measurement also exposed a real bug (a section left pending when its inputs
-  changed under a waiting job), fixed in the same delivery. **Decision for the maintainer:** continue to M8.4, or correct first
-  (recommended: a persistent worker, cheaper transfer, a faster memory sampler, then re-measure). The experiment stays off by default.
+  changed under a waiting job), fixed in the same delivery. **Corrections (14 November 2026, on the maintainer's instruction to fix errors before M8.4):**
+  one long-lived method worker (contract amended), a psutil memory sampler at 25 ms (median 25.4 ms), then the whole measurement was repeated
+  ([corrected evidence](validation/M8.3.8-engine-analysis-windows-corrected.json)): every gate passes, cold analysis is 1.6 s (public) and 3.4-3.9 s (synthetic)
+  against 0.03 s and 0.11 s in JavaScript, the ten-cycle memory gate passed in four of four runs. Remaining cost is the label-image upload, removed by M8.4.
+  The experiment stays off by default.
 
 ### M8.4 to M8.6 - summaries
 
