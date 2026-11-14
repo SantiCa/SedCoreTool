@@ -65,7 +65,7 @@ const TYPES = { u8: Uint8Array, i32le: Int32Array, u32le: Uint32Array, u64le: Bi
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 /** A bridge that stores uploads, "analyses" by answering with the JavaScript reference, and serves downloads in ranges. */
-function memoryBridge({ state = 'ready', answer = 'reference', failAt = null } = {}) {
+function memoryBridge({ state = 'ready', answer = 'reference', failAt = null, override = {} } = {}) {
   const buffers = new Map(), released = [], calls = [], log = [];
   let reference = null, hold = null;
   const bridge = {
@@ -88,16 +88,20 @@ function memoryBridge({ state = 'ready', answer = 'reference', failAt = null } =
       if (hold) await new Promise((resolve) => { const done = hold; hold = null; done(() => resolve()); });
       if (answer === 'error') return { error: { code: 'UNSUPPORTED_INPUT', field: 'settings.roi' } };
       if (answer === 'cancelled') return { cancelled: true };
-      const outputs = {};
+      // Every column in ONE buffer, each starting at a multiple of 8 bytes, with a layout (what the engine does).
+      const layout = {}, parts = []; let size = 0;
       for (const [name, column] of Object.entries(reference.columns)) {
-        const put = (suffix, dtype, values) => {
-          const typed = TYPES[dtype].from(values, (v) => (dtype === 'u64le' ? BigInt(v) : v)), bytes = new Uint8Array(typed.buffer.slice(0)), token = crypto.randomUUID();
-          buffers.set(token, { data: bytes, byte_length: bytes.length, committed: true });
-          outputs[name + suffix] = { token, dtype, shape: column.shape, byte_length: bytes.length, sha256: sha(bytes) };
+        const add = (key, dtype, values) => {
+          const typed = TYPES[dtype].from(values, (v) => (dtype === 'u64le' ? BigInt(v) : v)), bytes = new Uint8Array(typed.buffer.slice(0));
+          layout[key] = { dtype, shape: column.shape, offset: size, byte_length: bytes.length }; parts.push([size, bytes]); size += Math.ceil(bytes.length / 8) * 8;
         };
-        put('', column.dtype, column.data); if (column.valid) put('_valid', 'u8', column.valid);
+        add(name, column.dtype, column.data); if (column.valid) add(name + '_valid', 'u8', column.valid);
       }
-      return { dimensions: reference.dimensions, outputs, provenance: { engine_version: 'test' }, ...request };
+      const packed = new Uint8Array(size), token = crypto.randomUUID();
+      for (const [offset, bytes] of parts) packed.set(bytes, offset);
+      buffers.set(token, { data: packed, byte_length: size, committed: true });
+      const outputs = { result: { token, dtype: 'u8', shape: [size], byte_length: size, sha256: sha(packed) } };
+      return { dimensions: reference.dimensions, outputs, layout: override.layout ? override.layout(layout) : layout, provenance: { engine_version: 'test' }, ...request, ...(override.outputs ? { outputs: override.outputs(outputs, buffers) } : {}) };
     },
   };
   return bridge;
@@ -115,7 +119,42 @@ test('the client uploads every input in bounded chunks, downloads the columns an
   assert.equal(request.settings_hash, sha(new TextEncoder().encode(JSON.stringify(snapshot.settings))), 'the settings hash is the hash of the settings buffer');
   assert.ok(bridge.log.filter((entry) => entry === 'append').length >= 2, 'the 1.6 MB label image went in more than one chunk');
   assert.equal(bridge.buffers.size, 0, 'nothing is left in the engine');
-  assert.equal(bridge.released.length, 9 + Object.keys(result.columns).length + Object.values(result.columns).filter((c) => c.valid).length);
+  assert.equal(bridge.released.length, 9 + 1, 'the nine inputs and the one packed result');
+});
+
+test('the result comes back as one packed buffer that the client reads in one go and cuts up by its layout', async () => {
+  const s = section(3, { w: 600, h: 700 }), p = project(), bridge = memoryBridge(); bridge.setReference(referenceColumns(s, p));
+  const reads = []; const read = bridge.readBuffer; bridge.readBuffer = async (token, offset, length) => { reads.push([offset, length]); return read(token, offset, length); };
+  const result = await createEngineClient(bridge).analyze(buildIntervalSnapshot(s, p));
+  const reference = referenceColumns(s, p);
+  assert.deepEqual(Object.keys(result.columns), Object.keys(reference.columns), 'every column of the contract, in order');
+  for (const [name, column] of Object.entries(reference.columns)) {
+    assert.deepEqual(result.columns[name].data, column.data, name);
+    assert.deepEqual(result.columns[name].valid, column.valid, `${name} validity`);
+  }
+  assert.ok(reads.length <= 2, `about one read for the whole result, not one per column (${reads.length})`);
+});
+
+test('a packed result whose layout is wrong is an internal error, never data', async () => {
+  const s = section(3), p = project();
+  const cases = {
+    'a column that overlaps the previous one': (layout) => ({ ...layout, depth: { ...layout.depth, offset: layout.depth_top.offset } }),
+    'a column that starts off a multiple of 8': (layout) => ({ ...layout, depth: { ...layout.depth, offset: layout.depth.offset + 4 } }),
+    'a column past the end of the buffer': (layout) => ({ ...layout, depth: { ...layout.depth, offset: 1 << 20 } }),
+    'a shape that does not match the length': (layout) => ({ ...layout, depth: { ...layout.depth, shape: [layout.depth.shape[0] + 1] } }),
+    'an unknown type': (layout) => ({ ...layout, depth: { ...layout.depth, dtype: 'f32le' } }),
+    'an empty column': (layout) => ({ ...layout, depth: { ...layout.depth, byte_length: 0 } }),
+    'a layout of the wrong kind': () => 'depth',
+  };
+  for (const [label, layout] of Object.entries(cases)) {
+    const bridge = memoryBridge({ override: { layout } }); bridge.setReference(referenceColumns(s, p));
+    await assert.rejects(createEngineClient(bridge).analyze(buildIntervalSnapshot(s, p)), (error) => error instanceof EngineError && error.code === 'INTERNAL', label);
+    assert.equal(bridge.buffers.size, 0, `${label}: everything was released`);
+  }
+  const hashed = memoryBridge({ override: { outputs: (outputs) => ({ result: { ...outputs.result, sha256: 'f'.repeat(64) } }) } }); hashed.setReference(referenceColumns(s, p));
+  await assert.rejects(createEngineClient(hashed).analyze(buildIntervalSnapshot(s, p)), { code: 'INTERNAL', field: 'result' }, 'a hash that does not match the bytes');
+  const two = memoryBridge({ override: { outputs: (outputs) => ({ ...outputs, extra: outputs.result }) } }); two.setReference(referenceColumns(s, p));
+  await assert.rejects(createEngineClient(two).analyze(buildIntervalSnapshot(s, p)), { code: 'INTERNAL' }, 'a second output');
 });
 
 test('a section without overlap sends no stack_members buffer', async () => {

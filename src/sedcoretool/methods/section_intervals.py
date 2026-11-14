@@ -14,6 +14,8 @@ on every record or on none.
 
 from __future__ import annotations
 
+import hashlib
+from collections import OrderedDict
 from dataclasses import dataclass
 
 import numpy as np
@@ -42,6 +44,21 @@ CHUNK_ROWS = 256                          # rows counted between cancellation ch
 MAX_COUNT_BYTES = 256 * 1024 ** 2         # rows * classes * 8 bytes of per-row class counts
 MAX_OBJECT_ID = 64 * 1024 ** 2            # the object-to-class table has one entry per id up to the largest
 EPSILON = 1e-9                            # depth tolerance of the no-data padding, as in the program
+MEMO_COUNT_BYTES = 64 * 1024 ** 2         # row counts a caller-owned memo may hold
+MEMO_COUNT_ENTRIES = 16
+MEMO_CHECKS = 64                          # remembered validations of masks
+
+
+def new_memo() -> dict:
+    """What a long-lived caller (the engine worker) keeps between jobs: validations that passed and the row counts of masks it has
+    seen. Every entry is indexed by the SHA-256 of the buffers it came from, so nothing stale can be used. Pass it to `parse` and `run`."""
+    return {"exclude_ok": set(), "labels_ok": set(), "counts": OrderedDict()}
+
+
+def _remember(checks: set, key) -> None:
+    if len(checks) >= MEMO_CHECKS:
+        checks.clear()
+    checks.add(key)
 
 
 @dataclass
@@ -63,6 +80,7 @@ class Snapshot:
     schemes: list[tuple[str, str, list[tuple[float, float, int]]]]
     age_model: tuple[np.ndarray, np.ndarray, np.ndarray | None, np.ndarray | None]   # depth, age, min, max
     manual: list[tuple[float, float, int | None, int | None]]
+    count_key: tuple | None = None                  # identity of everything the row counts depend on; None = not cacheable
 
 
 @dataclass
@@ -245,8 +263,12 @@ def _manual(value):
     return parsed
 
 
-def parse(inputs: dict) -> Snapshot:
+def parse(inputs: dict, *, hashes: dict | None = None, memo: dict | None = None) -> Snapshot:
     """Validate ``inputs`` (contract §4) and return a ``Snapshot``; raises ``MethodError`` naming the field at fault.
+
+    ``hashes`` (input name -> SHA-256 of its buffer, already verified by the caller) and ``memo`` (``new_memo()``) let a long-lived
+    caller skip, for masks it has validated before, the full-image checks and, in ``run``, the counting. Every rule is still applied
+    to a mask the memo has not seen; the tables are always validated.
 
     Numeric inputs are NumPy arrays of the contract's dtypes (``labels`` ``<i4`` [height, width], ``exclude`` ``u1``,
     ``stack_offsets`` and ``stack_members`` ``<u4``; ``stack_members`` may be None when there is no overlap); the
@@ -255,21 +277,37 @@ def parse(inputs: dict) -> Snapshot:
         fail("INVALID_REQUEST", "inputs")
     labels = buffer(inputs["labels"], "labels", "<i4", 2)
     exclude = buffer(inputs["exclude"], "exclude", "u1", 2)
-    if exclude.shape != labels.shape or exclude.max() > 1:
+    if exclude.shape != labels.shape:
         fail("INVALID_BUFFER", "exclude")
+    exclude_key = hashes.get("exclude") if hashes and memo is not None else None
+    if exclude_key is None or exclude_key not in memo["exclude_ok"]:
+        if exclude.max() > 1:
+            fail("INVALID_BUFFER", "exclude")
+        if exclude_key is not None:
+            _remember(memo["exclude_ok"], exclude_key)
     settings = _settings(inputs["settings"], labels)
     class_ids, counts = _classes(inputs["classes"])
     table, present = _objects(inputs["objects"], class_ids, counts, settings)
     offsets, members = _stacks(inputs["stack_offsets"], inputs["stack_members"], present)
-    _check_labels(labels, present, offsets.size - 1)
+    labels_key = None
+    if hashes and memo is not None and hashes.get("labels"):
+        labels_key = (hashes["labels"], hashes.get("stack_offsets"), hashes.get("stack_members"), hashlib.sha256(present.tobytes()).hexdigest())
+    if labels_key is None or labels_key not in memo["labels_ok"]:
+        _check_labels(labels, present, offsets.size - 1)
+        if labels_key is not None:
+            _remember(memo["labels_ok"], labels_key)
     x0, y0, x1, y1 = settings["roi"]
     if (y1 - y0) * len(class_ids) * 8 > MAX_COUNT_BYTES:
         fail("LIMIT_EXCEEDED", "classes")
+    count_key = None
+    if hashes and memo is not None and hashes.get("labels") and hashes.get("exclude") and hashes.get("stack_offsets"):
+        count_key = (hashes["labels"], hashes["exclude"], hashes["stack_offsets"], hashes.get("stack_members"), settings["roi"], len(class_ids),
+                     hashlib.sha256(table.tobytes()).hexdigest())
     return Snapshot(labels=labels, exclude=exclude, roi=settings["roi"], top=settings["top"], bottom=settings["bottom"],
                     units=settings["units"], bin_cm=settings["bin_cm"], min_valid=settings["min_valid"],
                     no_data_pad_cm=settings["no_data_pad_cm"], n_classes=len(class_ids), class_of_object=table,
                     stack_offsets=offsets, stack_members=members, schemes=settings["schemes"],
-                    age_model=_age_model(inputs["age_model"]), manual=_manual(inputs["manual_indices"]))
+                    age_model=_age_model(inputs["age_model"]), manual=_manual(inputs["manual_indices"]), count_key=count_key)
 
 
 # ---- run -------------------------------------------------------------------------------------------------------------
@@ -303,13 +341,34 @@ def _pad_no_data(no_data: np.ndarray, depth_top: np.ndarray, depth_bottom: np.nd
     return ~no_data & (first_end_above_top < starts_below_bottom)
 
 
-def run(snapshot: Snapshot, report=lambda stage, completed, total: None, cancelled=lambda: False) -> Result:
+def _counts(s: Snapshot, report, cancelled, memo: dict | None):
+    """Row counts of the snapshot: from the memo when the same masks, ROI and class table were counted before."""
+    cache = memo["counts"] if memo is not None and s.count_key is not None else None
+    if cache is not None and s.count_key in cache:
+        cache.move_to_end(s.count_key)
+        x0, y0, x1, y1 = s.roi
+        report("counting", y1 - y0, y1 - y0)
+        return cache[s.count_key]
+    counted = _count(s, report, cancelled)
+    if cache is not None:
+        for array in counted:
+            array.flags.writeable = False      # shared between jobs from now on
+        cache[s.count_key] = counted
+        while len(cache) > MEMO_COUNT_ENTRIES or sum(a.nbytes for entry in cache.values() for a in entry) > MEMO_COUNT_BYTES:
+            if len(cache) == 1:
+                cache.clear()               # a single entry larger than the bound is not kept
+                break
+            cache.popitem(last=False)
+    return counted
+
+
+def run(snapshot: Snapshot, report=lambda stage, completed, total: None, cancelled=lambda: False, *, memo: dict | None = None) -> Result:
     """Calculate the contract's result columns. ``report(stage, completed, total)`` receives progress in work units;
     ``cancelled()`` is polled between blocks of rows and raises ``Cancelled`` (no partial result exists)."""
     s = snapshot
     x0, y0, x1, y1 = s.roi
     rows, columns = y1 - y0, x1 - x0
-    valid_rows, bio_rows, class_rows = _count(s, report, cancelled)
+    valid_rows, bio_rows, class_rows = _counts(s, report, cancelled, memo)
     if cancelled():
         raise Cancelled()
     bin_px = max(1.0, interval_rows(s.bin_cm, pixels_per_cm(rows, s.top, s.bottom, s.units)))

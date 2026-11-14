@@ -92,8 +92,9 @@ async function bridgeRoundTrip(fixture) {
     revision: 1, settings_hash: settingsHash, inputs: tokens });
   if (result.error) throw new Error('analyze: ' + JSON.stringify(result));
   outcome.dimensions = result.dimensions;
-  const column = result.outputs.row_start, read = await engine.readBuffer(column.token, 0, column.byte_length);
-  outcome.rowStart = Array.from(new Uint32Array(read.bytes.buffer, read.bytes.byteOffset, column.byte_length / 4));
+  // One packed buffer holds every column; row_start is the first (offset 0 of the layout) of 4-byte items.
+  const column = result.outputs.result, part = result.layout.row_start, read = await engine.readBuffer(column.token, 0, column.byte_length);
+  outcome.rowStart = Array.from(new Uint32Array(read.bytes.buffer.slice(read.bytes.byteOffset + part.offset, read.bytes.byteOffset + part.offset + part.byte_length)));
   await engine.release([column.token, ...Object.values(tokens)]);
   outcome.afterRelease = await engine.readBuffer(column.token, 0, 1);
   outcome.forged = await engine.readBuffer(crypto.randomUUID(), 0, 1);

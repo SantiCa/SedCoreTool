@@ -161,9 +161,9 @@ Example: the user edits a trace and the interval table must update.
 6. **Worker** (`engine/method_worker.py`) loads the method from `methods/registry.py`, calls `parse` (rejects anything
    invalid before computing) and `run`, and writes each result column as a buffer file. It polls the cancel flag
    between bounded work units and never publishes a partial result.
-7. The coordinator adopts the output files as committed buffers and answers with their handles, dimensions and
-   provenance. The main process downloads them (`buffer.read`, built in M8.3.5; before it a client
-   can upload but not download) and releases every handle of the job.
+7. The coordinator adopts the worker's single packed result file as one committed buffer and answers with its handle, the
+   layout of the columns in it, the dimensions and provenance. The main process downloads it (`buffer.read`) and the page cuts it up
+   by the layout; every handle of the job is released afterwards.
 8. **`sectionanalysis.js`** validates the result (dimensions, revision, settings hash) and converts it to the
    `s.bins` shape. The controller publishes it **only if the section's revision is still the one requested**, then
    runs the same redraw calls as today. A stale, cancelled or failed job changes nothing.

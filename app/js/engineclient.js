@@ -112,8 +112,8 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
     return token;
   }
 
-  /** @param {{token: string, dtype: keyof typeof OUTPUT_TYPES, byte_length: number, sha256: string}} output @returns {Promise<number[]>} */
-  async function download(output) {
+  /** The packed result buffer, read in ranges of at most 1 MiB and checked against the hash the engine reported. */
+  async function download(/** @type {{token: string, byte_length: number, sha256: string}} */ output) {
     const bytes = new Uint8Array(output.byte_length);
     for (let offset = 0; offset < bytes.length; offset += CHUNK_BYTES) {
       const read = unwrap(await bridge.readBuffer(output.token, offset, Math.min(CHUNK_BYTES, bytes.length - offset)));
@@ -121,9 +121,30 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
       bytes.set(read.bytes, offset);
     }
     if ((await sha256(bytes)) !== output.sha256) throw new EngineError('INTERNAL', 'result');
-    const Type = OUTPUT_TYPES[output.dtype];
-    if (!Type) throw new EngineError('INTERNAL', 'result');
-    return Array.from(new Type(bytes.buffer, 0, output.byte_length / Type.BYTES_PER_ELEMENT), Number);
+    return bytes;
+  }
+
+  /**
+   * The columns of a packed result, cut up by its layout. The layout comes from another process, so every entry is checked against the
+   * buffer before it is read: a known type, a shape that matches the length, a start that is a multiple of 8, and no overlap.
+   * @param {Uint8Array} bytes
+   * @param {Record<string, {dtype: string, shape: number[], offset: number, byte_length: number}>} layout
+   * @returns {Record<string, number[]>}
+   */
+  function unpack(bytes, layout) {
+    /** @type {Record<string, number[]>} */
+    const columns = {};
+    let end = 0;
+    for (const [name, part] of Object.entries(layout).sort((a, b) => a[1].offset - b[1].offset)) {
+      const Type = /** @type {Record<string, any>} */ (OUTPUT_TYPES)[part.dtype];
+      const items = Array.isArray(part.shape) ? part.shape.reduce((n, d) => n * d, 1) : NaN;
+      const sound = !!Type && Number.isSafeInteger(part.offset) && part.offset % 8 === 0 && part.offset >= end && Number.isSafeInteger(part.byte_length)
+        && part.byte_length > 0 && items * Type.BYTES_PER_ELEMENT === part.byte_length && part.offset + part.byte_length <= bytes.length;
+      if (!sound) throw new EngineError('INTERNAL', 'result');
+      end = part.offset + part.byte_length;
+      columns[name] = Array.from(new Type(bytes.buffer, bytes.byteOffset + part.offset, items), Number);
+    }
+    return columns;
   }
 
   /** True when the engine already holds the mask buffers of `owner` for `maskKey` (so the snapshot may leave them out). */
@@ -230,13 +251,15 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
       if (result.cancelled) throw abortError();
       const analysed = performance.now();
       for (const output of Object.values(result.outputs)) transient.add(/** @type {any} */ (output).token);
+      const packed = result.outputs?.result;
+      if (!packed || Object.keys(result.outputs).length !== 1 || !result.layout || typeof result.layout !== 'object') throw new EngineError('INTERNAL', 'result');
+      const cells = unpack(await download(packed), result.layout);
+      if (signal?.aborted) throw abortError();
       /** @type {Record<string, {data: number[], valid?: number[]}>} */
       const columns = {};
-      for (const [name, output] of Object.entries(result.outputs)) {
+      for (const name of Object.keys(cells)) {
         if (name.endsWith('_valid')) continue;
-        const valid = result.outputs[`${name}_valid`];
-        columns[name] = { data: await download(/** @type {any} */ (output)), ...(valid ? { valid: await download(valid) } : {}) };
-        if (signal?.aborted) throw abortError();
+        columns[name] = { data: cells[name], ...(cells[`${name}_valid`] ? { valid: cells[`${name}_valid`] } : {}) };
       }
       const finished = performance.now();
       if (owner) keep(owner, entry, fresh, maskKey, transient);
@@ -244,7 +267,7 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
         timing: { upload_ms: uploaded - started, engine_ms: analysed - uploaded, download_ms: finished - analysed } };
     } finally {
       signal?.removeEventListener('abort', onAbort);
-      await releaseTokens([...transient]);
+      void releaseTokens([...transient]);   // the engine frees them in the background: the caller does not wait for it
     }
   }
 

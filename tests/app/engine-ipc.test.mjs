@@ -177,10 +177,13 @@ test('analyzeSection rejects each malformed request before the engine and names 
   assert.equal(engine.calls.length, calls, 'the engine never saw a malformed request');
 });
 
-test('analyzeSection sends handles, returns tokens for the result columns and hides every handle', async () => {
-  const outputs = { row_start: { handle: uuid(), dtype: 'u32le', shape: [2], byte_length: 8, sha256: 'a'.repeat(64) }, no_data: { handle: uuid(), dtype: 'u8', shape: [2], byte_length: 2, sha256: 'b'.repeat(64) } };
+const PACKED = { handle: '', dtype: 'u8', shape: [24], byte_length: 24, sha256: 'a'.repeat(64) };
+const LAYOUT = { row_start: { dtype: 'u32le', shape: [2], offset: 0, byte_length: 8 }, no_data: { dtype: 'u8', shape: [2], offset: 8, byte_length: 2 } };
+
+test('analyzeSection sends handles, returns a token for the packed result and its layout, and hides every handle', async () => {
+  const outputs = { result: { ...PACKED, handle: uuid() } };
   const engine = fakeEngine({ answers: { ...fakeAnswers(), 'section.analyze': (payload) => ({ project: payload.project, section: payload.section, revision: payload.revision,
-    settings_hash: payload.settings_hash, method: payload.method, dimensions: { bins: 2, classes: 1, schemes: 2 }, outputs, provenance: { engine_version: 'test' } }) } });
+    settings_hash: payload.settings_hash, method: payload.method, dimensions: { bins: 2, classes: 1, schemes: 2 }, outputs, layout: LAYOUT, provenance: { engine_version: 'test' } }) } });
   const ipc = createEngineIpc({ engine }), inputs = await analysisInputs(ipc, 1);
   const request = analysisRequest(inputs), result = await ipc.call(1, 'analyzeSection', request);
   const sent = engine.calls.find((call) => call.op === 'section.analyze').payload;
@@ -188,16 +191,45 @@ test('analyzeSection sends handles, returns tokens for the result columns and hi
   assert.deepEqual(Object.keys(sent.inputs).sort(), Object.keys(inputs).sort());
   assert.ok(Object.values(sent.inputs).every((handle) => !Object.values(inputs).includes(handle)), 'tokens were replaced by engine handles');
   assert.deepEqual([result.project, result.section, result.revision, result.settings_hash, result.method], [request.project, request.section, 3, request.settings_hash, request.method]);
-  assert.deepEqual(Object.keys(result.outputs), ['row_start', 'no_data']);
+  assert.deepEqual(Object.keys(result.outputs), ['result']);
+  assert.deepEqual(result.layout, LAYOUT, 'the page gets the layout of the packed buffer');
   assert.ok(Object.values(result.outputs).every((item) => /^[0-9a-f-]{36}$/.test(item.token) && !('handle' in item)));
   const text = JSON.stringify(result);
   for (const output of Object.values(outputs)) assert.ok(!text.includes(output.handle), 'an engine handle reached the page');
   for (const handle of Object.values(sent.inputs)) assert.ok(!text.includes(handle));
   // The result columns are readable and releasable by this page only.
-  assert.equal((await ipc.call(2, 'readBuffer', result.outputs.row_start.token, 0, 1)).error.code, 'INVALID_BUFFER');
-  assert.equal((await ipc.call(1, 'release', [result.outputs.row_start.token])).released, 1);
-  assert.equal(engine.calls.at(-1).payload.handles[0], outputs.row_start.handle);
-  assert.equal((await ipc.call(1, 'readBuffer', result.outputs.row_start.token, 0, 1)).error.code, 'INVALID_BUFFER', 'released');
+  assert.equal((await ipc.call(2, 'readBuffer', result.outputs.result.token, 0, 1)).error.code, 'INVALID_BUFFER');
+  assert.equal((await ipc.call(1, 'release', [result.outputs.result.token])).released, 1);
+  assert.equal(engine.calls.at(-1).payload.handles[0], outputs.result.handle);
+  assert.equal((await ipc.call(1, 'readBuffer', result.outputs.result.token, 0, 1)).error.code, 'INVALID_BUFFER', 'released');
+});
+
+test('a layout the page must not see is refused as an internal error and the result is handed back to the engine', async () => {
+  const good = LAYOUT.row_start;
+  const bad = { 'no layout': undefined, 'not an object': 5, 'empty': {}, 'a bad column name': { '../x': good }, 'an unknown dtype': { a: { ...good, dtype: 'f32le' } },
+    'a negative offset': { a: { ...good, offset: -8 } }, 'a zero length': { a: { ...good, byte_length: 0 } }, 'a fractional offset': { a: { ...good, offset: 1.5 } },
+    'a rank of four': { a: { ...good, shape: [1, 1, 1, 1] } }, 'a zero in the shape': { a: { ...good, shape: [0] } }, 'a column given as text': { a: 'u8' },
+    'too many columns': Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`c${i}`, good])) };
+  for (const [label, layout] of Object.entries(bad)) {
+    const handle = uuid();
+    const engine = fakeEngine({ answers: { ...fakeAnswers(), 'section.analyze': (payload) => ({ project: payload.project, section: payload.section, revision: payload.revision,
+      settings_hash: payload.settings_hash, method: payload.method, dimensions: { bins: 2, classes: 1, schemes: 2 }, outputs: { result: { ...PACKED, handle } }, layout, provenance: {} }) } });
+    const ipc = createEngineIpc({ engine }), inputs = await analysisInputs(ipc, 1), before = ipc.size();
+    const result = await ipc.call(1, 'analyzeSection', analysisRequest(inputs));
+    assert.equal(result.error?.code, 'INTERNAL', label);
+    assert.equal(ipc.size(), before, `${label}: no token for the refused result`);
+    assert.ok(engine.calls.some((call) => call.op === 'buffer.release' && call.payload.handles.includes(handle)), `${label}: the refused result was released`);
+  }
+});
+
+test('only the known fields of a layout reach the page', async () => {
+  const handle = uuid();
+  const engine = fakeEngine({ answers: { ...fakeAnswers(), 'section.analyze': (payload) => ({ project: payload.project, section: payload.section, revision: payload.revision,
+    settings_hash: payload.settings_hash, method: payload.method, dimensions: { bins: 2, classes: 1, schemes: 2 }, outputs: { result: { ...PACKED, handle } },
+    layout: { row_start: { ...LAYOUT.row_start, path: 'C:/secret', handle } }, provenance: {} }) } });
+  const ipc = createEngineIpc({ engine }), result = await ipc.call(1, 'analyzeSection', analysisRequest(await analysisInputs(ipc, 1)));
+  assert.deepEqual(result.layout, { row_start: LAYOUT.row_start });
+  assert.ok(!JSON.stringify(result).includes(handle) && !JSON.stringify(result).includes('secret'));
 });
 
 test('the same request key cannot run twice and a page runs a bounded number of analyses at once', async () => {
@@ -346,6 +378,26 @@ async function download(ipc, owner, output) {
   return Array.from(new Type(copy), (value) => Number(value));
 }
 
+/** The whole packed result buffer, read in ranges of 1,000 bytes. */
+async function downloadPacked(ipc, owner, output) {
+  const parts = [];
+  for (let offset = 0; offset < output.byte_length; offset += 1000) {
+    const read = await ipc.call(owner, 'readBuffer', output.token, offset, Math.min(1000, output.byte_length - offset));
+    assert.equal(read.error, undefined, JSON.stringify(read.error));
+    parts.push(Buffer.from(read.bytes));
+  }
+  const bytes = Buffer.concat(parts);
+  assert.equal(sha(bytes), output.sha256, 'downloaded bytes match the engine hash');
+  return bytes;
+}
+
+/** One column of the packed buffer as plain numbers (offsets are multiples of 8, so a typed array can view the copy). */
+function unpack(packed, part) {
+  assert.equal(part.offset % 8, 0);
+  const [Type] = DTYPE_BYTES[part.dtype], copy = packed.buffer.slice(packed.byteOffset + part.offset, packed.byteOffset + part.offset + part.byte_length);
+  return Array.from(new Type(copy), (value) => Number(value));
+}
+
 const EXACT = new Set(['row_start', 'row_end', 'valid_count', 'bio_count', 'class_count', 'no_data', 'manual_BI', 'manual_ii', 'indices']);
 
 /** A request the engine rejects: the page must learn the code and the field, and the engine must stay usable. */
@@ -368,11 +420,13 @@ async function runFixturesThrough(service, names) {
     assert.equal(result.error, undefined, `${name}: ${JSON.stringify(result.error)}`);
     assert.deepEqual([result.project, result.section, result.revision, result.settings_hash], [request.project, request.section, 11, settingsHash]);
     assert.deepEqual(result.dimensions, fixture.expected.dimensions, name);
-    assert.deepEqual(Object.keys(result.outputs).filter((key) => !key.endsWith('_valid')).sort(), Object.keys(fixture.expected.columns).sort(), name);
+    assert.deepEqual(Object.keys(result.outputs), ['result'], 'one buffer carries every column');
+    assert.deepEqual(Object.keys(result.layout).filter((key) => !key.endsWith('_valid')).sort(), Object.keys(fixture.expected.columns).sort(), name);
+    const packed = await downloadPacked(ipc, owner, result.outputs.result);
     for (const [column, expected] of Object.entries(fixture.expected.columns)) {
-      const actual = await download(ipc, owner, result.outputs[column]), want = expected.data;
+      const actual = unpack(packed, result.layout[column]), want = expected.data;
       assert.equal(actual.length, want.length, `${name}.${column}`);
-      const valid = expected.valid ? await download(ipc, owner, result.outputs[`${column}_valid`]) : null;
+      const valid = expected.valid ? unpack(packed, result.layout[`${column}_valid`]) : null;
       want.forEach((value, i) => {
         if (valid && !valid[i]) return;
         if (EXACT.has(column)) assert.equal(actual[i], value, `${name}.${column}[${i}]`);

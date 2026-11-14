@@ -2850,8 +2850,13 @@ SHA-256 equals `settings_hash`, and every handle's dtype and rank, pins the inpu
 `method_worker.py` (NumPy only; the public package and pandas are not loaded), a worker the coordinator starts with the first job
 and keeps for the next ones (starting it costs about 0.7 s): the coordinator sends it the path of a job description on stdin and it
 answers each job with one frame. The worker validates every input and writes the
-result columns to files; the coordinator re-checks each file (size, shape, SHA-256, finite floats) and adopts it as a committed
-buffer charged to the session budget, then answers with the handles. `buffer.read {handle, offset, byte_length}` downloads any
+result columns, one after another and each starting at a multiple of 8 bytes, to a single file with a layout (name, type, shape,
+offset, length); the coordinator checks the layout, moves the file into the store, reads it once to check its SHA-256 and that every
+float64 column is finite, and adopts it as one committed `u8` buffer charged to the session budget, then answers with its handle and
+the layout (one file because every file open costs about 2 ms on Windows; the first version wrote and re-read about 35).
+The worker also remembers, indexed by the SHA-256 that the coordinator verified for each input buffer, the masks it has validated, the
+row counts of masks it has counted (16 entries and 64 MiB at most) and up to 64 decoded metadata tables; a job that changes only the
+settings (the interval size) therefore skips validation, counting and decoding, and the memory is lost with the worker. `buffer.read {handle, offset, byte_length}` downloads any
 committed buffer in ranges of at most 1 MiB: the JSON response is followed by exactly one binary frame. A rejected input is an
 error response naming the field; a worker that crashes, ends before answering, sends an answer the coordinator does not approve,
 lies about its files or exceeds 120 s is `INTERNAL` and nothing is adopted, and the next job gets a new worker. A cancellation

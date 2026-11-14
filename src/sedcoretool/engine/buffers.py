@@ -108,50 +108,76 @@ class BufferStore:
     def verify(value):
         """Size, SHA-256, finite float64 data and strict metadata of a complete file; raises RequestError."""
         digest = hashlib.sha256()
+        text = bytearray()                       # a metadata buffer is read once, for the hash and for the JSON check
         with value.path.open('rb') as stream:
             while chunk := stream.read(MAX_CHUNK):
                 digest.update(chunk)
+                if value.dtype == 'utf8json':
+                    text += chunk
                 if value.dtype == 'f64le' and any(not math.isfinite(item[0]) for item in struct.iter_unpack('<d', chunk)):
                     raise RequestError('INVALID_BUFFER')
         if digest.hexdigest() != value.expected_hash:
             raise RequestError('INVALID_BUFFER', 'sha256')
         if value.dtype == 'utf8json':
             try:
-                strict_json(value.path.read_bytes(), metadata=True)
+                strict_json(bytes(text), metadata=True)
             except ProtocolError as error:
                 raise RequestError('INVALID_BUFFER') from error
 
-    def adopt(self, source, dtype, shape, byte_length, sha256):
-        """Take a result file written by a worker as a committed, immutable buffer; returns its handle.
+    def adopt_packed(self, source, byte_length, sha256, layout):
+        """Take the single result file of a worker as a committed, immutable `u8` buffer; returns `(handle, layout)`.
 
-        The file moves into the store (it must be on the same filesystem) after the same checks a client upload gets,
-        so a worker cannot publish data that does not match the size, shape or hash it declared."""
+        `layout` maps a column name to `{dtype, shape, offset, byte_length}`: every column must start at a multiple of 8 bytes, lie inside
+        the file, not overlap another, have a length equal to its shape times its item size, and the file must end exactly where the last
+        column's padding ends, so nothing in it is unaccounted for. The file moves into the store (same filesystem) and is then read once:
+        its SHA-256 must be the declared one and every float64 column must hold finite numbers. Nothing stays adopted on failure.
+        One file and one handle replace about 35 of each; opening a file is the expensive step on Windows."""
         if len(self.buffers) >= MAX_HANDLES:
             raise RequestError('LIMIT_EXCEEDED')
-        if not isinstance(dtype, str) or dtype not in ITEM_BYTES or dtype == 'utf8json':
-            raise RequestError('INVALID_BUFFER', 'dtype')
-        if not isinstance(shape, list) or not 1 <= len(shape) <= 3 or not all(type(item) is int and item >= 1 for item in shape):
+        total = require_integer(byte_length, 'byte_length', 8, MAX_BUFFER)
+        if not isinstance(sha256, str) or not re.fullmatch('[0-9a-f]{64}', sha256) or not isinstance(layout, dict) or not 1 <= len(layout) <= 64:
             raise RequestError('INVALID_BUFFER', 'shape')
-        length = require_integer(byte_length, 'byte_length', 1, MAX_BUFFER)
-        elements = math.prod(shape)
-        if elements * ITEM_BYTES[dtype] != length or not isinstance(sha256, str) or not re.fullmatch('[0-9a-f]{64}', sha256):
-            raise RequestError('INVALID_BUFFER', 'shape')
-        if self.reserved + length > self.budget:
+        end = 0
+        for part in sorted(layout.values(), key=lambda item: item['offset'] if isinstance(item, dict) and type(item.get('offset')) is int else -1):
+            valid = (isinstance(part, dict) and set(part) == {'dtype', 'shape', 'offset', 'byte_length'} and isinstance(part['dtype'], str)
+                     and part['dtype'] in ITEM_BYTES and part['dtype'] != 'utf8json' and isinstance(part['shape'], list) and 1 <= len(part['shape']) <= 3
+                     and all(type(item) is int and item >= 1 for item in part['shape']) and type(part['offset']) is int and type(part['byte_length']) is int)
+            if not valid or part['offset'] % 8 or part['offset'] < end:
+                raise RequestError('INVALID_BUFFER', 'shape')
+            if math.prod(part['shape']) * ITEM_BYTES[part['dtype']] != part['byte_length'] or part['byte_length'] < 1:
+                raise RequestError('INVALID_BUFFER', 'shape')
+            end = part['offset'] + part['byte_length']
+        if total != -(-end // 8) * 8:
+            raise RequestError('INVALID_BUFFER', 'byte_length')
+        if self.reserved + total > self.budget:
             raise RequestError('LIMIT_EXCEEDED', 'byte_length')
-        if not source.is_file() or source.is_symlink() or source.stat().st_size != length:
+        if not source.is_file() or source.is_symlink() or source.stat().st_size != total:
             raise RequestError('INVALID_BUFFER', 'byte_length')
         handle = str(uuid4())
         target = Path(self.directory.name) / handle
-        value = StagedBuffer(target, dtype, length, sha256, length, received=length, committed=True, shape=tuple(shape))
         os.replace(source, target)
         try:
-            self.verify(value)
-        except RequestError:
+            digest = hashlib.sha256()
+            with target.open('rb') as stream:
+                while chunk := stream.read(MAX_CHUNK):
+                    digest.update(chunk)
+                if digest.hexdigest() != sha256:
+                    raise RequestError('INVALID_BUFFER', 'sha256')
+                for part in layout.values():
+                    if part['dtype'] == 'f64le':
+                        stream.seek(part['offset'])
+                        remaining = part['byte_length']
+                        while remaining:
+                            chunk = stream.read(min(remaining, MAX_CHUNK))
+                            remaining -= len(chunk)
+                            if not chunk or any(not math.isfinite(item[0]) for item in struct.iter_unpack('<d', chunk)):
+                                raise RequestError('INVALID_BUFFER')
+        except BaseException:
             target.unlink(missing_ok=True)
             raise
-        self.buffers[handle] = value
-        self.reserved += length
-        return handle
+        self.buffers[handle] = StagedBuffer(target, 'u8', total, sha256, total, received=total, committed=True, shape=(total,))
+        self.reserved += total
+        return handle, {name: dict(part, shape=list(part['shape'])) for name, part in layout.items()}
 
     def read(self, payload):
         """A range of a committed buffer: ``(result, bytes)``; the coordinator sends the bytes as one binary frame."""

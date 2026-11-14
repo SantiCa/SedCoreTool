@@ -240,7 +240,9 @@ class Coordinator:
         directory = Path(self.store.directory.name) / f'job-{uuid4()}'
         (directory / 'out').mkdir(parents=True)
         buffers = {name: self.store.buffers[handle] for name, handle in payload['inputs'].items()}
-        specification = {name: {'path': str(value.path), 'dtype': value.dtype, 'shape': list(value.shape)} for name, value in buffers.items()}
+        # expected_hash is the SHA-256 the coordinator verified when the buffer was committed (or adopted).
+        specification = {name: {'path': str(value.path), 'dtype': value.dtype, 'shape': list(value.shape), 'sha256': value.expected_hash}
+                         for name, value in buffers.items()}
         job_file = directory / 'job.json'
         job_file.write_text(json.dumps({'method': payload['method'], 'cancel_path': str(directory / 'cancel'),
                                         'output_dir': str(directory / 'out'), 'inputs': specification}), encoding='utf-8')
@@ -338,28 +340,23 @@ class Coordinator:
 
     def adopt_results(self, payload, result, directory, active):
         """Take the worker's output files as committed buffers and describe them; nothing stays adopted on failure."""
-        dimensions, columns = result['dimensions'], result['columns']
+        dimensions, packed_spec = result['dimensions'], result['packed']
         if (not isinstance(dimensions, dict) or set(dimensions) != {'bins', 'classes', 'schemes'}
-                or not all(type(value) is int and value >= 1 for value in dimensions.values()) or not 1 <= len(columns) <= 64):
+                or not all(type(value) is int and value >= 1 for value in dimensions.values())
+                or not isinstance(packed_spec, dict) or set(packed_spec) != {'byte_length', 'sha256', 'layout'} or not isinstance(packed_spec['layout'], dict)
+                or not all(isinstance(name, str) and COLUMN_NAME.fullmatch(name) for name in packed_spec['layout'])):
             raise RequestError('INTERNAL')
-        outputs = {}
         try:
-            for name, spec in columns.items():
-                valid_spec = isinstance(spec, dict) and set(spec) == {'dtype', 'shape', 'byte_length', 'sha256'}
-                if not isinstance(name, str) or not COLUMN_NAME.fullmatch(name) or not valid_spec:
-                    raise RequestError('INTERNAL')
-                handle = self.store.adopt(directory / f'{name}.bin', spec['dtype'], spec['shape'], spec['byte_length'], spec['sha256'])
-                outputs[name] = {'handle': handle, 'dtype': spec['dtype'], 'shape': spec['shape'],
-                                 'byte_length': spec['byte_length'], 'sha256': spec['sha256']}
+            handle, layout = self.store.adopt_packed(directory / 'result.bin', packed_spec['byte_length'], packed_spec['sha256'], packed_spec['layout'])
         except RequestError as error:
-            for item in outputs.values():
-                self.store.release(item['handle'])
             if error.code == 'LIMIT_EXCEEDED':
                 raise RequestError('LIMIT_EXCEEDED', error.field) from None
             raise RequestError('INTERNAL') from None
+        packed = self.store.buffers[handle]
+        outputs = {'result': {'handle': handle, 'dtype': 'u8', 'shape': list(packed.shape), 'byte_length': packed.length, 'sha256': packed.expected_hash}}
         input_hashes = {name: self.store.buffers[handle].expected_hash for name, handle in payload['inputs'].items()}
         return {'project': payload['project'], 'section': payload['section'], 'revision': payload['revision'],
-                'settings_hash': payload['settings_hash'], 'method': payload['method'], 'dimensions': dimensions, 'outputs': outputs,
+                'settings_hash': payload['settings_hash'], 'method': payload['method'], 'dimensions': dimensions, 'outputs': outputs, 'layout': layout,
                 'provenance': {'engine_version': self.version, 'runtime_id': self.runtime_id, 'method': payload['method'],
                                'revision': payload['revision'], 'deterministic': True, 'input_sha256': input_hashes,
                                'elapsed_ms': int((time.monotonic() - active['started_at']) * 1000)}}
@@ -420,7 +417,8 @@ def serve(input_stream, output_stream, *, version, runtime_id, scratch_directory
     try:
         while not coordinator.closing:
             try:
-                item = inbox.get(timeout=0.02)
+                # While a job runs, look again after 2 ms so that its answer is not left waiting (it was up to 20 ms per job).
+                item = inbox.get(timeout=0.002 if coordinator.active else 0.02)
                 if item is None:
                     break
                 if isinstance(item, Exception):

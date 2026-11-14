@@ -253,3 +253,155 @@ def test_worker_liveness_pipe_stops_orphaned_work_when_coordinator_disappears(tm
         assert job.finished()
     finally:
         job.close()
+
+
+# ---- one packed result file (card M8.4.3) ----------------------------------------------------------------------------------
+
+DTYPE_NAMES = {"<u4": "u32le", "<f8": "f64le", "|u1": "u8", "<u8": "u64le"}
+
+
+def packed_file(tmp_path, columns, name="result.bin"):
+    """Write columns one after another, each at a multiple of 8, the way the worker does. Returns (path, byte_length, sha256, layout)."""
+    import numpy as np
+    layout, chunks, offset = {}, [], 0
+    for key, array in columns.items():
+        data = array.tobytes()
+        layout[key] = {"dtype": DTYPE_NAMES[array.dtype.str], "shape": list(array.shape), "offset": offset, "byte_length": len(data)}
+        chunks.append((offset, data))
+        offset += -(-len(data) // 8) * 8
+    body = bytearray(offset)
+    for start, data in chunks:
+        body[start:start + len(data)] = data
+    path = tmp_path / name
+    path.write_bytes(bytes(body))
+    return path, offset, hashlib.sha256(bytes(body)).hexdigest(), layout
+
+
+def test_a_packed_file_becomes_one_buffer_and_keeps_its_layout(tmp_path):
+    import numpy as np
+    store = BufferStore()
+    try:
+        a, b, c = np.arange(3, dtype="<u4"), np.array([1.5, -2.0], dtype="<f8"), np.array([[1, 2, 3], [4, 5, 6]], dtype="u1")
+        path, length, digest, layout = packed_file(tmp_path, {"a": a, "b": b, "c": c})
+        assert (length, layout["b"]["offset"], layout["c"]["offset"]) == (40, 16, 32)
+        reserved = store.reserved
+        handle, adopted = store.adopt_packed(path, length, digest, layout)
+        assert adopted == layout and not path.exists(), "the file moved into the store"
+        value = store.buffers[handle]
+        assert (value.dtype, value.length, value.shape, value.committed, value.expected_hash) == ("u8", 40, (40,), True, digest)
+        assert store.reserved == reserved + 40
+        data = value.path.read_bytes()
+        np.testing.assert_array_equal(np.frombuffer(data, "<u4", 3, 0), a)
+        np.testing.assert_array_equal(np.frombuffer(data, "<f8", 2, 16), b)
+        np.testing.assert_array_equal(np.frombuffer(data, "u1", 6, 32).reshape(2, 3), c)
+        store.release(handle)
+        assert store.reserved == reserved and not store.buffers
+    finally:
+        store.close()
+
+
+def test_a_packed_file_is_refused_when_anything_in_it_cannot_be_trusted(tmp_path):
+    import copy
+
+    import numpy as np
+    store = BufferStore()
+    try:
+        columns = {"a": np.arange(3, dtype="<u4"), "b": np.array([1.5, 2.5], dtype="<f8")}
+
+        def attempt(mutate, code="INVALID_BUFFER|INVALID_REQUEST", columns=columns):
+            path, length, digest, layout = packed_file(tmp_path, columns)
+            layout = copy.deepcopy(layout)
+            args = mutate(path, length, digest, layout) or (path, length, digest, layout)
+            reserved, count = store.reserved, len(store.buffers)
+            before = sorted(p.name for p in Path(store.directory.name).iterdir())
+            with pytest.raises(RequestError, match=code):
+                store.adopt_packed(*args)
+            assert store.reserved == reserved and len(store.buffers) == count, "nothing adopted"
+            assert sorted(p.name for p in Path(store.directory.name).iterdir()) == before, "no file left behind"
+
+        attempt(lambda p, n, d, lay: (p, n, "0" * 64, lay))                                                  # a hash that is not the file's
+        attempt(lambda p, n, d, lay: (p, n, d.upper(), lay))                                                 # a hash that is not lower-case hexadecimal
+        attempt(lambda p, n, d, lay: (p, n + 8, d, lay))                                                     # a size that is not the file's
+        attempt(lambda p, n, d, lay: (p, n - 8, d, lay))
+        attempt(lambda p, n, d, lay: (p, 0, d, lay))
+        attempt(lambda p, n, d, lay: (p, n, d, {}))                                                          # no columns
+        attempt(lambda p, n, d, lay: lay["b"].update(offset=12))                                             # misaligned
+        attempt(lambda p, n, d, lay: lay["b"].update(offset=0))                                              # overlapping
+        attempt(lambda p, n, d, lay: lay["b"].update(offset=24))                                             # past the end
+        attempt(lambda p, n, d, lay: lay["b"].update(shape=[3]))                                             # shape and length disagree
+        attempt(lambda p, n, d, lay: lay["b"].update(shape=[0, 2]))
+        attempt(lambda p, n, d, lay: lay["b"].update(shape=[1, 1, 1, 2]))
+        attempt(lambda p, n, d, lay: lay["b"].update(dtype="utf8json", shape=[16]))                          # a metadata type with a consistent length
+        attempt(lambda p, n, d, lay: lay["b"].update(dtype="f32le"))
+        attempt(lambda p, n, d, lay: lay["b"].update(byte_length=0))
+        attempt(lambda p, n, d, lay: lay["b"].update(path="/etc/passwd"))                                    # an extra field
+        attempt(lambda p, n, d, lay: lay["a"].update(offset=True))                                           # not an integer
+        attempt(lambda p, n, d, lay: lay.pop("b"))                                                           # data that no column accounts for
+        attempt(lambda p, n, d, lay: (p.with_name("missing.bin"), n, d, lay))
+        attempt(lambda p, n, d, lay: (p, n, d, [lay]))                                                       # a layout that is not a mapping
+        attempt(lambda p, n, d, lay: (p, True, d, lay))
+        bad = {"a": np.arange(3, dtype="<u4"), "b": np.array([1.0, float("nan")], dtype="<f8")}
+        attempt(lambda p, n, d, lay: None, columns=bad)                                                      # non-finite float data
+        attempt(lambda p, n, d, lay: None, columns={"b": np.array([1.0, float("inf")], dtype="<f8")})
+        many = {f"c{i}": np.arange(1, dtype="<u4") for i in range(65)}
+        attempt(lambda p, n, d, lay: None, columns=many)                                                     # 65 columns, all valid by themselves
+        ok = {f"c{i}": np.arange(1, dtype="<u4") for i in range(64)}
+        path, length, digest, layout = packed_file(tmp_path, ok)
+        store.release(store.adopt_packed(path, length, digest, layout)[0])                                   # 64 are allowed
+        small = BufferStore(budget=TRANSIENT_RESERVE + 20)
+        try:
+            path, length, digest, layout = packed_file(tmp_path, columns)
+            with pytest.raises(RequestError, match="LIMIT_EXCEEDED"):
+                small.adopt_packed(path, length, digest, layout)
+            assert small.reserved == TRANSIENT_RESERVE and not small.buffers and path.exists()
+        finally:
+            small.close()
+    finally:
+        store.close()
+
+
+def test_a_symbolic_link_is_not_followed(tmp_path):
+    import numpy as np
+    store = BufferStore()
+    try:
+        path, length, digest, layout = packed_file(tmp_path, {"a": np.arange(3, dtype="<u4")})
+        link = tmp_path / "link.bin"
+        try:
+            link.symlink_to(path)
+        except OSError:
+            pytest.skip("this account may not create symbolic links (Windows without developer mode)")
+        with pytest.raises(RequestError, match="INVALID_BUFFER"):
+            store.adopt_packed(link, length, digest, layout)
+        assert not store.buffers
+    finally:
+        store.close()
+
+
+def test_a_float_column_is_checked_in_every_part_of_a_large_file(tmp_path):
+    import numpy as np
+    store = BufferStore()
+    try:
+        values = np.linspace(0, 1, 300_000)                       # 2.4 MB: the check crosses the 1 MiB read size
+        path, length, digest, layout = packed_file(tmp_path, {"x": values})
+        handle, _ = store.adopt_packed(path, length, digest, layout)
+        store.release(handle)
+        values[250_000] = float("nan")
+        path, length, digest, layout = packed_file(tmp_path, {"x": values})
+        with pytest.raises(RequestError, match="INVALID_BUFFER"):
+            store.adopt_packed(path, length, digest, layout)
+    finally:
+        store.close()
+
+
+def test_packing_respects_the_handle_limit(tmp_path):
+    import numpy as np
+    store = BufferStore()
+    descriptor = {"dtype": "u8", "shape": [1], "byte_length": 1, "sha256": hashlib.sha256(b"a").hexdigest()}
+    try:
+        for _ in range(MAX_HANDLES):
+            store.begin(descriptor)
+        path, length, digest, layout = packed_file(tmp_path, {"a": np.arange(2, dtype="<u4")})
+        with pytest.raises(RequestError, match="LIMIT_EXCEEDED"):
+            store.adopt_packed(path, length, digest, layout)
+    finally:
+        store.close()

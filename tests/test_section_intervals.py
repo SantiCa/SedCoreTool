@@ -234,3 +234,215 @@ def test_padding_comparisons_are_strict_at_exact_float_equality():
         assert section_intervals._pad_no_data(no_data, t, bottom, pad)[4] == expected
     assert not section_intervals._pad_no_data(no_data, top, bottom, 0.0).any()                   # no padding
     assert not section_intervals._pad_no_data(np.zeros(5, dtype=bool), top, bottom, pad).any()   # no gap to widen
+
+
+# ---- what a long-lived caller may remember between jobs (card M8.4.3) ------------------------------------------------------
+
+def hashes_of(inputs):
+    """Stand-ins for the SHA-256 the coordinator verified: any stable digest of the bytes serves for the test."""
+    import hashlib
+    return {name: hashlib.sha256(np.ascontiguousarray(value).tobytes()).hexdigest() for name, value in inputs.items()
+            if isinstance(value, np.ndarray)}
+
+
+@pytest.fixture
+def counting_spy(monkeypatch):
+    calls = []
+    real = section_intervals.object_row_counts
+
+    def spy(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(section_intervals, "object_row_counts", spy)
+    return calls
+
+
+def memo_run(inputs, memo, hashes=None):
+    snapshot = section_intervals.parse(inputs, hashes=hashes or hashes_of(inputs), memo=memo)
+    return section_intervals.run(snapshot, memo=memo)
+
+
+def same(a, b):
+    assert a.dimensions == b.dimensions and a.columns.keys() == b.columns.keys()
+    for key in a.columns:
+        np.testing.assert_array_equal(a.columns[key], b.columns[key], err_msg=key)
+
+
+def test_a_second_job_on_the_same_masks_does_not_count_again_and_gives_the_same_result(counting_spy):
+    inputs, memo = inputs_of(fixtures.load("large-mixed")), section_intervals.new_memo()
+    first = memo_run(inputs, memo)
+    blocks = len(counting_spy)
+    assert blocks > 0
+    second = memo_run(inputs, memo)
+    assert len(counting_spy) == blocks, "the second job counted nothing"
+    same(first, second)
+    same(first, section_intervals.run(section_intervals.parse(inputs)))      # and it is the result of the call without any memory
+
+
+def test_changing_only_the_settings_reuses_the_counts_and_matches_a_fresh_calculation(counting_spy):
+    inputs, memo = inputs_of(fixtures.load("large-mixed")), section_intervals.new_memo()
+    memo_run(inputs, memo)
+    blocks = len(counting_spy)
+    for bin_cm in (1.37, 5.0, 0.2):
+        changed = {**inputs, "settings": {**inputs["settings"], "bin_cm": bin_cm}}
+        expected = section_intervals.run(section_intervals.parse(changed))       # without any memory (the spy counts it too)
+        blocks += len(counting_spy) - blocks
+        got = memo_run(changed, memo)
+        assert len(counting_spy) == blocks, f"bin_cm {bin_cm}: counts reused"
+        same(got, expected)
+
+
+def altered(inputs, how):
+    out = {name: (value.copy() if isinstance(value, np.ndarray) else copy.deepcopy(value)) for name, value in inputs.items()}
+    how(out)
+    return out
+
+
+def test_every_component_of_the_count_key_forces_a_new_count(counting_spy):
+    base = inputs_of(fixtures.load("large-mixed"))
+    memo = section_intervals.new_memo()
+    memo_run(base, memo)
+    blocks = len(counting_spy)
+
+    def move_roi(i):
+        i["settings"]["roi"]["y0"] += 1
+
+    def other_label(i):
+        flat = i["labels"].reshape(-1)
+        k = int(np.flatnonzero(flat == 0)[0])
+        flat[k] = int(flat[flat > 0][0])
+
+    def other_exclusion(i):
+        flat = i["exclude"].reshape(-1)
+        k = int(np.flatnonzero(flat == 0)[0])
+        flat[k] = 1
+
+    def other_class_of_an_object(i):
+        i["objects"][0]["class_id"] = next(c["id"] for c in i["classes"] if c["id"] != i["objects"][0]["class_id"] and c["counts"])
+
+    def other_counted_class(i):
+        i["classes"][0]["counts"] = not i["classes"][0]["counts"]
+
+    def prediction_now_counts(i):
+        i["settings"]["include_predictions"] = not i["settings"]["include_predictions"]
+        i["settings"]["count_candidates"] = not i["settings"]["count_candidates"]
+
+    def one_more_class(i):
+        i["classes"].append({"id": "extra", "name": "Extra", "counts": True})        # the table of objects is the same; only the width of the counts changes
+
+    tested = []
+    cases = {"roi": move_roi, "labels": other_label, "exclusion": other_exclusion, "class of an object": other_class_of_an_object,
+             "which classes count": other_counted_class, "how objects get a class": prediction_now_counts, "number of classes": one_more_class}
+    for label, change in cases.items():
+        before = len(counting_spy)
+        changed = altered(base, change)
+        if label == "number of classes":
+            assert np.array_equal(section_intervals.parse(changed).class_of_object, section_intervals.parse(base).class_of_object)
+        if label in ("which classes count", "how objects get a class"):
+            assert not np.array_equal(section_intervals.parse(changed).class_of_object, section_intervals.parse(base).class_of_object), (
+                f"{label}: the change must alter the object-to-class table, or it tests nothing")
+        got = memo_run(changed, memo)
+        assert len(counting_spy) > before, f"{label}: counted again"
+        same(got, section_intervals.run(section_intervals.parse(changed)))
+        tested.append(label)
+    assert len(counting_spy) > blocks
+    assert tested == list(cases), tested
+
+
+def test_a_changed_stack_table_forces_a_new_count(counting_spy):
+    base = inputs_of(fixtures.load("overlap-same-and-different-class"))
+    memo = section_intervals.new_memo()
+    memo_run(base, memo)
+    before = len(counting_spy)
+    other = altered(base, lambda i: i["stack_members"].__setitem__(slice(None), i["stack_members"][::-1]))
+    if not np.array_equal(other["stack_members"], base["stack_members"]):
+        got = memo_run(other, memo)
+        assert len(counting_spy) > before, "stack members"
+        same(got, section_intervals.run(section_intervals.parse(other)))
+    before = len(counting_spy)
+    memo_run(base, memo, {**hashes_of(base), "stack_offsets": "0" * 64})       # the offsets are identified by their hash
+    assert len(counting_spy) > before, "stack offsets"
+
+
+def test_without_hashes_or_a_memo_nothing_is_remembered(counting_spy):
+    inputs = inputs_of(fixtures.load("basic-four-intervals"))
+    section_intervals.run(section_intervals.parse(inputs))
+    first = len(counting_spy)
+    section_intervals.run(section_intervals.parse(inputs))
+    assert len(counting_spy) == 2 * first
+    memo = section_intervals.new_memo()
+    snapshot = section_intervals.parse(inputs, memo=memo)                 # a memo but no hashes: no key
+    assert snapshot.count_key is None
+    section_intervals.run(snapshot, memo=memo)
+    section_intervals.run(snapshot, memo=memo)
+    assert len(counting_spy) == 4 * first and not memo["counts"] and not memo["exclude_ok"] and not memo["labels_ok"]
+
+
+def test_an_invalid_mask_is_rejected_on_first_sight_and_a_remembered_one_is_not_rechecked():
+    inputs = inputs_of(fixtures.load("basic-four-intervals"))
+    memo = section_intervals.new_memo()
+    memo_run(inputs, memo)
+    bad_exclusion = altered(inputs, lambda i: i["exclude"].reshape(-1).__setitem__(0, 2))
+    with pytest.raises(MethodError) as error:
+        memo_run(bad_exclusion, memo)                                     # other bytes, other hash: the rule is applied
+    assert (error.value.code, error.value.field) == ("INVALID_BUFFER", "exclude")
+    assert memo["exclude_ok"] == {hashes_of(inputs)["exclude"]}, "a rejected mask is never remembered"
+    bad_label = altered(inputs, lambda i: i["labels"].reshape(-1).__setitem__(0, 9999))
+    with pytest.raises(MethodError) as error:
+        memo_run(bad_label, memo)
+    assert (error.value.code, error.value.field) == ("INVALID_BUFFER", "labels")
+    assert len(memo["labels_ok"]) == 1
+
+
+def test_masks_validated_against_one_object_list_are_checked_again_for_another():
+    inputs = inputs_of(fixtures.load("basic-four-intervals"))
+    memo = section_intervals.new_memo()
+    memo_run(inputs, memo)
+    fewer = altered(inputs, lambda i: i["objects"].pop())                 # the last object disappears from the table, its pixels stay
+    used = {int(v) for v in np.unique(inputs["labels"]) if v > 0}
+    if int(inputs["objects"][-1]["id"]) in used:
+        with pytest.raises(MethodError) as error:
+            memo_run(fewer, memo)
+        assert (error.value.code, error.value.field) == ("INVALID_BUFFER", "labels")
+
+
+def test_the_memory_of_counts_is_bounded_and_its_arrays_are_read_only(monkeypatch):
+    inputs, memo = inputs_of(fixtures.load("basic-four-intervals")), section_intervals.new_memo()
+    monkeypatch.setattr(section_intervals, "MEMO_COUNT_ENTRIES", 3)
+    for k in range(8):
+        hashes = {**hashes_of(inputs), "labels": f"{k:064x}"}
+        memo_run(inputs, memo, hashes)
+    assert len(memo["counts"]) == 3
+    assert list(memo["counts"])[-1][0] == f"{7:064x}", "the oldest entries went first"
+    for entry in memo["counts"].values():
+        assert all(not array.flags.writeable for array in entry)
+    monkeypatch.setattr(section_intervals, "MEMO_COUNT_BYTES", 1)
+    memo_run(inputs, memo, {**hashes_of(inputs), "labels": "f" * 64})
+    assert not memo["counts"], "an entry larger than the bound is not kept"
+    monkeypatch.setattr(section_intervals, "MEMO_CHECKS", 2)
+    for k in range(5):
+        memo_run(inputs, memo, {**hashes_of(inputs), "exclude": f"{k:064x}"})
+    assert len(memo["exclude_ok"]) <= 2
+
+
+def test_a_cancelled_count_is_not_remembered():
+    inputs, memo = inputs_of(fixtures.load("large-mixed")), section_intervals.new_memo()
+    snapshot = section_intervals.parse(inputs, hashes=hashes_of(inputs), memo=memo)
+    with pytest.raises(Cancelled):
+        section_intervals.run(snapshot, cancelled=lambda: True, memo=memo)
+    assert not memo["counts"]
+
+
+def test_the_least_recently_used_counts_are_dropped_first(monkeypatch):
+    inputs, memo = inputs_of(fixtures.load("basic-four-intervals")), section_intervals.new_memo()
+    monkeypatch.setattr(section_intervals, "MEMO_COUNT_ENTRIES", 2)
+
+    def key(k):
+        return {**hashes_of(inputs), "labels": f"{k:064x}"}
+
+    memo_run(inputs, memo, key(1))
+    memo_run(inputs, memo, key(2))
+    memo_run(inputs, memo, key(1))                                                 # 1 is used again: 2 is now the oldest
+    memo_run(inputs, memo, key(3))
+    assert sorted(entry[0] for entry in memo["counts"]) == [f"{1:064x}", f"{3:064x}"]

@@ -464,7 +464,7 @@ Cards are done in order. Each one claims the development gate only.
 ### M8.4 - Engine-resident section data and fast analysis
 
 Proposed by the design review of 14 November 2026; replaces the earlier summary ("bounded engine data and image
-services, implements M2.3.1-M2.3.5"). Every card claims the development gate; M8.4.7 is the milestone gate.
+services, implements M2.3.1-M2.3.5"). Every card claims the development gate; M8.4.8 is the milestone gate.
 
 **Why the plan changed.** Measured on one 6.1-Mpixel section with the worker already running: snapshot 56 ms,
 upload 195 ms (24 round trips of 1 MiB through page, main process and engine, written to the scratch disk and
@@ -485,12 +485,12 @@ earlier summary proposed, would not remove that cost for editing: every brush st
    or of the copy never loses or changes an edit or a saved project; a copy that is not proven identical (full SHA-256) is never
    used; input-to-next-frame during an edit is not worse with the engine on than off.
 2. **Multi-gigabyte images are required for 1.0** (the maintainer rejected moving them after 1.0). M2.3.1–M2.3.5 are delivered as
-   **part C of M8.4**, after the engine holds source images (M8.4.8); V0.151 does not wait for them. They also constrain M8.5:
+   **part C of M8.4**, after the engine holds source images (M8.4.9); V0.151 does not wait for them. They also constrain M8.5:
    from slice (b) on, an image method works on regions of an engine-held image, never on a whole decoded raster.
 3. **Timing scenarios: accepted.** Contract §7's "warm end-to-end median" is evaluated on three named warm scenarios: (a) the
    interval size changes on all sections, (b) one edit, its undo and its redo on the largest section, (c) an unchanged re-analysis.
    Cold opening of a project is reported separately, as §7 already allows. The limits do not change.
-4. **V0.151 goes to `master` after part A** (M8.4.1–M8.4.7), not after part B.
+4. **V0.151 goes to `master` after part A** (M8.4.1–M8.4.8), not after part B.
 5. **Engine restart: accepted.** The error state of a section offers "Retry", which starts a new engine session and resubmits
    only the current snapshots (contract §3 already requires fresh tokens), plus at most one automatic restart per program session,
    announced to the user.
@@ -548,7 +548,7 @@ design session adds the next card instead of accepting the failure.
 - **Done when:** the tests pass and scenario (a) is measured and recorded (it may still fail until M8.4.3).
 - **Result (14 November 2026):** `engineclient.js` keeps each section's four masks (valid for one `maskIdentity`) and five tables (valid for their SHA-256) in the engine; an interval-size change uploads only the settings table. 14 new tests in `engine-analysis.test.mjs` (reuse, replacement, eviction by bytes and by section count, a section too large to keep, restart of the engine, abort, full engine budget) and 12 deliberate faults, all caught; one existing queue test waited on the wrong promise and now waits on the current request's. Caps raised: 256 live handles in the engine (`MAX_HANDLES`, was 128), 512 tokens per page. Measured (2 pairs, development evidence): interval change 782 ms public (was 1,779) and 1,452 ms synthetic (was 3,730); edit/undo/redo 363 and 620 ms (unchanged); still failing, as the card allowed. The memory peak passes but the synthetic margin is small (1,075 MiB against a limit of 1,081). The remaining cost per section (about 130-180 ms) is the engine's recount and the 35 result buffers: card M8.4.3.
 
-#### M8.4.3 - Row counts reused in the engine; one result buffer per job — state: Ready after M8.4.2
+#### M8.4.3 - Row counts reused in the engine; one result buffer per job — state: Done (14 Nov 2026, branch `work/2026-11-13`)
 
 - **Goal:** an analysis whose mask inputs and effective classes did not change skips counting, and its result
   travels as one buffer instead of about 35.
@@ -571,6 +571,7 @@ design session adds the next card instead of accepting the failure.
   byte bound; no entry survives a replaced worker; every fixture through the real coordinator unchanged; layout
   attacks (overlap, out of range, wrong dtype, missing or extra column).
 - **Done when:** the tests pass; scenario (a) is measured with its stage breakdown and verdict.
+- **Result (14 November 2026):** (1) the worker remembers, by the SHA-256 of the inputs that the coordinator verified, the masks it validated and counted (16 entries, 64 MiB), and up to 64 decoded tables; (2) the worker writes ONE packed result file with a layout and the coordinator verifies it in one pass and moves it (`BufferStore.adopt_packed`; the first version packed in the coordinator and spent 99 ms of 125 ms opening 55 files, found by profiling), so a result is one handle, one download; (3) three latency fixes: the coordinator looks for a finished job every 2 ms instead of every 20, a metadata buffer is read once to verify, and the client no longer waits for buffers to be released. Contract §3/§5 amended (`outputs.result` + `layout`). Tests: 32 for the memory (every part of the key, bounds, rejections), 9 for the packing (25 refusals), 25 misbehaving-worker cases rewritten, a worker-level test that counting really happens once; 45 deliberate faults, all caught (the symbolic-link refusal can only be exercised on Linux and macOS: it is skipped on this Windows account). Measured (3 pairs; before M8.4.1 / now): interval change 1,779 -> 198 ms (public) and 3,730 -> 285 ms (synthetic), limit 52; edit, undo, redo 358 -> 227 ms and 569 -> 381 ms, limit 58-68. Per section the interval change now costs 33-36 ms (about 15 ms engine, 15 ms of bridge calls, the rest dispatch), so eight sections cannot reach 51 ms one request at a time: see the new card M8.4.6.
 
 #### M8.4.4 - After an edit, only the changed rows travel — state: Ready after M8.4.3
 
@@ -604,34 +605,89 @@ design session adds the next card instead of accepting the failure.
   and a small stroke uploads less than 5 % of the mask bytes. Measure (b).
 - **Done when:** the tests pass; scenario (b) is measured with its verdict.
 
-#### M8.4.5 - Recount only the changed rows — state: Conditional
+#### M8.4.5 - Recount only the changed rows — state: Ready after M8.4.4
 
-- Only if scenario (b) still fails after M8.4.4: the worker recounts the changed rows of a derived buffer and reuses
-  the base's row counts when the effective classes did not change. A design session writes the card if it is needed.
+- **Goal:** after an edit, the worker counts only the rows that changed. Measured before this card (M8.4.3): counting a
+  6.1-Mpixel section takes about 40 ms and a whole edit about 230-380 ms; with M8.4.4 the upload disappears, and what
+  remains is the page's hash of the masks (15 ms), the engine's verification (about 15 ms), this count and the bridge.
+- **Read first:** `methods/section_intervals.py` (`_counts`, `new_memo`); `engine/method_worker.py`; `engine/buffers.py`
+  (`derive`, from M8.4.4); contract §3 (job description).
+- **Change:** `buffer.derive` records, on the derived buffer, the SHA-256 of its base and the merged row ranges that
+  differ; the job description gives the worker, for each mask, `derived_from: {sha256, rows: [[first, last), ...]}`;
+  `section_intervals.run` takes a `base_counts` (the counts memo of the base masks, same ROI, class table and stacks):
+  it copies them and recounts only the rows of the ranges inside the ROI. Contract §3 and the technical manual.
+- **Do not touch:** the result, its layout or the full-count path (a missing base, another class table or another ROI counts
+  everything, as now).
+- **Tests:** an edited section counted from its base equals the full count, exactly, for random edits including rows at
+  the ROI edges, overlaps and exclusions; a base that is not in the memo, a class table that changed or a range that is
+  not what the hashes imply falls back to a full count and never to a partial one; mutation tests for the ranges.
+- **Done when:** the tests pass and scenario (b) is measured with its verdict.
 
-#### M8.4.6 - Restart after a coordinator failure — state: Ready
+#### M8.4.6 - Several sections in one request — state: Designed, after M8.4.5
 
-- **Goal:** the behaviour chosen in decision 5, with fresh tokens and only current snapshots resubmitted (contract
-  §3). **Tests:** the kill cases of `tools/measure_engine_analysis.mjs` and `tests/app/engine-analysis.test.mjs`
-  extended; the JavaScript calculation is never used.
+- **Why:** an interval-size change touches every section of a project. Measured after M8.4.3, one request per section costs
+  33-36 ms of which about 15 ms is the engine (starting the job, reading the settings, computing from remembered counts, writing
+  the result) and about 15 ms is six calls through the page, the main process and the engine. Eight sections one after another
+  cannot meet the limit of about 51 ms for all of them, whatever is tuned inside one request.
+- **Goal:** the sections that need an analysis are sent in ONE request, computed one after another from remembered counts
+  and returned in ONE packed result; scenario (a) meets §7.
+- **Design:**
+  1. New operation `section.analyze_batch`: `{method, items: [{project, section, revision, settings_hash, inputs}, ...]}`,
+     at most 16 items; each item has the inputs and checks of `section.analyze`; the settings of an item may travel in the
+     request as an object (at most 8 KiB each, 64 KiB the frame) instead of as an uploaded buffer, and the coordinator writes
+     them as the `settings` input and derives the hash itself, so nothing is uploaded per item.
+  2. One job: the description lists the items; the worker runs them in order with its memories, polls the cancellation marker
+     between items and between blocks, and writes ONE packed file whose layout has one section per item. An item with a
+     rejected input returns `{error}` for that item only. The answer lists `items: [{section, revision, settings_hash,
+     dimensions, layout | error}]` and the one `outputs.result`.
+  3. The page asks for the batch from `analyzeSections(sections)` (and from a project load); `engineanalysis.js` keeps its
+     per-section revisions, cancellation and stale-result rules: a result is published per item and only if its revision is
+     still current.
+  4. Limits: the packed result obeys the 256 MiB buffer limit; a batch whose estimated result would exceed it is split.
+- **Do not touch:** `section.analyze` (kept for a single section), the method, the columns and their formulas.
+- **Tests:** a batch equals the same sections analysed one by one, for every fixture and for mixed valid and invalid items;
+  cancellation during a batch; a stale item is not published while its neighbours are; a batch with 17 items, an item whose
+  inputs are not resident, and the result-size split; a misbehaving worker for the batch frame; mutation tests.
+- **Done when:** the tests pass and scenario (a) is measured with its verdict. If it still fails, record the stage breakdown
+  and stop: the next change would be to run the interval table of resident sections inside the engine without a request per
+  change, which needs a decision of the maintainer.
 
-#### M8.4.7 - Milestone gate of part A — state: after M8.4.6
+#### M8.4.7 - Restart after a coordinator failure — state: Ready
+
+- **Goal:** the behaviour chosen in decision 5: a section in the error state offers "Retry", which starts a new engine
+  session and resubmits only the current snapshots (contract §3 already requires fresh tokens); at most one automatic
+  restart per program session, announced with a notice. The JavaScript calculation is never used.
+- **Read first:** `desktop/engine.js` (`createEngineService`: start, stop, status); `desktop/engine-ipc.js` (tokens belong to
+  a session); `app/js/engineanalysis.js` (`retry`, error state); `app/js/i18n.js` (`engine.error.*`); the kill phase of
+  `tools/measure_engine_analysis.mjs`.
+- **Change:** `desktop/engine.js` (a `restart()` that stops what is left, starts a new coordinator and handshake, refuses
+  to run twice at once and counts automatic restarts); `desktop/preload.js` and `engine-ipc.js` (the call `restart`, with
+  the sender check; it drops the page's tokens: they belong to the old session); `engineclient.js` (forget all resident
+  buffers when the session changes); `engineanalysis.js` and the interface (a "Retry" control in the error state of a section;
+  one automatic attempt per session when the engine is unavailable, with a notice); texts in Spanish and English.
+- **Do not touch:** the rule that a failed engine shows an error and never falls back to JavaScript; the experiment flag.
+- **Tests:** Node: restart after the coordinator dies, a second restart request while one runs, the automatic attempt is made
+  once and announced, tokens of the old session are refused, resident buffers are re-uploaded; the kill case of the
+  measuring tool now ends with every section analysed again; desktop end-to-end with a killed coordinator.
+- **Done when:** the tests pass and the kill measurement shows the engine `ready` again and parity with the reference.
+
+#### M8.4.8 - Milestone gate of part A — state: after M8.4.7
 
 - **Goal:** the measurement of M8.4.1 repeated on the final state, with a verdict for every gate and scenario, and the
   milestone gate on Windows, macOS and Linux. If decision 4 chose "after part A", V0.151 follows when the maintainer
   asks for it.
 
-**Part B (summaries; cards written by a design session after M8.4.7).**
+**Part B (summaries; cards written by a design session after M8.4.8).**
 
-- [ ] **M8.4.8 - Engine-held source images.** A section's source image is imported once into the engine at its
+- [ ] **M8.4.9 - Engine-held source images.** A section's source image is imported once into the engine at its
       native bit depth, read back by region at a requested scale, identified by SHA-256 and kept in a bounded cache.
       Needed by M8.5b (filters, detection, object features), M8.5e (U-Net inference) and M7 (radiographs). Decoder
       parity (browser decoding against Pillow, 16-bit TIFF) is its own fixture set. Known trap: the coordinator
       checks float buffers in pure Python (63 ns per value, about 1 s per 128 MiB); large float data must be checked
       in the worker with NumPy.
-- [ ] **M8.4.9 - Engine-held record tables.** Snapshots of depth/age records and data tables for M8.5a, M8.5d and M6.
-- [ ] **M8.4.10 - Milestone gate of part B.**
-- [ ] **M8.4.11 and later - Part C: multi-gigabyte images (M2.3.1–M2.3.5).** Cards written by a design session after M8.4.8,
+- [ ] **M8.4.10 - Engine-held record tables.** Snapshots of depth/age records and data tables for M8.5a, M8.5d and M6.
+- [ ] **M8.4.11 - Milestone gate of part B.**
+- [ ] **M8.4.12 and later - Part C: multi-gigabyte images (M2.3.1–M2.3.5).** Cards written by a design session after M8.4.9,
       from the tasks in [roadmap-future.md](roadmap-future.md#m2---large-projects-and-responsive-display); it ends with its own
       milestone gate. Required for 1.0.
 
@@ -643,7 +699,7 @@ Cards are written by a design session when the previous milestone passes its mil
       [ARCHITECTURE §5.1](ARCHITECTURE.md#51-add-or-migrate-a-scientific-method): (a) depth/age parsing and
       record/formula transformations; (b) image filters, detection and object features; (c) ichnotaxon
       classifiers and embeddings; (d) multiproxy rules, models, interpolation and fitted statistics; (e) U-Net
-      inference, then training integration after M3.2.5. Slices (a) and (d) use M8.4.9, (b) and (e) use M8.4.8,
+      inference, then training integration after M3.2.5. Slices (a) and (d) use M8.4.10, (b) and (e) use M8.4.9,
       (c) follows (b).
   - Lessons of M8.3, for every slice: the inputs are resident in the engine from the start (M8.4 services); the
     second card measures the matched timing of the first end-to-end path with the M8.4 tool, before any interface

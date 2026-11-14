@@ -176,7 +176,7 @@ class MethodJob:
         if set(result) == {'error'}:
             error = result['error']
             return isinstance(error, dict) and set(error) == {'code', 'field'} and isinstance(error['code'], str)
-        return set(result) == {'ok', 'dimensions', 'columns'} and result['ok'] is True and isinstance(result['columns'], dict)
+        return set(result) == {'ok', 'dimensions', 'packed'} and result['ok'] is True and isinstance(result['packed'], dict)
 
     def cancel(self):
         self.cancel_path.touch(exist_ok=True)

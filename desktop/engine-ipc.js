@@ -22,6 +22,24 @@ const reject = (code, field) => { throw new Rejected(code, field); };
 const isCount = (value, minimum = 0) => Number.isSafeInteger(value) && value >= minimum;
 const isPlain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 
+const COLUMN_NAME = /^[A-Za-z][A-Za-z_]{0,63}$/;
+const COLUMN_DTYPES = new Set(['u8', 'i32le', 'u32le', 'u64le', 'f64le']);
+/** The layout of the packed result buffer as the page may see it: only the four known fields of at most 64 columns, nothing else. */
+function cleanLayout(layout) {
+  if (!isPlain(layout)) reject('INTERNAL', 'layout');
+  const names = Object.keys(layout);
+  if (!names.length || names.length > 64) reject('INTERNAL', 'layout');
+  const clean = {};
+  for (const name of names) {
+    const part = layout[name];
+    const ok = COLUMN_NAME.test(name) && isPlain(part) && COLUMN_DTYPES.has(part.dtype) && Array.isArray(part.shape) && part.shape.length >= 1 && part.shape.length <= 3
+      && part.shape.every((n) => isCount(n, 1)) && isCount(part.offset) && isCount(part.byte_length, 1);
+    if (!ok) reject('INTERNAL', 'layout');
+    clean[name] = { dtype: part.dtype, shape: [...part.shape], offset: part.offset, byte_length: part.byte_length };
+  }
+  return clean;
+}
+
 /** The error a page sees: a stable code and, for a rejected input, the field at fault. Never a message or a stack. */
 function failure(error) {
   if (error instanceof Rejected) return { error: { code: error.code, ...(error.field ? { field: error.field } : {}) } };
@@ -132,8 +150,11 @@ function createEngineIpc({ engine }) {
           dtype: output.dtype, shape: output.shape, sha256: output.sha256 });
         outputs[name] = { token, dtype: output.dtype, shape: output.shape, byte_length: output.byte_length, sha256: output.sha256 };
       }
+      let layout;
+      try { layout = cleanLayout(result.layout); }
+      catch (error) { for (const output of Object.values(outputs)) { tokens.delete(output.token); } release(Object.values(result.outputs).map((output) => output.handle)); throw error; }
       return { project: result.project, section: result.section, revision: result.revision, settings_hash: result.settings_hash, method: result.method,
-        dimensions: result.dimensions, outputs, provenance: result.provenance };
+        dimensions: result.dimensions, outputs, layout, provenance: result.provenance };
     },
     async cancel(owner, requestKey) {
       if (typeof requestKey !== 'string' || !UUID.test(requestKey)) reject('INVALID_REQUEST', 'requestKey');
