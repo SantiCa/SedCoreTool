@@ -501,7 +501,7 @@ computer and the memory peak gate is evaluated. Nothing changes with the experim
 wants an efficient program (14 November 2026): part A is not finished while a scenario still fails; if M8.4.5 does not fix it, a
 design session adds the next card instead of accepting the failure.
 
-#### M8.4.1 - Measure the scenarios and give every gate a verdict — state: Ready
+#### M8.4.1 - Measure the scenarios and give every gate a verdict — state: Done (14 Nov 2026, branch `work/2026-11-13`)
 
 - **Goal:** `tools/measure_engine_analysis.mjs` reports pass or fail for matched timing on scenarios (a)-(c) and for
   the memory peak, and records a baseline before any optimisation.
@@ -520,6 +520,7 @@ design session adds the next card instead of accepting the failure.
   4. Replace `timing_not_a_gate` by verdicts computed from the formula of §7, written as a pure helper.
 - **Tests:** `node --test` on the verdict helper with hand-computed limits on both sides of each boundary; one full run.
 - **Done when:** the baseline is committed with a verdict for every gate and scenario. Expected today: (a) and (b) fail.
+- **Result (14 November 2026):** [baseline](validation/M8.4-baseline-summary.md). (a) fails (public 1,779 ms against a limit of 51 ms; synthetic 3,730 ms), (b) fails (358 ms against 59; 569 against 68), (c) passes, the memory peak passes (880 MiB against 1,052; 1,010 against 1,092) and parity passes. New: `tools/engine_gates.mjs` (the rules of §7 as pure functions, 7 tests) and the `scenarios` phase of the measuring tool, which now also samples the memory of the flag-off run. The edit is the deletion of a trace, not a paint stroke (the contract text says so).
 
 #### M8.4.2 - Section inputs stay resident in the engine — state: Ready after M8.4.1
 

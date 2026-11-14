@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { memoryPeakVerdict, timingVerdict } from './engine_gates.mjs';
 
 const { default: puppeteer } = await import(process.env.PUPPETEER_MODULE || 'puppeteer-core');
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -197,6 +198,60 @@ for (const fixture of want('timing') ? fixtures : []) {
 
 const largest = SYNTHETIC ? 'synthetic' : 'public';
 
+// ---- warm scenarios of contract §7 (card M8.4.1) ----------------------------------------------------------------------
+// One fresh process per run. The project is loaded and analysed once (warm-up), then each scenario is timed from the request
+// to the published result for every section it touches:
+//   (a) the interval size changes on all sections (no new mask version),
+//   (b) one edit on the largest section, its undo and its redo (the edit is the deletion of the trace whose area is closest to
+//       2,000 pixels, through the interface's own Delete key; undo and redo through the interface's buttons),
+//   (c) the same analysis requested again with nothing changed.
+// A run also records the peak of the summed working set of the Electron process tree (sampler at 25 ms) in both modes.
+async function scenarioRun(mode, fixture) {
+  const session = await start(mode), sampler = startSampler(session.child.pid);
+  try {
+    await loadFixture(session.page, fixture); await sleep(1500);
+    const mark = sampler.mark();
+    const timed = await session.page.evaluate(async () => {
+      const I = window.ichantool, S = I.S, pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const time = async (action) => { const t0 = performance.now(); await action(); return performance.now() - t0; };
+      const out = { interval_ms: [], edit_ms: null, undo_ms: null, redo_ms: null, unchanged_ms: [], notes: [] };
+      for (const binCm of [1.37, 2]) { out.interval_ms.push(await time(async () => { S.settings.binCm = binCm; await I.analyzeSections(S.sections); })); await pause(300); }
+      const index = S.sections.indexOf([...S.sections].sort((a, b) => b.w * b.h - a.w * a.h)[0]), s = S.sections[index];
+      S.cur = index; await pause(300);
+      const trace = [...s.objects.values()].filter((o) => o.area).sort((a, b) => Math.abs(a.area - 2000) - Math.abs(b.area - 2000))[0];
+      out.trace_area_px = trace.area;
+      S.selected = trace.id;
+      out.edit_ms = await time(async () => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); await I.analyzeSections([s]); });
+      out.deleted = !s.objects.has(trace.id); await pause(400);
+      out.undo_ms = await time(async () => { document.getElementById('undoBtn').click(); await I.analyzeSections([s]); });
+      out.restored = s.objects.has(trace.id); await pause(400);
+      out.redo_ms = await time(async () => { document.getElementById('redoBtn').click(); await I.analyzeSections([s]); });
+      out.deleted_again = !s.objects.has(trace.id); await pause(400);
+      for (let i = 0; i < 2; i++) out.unchanged_ms.push(await time(() => I.analyzeSections(S.sections)));
+      const mismatches = [];
+      S.sections.forEach((section, i) => {
+        const reference = I.referenceBins(section);
+        if (reference.length !== section.bins.length) { mismatches.push(`section ${i}: ${section.bins.length} bins, expected ${reference.length}`); return; }
+        reference.forEach((expected, j) => { const a = section.bins[j]; for (const key of ['r0', 'r1', 'valid', 'pct', 'BI', 'ii']) if (a[key] !== expected[key] && !(typeof a[key] === 'number' && Math.abs(a[key] - expected[key]) <= 1e-9)) mismatches.push(`s${i} b${j} ${key}`); });
+      });
+      out.mismatch_count = mismatches.length; out.states = S.sections.map((section) => section.analysis?.state ?? null);
+      return out;
+    });
+    return { ...timed, memory: summarise(sampler.samples.slice(mark)) };
+  } finally { sampler.stop(); await session.stop(); }
+}
+
+for (const fixture of want('scenarios') ? fixtures : []) {
+  log('scenarios', fixture);
+  const record = { warmup: { off: await scenarioRun('off', fixture), on: await scenarioRun('on', fixture) }, pairs: [] };
+  for (let pair = 0; pair < PAIRS; pair++) {
+    const order = pair % 2 === 0 ? ['off', 'on'] : ['on', 'off'], entry = { order };
+    for (const mode of order) entry[mode] = await scenarioRun(mode, fixture);
+    record.pairs.push(entry);
+  }
+  report.results[`scenarios_${fixture}`] = record;
+}
+
 // Responsiveness, cancellation, memory, cycles and failures: engine on, largest fixture.
 if (want('responsiveness')) {
   log('responsiveness and memory', largest);
@@ -372,7 +427,26 @@ if (R.kill) {
     coordinator_section_states: kill.coordinator.section_states, engine_after_coordinator_kill: kill.coordinator.status,
     note: 'After a coordinator death the engine stays unavailable until the program is restarted; sections show ENGINE_UNAVAILABLE and the JavaScript calculation is not used.' };
 }
-v.timing_not_a_gate = 'Matched timing is reported, not pass/fail; the contract compares flag off and on for the maintainer to judge.';
+// Matched timing is a gate of contract §7 (rules in tools/engine_gates.mjs). Scenario samples are pooled over the six pairs.
+for (const fixture of fixtures) {
+  const sc = R[`scenarios_${fixture}`];
+  if (!sc) continue;
+  const pool = (mode, pick) => sc.pairs.flatMap((p) => pick(p[mode]));
+  const scenarios = {
+    interval_change: (r) => r.interval_ms,
+    edit_undo_redo: (r) => [r.edit_ms, r.undo_ms, r.redo_ms],
+    unchanged: (r) => r.unchanged_ms,
+  };
+  const out = { n_pairs: sc.pairs.length, note: 'p95 of few samples is the maximum (nearest rank)' };
+  for (const [name, pick] of Object.entries(scenarios)) out[name] = timingVerdict(pool('off', pick), pool('on', pick));
+  const peak = (mode) => median(sc.pairs.map((p) => p[mode].memory.peak_mib));
+  out.memory_peak = { ...memoryPeakVerdict(peak('off'), peak('on')), basis: 'median over the pairs of the peak of each run',
+    max_off_mib: Math.max(...sc.pairs.map((p) => p.off.memory.peak_mib)), max_on_mib: Math.max(...sc.pairs.map((p) => p.on.memory.peak_mib)) };
+  out.parity = { pass: sc.pairs.every((p) => p.on.mismatch_count === 0 && p.on.deleted && p.on.restored && p.on.deleted_again && p.on.states.every((s) => s === 'ready')),
+    mismatches: sc.pairs.reduce((n, p) => n + p.on.mismatch_count, 0) };
+  out.pass = [out.interval_change, out.edit_undo_redo, out.unchanged, out.memory_peak, out.parity].every((x) => x.pass);
+  v[`scenarios_${fixture}`] = out;
+}
 v.not_measured = ['macOS and Linux', 'a clean Windows machine', 'cold cache after a reboot', 'saturated CPU', 'save interrupted during a job (covered separately by tests/e2e/interrupted-saves.mjs)'];
 
 report.finished = new Date().toISOString();
