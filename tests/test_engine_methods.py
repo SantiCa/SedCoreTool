@@ -742,12 +742,12 @@ def test_a_table_with_a_remembered_hash_is_not_read_again(tmp_path, worker_modul
     for name in ("objects", "classes", "age_model", "manual_indices"):
         Path(description["inputs"][name]["path"]).write_bytes(b"{not json")          # the hash says it is the table decoded before
     assert worker.run(job, modules, memos)["ok"], "the remembered tables were used"
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError, match="JSON"):
         worker.run(job, modules, {})                                                  # a worker that remembers nothing reads the damaged file
     for name in ("objects", "classes", "age_model", "manual_indices"):
         description["inputs"][name].pop("sha256")
     job.write_text(json.dumps(description))
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError, match="JSON"):
         worker.run(job, modules, memos)                                               # no hash, no memory
     assert len(memos["tables"]) <= worker.TABLE_CACHE_ENTRIES
 

@@ -263,7 +263,6 @@ DTYPE_NAMES = {"<u4": "u32le", "<f8": "f64le", "|u1": "u8", "<u8": "u64le"}
 
 def packed_file(tmp_path, columns, name="result.bin"):
     """Write columns one after another, each at a multiple of 8, the way the worker does. Returns (path, byte_length, sha256, layout)."""
-    import numpy as np
     layout, chunks, offset = {}, [], 0
     for key, array in columns.items():
         data = array.tobytes()

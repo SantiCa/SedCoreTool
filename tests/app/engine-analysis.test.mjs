@@ -715,3 +715,18 @@ test('a derived upload can be aborted and leaves what the engine held', async ()
   await flush();
   assert.ok(bridge.buffers.size <= held.size, 'nothing from the aborted upload is left');
 });
+
+test('the controller keeps the stages of its last analyses for measurements, at most twenty', async () => {
+  const s = section(5, { w: 120, h: 200 }); let p = project();
+  const { analysis } = engineFor(s, () => p);
+  await analysis.request(s);
+  assert.deepEqual(analysis.stats().recent.map((job) => job.mode), ['full'], 'the first analysis sent the masks whole');
+  for (let k = 0; k < 23; k++) { p = project({ settings: { binCm: 2 + k / 10 } }); await analysis.request(s); }
+  const { recent } = analysis.stats();
+  assert.equal(recent.length, 20, 'only the last twenty are kept');
+  assert.ok(recent.every((job) => job.mode === 'reuse'), 'later ones reused the masks');
+  for (const key of ['snapshot_ms', 'upload_ms', 'engine_ms', 'download_ms', 'queued_ms', 'revision_ms', 'analysis_ms', 'publish_ms']) {
+    assert.ok(recent.every((job) => Number.isFinite(job[key]) && job[key] >= 0), key);
+  }
+  recent[0].mode = 'changed'; assert.equal(analysis.stats().recent[0].mode !== 'changed', true, 'a copy, not the record itself');
+});

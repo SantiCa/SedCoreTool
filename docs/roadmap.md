@@ -30,23 +30,37 @@ Updated 14 November 2026.
   macOS and Linux (the desktop end-to-end test with the engine experiment off and on, the package check and the packaged-runtime start). It was
   the first time the engine work was built on macOS and Linux; it found three faults, all fixed (see the card). Still not covered, and on the
   release checklist: launching the *packaged* program on macOS and Linux, Intel Macs, clean machines.
-- **Next step:** M8.4.1 (the five decisions are answered). Also open: card H5 (the `e2e` job must pass ten
+- **Where M8.4 stands (14 November 2026):** cards M8.4.1-M8.4.5 are done and pushed. Measured on Windows (3 pairs, warm, flag off against
+  flag on), from the baseline before M8.4.1 to now: interval-size change on all sections 1,779 -> 229 ms (public) and 3,730 -> 259 ms (synthetic),
+  limit about 51 ms; edit, undo, redo 358 -> 147 ms and 569 -> 211 ms, limit 59-68 ms; unchanged re-analysis, memory peak and parity pass. **The
+  timing gate of contract §7 still fails for (a) and (b).** What remains in (b), measured through the interface on a 2.6-Mpixel section: about
+  35 ms are the interface's own redraw after the edit (it runs on the page's thread; with JavaScript it happens after the measured result, with
+  the engine it falls inside the chain of calls), 10 ms the snapshot and full hash in the page, about 50 ms the upload (the objects table and
+  both masks are derived and fully re-hashed by the engine), about 20 ms the engine. With the full-content hash that the maintainer's condition
+  of decision 1 requires and the page thread shared with drawing, this design cannot reach about 60 ms; see the decision below.
+- **Next step:** the maintainer's answer to the timing question below; meanwhile M8.4.6 (several sections in one request, for scenario (a))
+  and M8.4.7 (restart) can proceed. Also open: card H5 (the `e2e` job must pass ten
   consecutive pushes).
 - **Reminder for whoever talks to the maintainer:** the maintainer accepted the two acceptance levels on
   13 November 2026 and asked to be **reminded to run the release-gate tests** (the release checklist below:
   macOS and Linux, clean Windows machine, cold-cache first launch, saturated CPUs, package sizes, and the
   numerical/timing/memory/recovery gates). Remind him when a milestone of M8 finishes and before any flag is
   switched on by default or a version with the engine is announced.
-- **Decisions waiting for the maintainer:** only the flags in the table below that need a promote/remove decision. Decided on 13 November 2026:
+- **Decisions waiting for the maintainer:** (1) **timing of interactive scenarios** (14 November 2026): the limits of contract §7 are derived
+  from the JavaScript calculation, which runs in the page in 1-17 ms; an out-of-process engine that verifies every edited mask by its full
+  hash measured 147-259 ms. Options: keep the limits and continue redesigning (move the client off the page thread, send one request for all
+  sections, track label and exclusion changes separately, hash by blocks: several cards, with no certainty of reaching about 60 ms for a
+  6-Mpixel edit); or set limits for what the user perceives (for example result visible within 100 ms of an edit and 300 ms of a whole-project
+  setting change on the reference computer) and keep the JavaScript-relative limits as reported values; or relax the full-hash guarantee
+  (faster, weaker against a missed change). Also: the flags in the table below that need a promote/remove decision. Decided on 13 November 2026:
   acceptance levels (accepted), scope of 1.0 (below), publication of V0.149. Decided on 14 November 2026: a milestone gate on macOS and Linux
   closes every milestone; the five decisions of M8.4 (answers recorded there, among them **multi-gigabyte images are required for 1.0**).
-- **Last full checks: passed** on 14 November 2026 after the corrections following V0.150 (branch `work/2026-11-13`, run one after another on the
-  maintainer's Windows computer): `pytest -q` 605 passed / 8 skipped; `npm test` 295 passed; `npm run typecheck` (no new diagnostics);
-  `sync_version.py --check`; `ruff check src tests tools`; standalone build; `tests/e2e/smoke.mjs` (three consecutive runs, no slow page call
-  over 5 s); `tests/e2e/desktop.mjs` with the engine experiment on and off, bundled runtime rebuilt first (`prepare.js`, then
-  `prepare_engine_runtime.py`). The corrected measurements of card M8.3.8 are separate evidence. **GitHub workflow `tests`:** all jobs pass on
-  the work branch since commit `522f8ad`, including `fd13070` (the corrections after V0.150, pushed); on `master` (V0.150) only `e2e` fails,
-  fixed on the branch and reaching `master` with V0.151. The design review of 14 November 2026 changed documents only (no code).
+- **Last checks: passed** on 14 November 2026 after card M8.4.5 (branch `work/2026-11-13`, maintainer's Windows computer): `pytest -q` 664
+  passed / 9 skipped (Python 3.12); `node --test tests/app/*.test.mjs` 341 passed; `npm run typecheck` (no new diagnostics); `sync_version.py --check`;
+  `ruff check src tests tools` (ruff 0.17.5 under Python 3.14, the only interpreter on this computer that has it); standalone build;
+  `tests/e2e/desktop.mjs` with the engine experiment on and off, bundled runtime rebuilt first. **Not run in this session:** `tests/e2e/smoke.mjs`
+  (needs the local server on port 8765) and the GitHub workflows for the commits after `84c7808` (they run on push; results not read yet).
+  The scenario measurements of M8.4.1-M8.4.5 are separate evidence (baseline committed; later runs summarised in each card).
 
 ## How work is accepted
 

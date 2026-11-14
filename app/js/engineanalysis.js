@@ -24,8 +24,11 @@ export function createEngineAnalysis({ client, project, onChange, maskChanges })
   /** How many times a change of some rows was refused and the whole mask had to be sent (the page's record and the engine's disagreed). */
   let deriveFallbacks = 0;
   /** The stages of the last analyses (at most 20), for measurements: how the masks travelled and where the time went. */
-  /** @type {{mode: string, snapshot_ms: number, upload_ms: number, engine_ms: number, download_ms: number}[]} */
+  /** @type {Record<string, any>[]} */
   const recent = [];
+  /** The entry of the analysis that ran last (jobs run one at a time). */
+  /** @type {Record<string, any> | null} */
+  let lastEntry = null;
   /** @type {WeakMap<object, Job>} */
   const jobs = new WeakMap();
   /** Jobs wait here: the engine runs one calculation at a time and a page may hold only a few (engine-ipc.js). */
@@ -57,7 +60,9 @@ export function createEngineAnalysis({ client, project, onChange, maskChanges })
         const options = mode === 'derive' ? { masks: /** @type {const} */ ('derive'), change: taken } : { masks: mode === 'full' };
         const started = performance.now(), snapshot = buildIntervalSnapshot(section, project(), options), built = performance.now() - started;
         const result = await client.analyze(snapshot, { signal, owner: section, maskKey });
-        recent.push({ mode, snapshot_ms: built, ...(result.timing ?? {}) });
+        const entry = { mode, snapshot_ms: built, ...(result.timing ?? {}) };
+        lastEntry = entry;
+        recent.push(entry);
         if (recent.length > 20) recent.shift();
         return result;
       } catch (error) {
@@ -101,14 +106,21 @@ export function createEngineAnalysis({ client, project, onChange, maskChanges })
     const controller = new AbortController();
     /** @type {Job} */
     const job = { revision, controller, settled: false, done: Promise.resolve() };
+    const requestedAt = performance.now();
     job.done = new Promise((resolve) => {
       queue.push(async () => {
         let published = false;
         try {
+          const startedAt = performance.now();
           if (!isCurrent(section, job)) { renew(section, job); return; }
+          const checkedAt = performance.now();
+          lastEntry = null;
           const result = await analyseWithResidentInputs(section, controller.signal);
+          const answeredAt = performance.now();
           if (!isCurrent(section, job)) { renew(section, job); return; }   // edited, replaced or cancelled while the engine worked: change nothing
           section.bins = resultToBins(result);
+          if (lastEntry) Object.assign(lastEntry, { queued_ms: startedAt - requestedAt, revision_ms: checkedAt - startedAt,
+            analysis_ms: answeredAt - checkedAt, publish_ms: performance.now() - answeredAt });
           section.analysis = { state: 'ready' };
           published = true;
         } catch (error) {
