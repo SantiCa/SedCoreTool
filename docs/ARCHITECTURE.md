@@ -61,7 +61,8 @@ calculates everything itself; with it on, the interval table of each section com
 | Renderer-facing engine bridge (`engine-ipc.js`, `engineclient.js`, `engineanalysis.js`) | **built, experimental, off by default** (M8.3.6–M8.3.7) | §3.2, §3.3 |
 | Section intervals calculated by the engine (`section.intervals/1`) and shown by the interface | **built, experimental, off by default** (M8.3.7); slower than JavaScript, see the M8.3.8 evidence | contract §4–§5 |
 | Section inputs kept in the engine between analyses; edits sent as changed rows (`buffer.derive`); remembered counts; one packed result | **built, experimental, off by default** (M8.4.2-M8.4.5); timing gate of contract §7 not met | §4, contract §3 |
-| Several sections in one request; restart of the engine; engine-held source images and tables; remaining methods | **planned** (M8.4.6-M8.4.11, M8.5) | roadmap |
+| Restart of the engine (M8.4.7); engine-held pixels of small sections and record tables (part B, M8.4.9-M8.4.11); several sections in one request (M8.4.6, deferred); remaining methods (M8.5) | **planned** | roadmap |
+| Tile store for large images (pixel pyramid, versioned mask tiles), tiled viewer and editing, analysis on tiles, saving of large projects | **planned** (part C of M8.4, cards M8.4.12-M8.4.19; chosen 15 Nov 2026) | §3.4 |
 
 The engine experiment is enabled only by the environment variable `SEDCORETOOL_ENGINE_EXPERIMENT=1`. Keep that
 default until M8.6.
@@ -144,6 +145,46 @@ Pure modules for M8.3:
 and nothing in the wire protocol or the method contracts may mention Electron, IPC channels or the renderer.
 Everything Electron-specific stays in `desktop/`.
 
+### 3.4 Tile store for large images (planned, part C of M8.4)
+
+Chosen by the maintainer on 15 November 2026 (option A, decision D10) so that the program stays fluid with images of several
+gigabytes. **Not built.** Cards M8.4.12-M8.4.19 of the roadmap build it; every one of them follows these rules, and a card that
+needs to break one stops and asks.
+
+For each tiled section, the engine keeps on disk:
+
+- a **pixel pyramid**: the source image at full resolution and at reduced levels (each half the size of the previous one), cut into
+  tiles of 512 x 512 pixels (unless card M8.4.13 measures a better size), at the source's own bit depth. It never changes once built and
+  can be rebuilt from the source file, so it is a cache, not project data (M2.3.5);
+- **mask tiles**: labels (`i32`) and exclusion (`u8`) at full resolution on the same tile grid, each stored under the SHA-256 of its
+  bytes, and one **manifest** per saved version that lists the hashes for every tile position (no entry = an empty tile). The identity
+  of a version is the SHA-256 of its manifest;
+- **row counts per tile**, if the engine computes the interval table (rule D11), so that an edit recounts only the tiles it touched.
+
+Rules:
+
+1. **One writer.** Only the engine writes the store, on requests that pass through the main process. The page never sees or chooses a
+   path (contract §3); the main process tells the engine which folder belongs to the project.
+2. **A documented format that does not depend on the interface** (D12). JSON metadata and raw little-endian, C-order tile files,
+   specified in the engine contract and the technical manual before the first file is written; nothing in it depends on the browser,
+   IndexedDB or Electron. The pyramid uses a layout compatible with Zarr version 2 (an open format that other programs read) when that
+   needs no new dependency; card M8.4.14 records the choice. A later Rust kernel (option B, roadmap-future M4.1.1) or a native interface
+   (option C, M9.1) must be able to read and write the store from the specification alone.
+3. **Verified, tile by tile.** A tile is used only if its bytes have the SHA-256 that names it. This keeps the condition of M8.4
+   decision 1 (a copy not proven identical is never used), and the cost of hashing follows the size of the edit, not of the image.
+4. **Who owns what.** The page shows tiles from a bounded cache and owns the live edits of loaded tiles and the undo history until the
+   store acknowledges them; if the engine fails, those edits stay in the page and are sent again. Saved state is the store's. A save
+   writes the new tiles, then the new manifest (temporary file and atomic replacement), then the project record that names the
+   manifest's hash. The manifest of the last good save and its tiles are deleted only after a newer save has been committed, so a
+   failure at any step leaves the last good save readable.
+5. **Bounded memory.** The page and the engine each have a declared tile-cache budget; no code decodes a whole multi-gigabyte raster.
+   Coordinates are always full-resolution pixels (§6); a reduced level is only for display and never feeds a count.
+6. **Small sections keep today's path** (pixels and masks in the page) until a measurement shows that the tiled path is at least as
+   fast for them; then one card moves them and part B's M8.4.9 is dropped. Until M8.6 the tiled path needs the engine experiment.
+7. **Drawing** uses 2-D canvas drawing of tile images first. WebGL is used only if the viewer misses the frame target, and only by a
+   decision of the maintainer (D9).
+8. **No scientific calculation is written in JavaScript for tiled sections**, except the interval table if rule D11 chose option D.
+
 ## 4. Path of one scientific request (built in M8.3)
 
 Example: the user edits a trace and the interval table must update.
@@ -173,8 +214,9 @@ Rules of this path:
 
 - **No silent fallback.** With the experiment on, a failed job shows an error state; it never recomputes with the
   JavaScript calculation. With the experiment off, only the JavaScript calculation runs. There is no per-job choice.
-- **The renderer owns live editing and saved projects** until M8.4. The engine never reads or writes project
-  files, and a runtime or engine failure must not change live results or the last good save.
+- **The renderer owns live editing and saved projects.** The engine never reads or writes project files, and a runtime or engine
+  failure must not change live results or the last good save. The one planned exception is the tile store of tiled sections (§3.4),
+  which the engine writes only on the page's request and with the same last-good-save guarantee.
 - **Synchronous callers, asynchronous engine.** The seven call sites of `analyze(s)` still call it synchronously.
   With the experiment off it fills `s.bins` before returning. With it on it only requests the analysis and leaves the
   section pending (no bins); `engineanalysis.js` calls the controller's `onChange` when a result is published, which
@@ -269,3 +311,6 @@ Do not reopen these without the maintainer; build on them.
 | D7 | The Python API and CLI call the same kernels and methods in-process; they are not clients of the engine process | M8.1 |
 | D8 | Python layering `kernels/` → `methods/` → `engine/` and public API (§3.1); `app.js` only shrinks (§3.2) | 12 Nov 2026 (design; first applied in M8.3) |
 | D9 | Rust kernels, GPU work, WebAssembly, another scientific engine or a UI rewrite are not part of M8; each needs measured need and its own authorised task | 12 Nov 2026 |
+| D10 | Large images and fluidity follow **option A**: the engine owns a tile store on disk (pixel pyramid, versioned mask tiles); the page shows tiles and edits the loaded ones (§3.4). Options considered and not chosen: B, one Rust core compiled for the engine and to WebAssembly for the page; C, a native Python and Qt interface; D, light interactive calculations kept in JavaScript. B and C stay possible later because of D12 | 15 Nov 2026 |
+| D11 | Where the interval table of a tiled section is computed is decided once by a measurement (card M8.4.12) against the rule in contract §7: the engine (A) if one tile's edit round trip plus the table's recomputation is p95 <= 100 ms, otherwise the page (D) with the Python method as reference and parity tests. **Outcome: pending M8.4.12** | 15 Nov 2026 (rule) |
+| D12 | Data that may outlive the interface (the tile store, method inputs and results) uses documented, versioned formats that do not depend on the browser, IndexedDB or Electron; new scientific methods are written only in Python (§3.2 rule 1) | 15 Nov 2026 |

@@ -31,6 +31,10 @@ shell and does not change the M8 order.
     (IndexedDB under `app://corantool`), packages and folder backups; and ships portable and installed forms
     on every supported system. Record build, signing, platform web-view and maintenance costs. Keep Electron
     as the default and rollback until the maintainer accepts the transition.
+  - Option C of the review of 15 November 2026 (a native Python interface, for example Qt) is one such candidate. The
+    tile store, the method contracts and their results stay independent of the browser and Electron (ARCHITECTURE
+    D12) so that it could reuse them; it would still rewrite the whole interface, lose the web version and need the
+    tested migration of projects stored in IndexedDB described above.
 
 ### Capacity, advanced statistics and radiographs
 
@@ -74,7 +78,10 @@ M2.1 (large tables) and M2.2 (large images) are complete ([history](roadmap-hist
 
 - [ ] **M2.3 - Multi-gigabyte image workflows (required for 1.0).** Extend the measured M2.2 scope to individual source files
       of several gigabytes and larger decoded rasters, including native grayscale/16-bit images. Raising
-      the current input/memory limits alone is not an implementation of this task. Delivered through M8.4.
+      the current input/memory limits alone is not an implementation of this task. Scheduled on 15 November 2026 as part C
+      of M8.4 (cards M8.4.12-M8.4.19 of the [live roadmap](roadmap.md#part-c---multi-gigabyte-images-and-fluidity-option-a)),
+      built on the tile store of [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84).
+      The tasks below keep their IDs; each card names the task it delivers.
   - [ ] **M2.3.1 - Define fixtures, hardware and responsiveness targets.** Build deterministic 2, 4 and 8 GiB
         source-file cases, plus compressed cases whose decoded rasters exceed those sizes. Record dimensions,
         channels, bit depth, compression, tile/strip layout and exact encoded/decoded byte counts separately.
@@ -85,6 +92,8 @@ M2.1 (large tables) and M2.2 (large images) are complete ([history](roadmap-hist
       targets are cached-navigation p95 frame time <=33 ms, control response <=100 ms and cancellation
       acknowledgement <=250 ms. Ratify achievable targets and an absolute working-memory/cache budget on
       named hardware before implementation; report cold loading and analysis throughput separately.
+      *Ratified on 15 November 2026 as the interactive targets of
+      [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates) (memory peak <= 2 GiB).*
   - [ ] **M2.3.2 - Bounded image source and multiresolution tiles.** Read supported TIFF/BigTIFF regions on
         demand and generate/reuse a disk-backed pyramid without decoding the full raster into memory. Define
         a cancellable conversion path for non-random-access sources and a source/cache identity contract.
@@ -185,6 +194,11 @@ models), M3.3.1 and M3.3.3 (palette inputs, manifest escaping). Records:
       subject to M2.3's stricter absolute budget where applicable. Record build, portable/installer,
       platform-testing and dependency costs. Keep a default-off experiment and working fallback; stop if the
       target fails. The kernel is internal to the single engine; no broad language migration is selected.
+    - Option B of the review of 15 November 2026: the same Rust source could also be compiled to WebAssembly for
+      the page, giving one implementation without the engine round trip. It becomes a candidate if the engine path
+      misses the interactive targets of contract §7 (rule D11) and two implementations in JavaScript and Python are
+      not wanted. The documented store format and method contracts (ARCHITECTURE D12) keep it possible; it needs a
+      Rust toolchain, a build step and native binaries per system.
   - [ ] **M4.1.2 - Conditional GPU display or computation.** After separating CPU, I/O and rendering costs,
         evaluate GPU tile display or one suitable numerical operation only where profiling justifies it.
     - Acceptance: compare with the best accepted CPU path, include upload/readback and GPU memory, handle

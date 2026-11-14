@@ -84,7 +84,10 @@ Never do any of these without an explicit request from the maintainer in the cur
   New scientific methods are written once, in Python; the interface requests and displays their results. Existing
   JavaScript calculations change only to fix or preserve current behaviour until their M8 slice replaces them.
   `app.js` only shrinks. Keep the engine protocol, method contracts and result formats free of Electron and
-  renderer details; Electron-specific code stays in `desktop/`.
+  renderer details; Electron-specific code stays in `desktop/`. Data that may outlive the interface (the planned
+  tile store of large images, method inputs and results) uses documented formats that do not depend on the browser,
+  IndexedDB or Electron, so that the interface or the language of a kernel can be replaced later
+  ([ARCHITECTURE §3.4 and D10-D12](docs/ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84)).
 - **Modularity and review cost.** The maintainer requires a modular, understandable and easily editable program.
   One module, one responsibility, explicit inputs and outputs. A reviewer must be able to find a behaviour and
   understand its contract without reading the whole application. Prefer small, independently verifiable diffs.

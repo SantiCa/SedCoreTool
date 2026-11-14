@@ -18,7 +18,9 @@ scientific semantics requires a new method version and explicit acceptance, even
 
 How the code that implements this contract is layered, and the path of one request through it, are described in
 [ARCHITECTURE.md](ARCHITECTURE.md). Amended on 13 November 2026 (card M8.3.5): §3 now defines `buffer.read`, which downloads
-committed buffers, and the exact shape of the `section.analyze` response; progress events are not yet sent.
+committed buffers, and the exact shape of the `section.analyze` response; progress events are not yet sent. Amended on
+15 November 2026 (option A for large images, ARCHITECTURE D10-D12): §2 describes the ownership of tiled sections, §6 the new order
+of M8.4, and §7 adds absolute interactive targets and the rule that decides where the interval table of a tiled section is computed.
 
 ## 1. Current calculation and ownership inventory
 
@@ -63,11 +65,17 @@ JSON canonicalisation. Equal content under a different revision can reuse immuta
 must still carry the requesting revision. Closing a project releases its queued jobs, snapshots and results;
 process restart creates a new session and invalidates every old handle.
 
-M8.4 (revised 14 November 2026): the renderer stays the owner of live masks, edit history and saving. The engine keeps a
-verified copy of each section's analysis inputs, updated with the changed rows (card M8.4.4), so that the edit path never waits for
-it and an engine failure cannot change an edit or a save. Only source images for multi-gigabyte files (part C) and analysis
-results are engine-owned, with tiles and summaries sent to the renderer; there is still exactly one writer of a project. Keep
-atomic saves, recoverable backup, native samples, history and the compatibility identifiers in AGENTS.md.
+M8.4 (revised 14 November 2026): the renderer stays the owner of live masks, edit history and saving for sections held in the
+page. The engine keeps a verified copy of each section's analysis inputs, updated with the changed rows (card M8.4.4), so that the
+edit path never waits for it and an engine failure cannot change an edit or a save.
+
+Tiled sections (decided 15 November 2026, option A; planned, part C of M8.4; design in
+[ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84)): the pixels (a pyramid built from the
+source file) and the saved masks live in a tile store on disk that only the engine writes, on the page's request. The page loads the
+tiles it shows and owns the live edits of loaded tiles and the undo history until the store has acknowledged them. A save writes the
+new tiles, then the new store version (atomic replacement), then the project record that names it, so a failure at any step leaves
+the last good save readable. There is still exactly one writer of each file of a project. Keep atomic saves, recoverable backup,
+native samples, history and the compatibility identifiers in AGENTS.md.
 
 ## 3. Private transport v1
 
@@ -237,8 +245,10 @@ export/import and saves before adding that extension. No project format changes 
 2. **M8.3:** object/overlap resolver and shared count primitives, then complete interval postprocessing and
    actual desktop binding. First parity fixtures, then edit/undo/redo, results, CSV and save/reopen. Evaluate
    the existing opt-in NumPy counting path under M3.1.6; this design does not promote it by assertion.
-3. **M8.4:** define the M2.3 multi-gigabyte benchmark/ownership contract first; implement native image access,
-   bounded tile viewing, revisioned editing, analysis and saving as separate accepted increments.
+3. **M8.4** (order decided 15 November 2026): part A (inputs resident in the engine; restart; milestone gate), then part C
+   (M2.3: the round-trip measurement of §7, multi-gigabyte fixtures, tile store and pyramid import, tiled viewer, tiled masks and
+   editing, analysis on tiles, large-project saving), then part B (engine-held pixels of small sections and record tables for
+   M8.5), each as separate accepted increments.
 4. **M8.5a:** depth/age parsing and record/formula transformations; **5b:** image filters, detection and object
    features; **5c:** ichnotaxon classifiers/embeddings; **5d:** multiproxy rules/models/interpolation and fitted
    statistics; **5e:** U-Net inference, then training integration after M3.2.5. Each increment has its own
@@ -275,6 +285,36 @@ bridge/startup and cannot establish desktop end-to-end performance.
 | Responsiveness/cancel | During the largest first-slice fixture, injected UI input-to-next-frame p95 <=100 ms. Cancel acknowledgement <=250 ms; target reaches terminal cancelled (or already completed) and releases temporary work within 2 s. Test cancellation during upload, queue, count and result transfer, plus a noncooperative worker; stale results never publish. |
 | Whole-process memory | Sample simultaneous RSS sum of the complete Electron + engine + worker tree at the M0.1 25 ms target cadence, excluding harness/server; report cadence gaps, process list, idle RSS and observed peak, including transfer/conversion overlap. Peak <= max(1.10×matched legacy peak, legacy peak +256 MiB). Record shared-page double-counting/sampling limits; kernel-only memory is insufficient. |
 | Release/recovery | Ten open/analyse/close cycles release all session project handles; no growth in outstanding buffers/jobs/scratch files. After warm-up, final closed-state RSS <= first closed-state RSS +64 MiB. Kill the worker/coordinator mid-job and interrupt saves; live unsaved edits and the last good save/backup remain recoverable. |
+
+**Interactive targets (adopted 15 November 2026 with option A, ARCHITECTURE D10).** The matched-timing limits above compare the
+engine with the JavaScript calculation, which runs inside the page in 1-17 ms; no out-of-process design can meet them for an edit,
+and they do not describe what the user perceives. From part C of M8.4 on, interactive paths are accepted against the absolute
+targets below, on the primary reference host, warm. The matched-timing formula is still computed and reported for scenarios
+(a)-(c), and stays the gate for every path that has no target here. The numbers were proposed by the design review of 15 November
+2026 and adopted with the maintainer's choice of option A; changing them is a maintainer decision, recorded here before a
+validation run.
+
+| Interaction | Target | How it is measured |
+|---|---|---|
+| Pan and zoom over any image size, tiles already cached | frame interval median <= 17 ms (60 frames per second), p95 <= 33 ms | frame intervals during a scripted 5 s pan and 10 zoom steps |
+| Pan and zoom onto tiles not cached | a lower-resolution level is shown in the next frame; full resolution within 250 ms (p95) | from the frame that needs the tile to the frame that shows it |
+| Input during a brush stroke or a pan | input-to-next-frame p95 <= 33 ms, with the engine experiment on and off | 60 injected pointer moves (the responsiveness method above) |
+| Interval table after an edit that touches at most 4 tiles, any image size | p95 <= 150 ms | as scenario (b): from the analysis request (after the interface's fixed 100 ms grouping delay, which is the same in both modes) to the published table |
+| A setting changed for the whole project (interval size) | p95 <= 300 ms for all sections together | scenario (a) |
+| First useful view of a multi-gigabyte image whose pyramid exists | <= 2 s | from the open command to the first frame with image content |
+| Building the pyramid of a newly imported image | reported (MiB/s); progress at least once a second; cancellation acknowledged <= 250 ms | M8.4.13 fixtures |
+| Response of controls (buttons, menus, tabs) while the engine works | p95 <= 100 ms | injected clicks |
+| Whole-process-tree memory while viewing, editing and analysing any of the 2, 4 and 8 GiB fixtures | peak <= 2 GiB | the sampler of "Whole-process memory" above |
+| Scrolling a table of 100,000 rows; drawing or updating a figure of 50,000 points | frame interval p95 <= 33 ms | card M2.1.4 |
+
+**Interactive-calculation rule (decided 15 November 2026; applied once by card M8.4.12, outcome in ARCHITECTURE D11).** The
+interval table of tiled sections is computed by the engine (option A) if one edit of a one-tile section, sent through the real
+chain (page, main process, coordinator, worker) and published, takes p95 <= 100 ms on the primary reference host **plus** the
+in-process median time to turn the row counts of the tallest fixture section into its interval table. The threshold is stricter
+than the 150 ms target to leave room for the tiled viewer. Otherwise the interval table and percentages of the interactive path
+stay in JavaScript (option D of the review), with the Python method as the reference and exact parity tests on every fixture, and
+every other method still moves to the engine; a design session then revises the part C cards before M8.4.14. macOS and Linux
+numbers are not part of the rule (shared CI runners are too noisy for a 100 ms decision); they are measured at the release gate.
 
 Primary reference host: the existing Windows 11/Ryzen 7 7700X/approximately 32 GiB baseline machine. Record
 actual OS, RAM, CPU topology, Electron/Node/Python/native library versions, thread limits, power settings,
