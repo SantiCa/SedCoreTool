@@ -12,9 +12,14 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ## Unreleased
 
+### For users
+
+- The core image strip (Core column, Multiproxy) no longer freezes the page for tens of seconds while the pictures of some sections are still being read from disk. It asked for a new full-size grey canvas once per output row; it now reuses one while the section stays pending. The picture produced is unchanged.
+
 ### Internal
 
 - The GitHub `e2e` job is green again (it failed from 10 to 14 November 2026). The navigation preview now stretches the strip at the offset where the view draws it, because Chrome's software renderer (SwiftShader, Linux) rounds a stretch differently at different destination positions; exact pixel equality with the previous renderer is unchanged. The interrupted-saves test fixes the interface language, since two of its checks read Spanish messages and the Linux runner's browser is English.
+- Smoke test: any page call that takes more than 5 s is named in the log, and a new check asserts that a section with an unloaded picture answers every strip request with one canvas. This was the cause of the local timeouts (a 25-45 s freeze in the multiproxy step and in the wait for the 16-bit TIFF; Puppeteer's 180 s limit was reached on slower runs).
 
 ## V0.150 — 2026-11-14
 

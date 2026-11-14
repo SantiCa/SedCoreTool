@@ -89,7 +89,11 @@ export function sectionCanvas(s, lv = S.logView) {
   const bkey = `${lv.imgMode}|${s.ds}|${s.w}x${s.h}|${s.rot}|${JSON.stringify(s.crop)}|${lv.imgMode === 'orig' ? '' : JSON.stringify(s.filters) + JSON.stringify(s.roi)}`;
   if (s._lb?.key !== bkey) {
     if (!s.orig) {   // grey strip until the picture is read from disk
-      needPixels(s); const p = document.createElement('canvas'); p.width = sw; p.height = sh;
+      needPixels(s);
+      // stripDataURL asks once per output row: a new canvas of the full strip size each time took tens of seconds on a core
+      // whose pictures were not loaded yet, so keep the grey one while the section stays pending at the same size.
+      if (s._lc?.key === 'pending' && s._lc.canvas.width === sw && s._lc.canvas.height === sh) return s._lc.canvas;
+      const p = document.createElement('canvas'); p.width = sw; p.height = sh;
       const g = p.getContext('2d'); g.fillStyle = '#cfd4d2'; g.fillRect(0, 0, sw, sh); s._lc = { key: 'pending', canvas: p, k: sw / s.w }; return p;
     }
     const src = lv.imgMode === 'orig' ? s.orig : s.enh, px = [0, 0, 0, 255];

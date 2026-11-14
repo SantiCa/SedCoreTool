@@ -31,6 +31,15 @@ p.on('console', (m) => {
     .catch(() => m.text()))).then((details) => { errs.push(details.join(' ') || m.text()); }));
 });
 p.on('dialog', (d) => d.accept());
+// Name any page call that takes more than 5 s, so a slow or hanging step is identified by its code (roadmap card H5).
+const evaluateOnPage = p.evaluate.bind(p);
+p.evaluate = async (fn, ...args) => {
+  const t0 = Date.now();
+  try { return await evaluateOnPage(fn, ...args); } finally {
+    const ms = Date.now() - t0;
+    if (ms > 5000) console.log(`slow page call (${(ms / 1000).toFixed(1)} s): ${String(fn).replace(/\s+/g, ' ').slice(0, 140)}`);
+  }
+};
 const W = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 60000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await p.evaluate(fn)) return; await W(500); } throw new Error('timeout: ' + fn); };
 // A line starting with ::error:: becomes a GitHub annotation, readable from the workflow run without the full log. It bypasses
@@ -258,6 +267,19 @@ try {
     return { reordered, hidden, restored, collapsed, readableName, independent, follows };
   });
   if (!Object.values(multiproxy).every(Boolean)) fail(`multiproxy controls: ${JSON.stringify(multiproxy)}`);
+  // A section whose picture is not loaded yet answers every strip request with one grey canvas, not a new full-size one each
+  // time (the image strip of a core asks once per output row; thousands of new canvases took tens of seconds, roadmap card H5).
+  const pendingStrip = await p.evaluate(async () => {
+    const I = window.ichantool, { sectionCanvas } = await import('./js/columns.js');
+    const s = I.S.sections[0], saved = { orig: s.orig, lb: s._lb, lc: s._lc };
+    try {
+      s.orig = null; s._lb = null; s._lc = null;
+      const first = sectionCanvas(s), canvases = new Set([first]);
+      for (let i = 0; i < 50; i++) canvases.add(sectionCanvas(s));
+      return { distinct: canvases.size, grey: first.getContext('2d').getImageData(0, 0, 1, 1).data.join() };
+    } finally { s.orig = saved.orig; s._lb = saved.lb; s._lc = saved.lc; }
+  });
+  if (pendingStrip.distinct !== 1 || pendingStrip.grey !== '207,212,210,255') fail(`pending section strip: ${JSON.stringify(pendingStrip)}`);
   const nameHandle = '#geoLabels .geo-name-handle';
   await p.evaluate(() => window.ichantool.setMode('geo'));
   await until(() => document.getElementById('busy').hidden);

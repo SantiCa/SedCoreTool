@@ -483,7 +483,7 @@ Independent of M8; each can be done in under an hour when the maintainer asks.
     check passes on Linux and Windows. It was a rasteriser dependence, not a logic error of the preview. (b) That failure had hidden a second
     one: two checks of `interrupted-saves.mjs` read Spanish messages and the Linux runner's browser is English; the test now fixes the
     interface language. First green run: work branch, commit after `0926bbc`. `master` (V0.150) still has the failing job until the next
-    version. Remaining: the local flakes (a wait for the 16-bit TIFF after reopening, Puppeteer's 180 s protocol timeout). Done when the
+    version. (c) The local flakes (the wait for the 16-bit TIFF after reopening, Puppeteer's 180 s protocol timeout) had a product cause, found with the CPU profiler on 14 November 2026: `sectionCanvas` created a new full-strip grey canvas on every call for a section whose picture was not loaded yet, and the image strip asks once per output row (up to 4000), so `toDataURL` took 6-25 s. It now keeps one grey canvas while the section stays pending; the smoke test asserts it (fails without the fix) and names any page call over 5 s. Done when the
     `e2e` job passes ten consecutive pushes.
 - [ ] **H3 - Move raw benchmark reports out of the repository.** `docs/benchmarks/*.json` weighs about 10 MB.
       Needs the maintainer's decision on where the raw files go; the `.md` summaries stay.
