@@ -32,8 +32,8 @@ describe a planned part as available. When you build a planned part, change its 
                     private stdin/stdout pipes, `SCE1` frames, no network port
 ┌─────────────── Engine process: src/sedcoretool run by the bundled CPython 3.12 ───────────┐
 │  engine/    transport only: frames, buffers, coordinator, job runner, method worker script │
-│  methods/   one module per versioned scientific method (planned)                           │
-│  kernels/   pure NumPy primitives shared by every caller (planned)                         │
+│  methods/   one module per versioned scientific method (built: section.intervals/1)        │
+│  kernels/   pure NumPy primitives shared by every caller (built)                           │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
    Python API and command line (pipeline.py, cli.py, batch.py …) call kernels/methods in-process.
    They never start the engine process.
@@ -41,8 +41,9 @@ describe a planned part as available. When you build a planned part, change its 
 
 The goal of milestone M8 is **one implementation of each scientific method**, written in Python, used by the
 desktop program (through the engine process), by the Python API and by the command line. JavaScript keeps
-interaction, drawing, editing and saving. Today the renderer still calculates everything itself; the engine
-process exists but only answers a diagnostic request.
+interaction, drawing, editing and saving. Today, with the engine experiment off (the default), the renderer still
+calculates everything itself; with it on, the interval table of each section comes from the engine method
+`section.intervals/1` (M8.3) and every other calculation still runs in JavaScript.
 
 ## 2. What is built and what is planned
 
@@ -53,13 +54,13 @@ process exists but only answers a diagnostic request.
 | Python package: intervals, indices, age, export, batch, CLI, U-Net | built | `src/sedcoretool/` |
 | Engine process: frames, bounded buffers, queue, cancellation, isolated worker | built, off by default | `src/sedcoretool/engine/`, `desktop/engine*.js` |
 | Bundled Python runtime, verified at launch | built (Windows measured; macOS/Linux not yet run) | `desktop/runtime-lock.json`, `tools/prepare_engine_runtime.py` |
-| Engine methods: `buffer.digest/1` (a transport diagnostic) and `section.intervals/1` (the first scientific method, not yet used by the interface) | built | `engine/worker.py`, `engine/method_worker.py` |
+| Engine methods: `buffer.digest/1` (a transport diagnostic) and `section.intervals/1` (the first scientific method) | built | `engine/worker.py`, `engine/method_worker.py` |
 | `kernels/` package: binning, counting, classification, age interpolation; `tests/test_architecture.py` | built (M8.3.3) | §3.1 |
 | `methods/` package with the registry and `section.intervals/1`, called directly | built (M8.3.4) | §3.1 |
 | Job runner in the engine process: `section.analyze` runs a registered method in the engine's long-lived worker process (one job at a time, replaced after any anomaly), results are adopted as committed buffers and downloaded with `buffer.read` | built (M8.3.5) | §3.1, §4 |
 | Renderer-facing engine bridge (`engine-ipc.js`, `engineclient.js`, `engineanalysis.js`) | **built, experimental, off by default** (M8.3.6–M8.3.7) | §3.2, §3.3 |
-| Section intervals calculated by the engine (`section.intervals/1`) | **planned** (M8.3) | contract §4–§5 |
-| Engine-owned images and tiles, remaining methods | **planned** (M8.4, M8.5) | roadmap |
+| Section intervals calculated by the engine (`section.intervals/1`) and shown by the interface | **built, experimental, off by default** (M8.3.7); slower than JavaScript, see the M8.3.8 evidence | contract §4–§5 |
+| Section inputs kept resident in the engine between analyses, remaining methods | **planned** (M8.4, M8.5) | roadmap |
 
 The engine experiment is enabled only by the environment variable `SEDCORETOOL_ENGINE_EXPERIMENT=1`. Keep that
 default until M8.6.
@@ -112,11 +113,11 @@ Rules:
 
 Pure modules for M8.3:
 
-- `sectionanalysis.js` — **built** (M8.3.1): everything about analysing one section that does not need the DOM; today
-  the effective class of each object, the legacy calculation that used to live in `app.js::analyze` (moved, not
-  rewritten) and its row-count cache. **Planned** additions (M8.3.2, M8.3.7): the revision key of the scientific
-  inputs, building the engine snapshot of contract §4, and converting an engine result into the existing `s.bins`
-  array so that tables, columns, figures and exports do not change.
+- `sectionanalysis.js` — **built** (M8.3.1, M8.3.2, M8.3.7): everything about analysing one section that does not
+  need the DOM: the effective class of each object, the legacy calculation that used to live in `app.js::analyze`
+  (moved, not rewritten) and its row-count cache, the revision key of the scientific inputs (`analysisRevision`),
+  the engine snapshot of contract §4 (`buildIntervalSnapshot`) and the conversion of an engine result into the
+  existing `s.bins` array (`resultToBins`), so that tables, columns, figures and exports do not change.
 - `engineclient.js` — uploads typed arrays in chunks of at most 1 MiB, starts and cancels jobs and downloads
   results through an injected bridge object. In the desktop program the bridge is `window.corantoolDesktop.engine`;
   in Node tests it is a fake.
@@ -142,7 +143,7 @@ Pure modules for M8.3:
 and nothing in the wire protocol or the method contracts may mention Electron, IPC channels or the renderer.
 Everything Electron-specific stays in `desktop/`.
 
-## 4. Path of one scientific request (target design for M8.3)
+## 4. Path of one scientific request (built in M8.3)
 
 Example: the user edits a trace and the interval table must update.
 
@@ -173,10 +174,14 @@ Rules of this path:
   JavaScript calculation. With the experiment off, only the JavaScript calculation runs. There is no per-job choice.
 - **The renderer owns live editing and saved projects** until M8.4. The engine never reads or writes project
   files, and a runtime or engine failure must not change live results or the last good save.
-- **Synchronous today, asynchronous tomorrow.** `analyze(s)` currently fills `s.bins` before returning and seven
-  call sites read `s.bins` immediately (`app.js` lines near 1084, 2158, 2247, 2556, 2558, 2691 and `columns.js` 53).
-  The engine path is asynchronous. M8.3.6 converts those call sites to await a single
-  `analyzeSections(sections)` function; M8.3.1 prepares it by moving the calculation out of `app.js`.
+- **Synchronous callers, asynchronous engine.** The seven call sites of `analyze(s)` still call it synchronously.
+  With the experiment off it fills `s.bins` before returning. With it on it only requests the analysis and leaves the
+  section pending (no bins); `engineanalysis.js` calls the controller's `onChange` when a result is published, which
+  redraws, and exports await `analyzeSections(sections)` so they never write a pending section (decided in M8.3.7
+  instead of turning every render path asynchronous).
+- **Every analysis uploads every input today.** The label image and the exclusion mask (about 30 MB for a
+  6-Mpixel section) cross the page, the main process and the engine for every revision, even when only a setting
+  changed. This is most of the measured time (M8.3.8); M8.4 keeps them resident in the engine.
 - Buffers and metadata never travel as JSON arrays or base64. Missing values travel as a value column plus a
   `<name>_valid` column, never as NaN or a magic number.
 

@@ -4,10 +4,13 @@ Design baseline: V0.141, 12 November 2026. Authorised by the maintainer's instru
 [roadmap](roadmap.md#active-priority-desktop-and-one-scientific-engine). Editor: Codex. Verification:
 source inspection and author-run repository checks; no independent reviewer is assigned.
 
-This is a specification for pending M8.2–M8.6 work, not a description of an implemented engine.
-The current desktop/browser calculations, Python API, file formats and defaults remain unchanged.
-M8.2.1 implements a development-only subset: see [current behaviour and limits](TECHNICAL_DOCUMENTATION.md#262-experimental-engine-process).
-The remaining capabilities below are still design requirements, not claims about that transport slice.
+This is the specification for M8.2–M8.6. M8.2 and M8.3 implement part of it behind the default-off experiment
+flag: the transport, staged buffers, `buffer.read`, `section.analyze` with `section.intervals/1` and the job
+execution model of §3 ([current behaviour and limits](TECHNICAL_DOCUMENTATION.md#262-experimental-engine-process)).
+**Not implemented yet** (14 November 2026): progress events, the content-keyed reuse of §2 (every analysis uploads
+and recomputes everything), retry after `ENGINE_UNAVAILABLE`, and everything after M8.3. The matched-timing gate of
+§7 fails on the first slice and its memory-peak gate was not evaluated (M8.3.8 evidence). Without the flag, the
+desktop/browser calculations, Python API, file formats and defaults are unchanged.
 Protocol version 1 and method `section.intervals/1` below are separate versioned contracts. Changing
 scientific semantics requires a new method version and explicit acceptance, even if the wire format fits.
 

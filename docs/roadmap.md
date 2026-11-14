@@ -19,29 +19,35 @@ Updated 14 November 2026.
   master con una nueva version 0.150"). **No tag and no GitHub Release exist for V0.149 or V0.150**: a tag publishes a Release and is the
   owner's decision. The *Desktop builds* workflow is started by hand for the macOS and Linux builds (see the release checklist).
 - **Active work branch:** `work/2026-11-13` (pushed), which `master` now contains. Changes after V0.150 accumulate under `## Unreleased`.
+  The maintainer decided on 14 November 2026 that nothing goes to `master` until M8.4 is finished; that delivery will be V0.151.
 - **Checks:** see the last line of this block; it is rewritten at the end of every session.
-- **Where we are:** M8.1 and M8.2 are done at the development gate (Windows). M8.3 is complete: with `SEDCORETOOL_ENGINE_EXPERIMENT=1` the
-  desktop program calculates the interval table of every section in the Python engine and shows it, with a pending state, stale-result
-  rejection, cancellation and an error state, never falling back to JavaScript. The measurements of card M8.3.8 (first and corrected) are recorded in
-  [docs/validation/M8.3.8-engine-analysis-summary.md](validation/M8.3.8-engine-analysis-summary.md).
-- **Next step:** M8.4 (cards to be written by a design session). The corrections after M8.3.8 are done: a long-lived method worker, a 25 ms
-  memory sampler, a second measurement in which every gate passes (see the Result of card M8.3.8). Left open on purpose: restart of the
-  engine after the coordinator dies (needs a decision on how the interface retries), the label-image upload (removed by M8.4).
-  Also open: card H5 (the `e2e` job must pass ten consecutive pushes).
+- **Where we are:** M8.1 and M8.2 are done at the development gate (Windows). M8.3 is complete at the development gate: with
+  `SEDCORETOOL_ENGINE_EXPERIMENT=1` the desktop program calculates the interval table of every section in the Python engine and shows it,
+  with a pending state, stale-result rejection, cancellation and an error state, never falling back to JavaScript. Measurements of card
+  M8.3.8: [summary](validation/M8.3.8-engine-analysis-summary.md). **The engine path is 30-60 times slower than JavaScript and fails the
+  matched-timing gate of contract §7**; about 90 % of the time is moving the label image on every analysis (design review of 14 November 2026).
+- **Never run on macOS or Linux:** the *Desktop builds* workflow last ran on 8 November 2026 (V0.84, failed), before the engine existed.
+  The bundled runtime, the engine process and the engine experiment of M8.2-M8.3 have been built and run only on Windows. The `tests`
+  workflow does run the Python engine tests on macOS and Linux, with the runner's Python, not the bundled runtime.
+- **Next step:** card M8.3.9, the milestone gate of M8.2-M8.3 on Windows, macOS and Linux (rule added to AGENTS.md §6 on the maintainer's
+  request of 14 November 2026: every milestone ends with cross-platform checks). It needs the maintainer to start *Desktop builds* on the
+  work branch. Then M8.4.1, after the maintainer answers the decisions listed under M8.4. Also open: card H5 (the `e2e` job must pass ten
+  consecutive pushes).
 - **Reminder for whoever talks to the maintainer:** the maintainer accepted the two acceptance levels on
   13 November 2026 and asked to be **reminded to run the release-gate tests** (the release checklist below:
   macOS and Linux, clean Windows machine, cold-cache first launch, saturated CPUs, package sizes, and the
   numerical/timing/memory/recovery gates). Remind him when a milestone of M8 finishes and before any flag is
   switched on by default or a version with the engine is announced.
-- **Decisions waiting for the maintainer:** only the flags in the table below that need a promote/remove decision.
-  Decided on 13 November 2026: acceptance levels (accepted), scope of 1.0 (below), publication of V0.149.
+- **Decisions waiting for the maintainer:** the five questions at the start of [M8.4](#m84---engine-resident-section-data-and-fast-analysis)
+  and the flags in the table below that need a promote/remove decision. Decided on 13 November 2026: acceptance levels (accepted), scope of
+  1.0 (below), publication of V0.149. Decided on 14 November 2026: a milestone gate on macOS and Linux closes every milestone.
 - **Last full checks: passed** on 14 November 2026 after the corrections following V0.150 (branch `work/2026-11-13`, run one after another on the
   maintainer's Windows computer): `pytest -q` 605 passed / 8 skipped; `npm test` 295 passed; `npm run typecheck` (no new diagnostics);
   `sync_version.py --check`; `ruff check src tests tools`; standalone build; `tests/e2e/smoke.mjs` (three consecutive runs, no slow page call
   over 5 s); `tests/e2e/desktop.mjs` with the engine experiment on and off, bundled runtime rebuilt first (`prepare.js`, then
   `prepare_engine_runtime.py`). The corrected measurements of card M8.3.8 are separate evidence. **GitHub workflow `tests`:** all jobs pass on
-  the work branch since commit `522f8ad`; on `master` (V0.150) only `e2e` fails, fixed on the branch and reaching `master` with the next
-  version. The corrections after V0.150 are not pushed yet.
+  the work branch since commit `522f8ad`, including `fd13070` (the corrections after V0.150, pushed); on `master` (V0.150) only `e2e` fails,
+  fixed on the branch and reaching `master` with V0.151. The design review of 14 November 2026 changed documents only (no code).
 
 ## How work is accepted
 
@@ -51,10 +57,11 @@ every platform and performance gate had to pass before the next task could start
 | Level | Needed for | What must be true |
 |---|---|---|
 | **Development gate** | Starting the next card | The card's "Done when" holds; its tests and the session checks pass on the maintainer's Windows workstation; anything unfinished is behind a flag that is off by default; evidence states what was not measured. |
+| **Milestone gate** (added 14 November 2026) | Starting the next milestone or M8.5 slice; integrating a version into `master` | On one commit of the work branch: the `tests` workflow and a manual run of *Desktop builds* pass on Windows, macOS (Apple Silicon runner) and Linux, including `tests/e2e/desktop.mjs` with the engine experiment on and off and the package check ([how: DEVELOPMENT §8](DEVELOPMENT.md#8-versions-ci-and-releases)). Each failure is fixed, or recorded with its message and a decision of the maintainer. It is the last card of every milestone. |
 | **Release gate** | Switching a flag on by default, or publishing a version to users | Everything in the [release checklist](#release-checklist): all supported platforms, clean machines, and the numerical, timing, memory and recovery gates of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates). |
 
-Never report the release gate as met from development evidence. A failed gate is recorded with its measurement;
-it is not hidden, and limits are not relaxed to pass it.
+Never report the release gate as met from development or milestone evidence. A failed gate is recorded with its
+measurement; it is not hidden, and limits are not relaxed to pass it.
 
 ### Flags
 
@@ -79,7 +86,7 @@ Decided by the maintainer on 13 November 2026.
 - **Not required:** optional acceleration (M4), a new interface shell (M9), multi-gigabyte images beyond what M8.4
   and M7 need (M2.3 as a whole).
 - **Consequence for the order:** after M8.6 the next milestones are M6 and M7, in that order unless the
-  maintainer changes it; their cards are written by a design session when M8.4 has passed its development gate,
+  maintainer changes it; their cards are written by a design session when M8.4 has passed its milestone gate,
   because they use the engine's image and data services.
 
 ## Active priority: desktop and one scientific engine
@@ -92,10 +99,10 @@ command line call the same code directly.
 | Order | Milestone | State |
 |---|---|---|
 | 1 | M8.1 Inventory and engine contract | done ([V0.141](../CHANGELOG.md#v0141--2026-11-12)) |
-| 2 | M8.2 Engine process, bundled runtime, packaging | done at the development gate; release items in the checklist |
-| 3 | **M8.3 First scientific slice: section intervals** | **next: cards below** |
-| 4 | M8.4 Engine-owned images and large files (includes M2.3) | cards written when M8.3 passes its development gate |
-| 5 | M8.5 Remaining methods, one slice at a time | idem |
+| 2 | M8.2 Engine process, bundled runtime, packaging | done at the development gate; milestone gate in card M8.3.9; release items in the checklist |
+| 3 | **M8.3 First scientific slice: section intervals** | **done at the development gate; milestone gate M8.3.9 next** |
+| 4 | M8.4 Engine-resident section data and fast analysis | cards below, proposed by the design review of 14 November 2026; five decisions pending |
+| 5 | M8.5 Remaining methods, one slice at a time | cards written when M8.4 passes its milestone gate |
 | 6 | M8.6 Release gate, default-on, duplicate JavaScript science removed, HTML version frozen | idem |
 | 7 | Statistics (M6) and radiographs (M7), both **required for 1.0**; then validation and publication | [roadmap-future.md](roadmap-future.md) |
 | 8 | Conditional: acceleration (M4), interface shell (M9) | [roadmap-future.md](roadmap-future.md) |
@@ -127,14 +134,17 @@ What the development gate does **not** cover. All of it must hold before M8.6 sw
 or a version with the engine is published. Tick an item only with recorded evidence.
 
 - [ ] macOS (Intel, Apple Silicon, universal disk image) and Linux (AppImage, DEB): runtime preparation, native
-      smoke check, packaged start-up and close. Needs those machines or a run of the *Desktop builds* workflow
-      (requires pushing; maintainer's decision).
+      smoke check, packaged start-up and close. The milestone gates cover runtime preparation, the desktop end-to-end
+      test from source and packaging on the Apple Silicon and Linux x64 runners; still needed for the release gate:
+      launching the packaged program (not only building it) on each system, and an Intel Mac (GitHub's Intel macOS
+      runners are being retired; check what is offered before relying on them).
 - [ ] Clean Windows machine (no Python, no Node) and at least one other antivirus configuration.
 - [ ] First launch with a cold disk cache (after a reboot) against the 5 s engine-ready gate. Measured so far:
       3.7–3.9 s right after extraction; 11–25 s before the runtime was pruned. Measure once after the next reboot
       with `tools/measure_packaged_startup.mjs <exe> --runs 1`.
 - [ ] Whole-process memory, timing, responsiveness, cancellation and recovery gates of contract §7 on the first
-      scientific slice (measured in card M8.3.8).
+      scientific slice. Measured in card M8.3.8 on Windows: responsiveness, cancellation and recovery pass; **matched
+      timing fails** and the memory peak was not evaluated. Measured again in card M8.4.1 and after each M8.4 card.
 - [ ] Engine start-up with all CPUs saturated: runtime verification took 16 s median before pruning and the
       verification record; repeat `tools/measure_engine_lifecycle.mjs --load 16`.
 - [ ] Installer and portable sizes recorded for every platform.
@@ -144,7 +154,7 @@ or a version with the engine is published. Tick an item only with recorded evide
 **Outcome.** With the experiment on, the interval percentages, per-class percentages, BI and ii of a section are
 computed by the engine method `section.intervals/1` and shown by the existing interface; with it off, nothing
 changes. Inputs and results are defined in [contract §4–§5](roadmap-engine-contract.md#4-scientific-input-contract-sectionintervals1);
-the path of a request is [ARCHITECTURE §4](ARCHITECTURE.md#4-path-of-one-scientific-request-target-design-for-m83).
+the path of a request is [ARCHITECTURE §4](ARCHITECTURE.md#4-path-of-one-scientific-request-built-in-m83).
 Cards are done in order. Each one claims the development gate only.
 
 #### M8.3.1 - Move the section analysis out of `app.js` — state: Done (12 Nov 2026, [V0.149](../CHANGELOG.md#v0149--2026-11-13))
@@ -361,7 +371,7 @@ Cards are done in order. Each one claims the development gate only.
 #### M8.3.7 - The interface shows engine results under the flag — state: Done (development gate, 14 November 2026)
 
 - **Goal:** with the experiment on, `s.bins` comes from the engine; with it off, from the JavaScript calculation.
-- **Read first:** [ARCHITECTURE §4](ARCHITECTURE.md#4-path-of-one-scientific-request-target-design-for-m83);
+- **Read first:** [ARCHITECTURE §4](ARCHITECTURE.md#4-path-of-one-scientific-request-built-in-m83);
   contract §2; `app/js/sectionanalysis.js`; the seven call sites of `analyze` (`app.js`, `columns.js`).
 - **Change:** `app/js/sectionanalysis.js` (`analysisRevision(section, project)`, `resultToBins(result)`); create
   `app/js/engineclient.js` and its Node test with a fake bridge; `app/js/app.js` and `columns.js` (callers await
@@ -407,26 +417,214 @@ Cards are done in order. Each one claims the development gate only.
   27 ms; 6.9 s against 110 ms), mostly per-job overhead. The measurement also exposed a real bug (a section left pending when its inputs
   changed under a waiting job), fixed in the same delivery. **Corrections (14 November 2026, on the maintainer's instruction to fix errors before M8.4):**
   one long-lived method worker (contract amended), a psutil memory sampler at 25 ms (median 25.4 ms), then the whole measurement was repeated
-  ([corrected evidence](validation/M8.3.8-engine-analysis-windows-corrected.json)): every gate passes, cold analysis is 1.6 s (public) and 3.4-3.9 s (synthetic)
-  against 0.03 s and 0.11 s in JavaScript, the ten-cycle memory gate passed in four of four runs. Remaining cost is the label-image upload, removed by M8.4.
+  ([corrected evidence](validation/M8.3.8-engine-analysis-windows-corrected.json)): cold analysis is 1.6 s (public) and 3.4-3.9 s (synthetic)
+  against 0.03 s and 0.11 s in JavaScript, the ten-cycle memory gate passed in four of four runs. **Verdicts corrected by the design review of the same
+  day:** matched timing is a gate of contract §7 and fails (the tool had reported it as "not a gate"), and the memory-peak gate was not evaluated
+  (no flag-off sample of the Electron tree); parity, responsiveness, cancellation, cycles and kills pass. The cost is data movement (M8.4).
   The experiment stays off by default.
 
-### M8.4 to M8.6 - summaries
+#### M8.3.9 - Milestone gate of M8.2 and M8.3 on Windows, macOS and Linux — state: Ready (next)
 
-Cards are written by a design session when the previous milestone passes its development gate.
+- **Goal:** the engine work of M8.2-M8.3 is built and tested on the three systems before M8.4 builds on it. Today it
+  has run only on Windows: *Desktop builds* last ran on 8 November 2026 (V0.84, failed).
+- **Read first:** [AGENTS.md §6](../AGENTS.md#6-working-on-a-task) (milestone gate);
+  [DEVELOPMENT §8](DEVELOPMENT.md#8-versions-ci-and-releases); `.github/workflows/desktop.yml`; card H5 (how CI
+  failures were read and fixed without logs).
+- **Change:** `.github/workflows/desktop.yml` (add a run of `tests/e2e/desktop.mjs` with the experiment off, next to
+  the existing run with it on, on every system); whatever a failure shows to be broken, each fix with its own test;
+  this card's result; the status block; the release checklist.
+- **Do not touch:** the `release` job and its conditions (no tag, no draft, no Release); `master`; the experiment
+  default; tolerances and deadlines of the tests (a failure is fixed or recorded, never relaxed).
+- **Steps:**
+  1. Add the flag-off step to `desktop.yml`; commit; push the work branch (allowed). Confirm the `tests` workflow
+     passes on that commit.
+  2. Ask the maintainer to start *Desktop builds* on `work/2026-11-13` with `draft_release` off.
+  3. Read the result through the public API. For each failing system: find the cause from the annotations or by
+     reproducing it, fix it on the branch with a test, push, ask for a new run. Separate failures of the program
+     from failures of the runner (for example a missing system library on Linux) and record which is which.
+  4. Record the run id, commit, per-system result, the duration of the runtime preparation and the size of every
+     artifact (partial evidence for the "package sizes" item of the release checklist; the CI artifact is not the
+     signed product).
+- **Tests:** the two workflows themselves.
+- **Done when:** one *Desktop builds* run on the branch head passes on Windows, macOS and Linux and `tests` passes on
+  the same commit, or each remaining failure is recorded here with its message and the maintainer has decided what
+  to do. Claims the milestone gate only: packaged start-up on macOS/Linux, Intel Macs and clean machines stay on the
+  release checklist.
 
-- [ ] **M8.4 - Bounded engine data and image services.** Engine-owned native images, chunked operations and a
-      bounded tile/cache interface; the renderer receives visible tiles, editing updates and result summaries
-      instead of holding a second copy of every image. Implements M2.3.1–M2.3.5
-      ([roadmap-future.md](roadmap-future.md)).
-  - Acceptance: the multi-gigabyte contract covers the complete Electron/engine process tree, disk usage, buffer
-    ownership and memory release after closing a project; native pixels, editing coordinates, masks/history and
-    atomic save/backup recovery are preserved; raising heap or image limits alone does not pass.
+### M8.4 - Engine-resident section data and fast analysis
+
+Proposed by the design review of 14 November 2026; replaces the earlier summary ("bounded engine data and image
+services, implements M2.3.1-M2.3.5"). Every card claims the development gate; M8.4.7 is the milestone gate.
+
+**Why the plan changed.** Measured on one 6.1-Mpixel section with the worker already running: snapshot 56 ms,
+upload 195 ms (24 round trips of 1 MiB through page, main process and engine, written to the scratch disk and
+hashed in the page and again in the engine), engine 132 ms, download 9 ms (about 35 result buffers, one read
+each): about 392 ms. JavaScript takes 17 ms, and under 1 ms when only the interval size changes, because it keeps
+its row counts. The NumPy method itself takes about 50 ms in-process (parse 8 ms, run 41 ms). So the engine path is
+slow because it moves the whole label image for every analysis, even when only a setting changed; copying and
+hashing in the page are not the main cost (6 ms and 15 ms in Node 22). Moving image ownership to the engine, as the
+earlier summary proposed, would not remove that cost for editing: every brush stroke would then cross two processes.
+
+**Decisions for the maintainer (answer before M8.4.1):**
+
+1. **Who owns live masks.** Proposal: the renderer keeps live editing, undo/redo and saving, as decision D1 says;
+   the engine holds a verified copy of each section's analysis inputs, which the renderer updates with the changed
+   rows. This withdraws the last paragraph of contract §2 (engine-owned masks, edit commands sent to the engine,
+   tiles sent back), unless the maintainer prefers it.
+2. **Multi-gigabyte images leave M8.4.** The scope of 1.0 already excludes M2.3 as a whole, while the earlier
+   summary said M8.4 implements M2.3.1-M2.3.5. Proposal: M2.3 returns to the later milestones; what M8.5, M6 and M7
+   need from engine-held images and tables is part B of M8.4 (below), designed after part A.
+3. **Timing scenarios.** Contract §7 defines one "warm end-to-end median". Proposal: evaluate that same formula on
+   three named warm scenarios: (a) the interval size changes on all sections, (b) one edit, its undo and its redo on
+   the largest section, (c) an unchanged re-analysis. Cold opening of a project is reported separately, as §7 already
+   allows. This names what is measured; the limit does not change. §7 may be changed only after this decision.
+4. **When V0.151 goes to `master`:** after part A (M8.4.1-M8.4.7, the speed of the engine path), or only after
+   part B as well (several more weeks of work on the branch).
+5. **Engine restart after a coordinator failure.** Today the engine stays unavailable until the program restarts.
+   Proposal: the error state of a section offers "Retry", which starts a new engine session and resubmits only the
+   current snapshots (contract §3 already requires fresh tokens), plus at most one automatic restart per program
+   session, announced to the user. Alternative: manual retry only.
+
+**Outcome of part A.** With the experiment on, changing a setting re-analyses without uploading any image, and an
+edit uploads only the changed rows; scenarios (a)-(c) meet the matched-timing gate on the maintainer's Windows
+computer and the memory peak gate is evaluated. Nothing changes with the experiment off; no fallback to JavaScript.
+
+#### M8.4.1 - Measure the scenarios and give every gate a verdict — state: Ready after M8.3.9 and decisions 1-3
+
+- **Goal:** `tools/measure_engine_analysis.mjs` reports pass or fail for matched timing on scenarios (a)-(c) and for
+  the memory peak, and records a baseline before any optimisation.
+- **Read first:** contract §7; [M8.3.8 summary](validation/M8.3.8-engine-analysis-summary.md) including its
+  correction; the tool.
+- **Change:** contract §7 (the scenarios, as decided); the tool; new evidence `docs/validation/M8.4-baseline-windows.json`
+  and a short summary next to it; this card's result.
+- **Do not touch:** the limits of §7; engine, bridge and interface code.
+- **Steps:**
+  1. Write the decided scenarios into §7.
+  2. Scenario (a): set the interval size from 2 to 1.37 cm and back; there is no new mask version, so the JavaScript
+     reference uses its cached row counts. Scenario (b): one edit through the interface's own edit path on the largest
+     section (a stroke of about 20 x 100 pixels), then undo, then redo, each timed to the published result.
+     Scenario (c): no change. Cold opening: reported only.
+  3. Sample the Electron process tree with the experiment off as well, so the memory-peak gate has its comparison.
+  4. Replace `timing_not_a_gate` by verdicts computed from the formula of §7, written as a pure helper.
+- **Tests:** `node --test` on the verdict helper with hand-computed limits on both sides of each boundary; one full run.
+- **Done when:** the baseline is committed with a verdict for every gate and scenario. Expected today: (a) and (b) fail.
+
+#### M8.4.2 - Section inputs stay resident in the engine — state: Ready after M8.4.1
+
+- **Goal:** when the mask did not change, an analysis uploads only the five JSON tables; labels, exclusion and
+  overlap stacks already in the engine are reused.
+- **Read first:** `app/js/engineclient.js`, `engineanalysis.js`; `sectionanalysis.js` (`analysisRevision`,
+  `buildIntervalSnapshot`); `desktop/engine-ipc.js` (token ownership, `MAX_TOKENS_PER_PAGE`);
+  `src/sedcoretool/engine/buffers.py` (session budget, the 128-buffer cap); contract §3 limits; in `app.js`,
+  `lazyMask`, `beginOp` and `afterChange` (where the mask version `_mv` changes).
+- **Change:** `engineclient.js` (a per-section table of resident input tokens and the mask version they hold,
+  least-recently-used, bounded at 256 MiB); `engineanalysis.js` (drop a section's resident inputs when the section or
+  the project closes); `buffers.py` and `engine-ipc.js` (buffer and token count caps sized for resident inputs; the
+  512 MiB byte budget does not change); contract §3 (the reuse rule and the caps); tests.
+- **Do not touch:** the method, the result contract, `s.bins`, saving; the rule that the page never sees engine handles.
+- **Steps:**
+  1. Reuse only when the section's `_mv`, width, height and a signature of `s.stacks` (length and number of members)
+     all equal those of the upload: the invariant the JavaScript row-count cache `_rc` already relies on. Otherwise
+     upload again.
+  2. `LIMIT_EXCEEDED` when beginning a buffer: release the least recently used resident inputs of other sections and
+     try once more; a second failure is the section's error state.
+  3. A token the bridge no longer knows (the engine restarted) makes the section upload again once.
+- **Tests:** Node with the fake bridge: after an interval-size change only the JSON tables are uploaded; after an
+  edit everything is; eviction order and byte bound; release on close; a restarted engine. Python: the new caps.
+  Desktop end-to-end: an interval-size change with the experiment on matches the JavaScript reference. Measure (a).
+- **Done when:** the tests pass and scenario (a) is measured and recorded (it may still fail until M8.4.3).
+
+#### M8.4.3 - Row counts reused in the engine; one result buffer per job — state: Ready after M8.4.2
+
+- **Goal:** an analysis whose mask inputs and effective classes did not change skips counting, and its result
+  travels as one buffer instead of about 35.
+- **Read first:** `methods/section_intervals.py` (`parse`, `_count`, `run`); `engine/method_worker.py`, `worker.py`,
+  `server.py` (`complete_analysis`), `buffers.py` (`adopt`); contract §2 (cache keys), §3 (`section.analyze` result), §5.
+- **Change:** `methods/section_intervals.py` (split `run` into pure `count(snapshot, cancelled)` and
+  `intervals(snapshot, counts)`); `engine/method_worker.py` (row counts cached in the worker, bounded at 64 MiB; the
+  coordinator passes the verified SHA-256 of every input in the job description); one packed result file with a
+  layout table, verified as a whole by the coordinator; `desktop/engine-ipc.js` and `app/js/engineclient.js` (one
+  read, split by the layout); contract §2, §3, §5 (columns and dtypes unchanged, only their transport); tests.
+- **Do not touch:** formulas, fixtures, and the method name and version (results are identical).
+- **Steps:**
+  1. Cache key: SHA-256 of `labels`, `exclude`, `stack_offsets` and `stack_members`, the bytes of the object-to-class
+     table that `parse` derives, the set of listed object IDs, and the ROI. Nothing outside the key may influence
+     `count`. The label check of `parse` is skipped only on a hit.
+  2. Layout `{name: {dtype, shape, offset, byte_length}}`: offsets aligned to 8 bytes, inside the buffer, no overlap,
+     exactly the columns of §5; anything else is `INTERNAL` and nothing is adopted.
+  3. The cache lives and dies with the worker, which is replaced after any anomaly and stopped after 30 s idle.
+- **Tests:** a hit and a miss for every key component, mutation-tested (dropping any component must fail a test); the
+  byte bound; no entry survives a replaced worker; every fixture through the real coordinator unchanged; layout
+  attacks (overlap, out of range, wrong dtype, missing or extra column).
+- **Done when:** the tests pass; scenario (a) is measured with its stage breakdown and verdict.
+
+#### M8.4.4 - After an edit, only the changed rows travel — state: Ready after M8.4.3
+
+- **Goal:** an edit, undo or redo uploads only the changed rows of labels and exclusion onto the resident copy; the
+  engine verifies the complete result before using it.
+- **Read first:** in `app.js`, `beginOp`, `commitOp`, `swapEditStep`, `compactSectionStacks`, `lazyMask`;
+  `app/js/engineclient.js`; `engine/buffers.py`; contract §3 (`buffer.begin`, `buffer.chunk`, `buffer.commit`).
+- **Change:** contract §3: new `buffer.derive {base, byte_length, sha256}`, a staging buffer that starts as a copy of
+  the committed `base` (same dtype and shape), whose chunks may come at ascending, non-overlapping offsets; commit
+  verifies the SHA-256 of the whole result as today; the full length is charged to the budget.
+  `engine/buffers.py`, `server.py`; `desktop/engine-ipc.js`, `preload.js` (`deriveBuffer`); new pure module
+  `app/js/maskchanges.js` (changed row ranges since a mask version); `app.js`, wiring only (`commitOp` and
+  `swapEditStep` report the rows of `op.lm` and `op.ex`; the mask setter and stack compaction, which renumbers
+  overlap codes everywhere, report all rows); `engineclient.js`; `tools/build_standalone.py` (`ORDER`); tests.
+- **Do not touch:** the editing tools, edit history and saving; the rule that a buffer is committed only when its full
+  SHA-256 matches.
+- **Steps:**
+  1. The page hashes the current labels and exclusion in full (15 ms for 24.6 MB in Node 22) and sends only the changed
+     row ranges; unknown ranges mean a full upload.
+  2. A hash mismatch at commit means a change was missed: drop the resident copy, upload in full, and count the event
+     in the opt-in diagnostics; the end-to-end test requires the count to stay at 0.
+- **Tests:** Node: row ranges from edits, undo and redo, and their merging; the mismatch path. Python: derive from a
+  staging or released base; chunks out of order, overlapping or out of range; a mismatched hash commits nothing and
+  restores the budget. Desktop end-to-end: paint, undo and redo with the experiment on match the JavaScript reference,
+  and a small stroke uploads less than 5 % of the mask bytes. Measure (b).
+- **Done when:** the tests pass; scenario (b) is measured with its verdict.
+
+#### M8.4.5 - Recount only the changed rows — state: Conditional
+
+- Only if scenario (b) still fails after M8.4.4: the worker recounts the changed rows of a derived buffer and reuses
+  the base's row counts when the effective classes did not change. A design session writes the card if it is needed.
+
+#### M8.4.6 - Restart after a coordinator failure — state: Ready after decision 5
+
+- **Goal:** the behaviour chosen in decision 5, with fresh tokens and only current snapshots resubmitted (contract
+  §3). **Tests:** the kill cases of `tools/measure_engine_analysis.mjs` and `tests/app/engine-analysis.test.mjs`
+  extended; the JavaScript calculation is never used.
+
+#### M8.4.7 - Milestone gate of part A — state: after M8.4.6
+
+- **Goal:** the measurement of M8.4.1 repeated on the final state, with a verdict for every gate and scenario, and the
+  milestone gate on Windows, macOS and Linux. If decision 4 chose "after part A", V0.151 follows when the maintainer
+  asks for it.
+
+**Part B (summaries; cards written by a design session after M8.4.7).**
+
+- [ ] **M8.4.8 - Engine-held source images.** A section's source image is imported once into the engine at its
+      native bit depth, read back by region at a requested scale, identified by SHA-256 and kept in a bounded cache.
+      Needed by M8.5b (filters, detection, object features), M8.5e (U-Net inference) and M7 (radiographs). Decoder
+      parity (browser decoding against Pillow, 16-bit TIFF) is its own fixture set. Known trap: the coordinator
+      checks float buffers in pure Python (63 ns per value, about 1 s per 128 MiB); large float data must be checked
+      in the worker with NumPy.
+- [ ] **M8.4.9 - Engine-held record tables.** Snapshots of depth/age records and data tables for M8.5a, M8.5d and M6.
+- [ ] **M8.4.10 - Milestone gate of part B.**
+
+### M8.5 and M8.6 - summaries
+
+Cards are written by a design session when the previous milestone passes its milestone gate.
+
 - [ ] **M8.5 - Migrate the remaining scientific methods,** one slice at a time with the recipe of
       [ARCHITECTURE §5.1](ARCHITECTURE.md#51-add-or-migrate-a-scientific-method): (a) depth/age parsing and
       record/formula transformations; (b) image filters, detection and object features; (c) ichnotaxon
       classifiers and embeddings; (d) multiproxy rules, models, interpolation and fitted statistics; (e) U-Net
-      inference, then training integration after M3.2.5.
+      inference, then training integration after M3.2.5. Slices (a) and (d) use M8.4.9, (b) and (e) use M8.4.8,
+      (c) follows (b).
+  - Lessons of M8.3, for every slice: the inputs are resident in the engine from the start (M8.4 services); the
+    second card measures the matched timing of the first end-to-end path with the M8.4 tool, before any interface
+    card (M8.3 found its 30-60 times slowdown only at its last card); each slice ends with a milestone gate.
   - Acceptance per slice: independent reference fixtures, explicit provenance, unchanged public contracts; exact
     counts/masks/labels and predeclared tolerances elsewhere; figures and exports unchanged.
 - [ ] **M8.6 - Promote desktop and retire duplicate computation.** After the release checklist passes: the engine
@@ -435,7 +633,7 @@ Cards are written by a design session when the previous milestone passes its dev
       export/import path for its stored projects.
   - Acceptance: one implementation per method; identical API, CLI and desktop results; complete desktop and
     interrupted-save regressions; storage identifiers and old project readers retained; documents and CI updated
-    in the same delivery; engine errors stay visible.
+    in the same delivery; engine errors stay visible; every earlier milestone gate passed.
 
 ## Small maintenance cards
 
@@ -500,7 +698,7 @@ Not scheduled. Details, acceptance criteria and the backlog are in [roadmap-futu
 | Area | Tasks |
 |---|---|
 | Editing and recovery | M1.2.2 remaining desktop hangs |
-| Large images | M2.3.1–M2.3.5 (delivered through M8.4) |
+| Large images | M2.3.1–M2.3.5 (were to be delivered through M8.4; proposed to move after 1.0, decision 2 of M8.4) |
 | Analysis and U-Net | M3.1.6, M3.1.7, M3.2.4, M3.2.5, M3.3.2, M3.3.4 |
 | Optional acceleration | M4.1.1 Rust kernel, M4.1.2 GPU |
 | Release readiness | M5.1, M5.2, M5.4, M5.5 |

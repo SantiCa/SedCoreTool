@@ -5,7 +5,8 @@ completed tasks are in [roadmap-history.md](roadmap-history.md). Nothing here is
 live roadmap, as a task card, when the maintainer schedules it. Task IDs are stable; keep them when moving a task.
 
 **Required for version 1.0 (decided 13 November 2026): M6 advanced statistics and M7 radiographs.** They are
-written as task cards by a design session once M8.4 has passed its development gate.
+written as task cards by a design session once M8.4 has passed its milestone gate. Like every milestone, each ends
+with a milestone gate on Windows, macOS and Linux ([AGENTS.md §6](../AGENTS.md#6-working-on-a-task)).
 
 The order of the milestones follows the engine migration: M8 (live roadmap) comes first; advanced statistics (M6),
 radiographs (M7) and large images (M2.3) build on the engine; acceleration (M4) and a possible new interface

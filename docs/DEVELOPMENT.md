@@ -126,6 +126,7 @@ the roadmap. State in the report what was **not** measured.
 | `tools/measure_engine_lifecycle.mjs` | Runtime verification, engine ready, orderly stop, forced kill, leftovers; optional CPU load (`--load N`) |
 | `tools/measure_engine_cancellation.mjs` | Buffer upload speed, cancellation latency (running and queued jobs), engine memory |
 | `tools/measure_packaged_startup.mjs <exe>` | Packaged program: time to window and to engine ready, close, leftover processes, process-tree memory and idle CPU. `--keep-profile` reuses one user-data folder (verification record present after the first launch); `--wait-ms` shortens the failure timeout |
+| `tools/measure_engine_analysis.mjs` | The gates of contract §7 for an engine method run from the desktop program: parity, matched timing, stages per section, responsiveness, cancellation, process-tree memory (through `tools/process_tree_sampler.py`, needs `psutil`), ten open/analyse/close cycles, worker and coordinator kills |
 | `tools/benchmark*.py`, `tools/benchmark*.mjs` | Earlier performance baselines (see `docs/benchmarks/*.md` for how each was run) |
 
 ## 8. Versions, CI and releases
@@ -136,5 +137,14 @@ the roadmap. State in the report what was **not** measured.
 - `.github/workflows/tests.yml` runs the test suites on pushes and pull requests; `.github/workflows/desktop.yml`
   builds Windows, macOS and Linux packages on a version tag or on a manual run. A manual run with
   `draft_release=false` produces artifacts without a release. Never push a tag only to get a build: tags publish.
+- **Milestone gate** ([AGENTS.md §6](../AGENTS.md#6-working-on-a-task)): push the work branch, then start *Desktop
+  builds* by hand on that branch (GitHub web page: Actions → Desktop builds → Run workflow → branch → `draft_release`
+  off; the `gh` command is not installed on the maintainer's computer). It prepares the bundled runtime, runs
+  `tests/e2e/desktop.mjs` with the engine experiment on (and off once card M8.3.9 adds that step), packages and
+  checks the package on Windows, macOS
+  (Apple Silicon runner) and Linux. The `tests` workflow must pass on the same commit. Results can be read without
+  logging in: `GET https://api.github.com/repos/SantiCa/SedCoreTool/actions/runs/<run id>/jobs` and, for a failed
+  job, `GET .../check-runs/<job id>/annotations` (60 unauthenticated requests per hour). Record the run id, commit
+  and per-system result in the roadmap status.
 - `tools/release.sh` checks branch, clean tree, versions and tests, then pushes the tag. Only the owner decides to
   push, release or request a DOI.
