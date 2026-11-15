@@ -704,7 +704,7 @@ experiment stays off by default.
   and stop: the next change would be to run the interval table of resident sections inside the engine without a request per
   change, which needs a decision of the maintainer.
 
-#### M8.4.7 - Restart after a coordinator failure — state: Ready
+#### M8.4.7 - Restart after a coordinator failure — state: Done (15 Nov 2026, branch `work/2026-11-13`)
 
 - **Goal:** the behaviour chosen in decision 5: a section in the error state offers "Retry", which starts a new engine
   session and resubmits only the current snapshots (contract §3 already requires fresh tokens); at most one automatic
@@ -722,6 +722,7 @@ experiment stays off by default.
   once and announced, tokens of the old session are refused, resident buffers are re-uploaded; the kill case of the
   measuring tool now ends with every section analysed again; desktop end-to-end with a killed coordinator.
 - **Done when:** the tests pass and the kill measurement shows the engine `ready` again and parity with the reference.
+- **Result (15 November 2026):** `createEngineService.restart({automatic})` (desktop/engine.js) ends the old process tree, starts a new coordinator and shakes hands; two requests at once share one restart, a disabled service or one that is closing refuses it, and an automatic request after the first is refused with `LIMIT_EXCEEDED` (field `automatic`). The bridge operation `restart` (engine-ipc.js, preload) validates its options (only a boolean `automatic`) and drops the tokens of every page. `engineclient.js::restart` forgets every resident input without releasing it into the new session. `engineanalysis.js`: an analysis that fails with `ENGINE_UNAVAILABLE` asks for the one automatic restart (not if it was cancelled meanwhile), announces it with a notice and sends everything whole; if refused or failed the section keeps the error. `restartAndRetry(sections)` is the user's Retry (button `#engineRetry` in the error state of the results panel): new session, then only the sections in error are analysed again. The JavaScript calculation is never used. Tests: 8 in `engine-analysis.test.mjs`, 4 in `engine-ipc.test.mjs`, 5 with the real engine in `engine.test.mjs`; 14 deliberate faults, all caught (one of them, removing the guard against repeated restarts, loops forever and is caught by the time-out). Desktop end-to-end (engine on): the coordinator killed twice, the first loss repaired by itself with results equal to the reference, the second shows `ENGINE_UNAVAILABLE` on all six sections, Retry brings them back equal to the reference, the project unchanged; engine off unchanged. Kill phase of the measuring tool: after the coordinator is killed the engine is `ready` again and all six sections `ready`. **Not working any more:** the worker-kill part of that phase (it kills a worker while a job runs) found no worker to kill in three attempts, because jobs now last about 150 ms; its verdict `kill_recovery` therefore reads `pass: false`. Not part of this card; a design session should redo that check with a job held in the worker (a test hook) instead of a race.
 
 #### M8.4.8 - Milestone gate of part A — state: after M8.4.7
 

@@ -7,8 +7,7 @@ source inspection and author-run repository checks; no independent reviewer is a
 This is the specification for M8.2–M8.6. M8.2 and M8.3 implement part of it behind the default-off experiment
 flag: the transport, staged buffers, `buffer.read`, `section.analyze` with `section.intervals/1` and the job
 execution model of §3 ([current behaviour and limits](TECHNICAL_DOCUMENTATION.md#262-experimental-engine-process)).
-**Not implemented yet** (14 November 2026): progress events, the batch request for several sections, retry after
-`ENGINE_UNAVAILABLE`, engine-held source images and tables, and everything after M8.4.5. Implemented since M8.3 (cards
+**Not implemented yet** (15 November 2026): progress events, the batch request for several sections, engine-held source images and tables, the tile store, and everything after M8.4.7. Implemented in card M8.4.7: a new engine session after `ENGINE_UNAVAILABLE` (one automatic restart per program session, then the user's Retry; all tokens and buffers of the old session are invalid; no wire change). Implemented since M8.3 (cards
 M8.4.2-M8.4.5): inputs kept in the engine between analyses, remembered counts, one packed result, `buffer.derive` and the recount of
 written rows. The matched-timing gate of §7 still fails for the interval-size change and for edit/undo/redo (see the roadmap); the
 memory-peak gate passes. Without the flag, the

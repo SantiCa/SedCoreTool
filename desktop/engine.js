@@ -13,6 +13,8 @@ const OPERATIONS = new Set(['hello', 'buffer.begin', 'buffer.derive', 'buffer.ch
 // against a coordinator that stops answering, and it ends the whole session (see `request`).
 const ANALYSIS_TIMEOUT_MS = 10 * 60 * 1000;
 
+const MAX_AUTOMATIC_RESTARTS = 1;
+
 function unavailable() { return Object.assign(new Error('ENGINE_UNAVAILABLE'), { code: 'ENGINE_UNAVAILABLE' }); }
 
 async function cleanupScratch(scratch) {
@@ -182,8 +184,35 @@ class EngineClient {
 /** `cacheFile` (optional path or function returning one) holds the record of the last full runtime verification. */
 function createEngineService({ enabled, packaged, executable, sourceDirectory, runtimeDirectory, lockPath, version, cacheFile = null }) {
   let client, runtime = null, state = enabled ? 'stopped' : 'disabled', stopped = false;
-  return {
+  /** The restart that is running, if any: a second request while it runs waits for the same one. */
+  let restarting = null;
+  /** Restarts the interface asked for by itself (not by the user's Retry); at most MAX_AUTOMATIC_RESTARTS per program session. */
+  let automaticRestarts = 0;
+  const service = {
     status: () => ({ enabled, runtime, ...(client ? client.status() : { state, protocol: null, methods: [] }) }),
+    /**
+     * A new engine session: the old process tree is ended, a new coordinator starts and shakes hands. Every buffer handle of the old
+     * session is invalid afterwards (engine-ipc.js drops the tokens). An automatic restart is refused with `LIMIT_EXCEEDED` after
+     * the first one. A restart never happens once the program is closing. Resolves when the engine is `ready`, otherwise rejects
+     * `ENGINE_UNAVAILABLE`; it never starts anything else.
+     */
+    restart: ({ automatic = false } = {}) => {
+      if (!enabled || stopped) return Promise.reject(unavailable());
+      if (restarting) return restarting;
+      if (automatic && automaticRestarts >= MAX_AUTOMATIC_RESTARTS) return Promise.reject(Object.assign(new Error('LIMIT_EXCEEDED'), { code: 'LIMIT_EXCEEDED', field: 'automatic' }));
+      if (automatic) automaticRestarts++;
+      restarting = (async () => {
+        const old = client;
+        client = null; state = 'starting';
+        if (old) await old.stop();
+        if (stopped) throw unavailable();   // the program started closing while the old engine was ending: start nothing
+        await service.start();
+        if (!client || client.state !== 'ready') throw unavailable();
+        return { restarted: true };
+      })().finally(() => { restarting = null; });
+      return restarting;
+    },
+    automaticRestarts: () => automaticRestarts,
     start: async () => {
       if (!enabled) return;
       stopped = false;
@@ -208,6 +237,7 @@ function createEngineService({ enabled, packaged, executable, sourceDirectory, r
     request: (op, payload, binary = null) => (client && client.state === 'ready' ? client.request(op, payload, binary) : Promise.reject(unavailable())),
     session: () => (client && client.state === 'ready' ? client.session : null),
   };
+  return service;
 }
 
 module.exports = { EngineClient, terminateTree, createEngineService, ADVERTISED_METHODS };

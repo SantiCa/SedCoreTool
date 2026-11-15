@@ -2125,6 +2125,7 @@ Object.assign(D.es, {
   'engine.error.INVALID_REQUEST': 'El motor rechazó los datos de esta sección', 'engine.error.UNSUPPORTED_INPUT': 'El motor no admite los datos de esta sección', 'engine.error.INVALID_BUFFER': 'El motor perdió los datos enviados; edita la sección para reintentar',
   'engine.error.LIMIT_EXCEEDED': 'La sección supera los límites del motor', 'engine.error.BUSY': 'El motor está ocupado; edita la sección para reintentar', 'engine.error.UNSUPPORTED_METHOD': 'El motor no ofrece este método',
   'engine.error.INTERNAL': 'El motor falló al calcular esta sección',
+  'engine.retry': 'Reintentar', 'engine.restarted': 'El motor científico se detuvo y se reinició. Se recalculan las secciones.', 'engine.restartFailed': 'No se pudo reiniciar el motor científico. Las secciones siguen con su error.',
 });
 Object.assign(D.es, { 'nav.preview': 'Miniatura de navegación optimizada', 'nav.previewTip': 'Activada al iniciar. Desactívala para usar el renderizado anterior durante esta sesión; las figuras y los datos no cambian.' });
 Object.assign(D.en, {
@@ -2132,5 +2133,6 @@ Object.assign(D.en, {
   'engine.error.INVALID_REQUEST': 'The engine rejected the data of this section', 'engine.error.UNSUPPORTED_INPUT': 'The engine does not support the data of this section', 'engine.error.INVALID_BUFFER': 'The engine lost the data it was sent; edit the section to retry',
   'engine.error.LIMIT_EXCEEDED': 'The section exceeds the engine limits', 'engine.error.BUSY': 'The engine is busy; edit the section to retry', 'engine.error.UNSUPPORTED_METHOD': 'The engine does not offer this method',
   'engine.error.INTERNAL': 'The engine failed to calculate this section',
+  'engine.retry': 'Retry', 'engine.restarted': 'The scientific engine stopped and was restarted. The sections are being recalculated.', 'engine.restartFailed': 'The scientific engine could not be restarted. The sections keep their error.',
 });
 Object.assign(D.en, { 'nav.preview': 'Optimised navigation preview', 'nav.previewTip': 'Enabled at startup. Disable it to use the previous renderer for this session; figures and data are unchanged.' });

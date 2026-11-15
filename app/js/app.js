@@ -1103,7 +1103,7 @@ export function effClassArray(s) { return effectiveClassIndex(s, S.classes, S.se
 const analysisProject = () => ({ classes: S.classes, settings: S.settings, ageModel: S.age.model, ageUnits: S.age.units });
 let engineRefresh = 0;
 const engineBridge = /** @type {any} */ (window).corantoolDesktop?.engine;
-const engineAnalysis = engineBridge?.enabled === true ? createEngineAnalysis({ client: createEngineClient(engineBridge), project: analysisProject, maskChanges, onChange: () => {
+const engineAnalysis = engineBridge?.enabled === true ? createEngineAnalysis({ client: createEngineClient(engineBridge), project: analysisProject, maskChanges, onNotice: (key) => toast(t(key), 6000), onChange: () => {
   clearTimeout(engineRefresh);
   engineRefresh = setTimeout(() => { renderResults(); requestRender(); if (mode === 'log') scheduleLog(0); else if (mode !== 'section') setMode(mode); }, 50);
 } }) : null;
@@ -2138,7 +2138,9 @@ function renderLearn() {
 function renderResults() {
   const s = sec(), sum = $('resSummary'), tab = $('resTable');
   if (s?.analysis?.state === 'pending') { sum.innerHTML = `<p class="note">${t('engine.pending')}</p>`; tab.innerHTML = ''; return; }
-  if (s?.analysis?.state === 'error') { sum.innerHTML = `<p class="note" role="alert">${esc(t(`engine.error.${s.analysis.code}`) === `engine.error.${s.analysis.code}` ? t('engine.error.INTERNAL') : t(`engine.error.${s.analysis.code}`))}${s.analysis.field ? ` (${esc(s.analysis.field)})` : ''}</p>`; tab.innerHTML = ''; return; }
+  if (s?.analysis?.state === 'error') { sum.innerHTML = `<p class="note" role="alert">${esc(t(`engine.error.${s.analysis.code}`) === `engine.error.${s.analysis.code}` ? t('engine.error.INTERNAL') : t(`engine.error.${s.analysis.code}`))}${s.analysis.field ? ` (${esc(s.analysis.field)})` : ''}</p><p><button class="btn small" id="engineRetry">${t('engine.retry')}</button></p>`; tab.innerHTML = '';
+    $('engineRetry').onclick = () => { void engineAnalysis?.restartAndRetry(S.sections); };   // a new engine session, then every failed section again
+    return; }
   if (!s || !s.bins?.length) { sum.innerHTML = `<p class="note">${t('r.empty')}</p>`; tab.innerHTML = ''; return; }
   let v = 0, b = 0; const cls = new Array(S.classes.length).fill(0);
   for (const x of s.bins) { if (!x.valid) continue; v += x.valid; b += (x.pct / 100) * x.valid; x.classPct.forEach((p, k) => (cls[k] += ((p || 0) / 100) * x.valid)); }

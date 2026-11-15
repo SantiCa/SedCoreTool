@@ -17,11 +17,14 @@ import { analysisRevision, buildIntervalSnapshot, maskIdentity, resultToBins } f
  * `canDerive` says whether it holds masks that such a change can be applied to.
  * @param {{client: {analyze: (snapshot: any, options: {signal: AbortSignal, owner?: object, maskKey?: string}) => Promise<any>,
  *     hasMasks?: (owner: object, maskKey: string) => boolean, canDerive?: (owner: object, section: any) => boolean, forget?: (owner: object) => void,
- *     releaseAll?: () => void},
+ *     releaseAll?: () => void, restart?: (options: {automatic: boolean}) => Promise<void>},
  *   project: () => import('./sectionanalysis.js').AnalysisProject, onChange: (section: any) => void,
- *   maskChanges?: ReturnType<typeof import('./maskchanges.js').createMaskChanges>}} deps
+ *   maskChanges?: ReturnType<typeof import('./maskchanges.js').createMaskChanges>,
+ *   onNotice?: (key: 'engine.restarted' | 'engine.restartFailed') => void}} deps
+ * With `client.restart` the engine is started again when it turns out to be unavailable (card M8.4.7): by itself once (the main process
+ * refuses a second automatic restart) and whenever the user asks (`restartAndRetry`). `onNotice` tells the user about either.
  */
-export function createEngineAnalysis({ client, project, onChange, maskChanges }) {
+export function createEngineAnalysis({ client, project, onChange, maskChanges, onNotice }) {
   /** How many times a change of some rows was refused and the whole mask had to be sent (the page's record and the engine's disagreed). */
   let deriveFallbacks = 0;
   /** The stages of the last analyses (at most 20), for measurements: how the masks travelled and where the time went. */
@@ -53,6 +56,7 @@ export function createEngineAnalysis({ client, project, onChange, maskChanges })
    */
   async function analyseWithResidentInputs(section, signal) {
     const maskKey = maskIdentity(section);
+    let restarted = false;
     for (let attempt = 0; ; attempt++) {
       let mode = attempt > 0 ? 'full' : client.hasMasks?.(section, maskKey) ? 'reuse' : maskChanges && client.canDerive?.(section, section) ? 'derive' : 'full';
       const taken = mode === 'reuse' ? null : (maskChanges?.take(section) ?? null);
@@ -72,6 +76,13 @@ export function createEngineAnalysis({ client, project, onChange, maskChanges })
         if (attempt === 0 && ((mode === 'reuse' && code === 'RESIDENT_LOST') || (mode === 'derive' && code === 'DERIVE_FAILED'))) {
           if (mode === 'derive') deriveFallbacks++;
           client.forget?.(section);
+          continue;
+        }
+        // The engine is gone: start a new one once, by ourselves. The client forgets what the old one held, so the next attempt sends everything.
+        if (code === 'ENGINE_UNAVAILABLE' && !restarted && !signal.aborted && client.restart) {
+          restarted = true;
+          try { await client.restart({ automatic: true }); } catch { throw error; }   // refused (already used) or failed: the section shows the error
+          onNotice?.('engine.restarted');
           continue;
         }
         throw error;
@@ -153,6 +164,17 @@ export function createEngineAnalysis({ client, project, onChange, maskChanges })
         if (!job || (job.settled && job.revision === analysisRevision(section, project()))) return;
       }
     })).then(() => undefined),
+    /**
+     * The user's Retry (card M8.4.7): a new engine session, then every section that is in the error state is analysed again from its current
+     * state. Resolves when they have a final state. If the engine does not come back the sections keep their error and the user is told.
+     */
+    restartAndRetry: async (/** @type {any[]} */ sections) => {
+      try { await client.restart?.({ automatic: false }); }
+      catch { onNotice?.('engine.restartFailed'); return; }
+      const failed = sections.filter((section) => section?.analysis?.state === 'error');
+      for (const section of failed) { jobs.get(section)?.controller.abort(); jobs.delete(section); }
+      await Promise.all(failed.map((section) => request(section)));
+    },
     /** Forgets the state of a section so that the next request runs again (after a failure the user retries). */
     retry: (/** @type {any} */ section) => { jobs.get(section)?.controller.abort(); jobs.delete(section); client.forget?.(section); },
     /** A project is being replaced: the engine drops everything it kept for the sections of the old one. */

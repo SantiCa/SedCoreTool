@@ -56,7 +56,7 @@ function bytesOf(value) {
 
 /**
  * @param engine the engine service of desktop/engine.js: `request(op, payload, binary)` returning a promise that carries
- *   `requestId`, and `session()` returning the current session or null.
+ *   `requestId`, `session()` returning the current session or null, and `restart({automatic})`.
  */
 function createEngineIpc({ engine }) {
   const tokens = new Map();      // token -> {owner, session, handle, state, length, next, dtype, shape, sha256}
@@ -179,6 +179,13 @@ function createEngineIpc({ engine }) {
       const running = analyses.get(`${owner}/${requestKey}`);
       if (!running) return { state: 'already_terminal' };
       return engine.request('job.cancel', { request_id: running.engineRequest });
+    },
+    /** A new engine session (card M8.4.7). Every token of every page belonged to the old session and is dropped; the pages upload again. */
+    async restart(owner, options) {
+      if (options !== undefined && (!isPlain(options) || Object.keys(options).some((key) => key !== 'automatic') || (options.automatic !== undefined && typeof options.automatic !== 'boolean'))) reject('INVALID_REQUEST', 'options');
+      await engine.restart({ automatic: options?.automatic === true });
+      tokens.clear();
+      return { restarted: true };
     },
     async release(owner, list) {
       if (!Array.isArray(list) || list.length > MAX_RELEASE || !list.every((token) => typeof token === 'string')) reject('INVALID_REQUEST', 'tokens');

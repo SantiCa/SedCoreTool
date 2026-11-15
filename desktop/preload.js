@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('corantoolDesktop', {
     cancel: (requestKey) => ipcRenderer.invoke('engine:cancel', requestKey),
     readBuffer: (token, offset, length) => ipcRenderer.invoke('engine:readBuffer', token, offset, length),
     release: (tokens) => ipcRenderer.invoke('engine:release', tokens),
+    restart: (options) => ipcRenderer.invoke('engine:restart', options),
   },
   diagnostics: {
     status: () => ipcRenderer.invoke('diagnostics:status'),

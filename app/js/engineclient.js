@@ -42,7 +42,7 @@ export const RESIDENT_BYTES = 256 * 1048576, RESIDENT_SECTIONS = 16;
 
 /**
  * @param {{status: () => Promise<any>, beginBuffer: Function, appendBuffer: Function, commitBuffer: Function,
- *   analyzeSection: Function, cancel: Function, readBuffer: Function, release: Function, deriveBuffer?: Function}} bridge
+ *   analyzeSection: Function, cancel: Function, readBuffer: Function, release: Function, deriveBuffer?: Function, restart?: Function}} bridge
  * @param {{readyTimeoutMs?: number, residentBytes?: number, residentSections?: number}} [options]
  */
 export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentBytes = RESIDENT_BYTES, residentSections = RESIDENT_SECTIONS } = {}) {
@@ -65,12 +65,12 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
   }
   const entryBytes = (/** @type {ResidentEntry} */ entry) => Object.values(entry.inputs).reduce((sum, input) => sum + input.bytes, 0);
   const residentTotal = () => { let sum = 0; for (const entry of entries) sum += entryBytes(entry); return sum; };
-  /** @param {ResidentEntry} entry */
-  function drop(entry) {
+  /** @param {ResidentEntry} entry @param {boolean} [release] false when the tokens are already invalid (the engine session ended) */
+  function drop(entry, release = true) {
     entries.delete(entry);
     const owner = entry.owner.deref();
     if (owner && byOwner.get(owner) === entry) byOwner.delete(owner);
-    void releaseTokens(Object.values(entry.inputs).map((input) => input.token));
+    if (release) void releaseTokens(Object.values(entry.inputs).map((input) => input.token));
     entry.inputs = {};
   }
   function pruneGone() { for (const entry of [...entries]) if (!entry.owner.deref()) drop(entry); }
@@ -317,5 +317,18 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
     }
   }
 
-  return { analyze, ready, hasMasks, canDerive, forget, releaseAll, residentBytes: residentTotal, residentSections: () => entries.size, stats: () => ({ ...stats }) };
+  /**
+   * Starts a new engine session (card M8.4.7). Everything the old session held is gone, so every resident input is forgotten without
+   * asking the engine to release it, and the next analysis of each section uploads its inputs whole. `automatic` marks the one restart per
+   * program session that the interface may make by itself; the main process refuses a second one with `LIMIT_EXCEEDED`.
+   * @param {{automatic?: boolean}} [options]
+   */
+  async function restart({ automatic = false } = {}) {
+    if (typeof bridge.restart !== 'function') throw new EngineError('ENGINE_UNAVAILABLE');
+    for (const entry of [...entries]) drop(entry, false);
+    unwrap(await bridge.restart({ automatic }));
+    await ready();
+  }
+
+  return { analyze, ready, restart, hasMasks, canDerive, forget, releaseAll, residentBytes: residentTotal, residentSections: () => entries.size, stats: () => ({ ...stats }) };
 }

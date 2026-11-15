@@ -32,7 +32,15 @@ function fakeEngine({ answers = {}, session = 'session-1' } = {}) {
       return promise;
     },
   };
-  return { request: engine.request, session: () => engine.session, calls: engine.calls, pending: engine.pending, setSession: (value) => { engine.session = value; } };
+  const restarts = [];
+  /** A restart ends the old session: handles die, the session changes. `answers.restart` may be an Error to refuse it. */
+  const restart = async (options) => {
+    restarts.push(options);
+    if (answers.restart instanceof Error) throw answers.restart;
+    engine.session = `session-${restarts.length + 1}`;
+    return { restarted: true };
+  };
+  return { request: engine.request, restart, restarts, session: () => engine.session, calls: engine.calls, pending: engine.pending, setSession: (value) => { engine.session = value; } };
 }
 const fakeAnswers = () => ({
   'buffer.begin': () => ({ handle: uuid() }),
@@ -55,7 +63,7 @@ const analysisRequest = (inputs, change = {}) => ({ requestKey: uuid(), method: 
 
 test('the bridge offers exactly the documented operations and never an engine operation by name', async () => {
   const ipc = createEngineIpc({ engine: fakeEngine({ answers: fakeAnswers() }) });
-  assert.deepEqual([...ipc.OPERATIONS].sort(), ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'deriveBuffer', 'readBuffer', 'release']);
+  assert.deepEqual([...ipc.OPERATIONS].sort(), ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'deriveBuffer', 'readBuffer', 'release', 'restart']);
   for (const name of ['request', 'buffer.begin', 'shutdown', '__proto__', 'constructor', 'toString', 'hasOwnProperty', 7, null, undefined]) {
     assert.deepEqual(await ipc.call(1, name), { error: { code: 'UNSUPPORTED_METHOD' } }, String(name));
   }
@@ -513,4 +521,44 @@ test('deriveBuffer refuses everything that is not a derivation of a committed bu
   const kept = await committed(many, 1, bytes);
   for (let i = 1; i < MAX_TOKENS_PER_PAGE; i++) assert.ok((await many.call(1, 'beginBuffer', descriptor())).token);
   assert.equal((await many.call(1, 'deriveBuffer', kept, good)).error.code, 'LIMIT_EXCEEDED');
+});
+
+// ---- a new engine session (card M8.4.7) -----------------------------------------------------------------------------------
+
+test('restart ends the old session: the tokens of every page are dropped and the pages upload again', async () => {
+  const engine = fakeEngine({ answers: fakeAnswers() }), ipc = createEngineIpc({ engine });
+  const one = await committed(ipc, 1, Buffer.alloc(10, 1)), two = await committed(ipc, 2, Buffer.alloc(10, 2));
+  assert.equal(ipc.size(), 2);
+  assert.deepEqual(await ipc.call(1, 'restart', { automatic: true }), { restarted: true });
+  assert.deepEqual(engine.restarts, [{ automatic: true }]);
+  assert.equal(ipc.size(), 0, 'no token of the old session survives, for any page');
+  assert.equal((await ipc.call(1, 'readBuffer', one, 0, 1)).error.code, 'INVALID_BUFFER');
+  assert.equal((await ipc.call(2, 'readBuffer', two, 0, 1)).error.code, 'INVALID_BUFFER');
+  const again = await committed(ipc, 1, Buffer.alloc(10, 3));
+  assert.equal((await ipc.call(1, 'readBuffer', again, 0, 1)).error?.code ?? 'readable', 'readable', 'the new session works');
+});
+
+test('restart passes only a boolean "automatic" and nothing else', async () => {
+  const engine = fakeEngine({ answers: fakeAnswers() }), ipc = createEngineIpc({ engine });
+  assert.deepEqual(await ipc.call(1, 'restart'), { restarted: true });
+  assert.deepEqual(await ipc.call(1, 'restart', {}), { restarted: true });
+  assert.deepEqual(engine.restarts, [{ automatic: false }, { automatic: false }]);
+  for (const options of [null, 'yes', [], { automatic: 1 }, { automatic: 'true' }, { automatic: true, path: '/x' }, { executable: 'x' }]) {
+    assert.equal((await ipc.call(1, 'restart', options)).error.code, 'INVALID_REQUEST', JSON.stringify(options));
+  }
+  assert.equal(engine.restarts.length, 2, 'a malformed request never reaches the engine service');
+});
+
+test('a refused or failed restart keeps the tokens and tells the page why', async () => {
+  const refusal = Object.assign(new Error('LIMIT_EXCEEDED'), { code: 'LIMIT_EXCEEDED', field: 'automatic' });
+  const engine = fakeEngine({ answers: { ...fakeAnswers(), restart: refusal } }), ipc = createEngineIpc({ engine });
+  const token = await committed(ipc, 1, Buffer.alloc(10, 1));
+  assert.deepEqual(await ipc.call(1, 'restart', { automatic: true }), { error: { code: 'LIMIT_EXCEEDED', field: 'automatic' } });
+  assert.equal(ipc.size(), 1);
+  assert.equal((await ipc.call(1, 'readBuffer', token, 0, 1)).error?.code ?? 'readable', 'readable', 'the engine is the same session');
+});
+
+test('restart is one of the bridge operations and a page reaches it only through them', () => {
+  const ipc = createEngineIpc({ engine: fakeEngine({ answers: fakeAnswers() }) });
+  assert.ok(ipc.OPERATIONS.includes('restart'));
 });

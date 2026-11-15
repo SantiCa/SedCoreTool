@@ -763,3 +763,135 @@ test('the engine dying in the middle of sending changed rows leaves the edit and
   assert.equal(bridge.stats.refused, 0, 'the change that failed to arrive was delivered with the new one');
   assert.equal(analysis.deriveFallbacks(), 0);
 });
+
+// ---- a new engine session after the engine was lost (card M8.4.7) ---------------------------------------------------------
+
+/**
+ * Sections with the same content (so one reference serves all), an engine that can be killed (`kill()` makes the next analyses fail with
+ * ENGINE_UNAVAILABLE) and a bridge whose `restart` brings it back with an empty store, like a new engine session. `refuse` answers a restart request itself.
+ */
+function restartableEngine(count, { refuse = null, stayDead = false } = {}) {
+  const sections = Array.from({ length: count }, () => section(5, { w: 200, h: 300 })), p = project();
+  const bridge = derivingBridge(), client = createEngineClient(bridge), changes = createMaskChanges(), notices = [];
+  let dead = false, gate = null; const restarts = [];
+  const answer = bridge.analyzeSection;
+  bridge.analyzeSection = async (request) => { if (dead) { bridge.lostCalls = (bridge.lostCalls ?? 0) + 1; await gate; return { error: { code: 'ENGINE_UNAVAILABLE' } }; } bridge.setReference(referenceColumns(sections[0], p)); return answer(request); };
+  bridge.restart = async (options) => {
+    restarts.push(options);
+    const refused = refuse?.(options, restarts.length);
+    if (refused) return refused;
+    bridge.buffers.clear(); dead = stayDead; return { restarted: true };
+  };
+  const analysis = createEngineAnalysis({ client, project: () => p, maskChanges: changes, onChange() {}, onNotice: (key) => notices.push(key) });
+  return { sections, p, bridge, client, analysis, notices, restarts, kill: () => { dead = true; },
+    /** Makes failing analyses wait until the returned function is called. */
+    hold: () => new Promise((resolve) => { gate = new Promise((open) => { resolve(open); }); }) };
+}
+
+test('the client forgets every resident buffer without releasing it when a new engine session starts, and says whether the restart is automatic', async () => {
+  const a = section(1, { w: 20, h: 40 }), p = project(), bridge = memoryBridge(), client = createEngineClient(bridge), asked = [];
+  bridge.restart = async (options) => { asked.push(options); return { restarted: true }; };
+  await analyseResident(client, bridge, a, p);
+  const released = bridge.released.length;
+  await client.restart({ automatic: true });
+  await client.restart();
+  assert.deepEqual(asked, [{ automatic: true }, { automatic: false }]);
+  assert.equal(client.residentSections(), 0);
+  assert.equal(client.residentBytes(), 0);
+  await flush();
+  assert.equal(bridge.released.length, released, 'the old session is gone: nothing is released into the new one');
+  assert.equal(client.hasMasks(a, maskIdentity(a)), false);
+});
+
+test('a refused or failed restart is an error of the client, and a bridge without restart is an unavailable engine', async () => {
+  const bridge = memoryBridge(), client = createEngineClient(bridge);
+  await assert.rejects(client.restart({ automatic: true }), { code: 'ENGINE_UNAVAILABLE' });
+  bridge.restart = async () => ({ error: { code: 'LIMIT_EXCEEDED', field: 'automatic' } });
+  await assert.rejects(client.restart({ automatic: true }), { code: 'LIMIT_EXCEEDED', field: 'automatic' });
+  bridge.restart = async () => ({ restarted: true });
+  const answer = bridge.status; bridge.status = async () => ({ state: 'unavailable' });
+  await assert.rejects(client.restart(), { code: 'ENGINE_UNAVAILABLE' }, 'a restart that leaves the engine unavailable is not a success');
+  bridge.status = answer;
+});
+
+test('when the engine is lost the controller restarts it once by itself, announces it, sends everything again and publishes the reference', async () => {
+  const { sections: [s], p, bridge, client, analysis, notices, restarts, kill } = restartableEngine(1);
+  await analysis.request(s);
+  assert.equal(client.stats().fullMaskUploads, 1);
+  kill();
+  p.settings.binCm = 6.1;                                                         // a setting changed: the masks would be reused
+  await analysis.request(s);
+  assert.deepEqual(restarts, [{ automatic: true }]);
+  assert.deepEqual(notices, ['engine.restarted']);
+  assert.equal(s.analysis.state, 'ready');
+  assert.deepEqual(s.bins, computeSectionBins(s, p).bins);
+  assert.equal(client.stats().fullMaskUploads, 2, 'the new session got the masks whole');
+  assert.equal(bridge.buffers.size, 9, 'one resident copy of the section in the new session');
+});
+
+test('a second loss is not restarted by itself: the section shows the error and the notice is not repeated', async () => {
+  const { sections: [s], p, analysis, notices, restarts, kill } = restartableEngine(1, { refuse: (options, n) => (n > 1 ? { error: { code: 'LIMIT_EXCEEDED', field: 'automatic' } } : null) });
+  await analysis.request(s);
+  kill(); p.settings.binCm = 6.1; await analysis.request(s);
+  assert.equal(s.analysis.state, 'ready');
+  kill(); p.settings.binCm = 6.2; await analysis.request(s);
+  assert.equal(restarts.length, 2, 'it asked again and was refused');
+  assert.deepEqual(s.analysis, { state: 'error', code: 'ENGINE_UNAVAILABLE', field: null }, 'the original error, no JavaScript calculation');
+  assert.deepEqual(s.bins, []);
+  assert.deepEqual(notices, ['engine.restarted']);
+});
+
+test('a restart that does not bring the engine back leaves the error, with one attempt per analysis', async () => {
+  const { sections: [s], p, analysis, notices, restarts, kill } = restartableEngine(1, { refuse: (options, n) => (n > 0 ? { error: { code: 'ENGINE_UNAVAILABLE' } } : null) });
+  await analysis.request(s);
+  kill(); p.settings.binCm = 6.1; await analysis.request(s);
+  assert.equal(restarts.length, 1, 'no loop of restarts inside one analysis');
+  assert.equal(s.analysis.state, 'error');
+  assert.deepEqual(notices, []);
+});
+
+test('a restart that succeeds but leaves the engine failing is tried once, not again', async () => {
+  const { sections: [s], p, analysis, restarts, kill } = restartableEngine(1, { stayDead: true });
+  await analysis.request(s);
+  kill(); p.settings.binCm = 6.1; await analysis.request(s);
+  assert.equal(restarts.length, 1);
+  assert.deepEqual(s.analysis, { state: 'error', code: 'ENGINE_UNAVAILABLE', field: null });
+});
+
+test('an analysis that was cancelled while the engine was failing does not restart the engine', async () => {
+  const { sections: [s], p, bridge, analysis, restarts, kill, hold } = restartableEngine(1);
+  await analysis.request(s);
+  kill(); p.settings.binCm = 6.1;
+  const open = hold(), done = analysis.request(s);
+  while (!bridge.lostCalls) await flush();                      // the call to the lost engine is on its way
+  analysis.forget(s);                                                             // closed while the call to the lost engine is in flight
+  (await open)();
+  await done; await flush();
+  assert.deepEqual(restarts, []);
+});
+
+test("the user's Retry starts a new session and analyses again only the sections in the error state, from their current state", async () => {
+  const { sections: [a, b, c], p, bridge, analysis, notices, restarts, kill } = restartableEngine(3, { refuse: (options) => (options.automatic ? { error: { code: 'LIMIT_EXCEEDED', field: 'automatic' } } : null) });
+  await analysis.request(a); await analysis.request(b); await analysis.request(c);
+  kill(); p.settings.binCm = 6.1;
+  await analysis.all([a, b]);                                                     // two sections fail; c is not asked
+  assert.equal(a.analysis.state, 'error'); assert.equal(b.analysis.state, 'error');
+  const before = analysesOf(bridge).length;
+  await analysis.restartAndRetry([a, b, c]);
+  assert.deepEqual(restarts.at(-1), { automatic: false });
+  assert.equal(a.analysis.state, 'ready'); assert.equal(b.analysis.state, 'ready');
+  assert.deepEqual(a.bins, computeSectionBins(a, p).bins);
+  assert.equal(analysesOf(bridge).length - before, 2, 'c, which had no error, was not asked again');
+  assert.ok(!notices.includes('engine.restartFailed'));
+});
+
+test('Retry that cannot restart the engine tells the user and leaves every section as it was', async () => {
+  const { sections: [a], p, analysis, notices, kill } = restartableEngine(1, { refuse: (options, n) => (n > 0 ? { error: { code: 'ENGINE_UNAVAILABLE' } } : null) });
+  await analysis.request(a);
+  kill(); p.settings.binCm = 6.1; await analysis.request(a);
+  assert.equal(a.analysis.state, 'error');
+  await analysis.restartAndRetry([a]);
+  assert.equal(a.analysis.state, 'error');
+  assert.deepEqual(a.bins, []);
+  assert.deepEqual(notices, ['engine.restartFailed']);
+});

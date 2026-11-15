@@ -1,7 +1,7 @@
 // V0.48: actual Electron, app://, worker, preload IPC and save-on-close across process restarts.
 // Needs desktop/npm ci + prepare-web and puppeteer-core at the repository root.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -56,7 +56,7 @@ async function close(run) {
   } finally { clearTimeout(timer); run.browser.disconnect(); }
 }
 
-const BRIDGE_OPERATIONS = ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'deriveBuffer', 'readBuffer', 'release', 'status'];   // plus the boolean `enabled`
+const BRIDGE_OPERATIONS = ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'deriveBuffer', 'readBuffer', 'release', 'restart', 'status'];   // plus the boolean `enabled`
 const fixture = JSON.parse(readFileSync(new URL('../fixtures/section-intervals/basic-four-intervals.json', import.meta.url), 'utf8'));
 
 /** Runs in the page: uploads a reference fixture through window.corantoolDesktop.engine, analyses it and reads one result column. */
@@ -252,6 +252,36 @@ try {
     assert.equal(stats.deriveFallbacks, 0, `the engine never refused a change: ${JSON.stringify(stats)}`);
   } else {
     assert.equal(await p.evaluate(() => window.ichantool.engineStats()), null, 'without the experiment there is no engine statistic');
+  }
+  if (engineOn) {
+    // M8.4.7: a coordinator that dies is replaced once by itself, and after that by the user's Retry; never by the JavaScript calculation.
+    const coordinator = () => {
+      const out = process.platform === 'win32'
+        ? execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `(Get-CimInstance Win32_Process -Filter "ParentProcessId=${run.child.pid}" | Where-Object { $_.CommandLine -like '*server.py*' } | Select-Object -First 1).ProcessId`], { encoding: 'utf8', windowsHide: true })
+        : execFileSync('pgrep', ['-P', String(run.child.pid), '-f', 'server.py'], { encoding: 'utf8' });
+      const pid = Number(out.trim().split(/\s+/)[0]);
+      assert.ok(pid > 0, `the engine's coordinator is a child of the program (${out})`);
+      return pid;
+    };
+    const reanalyse = (binCm) => p.evaluate(async (value) => {
+      const I = window.ichantool; I.S.settings.binCm = value; await I.analyzeSections(I.S.sections);
+      return I.S.sections.map((s) => (s.analysis?.state === 'error' ? s.analysis.code : s.analysis?.state));
+    }, binCm);
+    const binCm = await p.evaluate(() => window.ichantool.S.settings.binCm);
+    process.kill(coordinator(), 'SIGKILL');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.deepEqual(await reanalyse(binCm + 0.31), Array(6).fill('ready'), 'the first loss is repaired by an automatic restart');
+    assert.deepEqual((await p.evaluate(compareWithReference)).mismatches, [], 'and the restarted engine gives the reference result');
+    process.kill(coordinator(), 'SIGKILL');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.deepEqual(await reanalyse(binCm + 0.62), Array(6).fill('ENGINE_UNAVAILABLE'), 'the second loss is not repaired by itself: an error, no JavaScript result');
+    await p.evaluate(() => document.getElementById('modeSection').click());
+    await p.waitForSelector('#engineRetry', { timeout: 10000 });
+    await p.evaluate(() => document.getElementById('engineRetry').click());
+    await p.waitForFunction(() => window.ichantool.S.sections.every((s) => s.analysis?.state === 'ready'), { timeout: 60000 });
+    assert.deepEqual((await p.evaluate(compareWithReference)).mismatches, [], 'Retry starts a new session and every section matches the reference again');
+    assert.deepEqual(await reanalyse(binCm), Array(6).fill('ready'));
+    assert.equal(await p.evaluate(signature), edited, 'the project was not touched by the engine failures');
   }
   // The tabs that read the intervals must show them without a page error (checked only by eye in M8.3.7).
   const tabs = await p.evaluate(async () => {

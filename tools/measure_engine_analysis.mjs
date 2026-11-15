@@ -422,10 +422,10 @@ if (R.cycles) {
 if (R.kill) {
   const kill = R.kill;
   v.kill_recovery = { pass: kill.worker.killed_pids.length > 0 && kill.worker.section_states.includes('INTERNAL') && kill.worker.status === 'ready' && kill.worker.next_analysis?.mismatches === 0
-      && kill.coordinator.status !== 'ready' && kill.coordinator.section_states.every((s) => s === 'ENGINE_UNAVAILABLE'),
+      && kill.coordinator.status === 'ready' && kill.coordinator.section_states.every((s) => s === 'ready'),
     workers_killed: kill.worker.killed_pids.length, worker_section_states: kill.worker.section_states, engine_after_worker_kill: kill.worker.status,
     coordinator_section_states: kill.coordinator.section_states, engine_after_coordinator_kill: kill.coordinator.status,
-    note: 'After a coordinator death the engine stays unavailable until the program is restarted; sections show ENGINE_UNAVAILABLE and the JavaScript calculation is not used.' };
+    note: 'After a coordinator death the first analysis starts a new engine session by itself (card M8.4.7), sends every input again and every section is analysed; the JavaScript calculation is never used.' };
 }
 // Matched timing is a gate of contract §7 (rules in tools/engine_gates.mjs). Scenario samples are pooled over the six pairs.
 for (const fixture of fixtures) {

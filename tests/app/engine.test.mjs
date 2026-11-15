@@ -258,3 +258,76 @@ test('buffer.derive through the real client and engine: a copy that takes only t
   await assert.rejects(client.request('buffer.derive', { base, ...descriptor, shape: [data.length - 1], byte_length: data.length - 1 }), { code: 'INVALID_BUFFER' });
   assert.equal(client.status().state, 'ready');
 });
+
+// ---- the engine service starts a new session (card M8.4.7) ----------------------------------------------------------------
+
+const serviceRoot = fileURLToPath(new URL('../../', import.meta.url));
+const newService = () => createEngineService({ enabled: true, packaged: false, executable: python, sourceDirectory: serviceRoot, version: 'test' });
+
+test('restart gives a new ready session, ends the old process and keeps working; one restart at a time', { skip: !python, timeout: 60000 }, async (t) => {
+  const service = newService();
+  await service.start();
+  t.after(() => service.stop());
+  const first = service.session();
+  assert.ok(first);
+  const [a, b] = [service.restart(), service.restart()];
+  assert.equal(service.status().state, 'starting', 'the old engine is not offered while the new one starts');
+  assert.equal(service.session(), null);
+  assert.deepEqual(await a, { restarted: true });
+  assert.deepEqual(await b, { restarted: true });
+  assert.equal(service.status().state, 'ready');
+  assert.notEqual(service.session(), first);
+  const second = service.session();
+  assert.deepEqual(await service.restart(), { restarted: true });
+  assert.notEqual(service.session(), second, 'two requests at the same time share one restart; a later one starts another');
+});
+
+test('a restart after the engine died brings it back, and buffers of the old session are gone', { skip: !python, timeout: 60000 }, async (t) => {
+  const service = newService();
+  await service.start();
+  t.after(() => service.stop());
+  const handle = (await service.request('buffer.begin', { dtype: 'u8', shape: [4], byte_length: 4, sha256: digest(Buffer.alloc(4, 1)) })).handle;
+  const before = service.session();
+  await service.request('shutdown', {});                                          // the coordinator ends by itself, as if it had crashed
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.notEqual(service.status().state, 'ready');
+  assert.deepEqual(await service.restart(), { restarted: true });
+  assert.equal(service.status().state, 'ready');
+  assert.notEqual(service.session(), before);
+  await assert.rejects(service.request('buffer.digest', { handle }), { code: 'INVALID_BUFFER' });
+});
+
+test('an automatic restart is allowed once per program session; the user may restart as often as they like', { skip: !python, timeout: 60000 }, async (t) => {
+  const service = newService();
+  await service.start();
+  t.after(() => service.stop());
+  assert.deepEqual(await service.restart({ automatic: true }), { restarted: true });
+  assert.equal(service.automaticRestarts(), 1);
+  const session = service.session();
+  await assert.rejects(service.restart({ automatic: true }), { code: 'LIMIT_EXCEEDED', field: 'automatic' });
+  assert.equal(service.session(), session, 'a refused restart changes nothing');
+  assert.equal(service.status().state, 'ready');
+  assert.deepEqual(await service.restart({ automatic: false }), { restarted: true });
+  assert.notEqual(service.session(), session);
+  assert.equal(service.automaticRestarts(), 1);
+});
+
+test('a disabled service and one that is closing never restart', { skip: !python, timeout: 60000 }, async () => {
+  const disabled = createEngineService({ enabled: false, packaged: false, version: 'test', sourceDirectory: '/not-used' });
+  await assert.rejects(disabled.restart(), { code: 'ENGINE_UNAVAILABLE' });
+  const service = newService();
+  await service.start();
+  await service.stop();
+  await assert.rejects(service.restart(), { code: 'ENGINE_UNAVAILABLE' });
+  assert.equal(service.status().state, 'stopped');
+});
+
+test('closing the program while a restart is running starts nothing', { skip: !python, timeout: 60000 }, async () => {
+  const service = newService();
+  await service.start();
+  const restarting = service.restart().catch((error) => error.code);
+  await service.stop();
+  assert.equal(await restarting, 'ENGINE_UNAVAILABLE');
+  assert.equal(service.status().state, 'stopped');
+  assert.equal(service.session(), null, 'no engine was started behind the closing program');
+});
