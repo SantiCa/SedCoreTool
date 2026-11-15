@@ -281,6 +281,26 @@ try {
     await p.waitForFunction(() => window.ichantool.S.sections.every((s) => s.analysis?.state === 'ready'), { timeout: 60000 });
     assert.deepEqual((await p.evaluate(compareWithReference)).mismatches, [], 'Retry starts a new session and every section matches the reference again');
     assert.deepEqual(await reanalyse(binCm), Array(6).fill('ready'));
+    // Card M8.4.8: a coordinator killed while the changed rows of an undo are on their way (about 100 ms after the click the page sends them).
+    // Whether the kill lands before, during or after the transfer, the undo stays in the project and the program recovers by Retry.
+    await p.evaluate(() => document.getElementById('undoBtn').click());
+    await new Promise((resolve) => setTimeout(resolve, 110));
+    process.kill(coordinator(), 'SIGKILL');
+    await p.waitForFunction(() => window.ichantool.S.sections.every((s) => s.analysis?.state !== 'pending'), { timeout: 60000 });
+    assert.equal(await p.evaluate(signature), before, 'the undo is in the project whatever the engine did');
+    await reanalyse(binCm + 0.13);                                              // a changed setting makes every section ask the engine, so the loss is noticed
+    if (await p.evaluate(() => window.ichantool.S.sections.some((s) => s.analysis?.state === 'error'))) {
+      await p.evaluate(() => document.getElementById('modeSection').click());
+      await p.waitForSelector('#engineRetry', { timeout: 10000 });
+      await p.evaluate(() => document.getElementById('engineRetry').click());
+    }
+    await p.waitForFunction(() => window.ichantool.S.sections.every((s) => s.analysis?.state === 'ready'), { timeout: 60000 });
+    assert.deepEqual(await reanalyse(binCm), Array(6).fill('ready'));
+    assert.deepEqual((await p.evaluate(compareWithReference)).mismatches, [], 'after the failure the result is the reference');
+    await p.evaluate(() => document.getElementById('redoBtn').click());
+    assert.equal(await p.evaluate(signature), edited, 'redo restores the edited state');
+    assert.deepEqual((await p.evaluate(compareWithReference)).mismatches, [], 'and the engine agrees');
+    await p.waitForFunction(() => document.getElementById('saveState').dataset.state === 'saved', { timeout: 30000 });
     assert.equal(await p.evaluate(signature), edited, 'the project was not touched by the engine failures');
   }
   // The tabs that read the intervals must show them without a page error (checked only by eye in M8.3.7).

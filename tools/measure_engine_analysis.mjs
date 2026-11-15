@@ -276,6 +276,21 @@ if (want('responsiveness')) {
       results[mode] = { analysis_ms: round(elapsed), frames: measured.gaps.length, frame_gap_p95_ms: round(percentile(measured.gaps, 0.95)), frame_gap_max_ms: round(Math.max(...measured.gaps, 0)),
         input_to_frame_p95_ms: round(percentile(measured.latency, 0.95)), input_to_frame_max_ms: round(Math.max(...measured.latency, 0)), input_events: measured.latency.length,
         memory: sampler ? { idle, during_analysis: summarise(sampler.samples.slice(startMark)) } : 'engine off: the sampler measures the engine tree only' };
+      // Guarantee (4) of card M8.4.4: input-to-next-frame during a brush stroke, while the analysis of the previous stroke is still on its way.
+      await session.page.evaluate(() => { window.ichantool.setTool('brush'); });
+      const box = await session.page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+      const stroke = async (moves, pause) => {
+        await session.page.mouse.move(box.x + box.w * 0.3, box.y + box.h * 0.4); await session.page.mouse.down();
+        for (let i = 0; i < moves; i++) { await session.page.mouse.move(box.x + box.w * 0.3 + (i % 30) * 6, box.y + box.h * 0.4 + Math.floor(i / 30) * 12); await sleep(pause); }
+        await session.page.mouse.up();
+      };
+      await stroke(30, 10);                                                       // its analysis starts 100 ms later and runs while the next stroke is drawn
+      await session.page.evaluate(() => { window.__latency = []; window.__gaps = []; window.__watch = true; let last = performance.now(); const frame = (t) => { window.__gaps.push(t - last); last = t; if (window.__watch) requestAnimationFrame(frame); }; requestAnimationFrame(frame); });
+      await stroke(60, 15);
+      const settled = await session.page.evaluate(async () => { const I = window.ichantool; await I.analyzeSections(I.S.sections); return I.S.sections.every((s) => s.analysis?.state === 'ready' || s.analysis === undefined); });
+      const strokeMeasured = await session.page.evaluate(() => { window.__watch = false; return { gaps: window.__gaps, latency: window.__latency }; });
+      results[mode].stroke = { input_to_frame_p95_ms: round(percentile(strokeMeasured.latency, 0.95)), input_to_frame_max_ms: round(Math.max(...strokeMeasured.latency, 0)), input_events: strokeMeasured.latency.length,
+        frame_gap_p95_ms: round(percentile(strokeMeasured.gaps, 0.95)), settled };
     } finally { sampler?.stop(); await session.stop(); }
   }
   report.results.responsiveness_memory = { fixture: largest, ...results };
@@ -407,6 +422,9 @@ for (const fixture of fixtures) {
 }
 if (R.responsiveness_memory) {
   const rm = R.responsiveness_memory;
+  // Gate of card M8.4.4 (4): a stroke with the engine on is not worse than with it off, beyond measurement noise (the larger of 1.25 x and +16 ms) and within the 100 ms of the gate.
+  v.stroke_responsiveness = { pass: rm.on.stroke.settled && rm.on.stroke.input_to_frame_p95_ms <= Math.min(100, Math.max(1.25 * rm.off.stroke.input_to_frame_p95_ms, rm.off.stroke.input_to_frame_p95_ms + 16)),
+    p95_on_ms: rm.on.stroke.input_to_frame_p95_ms, p95_off_ms: rm.off.stroke.input_to_frame_p95_ms, events_on: rm.on.stroke.input_events, events_off: rm.off.stroke.input_events };
   v.responsiveness = { pass: rm.on.input_to_frame_p95_ms <= 100, input_to_frame_p95_ms_on: rm.on.input_to_frame_p95_ms, input_to_frame_p95_ms_off: rm.off.input_to_frame_p95_ms, gate_ms: 100 };
 }
 if (R.cancellation) {

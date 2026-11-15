@@ -46,12 +46,19 @@ def rle(mask):
     return np.column_stack((flat[edges[:-1]], np.diff(edges))).ravel().tolist()
 
 
-def make_synthetic(path, *, height=6400):
-    """Write a deterministic normal project package with precomputed nonoverlapping traces."""
+def make_synthetic(path, *, height=6400, width=960):
+    """Write a deterministic normal project package with precomputed nonoverlapping traces.
+
+    The default 960 x 6400 package is the fixture of M0.1 and must stay byte-identical; ``width`` only changes the geometry
+    (card M8.4.12 uses 512 x 512 sections, one tile each).
+    """
     if not isinstance(height, int) or not 256 <= height <= 16000:
         raise ValueError("Synthetic section height must be an integer from 256 to 16000 pixels")
+    if not isinstance(width, int) or not 256 <= width <= 4096:
+        raise ValueError("Synthetic section width must be an integer from 256 to 4096 pixels")
     rng = np.random.Generator(np.random.PCG64(SEED))
-    w, h, depth_cm = 960, height, 128
+    w, h, depth_cm = width, height, 128
+    column_width = (w - 100) // 2          # 430 for the default width: two columns of traces, 32 pixels from the left edge and 18 apart
     filters = dict(channel="rgb", blackPoint=0, whitePoint=255, gamma=1, brightness=0, contrast=0, saturation=100)
     classes = [
         dict(id="undet", name="Undetermined", color="#d9a441", counts=True, fixed=True, plain=True),
@@ -67,7 +74,7 @@ def make_synthetic(path, *, height=6400):
             pixels = rng.integers(165, 201, size=(h, w), dtype=np.uint8)
             objects = []
             for y0 in range(16, h - 100, 128):
-                for x0, max_width, cls in [(32, 430, "chondrites"), (480, 430, "planolites")]:
+                for x0, max_width, cls in [(32, column_width, "chondrites"), (32 + column_width + 18, column_width, "planolites")]:
                     x1 = x0 + int(rng.integers(40, max_width))
                     y1 = y0 + int(rng.integers(28, 101))
                     ident = len(objects) + 1

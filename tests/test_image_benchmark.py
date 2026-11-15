@@ -102,3 +102,39 @@ def test_provenance_distinguishes_newlines_from_application_edits(image_benchmar
     added = image_benchmark.application_provenance()
     assert added["modified_files"] == ["app/js/added.js"]
     assert added["files_sha256"] != before["files_sha256"]
+
+
+@pytest.mark.parametrize("width", [0, True, "960", 255, 4097])
+def test_synthetic_fixture_rejects_unsupported_widths(image_benchmark, tmp_path, width):
+    with pytest.raises(ValueError, match="section width"):
+        image_benchmark.make_synthetic(tmp_path / "invalid.zip", width=width)
+    assert not (tmp_path / "invalid.zip").exists()
+
+
+def test_synthetic_fixture_with_a_width_keeps_every_trace_inside_the_image_and_is_deterministic(image_benchmark, tmp_path):
+    first, second = tmp_path / "first.zip", tmp_path / "second.zip"
+    image_benchmark.make_synthetic(first, height=512, width=512)
+    image_benchmark.make_synthetic(second, height=512, width=512)
+    assert first.read_bytes() == second.read_bytes()
+    with ZipFile(first) as archive:
+        sections = json.loads(archive.read("project.json"))["cores"][0]["sections"]
+        assert len(sections) == 8
+        for section in sections:
+            assert (section["w"], section["h"]) == (512, 512)
+            assert section["roi"] == {"x0": 20, "x1": 492, "y0": 0, "y1": 512}
+            assert section["objects"]
+            for obj in section["objects"]:
+                stats = obj["st"]
+                assert 0 <= stats["x0"] <= stats["x1"] < 512 and 0 <= stats["y0"] <= stats["y1"] < 512
+            with archive.open(section["file"]["path"]) as source, Image.open(source) as image:
+                assert image.size == (512, 512)
+
+
+def test_the_default_synthetic_geometry_did_not_change(image_benchmark, tmp_path):
+    """The 960-pixel fixture of M0.1 is referenced by recorded evidence: its traces must stay where they were."""
+    image_benchmark.make_synthetic(tmp_path / "default.zip", height=256)
+    with ZipFile(tmp_path / "default.zip") as archive:
+        first = json.loads(archive.read("project.json"))["cores"][0]["sections"][0]["objects"]
+    left, right = first[0]["st"], first[1]["st"]
+    assert left["x0"] == 32 and right["x0"] == 480
+    assert left["x1"] - 32 < 430 and right["x1"] - 480 < 430
