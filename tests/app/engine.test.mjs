@@ -331,3 +331,58 @@ test('closing the program while a restart is running starts nothing', { skip: !p
   assert.equal(service.status().state, 'stopped');
   assert.equal(service.session(), null, 'no engine was started behind the closing program');
 });
+
+// ---- tile store (card M8.4.14, contract §8.5) ----------------------------------------------------------------------------------------
+
+test('a control frame may announce several binary frames, which must arrive exactly and in order', () => {
+  const control = Buffer.concat(controlFrame({ ok: true }));
+  const parts = ['abc', 'defgh', 'i'].map((text) => Buffer.concat(frame(2, Buffer.from(text))));
+  const stream = Buffer.concat([control, ...parts, control]);
+  for (let split = 1; split < stream.length; split += 3) {
+    const controls = [], payloads = [], reader = new ControlReader((value) => { controls.push(value); return controls.length === 1 ? { binaryFrames: [3, 5, 1] } : undefined; },
+      (bytes) => payloads.push(bytes.toString()));
+    reader.push(stream.subarray(0, split)); reader.push(stream.subarray(split)); reader.end();
+    assert.deepEqual([controls.length, payloads], [2, ['abc', 'defgh', 'i']]);
+  }
+  const announce = (sizes) => new ControlReader(() => ({ binaryFrames: sizes }), () => {});
+  assert.throws(() => announce([3, 5]).push(Buffer.concat([control, parts[0], control])), /header/, 'a control frame where a binary frame was announced');
+  assert.throws(() => announce([3, 4]).push(Buffer.concat([control, parts[0], parts[1]])), /header/, 'a frame of the wrong length');
+  for (const bad of [[], [0], [MAX_CHUNK + 1], Array(65).fill(1), [1.5], 'x']) assert.throws(() => announce(bad).push(control), /announcement/);
+  const truncated = announce([3, 5]); truncated.push(Buffer.concat([control, parts[0]]));
+  assert.throws(() => truncated.end(), /Truncated/, 'the second announced frame never came');
+});
+
+const pyvipsCheck = python ? spawnSync(python, ['-c', 'import pyvips'], { windowsHide: true }) : null;
+const withPyvips = Boolean(python) && pyvipsCheck.status === 0;
+
+test('the tile store through the real client: a build with progress events, pyramid.info and verified tiles in several frames', { skip: !withPyvips, timeout: 120000 }, async (t) => {
+  const pyramidDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'sedcoretool-pyramids-test-'));
+  t.after(() => fs.rm(pyramidDirectory, { recursive: true, force: true }));
+  const client = await clientFixture(t, { pyramidDirectory });
+  const source = fileURLToPath(new URL('../../examples/data/idealized_core_0-500cm.jpg', import.meta.url));
+  const events = [];
+  const built = await client.request('pyramid.build', { path: source, name: 'idealized_core_0-500cm.jpg' }, null, { onEvent: (event) => events.push(event) });
+  assert.equal(built.pyramid, digest(await fs.readFile(source)));
+  assert.equal(built.reused, false);
+  assert.ok(events.length >= 1 && events.every((event) => ['hash', 'level0', 'levels'].includes(event.stage)));
+  const info = await client.request('pyramid.info', { pyramid: built.pyramid });
+  assert.equal(info.width, built.width); assert.equal(info.levels.length, built.levels);
+  const positions = [[0, 0], [1, 0]].filter(([row]) => row < info.levels[0].rows);
+  const read = await client.request('tile.read', { pyramid: built.pyramid, level: 0, positions });
+  const tileBytes = 512 * 512 * info.channels;
+  assert.equal(read.bytes.length, tileBytes * positions.length);
+  read.tiles.forEach((tile, index) => assert.equal(digest(read.bytes.subarray(index * tileBytes, (index + 1) * tileBytes)), tile.sha256));
+  assert.equal(read.frames.length, Math.ceil(read.bytes.length / MAX_CHUNK));
+  await assert.rejects(client.request('tile.read', { pyramid: built.pyramid, level: 0, positions: [[999, 0]] }), { code: 'INVALID_REQUEST', field: 'positions' });
+  const again = await client.request('pyramid.build', { path: source, name: 'idealized_core_0-500cm.jpg' });
+  assert.equal(again.reused, true);
+  assert.equal(client.status().state, 'ready');
+});
+
+test('without a pyramid folder the engine refuses the tile-store operations, and the page bridge never forwards them', { skip: !python }, async (t) => {
+  const client = await clientFixture(t);
+  await assert.rejects(client.request('pyramid.info', { pyramid: '0'.repeat(64) }), { code: 'UNSUPPORTED_METHOD' });
+  const { createEngineIpc } = require('../../desktop/engine-ipc.js');
+  const ipc = createEngineIpc({ engine: { request: async () => ({}), session: () => null, status: () => ({}) } });
+  for (const op of ['pyramid.build', 'pyramid.info', 'tile.read']) assert.ok(!ipc.OPERATIONS.includes(op), op);
+});

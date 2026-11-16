@@ -329,7 +329,8 @@ gates are delivered; it does not certify M8.2 packaging or M8.3 numerical/perfor
 
 ## 8. Tile store v1: pixel pyramids (card M8.4.14)
 
-Specified on 16 November 2026, before any store file is written; **not implemented yet** (the status line at the top says what is).
+Specified on 16 November 2026, before any store file was written. Implemented in the engine on 17 November 2026 (card M8.4.14 steps 3-5:
+`src/sedcoretool/store/`, the three operations below); **the interface does not use it yet** (card M8.4.15).
 It realises [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84) and its "Design of part C" for
 the pixel pyramid. Mask tiles and manifests (decision 6) extend this section in card M8.4.16. The format is independent of the browser,
 IndexedDB and Electron (D12): a program that reads this section can read and write a store without SedCoreTool.
@@ -384,8 +385,10 @@ finished the same pyramid meanwhile, the new folder is removed and the existing 
 leaves only a `.partial-*` folder, which every coordinator deletes when it starts and before each build. A full disk during the build is
 `LIMIT_EXCEEDED` with `details.field = "disk"`.
 
-Progress: the worker writes `<job folder>/progress` (16 bytes: completed and total, two `u64le`, replaced atomically); the coordinator reads it at
-most 10 times per second and sends events `{stage, completed, total}` (§3). A build has no fixed deadline; the coordinator kills it when its progress
+Progress: the worker writes `<job folder>/progress` as JSON `{stage, completed, total}`, through a temporary file and an atomic replacement; when
+the replacement fails because the coordinator is reading the file (Windows), that update is skipped. The coordinator reads it at most 10 times
+per second and sends events `{stage, completed, total}` (§3) with the build's request ID; the desktop client restarts its idle timeout (90 s) on
+each event. A build has no fixed deadline; the coordinator kills it when its progress
 has not advanced for 60 s. Cancellation follows §3 (marker file, polled at least once per band; acknowledgement within 250 ms; kill after 1.5 s).
 libvips' own caches are limited (`cache_set_max_mem` 64 MiB, `cache_set_max_files` 16) and its thread pool uses the engine's thread cap.
 
@@ -395,11 +398,15 @@ libvips' own caches are limited (`cache_set_max_mem` 64 MiB, `cache_set_max_file
 |---|---|---|
 | `pyramid.build` | `{path, name}`: `path` absolute, to a regular file; `name` its display name (no separators). **Accepted only from the main process**; the renderer bridge never forwards a path (card M8.4.15 maps tokens to paths). | `{pyramid, width, height, channels, bits, levels, reused, disk_bytes}`; events `{stage: "hash" \| "level0" \| "levels", completed, total}`. |
 | `pyramid.info` | `{pyramid}` | the parsed `pyramid.json` (only for a complete pyramid; touches its modification time). |
-| `tile.read` | `{pyramid, level, positions: [[row, col], ...]}`, 1 to 16 positions inside the level's grid | `{tiles: [{row, col, byte_length, sha256}, ...]}` in request order, immediately followed by the uncompressed tile bytes of all tiles, concatenated in that order and cut into binary frames of at most 1,048,576 bytes. Each tile is read, decompressed if needed and checked against `.tiles.sha256` before anything is sent; if any tile fails, the response is an error (`INVALID_BUFFER`, `details.field = "tile"`) and no binary frame follows. |
+| `tile.read` | `{pyramid, level, positions: [[row, col], ...]}`, 1 to 16 positions inside the level's grid | `{tiles: [{row, col, byte_length, sha256}, ...], frames: [n1, n2, ...]}` in request order, immediately followed by the uncompressed tile bytes of all tiles, concatenated in that order and cut into binary frames of at most 1,048,576 bytes whose lengths `frames` announces (the client accepts exactly those frames, then checks each tile's SHA-256). Each tile is read, decompressed if needed and checked against `.tiles.sha256` before anything is sent; if any tile fails, the response is an error (`INVALID_BUFFER`, `details.field = "tile"`) and no binary frame follows. |
 
 `tile.read` and `pyramid.info` run in the coordinator (standard library only: file reads, `zlib`, `hashlib`); verified tiles are kept in a
 least-recently-used cache of at most 256 MiB. Tile bytes are never charged to the session's buffer budget of §3 (they are not buffers).
-Error codes are those of §3.
+Error codes are those of §3. A coordinator started without `--pyramid-dir` answers the three operations with `UNSUPPORTED_METHOD`.
+
+The method worker reads its command pipe on a private file descriptor; descriptor 0 and the Windows standard input handle point to the null
+device. With the pipe on descriptor 0, a thread blocked reading it made libvips crash with an access violation in a stress test (12 processes of 12)
+and in about one build in fourteen through the coordinator (found in M8.4.14).
 
 ### 8.6 What is checked (M8.4.14)
 

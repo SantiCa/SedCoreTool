@@ -44,12 +44,13 @@ function controlFrame(value) { return frame(1, Buffer.from(JSON.stringify(value)
 
 /**
  * Reads engine frames. A binary frame is accepted only straight after a control frame whose handler returned its exact
- * length as `{ binaryBytes }` (a successful `buffer.read` response announces one); any other binary frame invalidates the session.
+ * length as `{ binaryBytes }` (a successful `buffer.read` response announces one), or as one of the lengths it returned in order as
+ * `{ binaryFrames: [...] }` (a `tile.read` response announces up to 64); any other binary frame invalidates the session.
  */
 class ControlReader {
   constructor(onControl, onBinary = null) {
     this.onControl = onControl; this.onBinary = onBinary; this.header = Buffer.alloc(12); this.used = 0; this.payload = null;
-    this.kind = 1; this.expected = null;
+    this.kind = 1; this.expected = null; this.following = [];
   }
   push(chunk) {
     let offset = 0;
@@ -71,14 +72,20 @@ class ControlReader {
           const size = announced.binaryBytes;
           if (!this.onBinary || !Number.isSafeInteger(size) || size < 1 || size > MAX_CHUNK) throw new Error('Invalid binary announcement');
           this.expected = size;
+        } else if (announced && typeof announced === 'object' && 'binaryFrames' in announced) {
+          const sizes = announced.binaryFrames;
+          if (!this.onBinary || !Array.isArray(sizes) || !sizes.length || sizes.length > 64
+              || sizes.some((size) => !Number.isSafeInteger(size) || size < 1 || size > MAX_CHUNK)) throw new Error('Invalid binary announcement');
+          [this.expected, ...this.following] = sizes;
         }
       } else {
-        const bytes = this.payload; this.payload = null; this.expected = null;
+        const bytes = this.payload; this.payload = null;
+        this.expected = this.following.length ? this.following.shift() : null;
         this.onBinary(bytes);
       }
     }
   }
-  end() { if (this.used || this.payload || this.expected !== null) throw new Error('Truncated response'); }
+  end() { if (this.used || this.payload || this.expected !== null || this.following.length) throw new Error('Truncated response'); }
 }
 
 module.exports = { MAX_JSON, MAX_CHUNK, parseControl, frame, controlFrame, ControlReader };

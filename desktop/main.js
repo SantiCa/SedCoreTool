@@ -63,7 +63,8 @@ if (process.versions.electron) {
     sourceDirectory: app.isPackaged ? path.join(process.resourcesPath, 'python') : path.join(__dirname, 'python'),
     runtimeDirectory: app.isPackaged ? path.join(process.resourcesPath, 'engine-runtime') : path.join(__dirname, 'runtime'),
     lockPath: path.join(__dirname, 'runtime-lock.json'),
-    cacheFile: () => path.join(app.getPath('userData'), 'engine-runtime-verified.json'), version: app.isPackaged ? app.getVersion() : require('./package.json').version });
+    cacheFile: () => path.join(app.getPath('userData'), 'engine-runtime-verified.json'), version: app.isPackaged ? app.getVersion() : require('./package.json').version,
+    pyramidDirectory: () => path.join(app.getPath('userData'), 'pyramids') });   // the tile store's pyramid cache (contract §8.1)
 
   const heapMB = Math.max(2048, Math.min(32768, Math.floor((os.totalmem() / 2 ** 20) * 0.75)));
   app.commandLine.appendSwitch('js-flags', `--max-old-space-size=${heapMB}`);

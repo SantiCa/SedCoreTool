@@ -1,6 +1,6 @@
 // Main-process-only client. Renderer code cannot choose commands, paths or arbitrary engine operations.
 const { spawn } = require('node:child_process');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -8,7 +8,14 @@ const { controlFrame, frame, ControlReader } = require('./engine-protocol');
 
 // Methods the engine may advertise in its handshake; anything else makes the engine unavailable.
 const ADVERTISED_METHODS = new Set(['buffer.digest/1', 'section.intervals/1']);
-const OPERATIONS = new Set(['hello', 'buffer.begin', 'buffer.derive', 'buffer.chunk', 'buffer.commit', 'buffer.release', 'buffer.read', 'buffer.digest', 'section.analyze', 'job.cancel', 'shutdown']);
+// The tile-store operations (contract §8) are main-process only: engine-ipc.js never forwards them, and `pyramid.build` carries a path.
+const OPERATIONS = new Set(['hello', 'buffer.begin', 'buffer.derive', 'buffer.chunk', 'buffer.commit', 'buffer.release', 'buffer.read', 'buffer.digest', 'section.analyze', 'job.cancel', 'shutdown',
+  'pyramid.build', 'pyramid.info', 'tile.read']);
+// A pyramid build has no fixed length: the engine stops a build whose progress stalls for 60 s. The client fails the session only
+// when nothing at all (no progress event, no answer) arrives for this long.
+const PYRAMID_IDLE_TIMEOUT_MS = 90 * 1000;
+const PROGRESS_STAGES = new Set(['hash', 'level0', 'levels']);
+const PYRAMID_BUDGET_BYTES = 50 * 2 ** 30;   // contract §8.4; the maintainer's default of 16 November 2026
 // The engine ends every analysis within its own 120 s deadline; up to four more wait in its queue. This is only the backstop
 // against a coordinator that stops answering, and it ends the whole session (see `request`).
 const ANALYSIS_TIMEOUT_MS = 10 * 60 * 1000;
@@ -40,9 +47,10 @@ function terminateTree(child) {
 }
 
 class EngineClient {
-  constructor({ executable, script, version, runtimeId, timeoutMs = 5000, captureDiagnostics = false }) {
+  constructor({ executable, script, version, runtimeId, timeoutMs = 5000, captureDiagnostics = false, pyramidDirectory = null, pyramidBudgetBytes = PYRAMID_BUDGET_BYTES }) {
     if (!path.isAbsolute(executable || '') || !path.isAbsolute(script || '') || !/^[0-9a-f]{64}$/.test(runtimeId || '')) throw unavailable();
-    this.options = { executable, script, version, runtimeId, timeoutMs, captureDiagnostics };
+    if (pyramidDirectory !== null && !path.isAbsolute(pyramidDirectory)) throw unavailable();
+    this.options = { executable, script, version, runtimeId, timeoutMs, captureDiagnostics, pyramidDirectory, pyramidBudgetBytes };
     this.child = null; this.state = 'stopped'; this.pending = new Map(); this.queue = []; this.writing = false;
     this.stderr = Buffer.alloc(0); this.handshake = null; this.session = null; this.partial = null;
   }
@@ -52,7 +60,8 @@ class EngineClient {
     if (this.state === 'starting') return this.starting;
     if (this.child) { terminateTree(this.child); await this.exited; }
     this.state = 'starting'; this.session = randomUUID(); this.stderr = Buffer.alloc(0); this.handshake = null;
-    const { executable, script, version, runtimeId } = this.options;
+    const { executable, script, version, runtimeId, pyramidDirectory, pyramidBudgetBytes } = this.options;
+    const storeArguments = pyramidDirectory ? ['--pyramid-dir', pyramidDirectory, '--pyramid-budget-bytes', String(pyramidBudgetBytes)] : [];
     let scratch;
     try { scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'sedcoretool-engine-')); }
     catch { this.state = 'unavailable'; throw unavailable(); }
@@ -61,7 +70,7 @@ class EngineClient {
     for (const variable of ['LD_LIBRARY_PATH', 'LD_PRELOAD', 'DYLD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES']) delete env[variable];
     let child;
     try {
-      child = spawn(executable, ['-I', '-B', '-u', script, '--version', version, '--runtime-id', runtimeId, '--scratch-dir', scratch], {
+      child = spawn(executable, ['-I', '-B', '-u', script, '--version', version, '--runtime-id', runtimeId, '--scratch-dir', scratch, ...storeArguments], {
         env, shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch { this.state = 'unavailable'; await cleanupScratch(scratch); throw unavailable(); }
@@ -90,7 +99,8 @@ class EngineClient {
     }).catch((error) => { this.fail(child); throw error; });
     return this.starting;
   }
-  request(op, payload, binary = null, { timeoutMs = op === 'section.analyze' ? ANALYSIS_TIMEOUT_MS : this.options.timeoutMs } = {}) {
+  /** `onEvent(payload)` receives the progress events of a `pyramid.build`; each event also restarts its idle timeout. */
+  request(op, payload, binary = null, { timeoutMs = op === 'section.analyze' ? ANALYSIS_TIMEOUT_MS : op === 'pyramid.build' ? PYRAMID_IDLE_TIMEOUT_MS : this.options.timeoutMs, onEvent = null } = {}) {
     if (!OPERATIONS.has(op) || !this.child || !['starting', 'ready', 'stopping'].includes(this.state)) return Promise.reject(unavailable());
     if (this.pending.size >= 32) return Promise.reject(Object.assign(new Error('BUSY'), { code: 'BUSY' }));
     if (op === 'buffer.chunk' && [...this.pending.values()].filter((item) => item.op === op).length >= 2) return Promise.reject(Object.assign(new Error('BUSY'), { code: 'BUSY' }));
@@ -104,7 +114,7 @@ class EngineClient {
     const promise = new Promise((resolve, reject) => {
       const child = this.child;
       const timer = setTimeout(() => this.fail(child), timeoutMs);
-      this.pending.set(id, { resolve, reject, timer, op, payload });
+      this.pending.set(id, { resolve, reject, timer, op, payload, onEvent, timeoutMs, child });
     });
     // Expose only to trusted callers so they can send cancellation for an in-flight diagnostic.
     promise.requestId = id;
@@ -131,6 +141,7 @@ class EngineClient {
   }
   receive(value) {
     const pending = this.pending.get(value?.id);
+    if (value?.kind === 'event') return this.receiveEvent(value, pending);
     if (!value || value.v !== 1 || value.kind !== 'response' || value.session !== this.session || !pending || value.op !== pending.op) throw unavailable();
     const fields = ['v', 'kind', 'session', 'id', 'op', 'status', ...(value.status === 'ok' ? ['result'] : value.status === 'error' ? ['error'] : [])];
     if (Object.keys(value).sort().join() !== fields.sort().join() || !['ok', 'error', 'cancelled'].includes(value.status)) throw unavailable();
@@ -142,6 +153,16 @@ class EngineClient {
       this.partial = { pending, id: value.id, result: read };
       return { binaryBytes: read.byte_length };
     }
+    if (value.status === 'ok' && pending.op === 'tile.read') {
+      // The result is followed by the announced binary frames: the tiles' bytes, concatenated, cut at 1 MiB (contract §8.5).
+      const read = value.result, asked = pending.payload, tiles = read?.tiles, frames = read?.frames;
+      if (!read || Object.keys(read).sort().join() !== 'frames,tiles' || !Array.isArray(tiles) || tiles.length !== asked.positions.length
+          || tiles.some((tile, index) => !tile || Object.keys(tile).sort().join() !== 'byte_length,col,row,sha256' || tile.row !== asked.positions[index][0]
+            || tile.col !== asked.positions[index][1] || !Number.isSafeInteger(tile.byte_length) || tile.byte_length < 1 || !/^[0-9a-f]{64}$/.test(tile.sha256))
+          || !Array.isArray(frames) || frames.reduce((sum, size) => sum + size, 0) !== tiles.reduce((sum, tile) => sum + tile.byte_length, 0)) throw unavailable();
+      this.partial = { pending, id: value.id, result: read, parts: [], remaining: frames.length };
+      return { binaryFrames: frames };
+    }
     clearTimeout(pending.timer); this.pending.delete(value.id);
     if (value.status === 'ok') pending.resolve(value.result);
     else if (value.status === 'cancelled') pending.resolve({ cancelled: true });
@@ -152,10 +173,34 @@ class EngineClient {
     return undefined;
   }
   receiveBinary(bytes) {
-    const partial = this.partial; this.partial = null;
+    const partial = this.partial;
     if (!partial) throw unavailable();
+    if (partial.parts) {
+      partial.parts.push(bytes);
+      if (--partial.remaining) return;
+      const joined = Buffer.concat(partial.parts);
+      let offset = 0;
+      for (const tile of partial.result.tiles) {          // the engine verified every tile; this checks the transport kept them apart
+        if (createHash('sha256').update(joined.subarray(offset, offset + tile.byte_length)).digest('hex') !== tile.sha256) throw unavailable();
+        offset += tile.byte_length;
+      }
+      bytes = joined;
+    }
+    this.partial = null;
     clearTimeout(partial.pending.timer); this.pending.delete(partial.id);
     partial.pending.resolve({ ...partial.result, bytes });
+  }
+  /** A progress event of a running `pyramid.build` (contract §8.4); anything else invalidates the session. */
+  receiveEvent(value, pending) {
+    const payload = value.payload;
+    if (value.v !== 1 || value.session !== this.session || !pending || pending.op !== 'pyramid.build' || value.op !== pending.op
+        || Object.keys(value).sort().join() !== 'id,kind,op,payload,session,v' || !payload || Object.keys(payload).sort().join() !== 'completed,stage,total'
+        || !PROGRESS_STAGES.has(payload.stage) || !Number.isSafeInteger(payload.completed) || !Number.isSafeInteger(payload.total)
+        || payload.completed < 0 || payload.total < 0) throw unavailable();
+    clearTimeout(pending.timer);
+    pending.timer = setTimeout(() => this.fail(pending.child), pending.timeoutMs);
+    try { pending.onEvent?.({ stage: payload.stage, completed: payload.completed, total: payload.total }); } catch { /* a listener error is not the engine's */ }
+    return undefined;
   }
   fail(child) {
     if (!child || child !== this.child) return;
@@ -182,7 +227,7 @@ class EngineClient {
 }
 
 /** `cacheFile` (optional path or function returning one) holds the record of the last full runtime verification. */
-function createEngineService({ enabled, packaged, executable, sourceDirectory, runtimeDirectory, lockPath, version, cacheFile = null }) {
+function createEngineService({ enabled, packaged, executable, sourceDirectory, runtimeDirectory, lockPath, version, cacheFile = null, pyramidDirectory = null }) {
   let client, runtime = null, state = enabled ? 'stopped' : 'disabled', stopped = false;
   /** The restart that is running, if any: a second request while it runs waits for the same one. */
   let restarting = null;
@@ -228,13 +273,13 @@ function createEngineService({ enabled, packaged, executable, sourceDirectory, r
         }
         if (stopped) return;
         runtime = options.runtime;
-        client = new EngineClient({ ...options, version });
+        client = new EngineClient({ ...options, version, pyramidDirectory: typeof pyramidDirectory === 'function' ? pyramidDirectory() : pyramidDirectory });
         await client.start();
       } catch { if (client) await client.stop(); client = null; state = stopped ? 'stopped' : 'unavailable'; }
     },
     stop: async () => { stopped = true; state = 'stopped'; if (client) await client.stop(); },
     // For engine-ipc.js, which validates everything a page sends. `request` keeps its allowlist of operations.
-    request: (op, payload, binary = null) => (client && client.state === 'ready' ? client.request(op, payload, binary) : Promise.reject(unavailable())),
+    request: (op, payload, binary = null, options = undefined) => (client && client.state === 'ready' ? client.request(op, payload, binary, options) : Promise.reject(unavailable())),
     session: () => (client && client.state === 'ready' ? client.session : null),
   };
   return service;

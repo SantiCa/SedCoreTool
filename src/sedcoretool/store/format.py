@@ -11,6 +11,7 @@ import json
 import math
 import os
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -84,6 +85,15 @@ def write_json_atomically(path: Path, value) -> None:
     temporary = path.with_name(path.name + '.tmp')
     temporary.write_bytes(json.dumps(value, separators=(',', ':'), sort_keys=True).encode('utf-8'))
     os.replace(temporary, path)
+
+
+def remove_partials(root: Path) -> None:
+    """Delete the folders of interrupted builds (contract §8.4: when a coordinator starts and before each build)."""
+    if not root.is_dir():
+        return
+    for item in root.glob(PARTIAL_PREFIX + '*'):
+        if item.is_dir() and not item.is_symlink():
+            shutil.rmtree(item, ignore_errors=True)
 
 
 class InvalidPyramid(ValueError):

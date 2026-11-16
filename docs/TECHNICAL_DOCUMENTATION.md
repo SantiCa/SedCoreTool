@@ -210,7 +210,8 @@ colour palette or a U-Net), `kernels/` (pure array primitives: intervals, counti
 `pipeline.py` (intervals, percentages, indices), `indices.py` (BI and ii schemes),
 `depth.py` (depth and age), `export.py` (CSV and Excel), `plotting.py` (matplotlib figure), `cli.py` (command line),
 `unet/` (U-Net dataset, training, evaluation, prediction, tiling and metrics), `engine/` (experimental desktop
-engine process: framing, staged buffers, coordinator and isolated worker; §26.2).
+engine process: framing, staged buffers, coordinator and isolated worker; §26.2), `store/` (the tile store's pixel pyramids:
+`format.py`, `tiles.py`, `source.py`, `pyramid.py`; §26.4).
 
 Desktop program (`desktop/`): `main.js` (window, `app://` protocol and IPC), `preload.js` (narrow
 `window.corantoolDesktop` bridge), `engine.js`, `engine-ipc.js`, `engine-protocol.js` and `engine-runtime.js` (engine process
@@ -3029,6 +3030,29 @@ lifecycle/package checks on each target. There is no automatic update. Follow th
 [runtime update policy](../SECURITY.md#desktop-scientific-runtime); keep optional trainer constraints separate
 under M3.2.4. M8.2.3 retains clean-machine/installer and cross-platform acceptance, resource measurements and
 large commit-verification scheduling gates.
+
+### 26.4 Tile store: pixel pyramids (engine only)
+
+For images of several gigabytes the engine can build a **pixel pyramid**: the image at full resolution and at halved levels, cut into
+512 × 512 tiles on disk. The format, operations and limits are specified in
+[contract §8](roadmap-engine-contract.md#8-tile-store-v1-pixel-pyramids-card-m844); this section describes the implementation. It is reached only
+from the desktop main process (the page cannot request it yet; card M8.4.15) and only when the engine experiment is on.
+
+- **Folder.** `<user data>/pyramids/` (the main process passes it with `--pyramid-dir`); one folder per source, named by the SHA-256 of the
+  source file. Budget 50 GiB: before a build, complete pyramids not used in the session are deleted, least recently used first, until the
+  new one fits and the disk keeps 1 GiB free; otherwise the build fails with `LIMIT_EXCEEDED` (`disk`).
+- **Reading sources** (`store/source.py`): the format is recognised by the file's first bytes and opened only with libvips' TIFF, JPEG or PNG
+  loader; limits are checked on the header (width ≤ 262,144, height ≤ 16,777,216, one 512-row band ≤ 256 MiB, JPEG or PNG ≤ 1 GiB decoded).
+  Samples are copied as stored (8 or 16 bits; 1, 3 or 4 channels).
+- **Building** (`store/pyramid.py`, in the method worker): the source is hashed, then read once in 512-row bands; each band is cut into tiles
+  and halved into the next level, whose rows wait until they fill a band. A level-`k+1` pixel is, per channel, `(sum + n // 2) // n` of the
+  `n` covered level-`k` pixels. Everything goes into `.partial-<uuid>/` and is renamed when `pyramid.json` has been written; a failure, a
+  cancellation or a killed worker leaves only that folder, which is deleted at the next start or build. Progress events at most 10 per second;
+  a build whose progress stops for 60 s is stopped.
+- **Serving tiles** (`store/tiles.py`, in the coordinator): every tile is checked against the SHA-256 listed in `<level>/.tiles.sha256` before
+  it is sent; verified tiles are kept in a 256 MiB least-recently-used cache. Up to 16 tiles per request, sent in binary frames of at most 1 MiB.
+- **Tests:** `tests/test_store_source.py`, `tests/test_store_pyramid.py`, `tests/test_engine_store.py` (Python) and the tile-store tests of
+  `tests/app/engine.test.mjs` (the desktop client and the real engine).
 
 ## 27. Offline single file
 

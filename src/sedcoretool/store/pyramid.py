@@ -58,12 +58,6 @@ def folder_bytes(folder: Path) -> int:
     return sum(item.stat().st_size for item in folder.rglob('*') if item.is_file())
 
 
-def remove_partials(root: Path) -> None:
-    for item in root.glob(fmt.PARTIAL_PREFIX + '*'):
-        if item.is_dir() and not item.is_symlink():
-            shutil.rmtree(item, ignore_errors=True)
-
-
 def complete_pyramids(root: Path) -> list[tuple[Path, dict]]:
     found = []
     for item in root.iterdir():
@@ -136,7 +130,7 @@ def build(path: Path, root: Path, *, name: str, budget: int, compressor=None, ke
     if compressor not in (None, fmt.ZLIB):
         raise ValueError('unknown compressor')
     root.mkdir(parents=True, exist_ok=True)
-    remove_partials(root)
+    fmt.remove_partials(root)
     sha256, size = source_digest(path, cancelled, progress)
     final = root / sha256
     if final.is_dir():

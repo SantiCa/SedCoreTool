@@ -1,6 +1,7 @@
 """Private desktop coordinator. Run this fixed script with Python -I -u."""
 
 import argparse
+import hashlib
 import json
 import os
 import queue
@@ -31,7 +32,7 @@ if __package__:
         write_json,
     )
     from .specs import METHOD_INPUTS, SECTION_INTERVALS, SETTINGS_INPUT
-    from .worker import DigestJob, MethodJob, MethodRunner
+    from .worker import DigestJob, MethodJob, MethodRunner, PyramidJob
 else:
     # Isolated Python excludes both PYTHONPATH and the script directory. Only our fixed source is added.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -52,7 +53,7 @@ else:
         write_json,
     )
     from specs import METHOD_INPUTS, SECTION_INTERVALS, SETTINGS_INPUT
-    from worker import DigestJob, MethodJob, MethodRunner
+    from worker import DigestJob, MethodJob, MethodRunner, PyramidJob
 
 METHODS = ('buffer.digest/1', SECTION_INTERVALS)
 WORKER_ERROR_CODES = ('INVALID_REQUEST', 'UNSUPPORTED_METHOD', 'UNSUPPORTED_INPUT', 'INVALID_BUFFER', 'LIMIT_EXCEEDED', 'INTERNAL')
@@ -60,10 +61,26 @@ FIELD_NAME = re.compile(r'[A-Za-z0-9_.\[\]]{1,128}')
 COLUMN_NAME = re.compile(r'[A-Za-z][A-Za-z_]{0,63}')
 HEX64 = re.compile('[0-9a-f]{64}')
 RUNNER_IDLE_SECONDS = 30         # an idle method worker holds memory (NumPy, the last job's arrays); it is started again when needed
+PROGRESS_EVENT_SECONDS = 0.1     # at most ten progress events per second (§3)
+PYRAMID_NAME = re.compile(r'[^/\\:\x00-\x1f]{1,255}')   # a file name for display: no folder separators or control characters
+MAX_PATH = 4096
+
+
+def load_store():
+    """The tile store's standard-library modules, without running ``sedcoretool/__init__.py`` (it imports pandas and Pillow)."""
+    import types
+    if 'sedcoretool' not in sys.modules:
+        parent = types.ModuleType('sedcoretool')
+        parent.__path__ = [str(Path(__file__).resolve().parent.parent)]
+        sys.modules['sedcoretool'] = parent
+    from sedcoretool.store import format as store_format
+    from sedcoretool.store import tiles as store_tiles
+    return store_format, store_tiles
 
 
 class Coordinator:
-    def __init__(self, output, *, version, runtime_id, worker_script=None, method_script=None, scratch_directory=None):
+    def __init__(self, output, *, version, runtime_id, worker_script=None, method_script=None, scratch_directory=None,
+                 pyramid_directory=None, pyramid_budget=None):
         self.output = output
         self.version = version
         self.runtime_id = runtime_id
@@ -78,6 +95,18 @@ class Coordinator:
         self.runner = None
         self.runner_idle_seconds = RUNNER_IDLE_SECONDS
         self.closing = False
+        self.attachments = []
+        # Tile store (contract §8): only when the main process named a pyramid folder. Pyramids used in this session are never evicted.
+        self.pyramid_root = Path(pyramid_directory) if pyramid_directory else None
+        self.pyramid_budget = pyramid_budget
+        self.pyramids_used = set()
+        self.pyramid_compressor = None    # contract §8.2: decided once by card M8.4.14 step 4, then fixed for format version 1
+        self.store_format = self.tile_reader = None
+        if self.pyramid_root is not None:
+            self.store_format, store_tiles = load_store()
+            self.pyramid_root.mkdir(parents=True, exist_ok=True)
+            self.store_format.remove_partials(self.pyramid_root)
+            self.tile_reader = store_tiles.TileReader(self.pyramid_root)
 
     def response(self, request, status='ok', result=None, error=None):
         value = {key: request[key] for key in ('v', 'session', 'id', 'op')}
@@ -110,12 +139,15 @@ class Coordinator:
                 self.response(request, result=result)
                 if self.attachment is not None:
                     write_binary(self.output, self.attachment)   # the response announced exactly one binary frame
+                for part in self.attachments:                    # tile.read: the response announced these frames
+                    write_binary(self.output, part)
         except RequestError as error:
             self.response(request, 'error', error=error)
         except OSError:
             self.response(request, 'error', error=RequestError('INTERNAL'))
         finally:
             self.attachment = None
+            self.attachments = []
 
     def dispatch(self, request, data):
         operation, payload = request['op'], request['payload']
@@ -160,6 +192,8 @@ class Coordinator:
             self.jobs.append(request)
             self.start_next()
             return None
+        if operation in ('pyramid.build', 'pyramid.info', 'tile.read'):
+            return self.store_operation(request)
         if operation == 'job.cancel':
             require_fields(payload, ('request_id',))
             if not is_uuid(payload['request_id']):
@@ -182,11 +216,131 @@ class Coordinator:
             return {}
         raise RequestError('UNSUPPORTED_METHOD')
 
+    # ---- tile store (contract §8) --------------------------------------------------------------------------------
+
+    def store_operation(self, request):
+        operation, payload = request['op'], request['payload']
+        if self.pyramid_root is None:
+            raise RequestError('UNSUPPORTED_METHOD')
+        if operation == 'pyramid.build':
+            require_fields(payload, ('path', 'name'))
+            path, name = payload['path'], payload['name']
+            if (not isinstance(path, str) or not 0 < len(path) <= MAX_PATH or '\x00' in path or not Path(path).is_absolute()):
+                raise RequestError('INVALID_REQUEST', 'path')
+            if not isinstance(name, str) or not PYRAMID_NAME.fullmatch(name):
+                raise RequestError('INVALID_REQUEST', 'name')
+            if not Path(path).is_file():
+                raise RequestError('UNSUPPORTED_INPUT', 'source')
+            if self.active is not None and len(self.jobs) >= 4:
+                raise RequestError('BUSY')
+            self.jobs.append(request)
+            self.start_next()
+            return None
+        require_fields(payload, ('pyramid',) if operation == 'pyramid.info' else ('pyramid', 'level', 'positions'))
+        try:
+            description = self.tile_reader.describe(payload['pyramid'])
+        except self.store_format.InvalidPyramid:
+            raise RequestError('INVALID_REQUEST', 'pyramid') from None
+        self.pyramids_used.add(payload['pyramid'])
+        if operation == 'pyramid.info':
+            os.utime(self.pyramid_root / payload['pyramid'] / 'pyramid.json')     # least-recently-used order of the budget
+            return description
+        try:
+            tiles = self.tile_reader.read(payload['pyramid'], payload['level'], payload['positions'])
+        except Exception as error:          # TileError: a missing, unreadable or altered tile is never served
+            field = getattr(error, 'field', None)
+            if field in ('level', 'positions'):
+                raise RequestError('INVALID_REQUEST', field) from None
+            if field == 'tile':
+                raise RequestError('INVALID_BUFFER', 'tile') from None
+            raise
+        joined = b''.join(tiles)
+        self.attachments = [joined[start:start + MAX_CHUNK] for start in range(0, len(joined), MAX_CHUNK)]
+        return {'tiles': [{'row': row, 'col': col, 'byte_length': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+                          for (row, col), data in zip(payload['positions'], tiles)],
+                'frames': [len(part) for part in self.attachments]}
+
+    def start_pyramid(self, request):
+        directory = Path(self.store.directory.name) / f'job-{uuid4()}'
+        directory.mkdir(parents=True)
+        payload = request['payload']
+        job_file = directory / 'job.json'
+        job_file.write_text(json.dumps({'kind': 'pyramid.build', 'path': payload['path'], 'name': payload['name'],
+                                        'root': str(self.pyramid_root), 'budget': self.pyramid_budget, 'compressor': self.pyramid_compressor,
+                                        'keep': sorted(self.pyramids_used), 'cancel_path': str(directory / 'cancel'),
+                                        'progress_path': str(directory / 'progress')}), encoding='utf-8')
+        worker = PyramidJob(self.method_runner(), job_file, directory / 'cancel')
+        worker.directory = directory
+        worker.progress_path = directory / 'progress'
+        worker.progress_seen = None
+        worker.progress_at = time.monotonic()
+        worker.event_at = 0.0
+        return worker
+
+    def pyramid_progress(self, active):
+        """Send a progress event when the worker's progress file changed (at most ten per second); return False when it has stalled."""
+        worker, now = active['worker'], time.monotonic()
+        try:
+            stamp = worker.progress_path.stat().st_mtime_ns
+        except OSError:
+            stamp = None
+        if stamp is not None and stamp != worker.progress_seen:
+            worker.progress_at = now
+            if now - worker.event_at >= PROGRESS_EVENT_SECONDS:
+                try:
+                    value = json.loads(worker.progress_path.read_text(encoding='utf-8'))
+                except (OSError, ValueError):
+                    value = None                                       # being replaced: read it on the next poll
+                if (isinstance(value, dict) and set(value) == {'stage', 'completed', 'total'} and value['stage'] in ('hash', 'level0', 'levels')
+                        and all(type(value[key]) is int and value[key] >= 0 for key in ('completed', 'total'))):
+                    worker.progress_seen, worker.event_at = stamp, now
+                    request = active['request']
+                    write_json(self.output, {'v': 1, 'kind': 'event', 'session': request['session'], 'id': request['id'], 'op': request['op'],
+                                             'payload': value})
+        return now - worker.progress_at < worker.stall_seconds
+
+    def complete_pyramid(self, active, result, worker):
+        request = active['request']
+        try:
+            if active['cancel_at'] is not None:
+                self.finish(request, 'cancelled')
+                return
+            if result is None or result.get('cancelled'):
+                raise RequestError('INTERNAL')
+            if 'error' in result:
+                code, field = result['error']['code'], result['error']['field']
+                if code not in WORKER_ERROR_CODES or (field is not None and not (isinstance(field, str) and FIELD_NAME.fullmatch(field))):
+                    raise RequestError('INTERNAL')
+                raise RequestError(code, field)
+            value = result['pyramid']
+            expected = {'pyramid', 'width', 'height', 'channels', 'bits', 'levels', 'reused', 'disk_bytes'}
+            if (set(value) != expected or not isinstance(value['pyramid'], str) or not HEX64.fullmatch(value['pyramid'])
+                    or type(value['reused']) is not bool
+                    or not all(type(value[key]) is int and value[key] >= 0 for key in expected - {'pyramid', 'reused'})):
+                raise RequestError('INTERNAL')
+            self.tile_reader.forget(value['pyramid'])
+            try:
+                description = self.tile_reader.describe(value['pyramid'])  # the coordinator checks the folder itself
+            except self.store_format.InvalidPyramid:
+                raise RequestError('INTERNAL') from None
+            if (description['width'], description['height'], description['channels'], description['bits'], len(description['levels'])) != (
+                    value['width'], value['height'], value['channels'], value['bits'], value['levels']):
+                raise RequestError('INTERNAL')
+            self.pyramids_used.add(value['pyramid'])
+        except RequestError as error:
+            self.finish(request, 'error', error=error)
+        else:
+            self.finish(request, 'ok', result=value)
+        finally:
+            self.discard(worker)
+
     # ---- jobs ----------------------------------------------------------------------------------------------------
 
     def pinned(self, request):
         """Handles that a queued or running job keeps alive until it ends."""
         payload = request['payload']
+        if request['op'] == 'pyramid.build':
+            return []
         return [payload['handle']] if request['op'] == 'buffer.digest' else list(payload['inputs'].values())
 
     def unpin(self, request):
@@ -237,6 +391,8 @@ class Coordinator:
     def start_worker(self, request):
         """The worker process of a queued job. Input buffers stay pinned while the job waits, so they exist."""
         payload = request['payload']
+        if request['op'] == 'pyramid.build':
+            return self.start_pyramid(request)
         if request['op'] == 'buffer.digest':
             return DigestJob(self.store.buffers[payload['handle']].path, script=self.worker_script)
         directory = Path(self.store.directory.name) / f'job-{uuid4()}'
@@ -301,6 +457,8 @@ class Coordinator:
             worker.kill()
         if time.monotonic() - active['started_at'] >= worker.deadline:
             worker.kill()
+        if active['request']['op'] == 'pyramid.build' and not self.pyramid_progress(active):
+            worker.kill()                                              # no progress for stall_seconds (contract §8.4)
         if not worker.finished():
             return
         self.active = None
@@ -317,6 +475,8 @@ class Coordinator:
                 self.finish(request, 'ok', result=result)
             else:
                 self.finish(request, 'error', error=RequestError('INTERNAL'))
+        elif request['op'] == 'pyramid.build':
+            self.complete_pyramid(active, result, worker)
         else:
             self.complete_analysis(active, result, worker)
         self.start_next()
@@ -414,8 +574,9 @@ def read_requests(stream, inbox):
         inbox.put(None)
 
 
-def serve(input_stream, output_stream, *, version, runtime_id, scratch_directory):
-    coordinator = Coordinator(output_stream, version=version, runtime_id=runtime_id, scratch_directory=scratch_directory)
+def serve(input_stream, output_stream, *, version, runtime_id, scratch_directory, pyramid_directory=None, pyramid_budget=None):
+    coordinator = Coordinator(output_stream, version=version, runtime_id=runtime_id, scratch_directory=scratch_directory,
+                              pyramid_directory=pyramid_directory, pyramid_budget=pyramid_budget)
     inbox = queue.Queue(maxsize=2)
     threading.Thread(target=read_requests, args=(input_stream, inbox), daemon=True).start()
     try:
@@ -440,16 +601,23 @@ def main():
     parser.add_argument('--version', required=True)
     parser.add_argument('--runtime-id', required=True)
     parser.add_argument('--scratch-dir', required=True)
+    parser.add_argument('--pyramid-dir')                       # the tile store's pyramid cache (contract §8.1); absent: no store operations
+    parser.add_argument('--pyramid-budget-bytes', type=int, default=50 * 2**30)
     args = parser.parse_args()
     if not re.fullmatch('[0-9a-f]{64}', args.runtime_id):
         parser.error('runtime-id must be a SHA-256 digest')
+    if args.pyramid_dir is not None and not Path(args.pyramid_dir).is_absolute():
+        parser.error('pyramid-dir must be absolute')
+    if args.pyramid_budget_bytes < 2**30:
+        parser.error('pyramid-budget-bytes must be at least 1 GiB')
     bind_to_process_lifetime()  # best effort; workers also watch the liveness pipe
     threads = str(max(1, min(4, (os.cpu_count() or 1) - 1)))
     for variable in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS', 'VECLIB_MAXIMUM_THREADS'):
         os.environ[variable] = threads
     try:
         # A daemon reader must not hold BufferedReader's lock during interpreter shutdown.
-        serve(sys.stdin.buffer.raw, sys.stdout.buffer, version=args.version, runtime_id=args.runtime_id, scratch_directory=args.scratch_dir)
+        serve(sys.stdin.buffer.raw, sys.stdout.buffer, version=args.version, runtime_id=args.runtime_id, scratch_directory=args.scratch_dir,
+              pyramid_directory=args.pyramid_dir, pyramid_budget=args.pyramid_budget_bytes)
     except (ProtocolError, RequestError, OSError):
         # No input content, paths or tracebacks on the public transport/diagnostic boundary.
         print('engine transport closed', file=sys.stderr)
