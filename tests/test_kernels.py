@@ -69,7 +69,7 @@ def test_units_edges_sums_and_the_minimum_valid_rule():
 
 
 def _sum_by_interval_loop(values, edges):
-    """The implementation before card M8.4.20: one slice sum per interval."""
+    """The implementation before card M8.4.21: one slice sum per interval."""
     return np.array([values[a:b].sum(axis=0) for a, b in edges], dtype=float).reshape(len(edges), *values.shape[1:])
 
 
@@ -89,7 +89,7 @@ def test_sum_by_interval_equals_the_slice_sums_exactly(dtype, trailing):
 
 
 def _bin_edges_loop(n, bin_px, keep_partial=True):
-    """The implementation before card M8.4.20: one ``bin_edge`` call per boundary."""
+    """The implementation before card M8.4.21: one ``bin_edge`` call per boundary."""
     out, j = [], 0
     while bin_edge(j, bin_px) < n:
         end = bin_edge(j + 1, bin_px)
