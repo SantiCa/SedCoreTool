@@ -82,7 +82,7 @@ Updated 16 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.14** (tile store format and pyramid import, engine only; Ready; **model: most capable, effort high**, AGENTS §6 "Which model"). The design session of part C was held on 16 November 2026: decisions in
+- **Next step: M8.4.15** (tiled sections in the viewer, behind a flag; **model: either tier, effort medium**; the most capable with effort high if its delivery-path measurement calls for a decision). M8.4.14 was done on 17 November 2026 ([summary](validation/M8.4.14-summary.md)). The design session of part C was held on 16 November 2026: decisions in
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -927,7 +927,7 @@ the development gate; each later card is re-read by its implementing session aga
 invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p95 85 ms; D11 = D), M8.4.13 (all seven fixtures open today only at
 1/6-1/19 of their resolution, peak 1.1-2.8 GiB, 3-61 s to the first frame), M2.1.4-M2.1.6.
 
-##### M8.4.14 - Tile store format and pyramid import (engine only) — state: In progress (step 1 done 16 Nov 2026: contract §8; the manual section follows the code, because the manual describes what the program does. Step 2 done: libvips in the runtime, +19 MiB on Windows; `tests` and *Desktop builds* passed on Windows, macOS and Linux on `26333ab`. Step 3 done: `store/source.py`, sources read in bands with libvips, exact against Pillow, the generator and `tiff.js`. Step 4 done: `store/format.py` (standard library only) and `store/pyramid.py`, the band-by-band build with every level exact, cancellation, full disk, budget and leftovers handled. Step 5 done: `pyramid.build` (worker job, progress events, stall watchdog), `pyramid.info` and `tile.read` (verified tiles, several frames) in the engine and the desktop client; the page bridge does not forward them. Found and fixed on the way: libvips crashed the worker on Windows while a thread read the stdin pipe, and replacing the progress file could fail while the coordinator read it)
+##### M8.4.14 - Tile store format and pyramid import (engine only) — state: Done (17 Nov 2026), development gate; [summary](validation/M8.4.14-summary.md)
 
 - **Goal:** the engine imports a supported source image into a pixel pyramid in the store, with progress, cancellation and bounded memory and
   disk, and serves verified tiles by level and position. The format is documented before the first file is written. No interface change.
@@ -975,6 +975,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   the three new operations, closed payloads, limits), robustness (step 6); `node --test` for the main-process allowlist of the new operations.
 - **Done when:** contract §8 and the manual describe the format; every fixture accepted by decision 4 builds and reads back exactly; the
   memory and cancellation targets hold or are recorded as failed with numbers (then stop and ask); evidence committed.
+- **Result (17 November 2026):** [summary](validation/M8.4.14-summary.md). Contract §8 and technical manual §26.4 describe the format; libvips in the runtime (+19 MiB on Windows; CI green on Windows, macOS and Linux); all seven fixtures build and read back exactly (80 regions per TIFF at levels 0-3); about 100 MiB/s, 8 GiB in 81 s, memory below 320 MiB, disk 1.33 times the decoded image; **no compressor** by the rule (zlib: 39 % of the throughput). The cancellation target failed first (297-658 ms, the partial folder was deleted before answering) and was fixed in the card (7-15 ms). Two Windows faults found and fixed: libvips crashed while a thread read the worker's stdin pipe; replacing the progress file failed while the coordinator read it. Not measured: macOS/Linux timing, cold cache, a 16 GiB computer.
 
 ##### M8.4.15 - Tiled sections in the viewer (behind a flag) — state: after M8.4.14
 

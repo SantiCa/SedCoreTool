@@ -3047,8 +3047,11 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
 - **Building** (`store/pyramid.py`, in the method worker): the source is hashed, then read once in 512-row bands; each band is cut into tiles
   and halved into the next level, whose rows wait until they fill a band. A level-`k+1` pixel is, per channel, `(sum + n // 2) // n` of the
   `n` covered level-`k` pixels. Everything goes into `.partial-<uuid>/` and is renamed when `pyramid.json` has been written; a failure, a
-  cancellation or a killed worker leaves only that folder, which is deleted at the next start or build. Progress events at most 10 per second;
-  a build whose progress stops for 60 s is stopped.
+  cancellation or a killed worker leaves only that folder, which is deleted at the next start or build (after a cancellation the worker
+  deletes it in the background right after answering). Tiles are stored uncompressed. Progress events at most 10 per second; cancellation is
+  checked before every tile; a build whose progress stops for 60 s is stopped. Measured on Windows (card M8.4.14): about 100 MiB of source per
+  second (8 GiB in 81 s), memory below 320 MiB, disk about 1.33 times the decoded image, cancellation answered in 7-15 ms
+  ([summary](validation/M8.4.14-summary.md)).
 - **Serving tiles** (`store/tiles.py`, in the coordinator): every tile is checked against the SHA-256 listed in `<level>/.tiles.sha256` before
   it is sent; verified tiles are kept in a 256 MiB least-recently-used cache. Up to 16 tiles per request, sent in binary frames of at most 1 MiB.
 - **Tests:** `tests/test_store_source.py`, `tests/test_store_pyramid.py`, `tests/test_engine_store.py` (Python) and the tile-store tests of

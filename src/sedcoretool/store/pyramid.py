@@ -11,6 +11,7 @@ import errno
 import hashlib
 import os
 import shutil
+import threading
 import uuid
 import zlib
 from pathlib import Path
@@ -89,8 +90,9 @@ def make_room(root: Path, need: int, budget: int, keep: set[str]) -> list[str]:
 class LevelWriter:
     """Writes one level's tiles row by row and remembers their hashes."""
 
-    def __init__(self, folder: Path, level: fmt.Level, channels: int, bits: int, compressor):
+    def __init__(self, folder: Path, level: fmt.Level, channels: int, bits: int, compressor, cancelled=lambda: False):
         self.folder, self.level, self.channels, self.bits, self.compressor = folder / str(level.level), level, channels, bits, compressor
+        self.cancelled = cancelled
         self.folder.mkdir()
         self.hashes = bytearray(level.rows * level.cols * 32)
         self.next_row = 0
@@ -101,6 +103,8 @@ class LevelWriter:
         if row >= self.level.rows or rows > fmt.TILE or (row < self.level.rows - 1 and rows != fmt.TILE):
             raise RuntimeError('band out of order')
         for col in range(self.level.cols):
+            if self.cancelled():               # once per tile: a band of a wide image takes about 100 ms (contract §8.4: acknowledgement <= 250 ms)
+                raise Cancelled()
             tile = np.zeros((fmt.TILE, fmt.TILE, self.channels), band.dtype)
             part = band[:, col * fmt.TILE:(col + 1) * fmt.TILE]
             tile[:rows, :part.shape[1]] = part
@@ -151,7 +155,7 @@ def build(path: Path, root: Path, *, name: str, budget: int, compressor=None, ke
         levels = fmt.levels_for(info.width, info.height)
         fmt.write_json_atomically(partial / '.zgroup', {'zarr_format': 2})
         fmt.write_json_atomically(partial / '.zattrs', fmt.zattrs(levels))
-        writers = [LevelWriter(partial, level, info.channels, info.bits, compressor) for level in levels]
+        writers = [LevelWriter(partial, level, info.channels, info.bits, compressor, cancelled) for level in levels]
         pending: list[list[np.ndarray]] = [[] for _ in levels]       # rows waiting to fill a band, per level >= 1
         written, total = 0, sum(level.rows * level.cols for level in levels)
 
@@ -192,6 +196,11 @@ def build(path: Path, root: Path, *, name: str, budget: int, compressor=None, ke
         shutil.rmtree(partial, ignore_errors=True)
         if is_disk_full(error):
             raise MethodError('LIMIT_EXCEEDED', 'disk') from None
+        raise
+    except Cancelled:
+        # Answer at once and delete in the background: removing gigabytes of written tiles took up to 0.66 s, beyond the 250 ms of
+        # contract §8.4. The folder keeps its .partial- name, so a coordinator start or the next build removes whatever remains.
+        threading.Thread(target=shutil.rmtree, args=(partial,), kwargs={'ignore_errors': True}, daemon=True).start()
         raise
     except BaseException:
         shutil.rmtree(partial, ignore_errors=True)

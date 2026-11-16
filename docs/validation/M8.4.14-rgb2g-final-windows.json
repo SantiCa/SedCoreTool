@@ -1,0 +1,130 @@
+{
+ "tool": "tools/measure_tile_store.py",
+ "card": "M8.4.14",
+ "phase": "full",
+ "environment": {
+  "os": "Windows-11-10.0.26300-SP0",
+  "cpu": "AMD64 Family 25 Model 97 Stepping 2, AuthenticAMD",
+  "logical_cpus": 16,
+  "python": "3.12.4",
+  "numpy": "1.26.4",
+  "libvips": "8.18.7",
+  "commit": "27daf07fe65c86ea51e1dedacdd31b102f5d3453",
+  "threads": "4"
+ },
+ "results": {
+  "rgb2g": {
+   "status": "ok",
+   "seconds": 17.5,
+   "result": {
+    "pyramid": "6ac15f2de509d983244332a0ba11641400ebbbf55cedc606098930933ec5f719",
+    "width": 8192,
+    "height": 87382,
+    "channels": 3,
+    "bits": 8,
+    "levels": 9,
+    "reused": false,
+    "disk_bytes": 2880820714
+   },
+   "source_mib_per_s": 117.3,
+   "disk_gib": 2.683,
+   "events": 100,
+   "event_gap_max_s": 0.224,
+   "first_event_s": 0.215,
+   "stage_start_s": {
+    "hash": 0.22,
+    "level0": 1.63,
+    "levels": 17.41
+   },
+   "memory_peak_mib": 263.6,
+   "memory_samples": 207,
+   "levels": [
+    {
+     "cols": 16,
+     "height": 87382,
+     "rows": 171,
+     "width": 8192
+    },
+    {
+     "cols": 8,
+     "height": 43691,
+     "rows": 86,
+     "width": 4096
+    },
+    {
+     "cols": 4,
+     "height": 21846,
+     "rows": 43,
+     "width": 2048
+    },
+    {
+     "cols": 2,
+     "height": 10923,
+     "rows": 22,
+     "width": 1024
+    },
+    {
+     "cols": 1,
+     "height": 5462,
+     "rows": 11,
+     "width": 512
+    },
+    {
+     "cols": 1,
+     "height": 2731,
+     "rows": 6,
+     "width": 256
+    },
+    {
+     "cols": 1,
+     "height": 1366,
+     "rows": 3,
+     "width": 128
+    },
+    {
+     "cols": 1,
+     "height": 683,
+     "rows": 2,
+     "width": 64
+    },
+    {
+     "cols": 1,
+     "height": 342,
+     "rows": 1,
+     "width": 32
+    }
+   ],
+   "reads": {
+    "single_ms": {
+     "p50": 4.91,
+     "p95": 7.37
+    },
+    "batch16_ms": {
+     "p50": 85.28,
+     "p95": 112.61
+    }
+   },
+   "exactness": {
+    "regions_checked": 80,
+    "mismatches": [],
+    "mismatch_count": 0
+   }
+  },
+  "rgb2g_cancelled": {
+   "status": "cancelled",
+   "seconds": 6.36,
+   "events": 40,
+   "event_gap_max_s": 0.217,
+   "first_event_s": 0.208,
+   "stage_start_s": {
+    "hash": 0.21,
+    "level0": 1.63
+   },
+   "memory_peak_mib": 262.7,
+   "memory_samples": 207,
+   "cancel_ack_ms": 12.6,
+   "cleanup_s": 0.21,
+   "leftovers": []
+  }
+ }
+}

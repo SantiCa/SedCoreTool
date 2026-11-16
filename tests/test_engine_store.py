@@ -210,6 +210,9 @@ def test_a_cancelled_build_answers_cancelled_and_leaves_nothing(engine, tmp_path
     coordinator.receive(request(session, 'job.cancel', {'request_id': item['id']}))
     response, _, _ = wait(coordinator, item['id'])
     assert response['status'] == 'cancelled'
+    until = time.monotonic() + 10                                                  # the worker deletes the partial folder after answering
+    while any((tmp_path / 'pyramids').iterdir()) and time.monotonic() < until:
+        time.sleep(0.02)
     assert [p.name for p in (tmp_path / 'pyramids').iterdir()] == []
 
 

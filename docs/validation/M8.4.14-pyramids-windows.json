@@ -1,0 +1,735 @@
+{
+ "tool": "tools/measure_tile_store.py",
+ "card": "M8.4.14",
+ "phase": "full",
+ "environment": {
+  "os": "Windows-11-10.0.26300-SP0",
+  "cpu": "AMD64 Family 25 Model 97 Stepping 2, AuthenticAMD",
+  "logical_cpus": 16,
+  "python": "3.12.4",
+  "numpy": "1.26.4",
+  "libvips": "8.18.7",
+  "commit": "27daf07fe65c86ea51e1dedacdd31b102f5d3453",
+  "threads": "4"
+ },
+ "results": {
+  "deflate8g": {
+   "status": "ok",
+   "seconds": 101.55,
+   "result": {
+    "pyramid": "1ab36e38ab27a3f6a404a3c40918cb3fb86c192ae02ed1bfadfe9d714d3b6a18",
+    "width": 8192,
+    "height": 349526,
+    "channels": 3,
+    "bits": 8,
+    "levels": 11,
+    "reused": false,
+    "disk_bytes": 11488669799
+   },
+   "source_mib_per_s": 75.0,
+   "disk_gib": 10.7,
+   "events": 661,
+   "event_gap_max_s": 0.335,
+   "first_event_s": 0.243,
+   "stage_start_s": {
+    "hash": 0.24,
+    "level0": 5.26,
+    "levels": 101.21
+   },
+   "memory_peak_mib": 251.9,
+   "memory_samples": 207,
+   "levels": [
+    {
+     "cols": 16,
+     "height": 349526,
+     "rows": 683,
+     "width": 8192
+    },
+    {
+     "cols": 8,
+     "height": 174763,
+     "rows": 342,
+     "width": 4096
+    },
+    {
+     "cols": 4,
+     "height": 87382,
+     "rows": 171,
+     "width": 2048
+    },
+    {
+     "cols": 2,
+     "height": 43691,
+     "rows": 86,
+     "width": 1024
+    },
+    {
+     "cols": 1,
+     "height": 21846,
+     "rows": 43,
+     "width": 512
+    },
+    {
+     "cols": 1,
+     "height": 10923,
+     "rows": 22,
+     "width": 256
+    },
+    {
+     "cols": 1,
+     "height": 5462,
+     "rows": 11,
+     "width": 128
+    },
+    {
+     "cols": 1,
+     "height": 2731,
+     "rows": 6,
+     "width": 64
+    },
+    {
+     "cols": 1,
+     "height": 1366,
+     "rows": 3,
+     "width": 32
+    },
+    {
+     "cols": 1,
+     "height": 683,
+     "rows": 2,
+     "width": 16
+    },
+    {
+     "cols": 1,
+     "height": 342,
+     "rows": 1,
+     "width": 8
+    }
+   ],
+   "reads": {
+    "single_ms": {
+     "p50": 6.15,
+     "p95": 11.37
+    },
+    "batch16_ms": {
+     "p50": 106.96,
+     "p95": 128.58
+    }
+   },
+   "exactness": {
+    "regions_checked": 80,
+    "mismatches": [],
+    "mismatch_count": 0
+   }
+  },
+  "gray16_2g": {
+   "status": "ok",
+   "seconds": 10.97,
+   "result": {
+    "pyramid": "1078de02d5b5b76131e3524cb6c304d8263ebda955e35b92866fd3ca59a43172",
+    "width": 8192,
+    "height": 131072,
+    "channels": 1,
+    "bits": 16,
+    "levels": 9,
+    "reused": false,
+    "disk_bytes": 2868557813
+   },
+   "source_mib_per_s": 186.8,
+   "disk_gib": 2.672,
+   "events": 85,
+   "event_gap_max_s": 0.172,
+   "first_event_s": 0.299,
+   "stage_start_s": {
+    "hash": 0.3,
+    "level0": 1.5,
+    "levels": 10.85
+   },
+   "memory_peak_mib": 202.4,
+   "memory_samples": 208,
+   "levels": [
+    {
+     "cols": 16,
+     "height": 131072,
+     "rows": 256,
+     "width": 8192
+    },
+    {
+     "cols": 8,
+     "height": 65536,
+     "rows": 128,
+     "width": 4096
+    },
+    {
+     "cols": 4,
+     "height": 32768,
+     "rows": 64,
+     "width": 2048
+    },
+    {
+     "cols": 2,
+     "height": 16384,
+     "rows": 32,
+     "width": 1024
+    },
+    {
+     "cols": 1,
+     "height": 8192,
+     "rows": 16,
+     "width": 512
+    },
+    {
+     "cols": 1,
+     "height": 4096,
+     "rows": 8,
+     "width": 256
+    },
+    {
+     "cols": 1,
+     "height": 2048,
+     "rows": 4,
+     "width": 128
+    },
+    {
+     "cols": 1,
+     "height": 1024,
+     "rows": 2,
+     "width": 64
+    },
+    {
+     "cols": 1,
+     "height": 512,
+     "rows": 1,
+     "width": 32
+    }
+   ],
+   "reads": {
+    "single_ms": {
+     "p50": 5.77,
+     "p95": 18.2
+    },
+    "batch16_ms": {
+     "p50": 80.95,
+     "p95": 402.52
+    }
+   },
+   "exactness": {
+    "regions_checked": 80,
+    "mismatches": [],
+    "mismatch_count": 0
+   }
+  },
+  "jpeg": {
+   "status": "ok",
+   "seconds": 6.89,
+   "result": {
+    "pyramid": "5b897b4003498dfa27d43e6635f0c6767688bd3ecb4bd6be94933dab388a5c2c",
+    "width": 4096,
+    "height": 65500,
+    "channels": 3,
+    "bits": 8,
+    "levels": 8,
+    "reused": false,
+    "disk_bytes": 1081390780
+   },
+   "source_mib_per_s": 6.8,
+   "disk_gib": 1.007,
+   "events": 51,
+   "event_gap_max_s": 0.18,
+   "first_event_s": 0.259,
+   "stage_start_s": {
+    "hash": 0.26,
+    "level0": 0.36,
+    "levels": 6.88
+   },
+   "memory_peak_mib": 240.6,
+   "memory_samples": 207,
+   "levels": [
+    {
+     "cols": 8,
+     "height": 65500,
+     "rows": 128,
+     "width": 4096
+    },
+    {
+     "cols": 4,
+     "height": 32750,
+     "rows": 64,
+     "width": 2048
+    },
+    {
+     "cols": 2,
+     "height": 16375,
+     "rows": 32,
+     "width": 1024
+    },
+    {
+     "cols": 1,
+     "height": 8188,
+     "rows": 16,
+     "width": 512
+    },
+    {
+     "cols": 1,
+     "height": 4094,
+     "rows": 8,
+     "width": 256
+    },
+    {
+     "cols": 1,
+     "height": 2047,
+     "rows": 4,
+     "width": 128
+    },
+    {
+     "cols": 1,
+     "height": 1024,
+     "rows": 2,
+     "width": 64
+    },
+    {
+     "cols": 1,
+     "height": 512,
+     "rows": 1,
+     "width": 32
+    }
+   ],
+   "reads": {
+    "single_ms": {
+     "p50": 5.45,
+     "p95": 8.2
+    },
+    "batch16_ms": {
+     "p50": 91.64,
+     "p95": 98.08
+    }
+   },
+   "exactness": {
+    "regions_checked": 20,
+    "mismatches": [],
+    "mismatch_count": 0
+   }
+  },
+  "rgb2g": {
+   "status": "ok",
+   "seconds": 18.51,
+   "result": {
+    "pyramid": "6ac15f2de509d983244332a0ba11641400ebbbf55cedc606098930933ec5f719",
+    "width": 8192,
+    "height": 87382,
+    "channels": 3,
+    "bits": 8,
+    "levels": 9,
+    "reused": false,
+    "disk_bytes": 2880820714
+   },
+   "source_mib_per_s": 110.8,
+   "disk_gib": 2.683,
+   "events": 99,
+   "event_gap_max_s": 0.26,
+   "first_event_s": 0.222,
+   "stage_start_s": {
+    "hash": 0.22,
+    "level0": 1.53,
+    "levels": 18.44
+   },
+   "memory_peak_mib": 313.8,
+   "memory_samples": 207,
+   "levels": [
+    {
+     "cols": 16,
+     "height": 87382,
+     "rows": 171,
+     "width": 8192
+    },
+    {
+     "cols": 8,
+     "height": 43691,
+     "rows": 86,
+     "width": 4096
+    },
+    {
+     "cols": 4,
+     "height": 21846,
+     "rows": 43,
+     "width": 2048
+    },
+    {
+     "cols": 2,
+     "height": 10923,
+     "rows": 22,
+     "width": 1024
+    },
+    {
+     "cols": 1,
+     "height": 5462,
+     "rows": 11,
+     "width": 512
+    },
+    {
+     "cols": 1,
+     "height": 2731,
+     "rows": 6,
+     "width": 256
+    },
+    {
+     "cols": 1,
+     "height": 1366,
+     "rows": 3,
+     "width": 128
+    },
+    {
+     "cols": 1,
+     "height": 683,
+     "rows": 2,
+     "width": 64
+    },
+    {
+     "cols": 1,
+     "height": 342,
+     "rows": 1,
+     "width": 32
+    }
+   ],
+   "reads": {
+    "single_ms": {
+     "p50": 5.41,
+     "p95": 10.91
+    },
+    "batch16_ms": {
+     "p50": 107.86,
+     "p95": 119.23
+    }
+   },
+   "exactness": {
+    "regions_checked": 80,
+    "mismatches": [],
+    "mismatch_count": 0
+   }
+  },
+  "rgb2g_cancelled": {
+   "status": "cancelled",
+   "seconds": 6.57,
+   "events": 39,
+   "event_gap_max_s": 0.222,
+   "first_event_s": 0.232,
+   "stage_start_s": {
+    "hash": 0.23,
+    "level0": 1.54
+   },
+   "memory_peak_mib": 312.1,
+   "memory_samples": 207,
+   "cancel_ack_ms": 297.0,
+   "leftovers": []
+  },
+  "rgb4g": {
+   "status": "ok",
+   "seconds": 40.54,
+   "result": {
+    "pyramid": "466a4e038826bcf907cce253e27fdcb19c5eeadc96db70ff78fcc9be8743a272",
+    "width": 8192,
+    "height": 174763,
+    "channels": 3,
+    "bits": 8,
+    "levels": 10,
+    "reused": false,
+    "disk_bytes": 5752987542
+   },
+   "source_mib_per_s": 101.2,
+   "disk_gib": 5.358,
+   "events": 199,
+   "event_gap_max_s": 0.267,
+   "first_event_s": 0.245,
+   "stage_start_s": {
+    "hash": 0.24,
+    "level0": 2.76,
+    "levels": 40.43
+   },
+   "memory_peak_mib": 309.9,
+   "memory_samples": 207,
+   "levels": [
+    {
+     "cols": 16,
+     "height": 174763,
+     "rows": 342,
+     "width": 8192
+    },
+    {
+     "cols": 8,
+     "height": 87382,
+     "rows": 171,
+     "width": 4096
+    },
+    {
+     "cols": 4,
+     "height": 43691,
+     "rows": 86,
+     "width": 2048
+    },
+    {
+     "cols": 2,
+     "height": 21846,
+     "rows": 43,
+     "width": 1024
+    },
+    {
+     "cols": 1,
+     "height": 10923,
+     "rows": 22,
+     "width": 512
+    },
+    {
+     "cols": 1,
+     "height": 5462,
+     "rows": 11,
+     "width": 256
+    },
+    {
+     "cols": 1,
+     "height": 2731,
+     "rows": 6,
+     "width": 128
+    },
+    {
+     "cols": 1,
+     "height": 1366,
+     "rows": 3,
+     "width": 64
+    },
+    {
+     "cols": 1,
+     "height": 683,
+     "rows": 2,
+     "width": 32
+    },
+    {
+     "cols": 1,
+     "height": 342,
+     "rows": 1,
+     "width": 16
+    }
+   ],
+   "reads": {
+    "single_ms": {
+     "p50": 5.23,
+     "p95": 8.15
+    },
+    "batch16_ms": {
+     "p50": 97.65,
+     "p95": 118.5
+    }
+   },
+   "exactness": {
+    "regions_checked": 80,
+    "mismatches": [],
+    "mismatch_count": 0
+   }
+  },
+  "rgb8g": {
+   "status": "ok",
+   "seconds": 81.26,
+   "result": {
+    "pyramid": "dc1ef08663f27208aab5732eaeb78aeb6973fce4518a259a086ea770e0fce960",
+    "width": 8192,
+    "height": 349526,
+    "channels": 3,
+    "bits": 8,
+    "levels": 11,
+    "reused": false,
+    "disk_bytes": 11488669795
+   },
+   "source_mib_per_s": 100.9,
+   "disk_gib": 10.7,
+   "events": 399,
+   "event_gap_max_s": 0.284,
+   "first_event_s": 0.226,
+   "stage_start_s": {
+    "hash": 0.23,
+    "level0": 5.24,
+    "levels": 80.94
+   },
+   "memory_peak_mib": 302.7,
+   "memory_samples": 207,
+   "levels": [
+    {
+     "cols": 16,
+     "height": 349526,
+     "rows": 683,
+     "width": 8192
+    },
+    {
+     "cols": 8,
+     "height": 174763,
+     "rows": 342,
+     "width": 4096
+    },
+    {
+     "cols": 4,
+     "height": 87382,
+     "rows": 171,
+     "width": 2048
+    },
+    {
+     "cols": 2,
+     "height": 43691,
+     "rows": 86,
+     "width": 1024
+    },
+    {
+     "cols": 1,
+     "height": 21846,
+     "rows": 43,
+     "width": 512
+    },
+    {
+     "cols": 1,
+     "height": 10923,
+     "rows": 22,
+     "width": 256
+    },
+    {
+     "cols": 1,
+     "height": 5462,
+     "rows": 11,
+     "width": 128
+    },
+    {
+     "cols": 1,
+     "height": 2731,
+     "rows": 6,
+     "width": 64
+    },
+    {
+     "cols": 1,
+     "height": 1366,
+     "rows": 3,
+     "width": 32
+    },
+    {
+     "cols": 1,
+     "height": 683,
+     "rows": 2,
+     "width": 16
+    },
+    {
+     "cols": 1,
+     "height": 342,
+     "rows": 1,
+     "width": 8
+    }
+   ],
+   "reads": {
+    "single_ms": {
+     "p50": 6.2,
+     "p95": 11.82
+    },
+    "batch16_ms": {
+     "p50": 104.95,
+     "p95": 126.8
+    }
+   },
+   "exactness": {
+    "regions_checked": 80,
+    "mismatches": [],
+    "mismatch_count": 0
+   }
+  },
+  "strip2g": {
+   "status": "ok",
+   "seconds": 18.16,
+   "result": {
+    "pyramid": "accb4313b9666e2e5da08b232263d1370f5cb5e723cec230bc26473fbf78e193",
+    "width": 8192,
+    "height": 87382,
+    "channels": 3,
+    "bits": 8,
+    "levels": 9,
+    "reused": false,
+    "disk_bytes": 2880820716
+   },
+   "source_mib_per_s": 112.8,
+   "disk_gib": 2.683,
+   "events": 101,
+   "event_gap_max_s": 0.804,
+   "first_event_s": 0.282,
+   "stage_start_s": {
+    "hash": 0.28,
+    "level0": 2.28,
+    "levels": 18.14
+   },
+   "memory_peak_mib": 311.3,
+   "memory_samples": 207,
+   "levels": [
+    {
+     "cols": 16,
+     "height": 87382,
+     "rows": 171,
+     "width": 8192
+    },
+    {
+     "cols": 8,
+     "height": 43691,
+     "rows": 86,
+     "width": 4096
+    },
+    {
+     "cols": 4,
+     "height": 21846,
+     "rows": 43,
+     "width": 2048
+    },
+    {
+     "cols": 2,
+     "height": 10923,
+     "rows": 22,
+     "width": 1024
+    },
+    {
+     "cols": 1,
+     "height": 5462,
+     "rows": 11,
+     "width": 512
+    },
+    {
+     "cols": 1,
+     "height": 2731,
+     "rows": 6,
+     "width": 256
+    },
+    {
+     "cols": 1,
+     "height": 1366,
+     "rows": 3,
+     "width": 128
+    },
+    {
+     "cols": 1,
+     "height": 683,
+     "rows": 2,
+     "width": 64
+    },
+    {
+     "cols": 1,
+     "height": 342,
+     "rows": 1,
+     "width": 32
+    }
+   ],
+   "reads": {
+    "single_ms": {
+     "p50": 5.18,
+     "p95": 13.25
+    },
+    "batch16_ms": {
+     "p50": 103.63,
+     "p95": 139.44
+    }
+   },
+   "exactness": {
+    "regions_checked": 80,
+    "mismatches": [],
+    "mismatch_count": 0
+   }
+  }
+ }
+}

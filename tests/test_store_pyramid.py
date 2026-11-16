@@ -148,13 +148,21 @@ def test_an_existing_pyramid_is_reused_and_a_changed_source_gets_a_new_one(tmp_p
     assert (tmp_path / "root" / first["pyramid"]).is_dir()                      # the old one stays, as a cache entry
 
 
+def empty_soon(folder, seconds=10):
+    import time
+    until = time.monotonic() + seconds
+    while any(folder.iterdir()) and time.monotonic() < until:
+        time.sleep(0.02)
+    return not any(folder.iterdir())
+
+
 def test_cancellation_leaves_no_partial_folder(tmp_path):
     source = small_source(tmp_path, size=(1600, 300))
     for after in (0, 3):                                                       # during the hash, during the bands
         calls = iter(range(10_000))
         with pytest.raises(Cancelled):
             pyr.build(source, tmp_path / "root", name="x", budget=50 * GiB, cancelled=lambda calls=calls, after=after: next(calls) >= after)
-        assert list((tmp_path / "root").iterdir()) == []
+        assert empty_soon(tmp_path / "root")                                   # deleted in the background after the answer
 
 
 def test_a_full_disk_is_reported_and_the_partial_folder_removed(tmp_path, monkeypatch):

@@ -100,7 +100,7 @@ class Coordinator:
         self.pyramid_root = Path(pyramid_directory) if pyramid_directory else None
         self.pyramid_budget = pyramid_budget
         self.pyramids_used = set()
-        self.pyramid_compressor = None    # contract §8.2: decided once by card M8.4.14 step 4, then fixed for format version 1
+        self.pyramid_compressor = None    # contract §8.2: no compressor in format version 1 (rule of card M8.4.14, 17 Nov 2026: zlib was 2.5 times slower)
         self.store_format = self.tile_reader = None
         if self.pyramid_root is not None:
             self.store_format, store_tiles = load_store()

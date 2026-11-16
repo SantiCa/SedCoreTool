@@ -349,7 +349,9 @@ the build starts. Its folder is `<root>/<sha256>/`. All integers are little-endi
 
 | Path inside `<root>/<sha256>/` | Content |
 |---|---|
-| `pyramid.json` | `{format: "sedcoretool.pyramid", version: 1, source: {sha256, size, name}, width, height, channels, bits, tile: 512, levels: [{level, width, height, rows, cols}], compressor, complete: true}`. `name` is the file name without any folder. `channels` is 1 (grey), 3 (RGB) or 4 (RGBA); `bits` 8 or 16. `compressor` is `null` or `{"id": "zlib", "level": 1}` (step 4 of M8.4.14 decides which, then it is fixed for format version 1). The file is written last, through a temporary file and an atomic rename; a folder without it, or with `complete` other than `true`, is not a pyramid. |
+| `pyramid.json` | `{format: "sedcoretool.pyramid", version: 1, source: {sha256, size, name}, width, height, channels, bits, tile: 512, levels: [{level, width, height, rows, cols}], compressor, complete: true}`. `name` is the file name without any folder. `channels` is 1 (grey), 3 (RGB) or 4 (RGBA); `bits` 8 or 16. `compressor` is `null` in format version 1: decided by the rule of M8.4.14 on 17 November 2026 ([evidence](validation/M8.4.14-compression-windows.json)): building
+`rgb2g` took 20.4 s without a compressor and 51.8 s with zlib level 1 (39 % of the throughput, the rule required 70 %), for 39 % less disk and a tile-read p95 of
+8.5 ms against 4.9 ms. Readers also accept `{"id": "zlib", "level": 1}`, which a later format version may adopt. The file is written last, through a temporary file and an atomic rename; a folder without it, or with `complete` other than `true`, is not a pyramid. |
 | `.zgroup` | `{"zarr_format": 2}` |
 | `.zattrs` | `{"multiscales": [{"version": "0.4", "axes": [{"name": "y", "type": "space"}, {"name": "x", "type": "space"}, {"name": "c", "type": "channel"}], "datasets": [{"path": "<k>", "coordinateTransformations": [{"type": "scale", "scale": [2^k, 2^k, 1]}]} ...]}]}` |
 | `<k>/.zarray` | Level `k` as a Zarr version 2 array: `{"zarr_format": 2, "shape": [height_k, width_k, channels], "chunks": [512, 512, channels], "dtype": "\|u1"` or `"<u2", "compressor": <as in pyramid.json>, "fill_value": 0, "order": "C", "filters": null, "dimension_separator": "."}` |
@@ -381,15 +383,16 @@ first (the modification time of `pyramid.json`, touched whenever a pyramid is op
 fails with `LIMIT_EXCEEDED`, `details.field = "disk"`; (4) write everything into `<root>/.partial-<uuid>/`, one band of 512 rows of level 0 at a
 time, each band feeding the next levels as soon as they have two rows of tiles' worth of input (stages `level0` and `levels`), so the working
 memory stays within 512 MiB; (5) write the `.tiles.sha256` files, then `pyramid.json`, then rename the folder to `<sha256>`. If another build
-finished the same pyramid meanwhile, the new folder is removed and the existing one is used. Any failure, a cancellation or a killed worker
-leaves only a `.partial-*` folder, which every coordinator deletes when it starts and before each build. A full disk during the build is
+finished the same pyramid meanwhile, the new folder is removed and the existing one is used. A failure removes the partial folder before the
+answer; a cancellation answers at once and the worker deletes the folder in the background (deleting gigabytes before answering took up to 0.66 s);
+a killed worker leaves it. Every coordinator deletes `.partial-*` folders when it starts and before each build. A full disk during the build is
 `LIMIT_EXCEEDED` with `details.field = "disk"`.
 
 Progress: the worker writes `<job folder>/progress` as JSON `{stage, completed, total}`, through a temporary file and an atomic replacement; when
 the replacement fails because the coordinator is reading the file (Windows), that update is skipped. The coordinator reads it at most 10 times
 per second and sends events `{stage, completed, total}` (§3) with the build's request ID; the desktop client restarts its idle timeout (90 s) on
 each event. A build has no fixed deadline; the coordinator kills it when its progress
-has not advanced for 60 s. Cancellation follows §3 (marker file, polled at least once per band; acknowledgement within 250 ms; kill after 1.5 s).
+has not advanced for 60 s. Cancellation follows §3 (marker file, polled before every tile; acknowledgement within 250 ms, measured 7-15 ms on Windows in M8.4.14; kill after 1.5 s).
 libvips' own caches are limited (`cache_set_max_mem` 64 MiB, `cache_set_max_files` 16) and its thread pool uses the engine's thread cap.
 
 ### 8.5 Operations

@@ -1,0 +1,86 @@
+{
+ "tool": "tools/measure_tile_store.py",
+ "card": "M8.4.14",
+ "phase": "compression",
+ "environment": {
+  "os": "Windows-11-10.0.26300-SP0",
+  "cpu": "AMD64 Family 25 Model 97 Stepping 2, AuthenticAMD",
+  "logical_cpus": 16,
+  "python": "3.12.4",
+  "numpy": "1.26.4",
+  "libvips": "8.18.7",
+  "commit": "27daf07fe65c86ea51e1dedacdd31b102f5d3453",
+  "threads": "4"
+ },
+ "results": {
+  "none": {
+   "status": "ok",
+   "seconds": 20.4,
+   "result": {
+    "pyramid": "6ac15f2de509d983244332a0ba11641400ebbbf55cedc606098930933ec5f719",
+    "width": 8192,
+    "height": 87382,
+    "channels": 3,
+    "bits": 8,
+    "levels": 9,
+    "reused": false,
+    "disk_bytes": 2880820714
+   },
+   "source_mib_per_s": 100.6,
+   "disk_gib": 2.683,
+   "events": 103,
+   "event_gap_max_s": 0.271,
+   "first_event_s": 0.251,
+   "stage_start_s": {
+    "hash": 0.25,
+    "level0": 1.67,
+    "levels": 20.31
+   },
+   "memory_peak_mib": 260.5,
+   "memory_samples": 207,
+   "tile_read_ms": {
+    "p50": 4.18,
+    "p95": 4.91,
+    "reads": 200
+   }
+  },
+  "zlib": {
+   "status": "ok",
+   "seconds": 51.84,
+   "result": {
+    "pyramid": "6ac15f2de509d983244332a0ba11641400ebbbf55cedc606098930933ec5f719",
+    "width": 8192,
+    "height": 87382,
+    "channels": 3,
+    "bits": 8,
+    "levels": 9,
+    "reused": false,
+    "disk_bytes": 1755899362
+   },
+   "source_mib_per_s": 39.6,
+   "disk_gib": 1.635,
+   "events": 185,
+   "event_gap_max_s": 0.484,
+   "first_event_s": 0.24,
+   "stage_start_s": {
+    "hash": 0.24,
+    "level0": 1.7,
+    "levels": 51.74
+   },
+   "memory_peak_mib": 260.0,
+   "memory_samples": 207,
+   "tile_read_ms": {
+    "p50": 6.86,
+    "p95": 8.5,
+    "reads": 200
+   }
+  }
+ },
+ "decision": {
+  "throughput_ratio_zlib_over_none": 0.394,
+  "zlib_tile_read_p95_ms": 8.5,
+  "disk_ratio_zlib_over_none": 0.609,
+  "chosen": "none",
+  "rule": "zlib if throughput ratio >= 0.70 and zlib tile-read p95 <= 10 ms"
+ }
+}
