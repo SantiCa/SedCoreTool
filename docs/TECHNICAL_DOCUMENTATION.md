@@ -2924,17 +2924,23 @@ Implementation: `desktop/runtime-lock.json`, `tools/prepare_engine_runtime.py`,
 `tools/check_engine_runtime.py`, `desktop/engine-runtime.js`, and desktop prepare/build/package-check scripts.
 The base is CPython **3.12.16**, Astral python-build-standalone release **20261110**, using `install_only`
 archives. Pinned wheels: NumPy 2.2.6, pandas 2.2.3, Pillow 11.3.0, python-dateutil 2.9.0.post0, pytz 2025.2,
-tzdata 2025.2 and six 1.17.0. These packaging constraints do not narrow the public package's declared version
+tzdata 2025.2, six 1.17.0, and, for reading large images (card M8.4.14), `pyvips-binary` 8.18.7 (libvips 8.18.7, LGPL-2.1-or-later,
+dynamically linked; its licence texts are in the wheel's `dist-info`) and `cffi` 2.1.1. `pyvips` 3.2.0 (MIT) is published only as a
+source archive: `install_sources` copies its `.py`/`.pyi` files and licence from the hash-verified archive and writes a minimal
+`dist-info`; nothing is built and no setup code runs. `pycparser` is not shipped: the binding runs in cffi's compiled API mode.
+These packages need glibc 2.28 or newer on Linux and macOS 10.15 or newer on Intel Macs (the program already requires macOS 13).
+These packaging constraints do not narrow the public package's declared version
 ranges or alter the optional trainer environment. Torch, ONNX Runtime and segmentation-models-pytorch are
-absent from the base. NumPy/pandas/Pillow already provide the scientific package dependencies;
-no new numerical framework or installer dependency is added to the program.
+absent from the base. `tools/check_engine_runtime.py` also checks that libvips is the pinned version, runs in API mode and
+reads 8-bit RGB and 16-bit grey TIFF regions exactly.
 The upstream interpreter retains its own pip (26.3 in this build); the application does not invoke it to
 install or update packages. Because every shipped file is verified at launch, preparation deletes content the
 engine never imports (`prune_runtime` in `tools/prepare_engine_runtime.py`): the interpreter's own pip, the
 `include`, `libs` and Tcl/Tk data folders, `idlelib`, `lib2to3`, `turtledemo` and the interpreter test suite, and
 pandas' `tests` folders (numpy's `tests` folders stay: `numpy.testing` imports one of them). The Windows runtime
 inventories 3,552 files totalling about 205 MB (excluding the manifest, application and filesystem allocation),
-down from 7,326 files and 249 MB before pruning. This is a distribution-size measurement, not a RAM/performance
+down from 7,326 files and 249 MB before pruning; libvips and its binding add about 19 MiB (16 November 2026: the
+prepared Windows folder went from 215,212,320 to 235,159,163 bytes, 3,635 files). This is a distribution-size measurement, not a RAM/performance
 result; the manifest hash and reproduction checks of the unpruned bundle are in the V0.143 evidence below.
 
 The selected distribution supplies a relocatable interpreter/standard library across the four target triples;

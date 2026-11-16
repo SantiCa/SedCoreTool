@@ -24,6 +24,8 @@ OUTPUT = ROOT / 'desktop/runtime'
 CACHE = ROOT / '.venv/runtime-downloads'
 MAX_EXPANDED = 2 * 1024**3
 MAX_MEMBERS = 50_000
+MAX_SOURCE_BYTES = 16 * 1024**2      # a pure-Python package copied from its source archive
+SOURCE_SUFFIXES = ('.py', '.pyi')
 
 
 def native_target():
@@ -136,6 +138,49 @@ def install_wheels(specification, artifacts, destination, *, runner=subprocess.r
         shutil.rmtree(wheels)
 
 
+def install_sources(sources, artifacts, site_packages):
+    """Pure-Python packages that are published only as source archives (pyvips): copy the package's ``.py``/``.pyi`` files and
+    its licence, and write a minimal ``dist-info`` so ``importlib.metadata`` reports the pinned version. Nothing is built and no
+    setup code runs; the archive was verified by its SHA-256 when it was downloaded."""
+    for source, artifact in zip(sources, artifacts, strict=True):
+        name, version, package = source['name'], source['version'], source['package']
+        if not re.fullmatch('[A-Za-z0-9_]+', package) or not re.fullmatch('[A-Za-z0-9_.-]+', f'{name}-{version}'):
+            raise ValueError('Invalid source package descriptor')
+        prefix, target = f'{name}-{version}/', site_packages / package
+        if target.exists():
+            raise ValueError('Source package already present')
+        total, licence = 0, None
+        with tarfile.open(artifact, 'r:gz') as archive:
+            members = archive.getmembers()
+            if len(members) > 2_000:
+                raise ValueError('Too many archive members')
+            for member in members:
+                if not (member.name + '/').startswith(prefix):
+                    raise ValueError('Unexpected source archive layout')
+                relative = member.name[len(prefix):]
+                if member.isdir() or not relative:
+                    continue
+                if not member.isfile():
+                    raise ValueError('Unsupported archive member')
+                total += member.size
+                if total > MAX_SOURCE_BYTES:
+                    raise ValueError('Source archive too large')
+                if relative in ('LICENSE', 'LICENSE.txt'):
+                    licence = archive.extractfile(member).read()
+                elif relative.startswith(package + '/') and relative.endswith(SOURCE_SUFFIXES) and relative != f'{package}/{package}_build.py':
+                    destination = site_packages.joinpath(*safe_relative(relative).parts)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(archive.extractfile(member).read())
+        if licence is None or not (target / '__init__.py').is_file():
+            raise ValueError('Incomplete source package')
+        info = site_packages / f'{package}-{version}.dist-info'
+        info.mkdir()
+        (info / 'METADATA').write_text(f'Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n', encoding='utf-8')
+        (info / 'INSTALLER').write_text('sedcoretool-runtime\n', encoding='utf-8')
+        (info / 'top_level.txt').write_text(package + '\n', encoding='utf-8')
+        (info / 'LICENSE.txt').write_bytes(licence)
+
+
 # Content of the upstream interpreter and wheels that the engine never imports. The program verifies every shipped file
 # at launch, so each unneeded file costs start-up time (several seconds on a cold first launch) as well as disk space.
 # Paths are relative to the staging root; the Windows and POSIX layouts differ, and a path absent from the
@@ -218,6 +263,7 @@ def prepare(target, *, offline=False, output=OUTPUT, cache=CACHE):
     specification = lock['targets'][target]
     archive = download_artifact(specification['archive'], cache, offline=offline)
     wheels = [download_artifact(wheel, cache, offline=offline) for wheel in specification['wheels']]
+    source_packages = [download_artifact(source, cache, offline=offline) for source in lock.get('sources', [])]
     sources = ROOT / 'desktop/python/src'
     if not (sources / 'sedcoretool/engine/server.py').is_file():
         raise ValueError('Run desktop/scripts/prepare.js before preparing the runtime')
@@ -230,6 +276,7 @@ def prepare(target, *, offline=False, output=OUTPUT, cache=CACHE):
             staging.mkdir()
             extract_runtime(archive, staging)
             install_wheels(specification, wheels, staging)
+            install_sources(lock.get('sources', []), source_packages, staging / specification['site_packages'])
             prune_runtime(staging, specification)
             native = target == native_target()
             if native:

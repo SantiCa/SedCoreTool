@@ -9,8 +9,22 @@
     "python-dateutil": "2.9.0.post0",
     "pytz": "2025.2",
     "tzdata": "2025.2",
-    "six": "1.17.0"
+    "six": "1.17.0",
+    "pyvips": "3.2.0",
+    "pyvips-binary": "8.18.7",
+    "cffi": "2.1.1"
   },
+  "sources": [
+    {
+      "name": "pyvips",
+      "version": "3.2.0",
+      "filename": "pyvips-3.2.0.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/df/f3/90993aab504fa2e1f28fcc09aa16b6ea4f00e75a037d9136e737855833e2/pyvips-3.2.0.tar.gz",
+      "sha256": "5fa47cdce4e7f450747c118c12fde913e0710850c6015d8ec4f5af490003a347",
+      "size": 72067,
+      "package": "pyvips"
+    }
+  ],
   "targets": {
     "win32-x64": {
       "archive": {
@@ -78,6 +92,22 @@
           "url": "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl",
           "sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
           "size": 11050
+        },
+        {
+          "name": "pyvips-binary",
+          "version": "8.18.7",
+          "filename": "pyvips_binary-8.18.7-cp37-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/7a/24/6128202b9a94109f678eb9c2bc048ce622dca50e375e2712c16986f6366d/pyvips_binary-8.18.7-cp37-abi3-win_amd64.whl",
+          "sha256": "0c31cdaf88196e01a7a3e4372f3447d06db3c58383c15ff2eeaaa715952b1ec8",
+          "size": 8325477
+        },
+        {
+          "name": "cffi",
+          "version": "2.1.1",
+          "filename": "cffi-2.1.1-cp312-cp312-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/d9/79/615cc094e2fb508cade7de88d3b4f6c4ec2bab695c97bce9153dc65aadf5/cffi-2.1.1-cp312-cp312-win_amd64.whl",
+          "sha256": "f53e442b08449d42821fa4a4fba000095af9f62742a500f978a9f557ec44339a",
+          "size": 185919
         }
       ]
     },
@@ -90,7 +120,7 @@
       },
       "executable": "python/bin/python3.12",
       "site_packages": "python/lib/python3.12/site-packages",
-      "wheel_platform": "manylinux_2_17_x86_64",
+      "wheel_platform": "manylinux_2_28_x86_64",
       "wheels": [
         {
           "name": "numpy",
@@ -147,6 +177,22 @@
           "url": "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl",
           "sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
           "size": 11050
+        },
+        {
+          "name": "pyvips-binary",
+          "version": "8.18.7",
+          "filename": "pyvips_binary-8.18.7-cp37-abi3-manylinux_2_28_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/97/4e/dbdf6444c243b5262257f5b9ded22eb4758aa9b8430e453badda4dc58ac4/pyvips_binary-8.18.7-cp37-abi3-manylinux_2_28_x86_64.whl",
+          "sha256": "312046c567abd89ce577ccb0dda8c8cbd9f37d520d5246290cdf8e114e91fbfc",
+          "size": 8113278
+        },
+        {
+          "name": "cffi",
+          "version": "2.1.1",
+          "filename": "cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/b1/db/dceb9dd5b231e1da801793f8acc9f3c52a7e1afe40bb1aae37e02b0faad5/cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf",
+          "size": 221822
         }
       ]
     },
@@ -159,7 +205,7 @@
       },
       "executable": "python/bin/python3.12",
       "site_packages": "python/lib/python3.12/site-packages",
-      "wheel_platform": "macosx_10_13_x86_64",
+      "wheel_platform": "macosx_10_15_x86_64",
       "wheels": [
         {
           "name": "numpy",
@@ -216,6 +262,22 @@
           "url": "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl",
           "sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
           "size": 11050
+        },
+        {
+          "name": "pyvips-binary",
+          "version": "8.18.7",
+          "filename": "pyvips_binary-8.18.7-cp37-abi3-macosx_10_15_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/ad/de/90a1afdd619d50ab427632725284566ef1de982ec4a956e806af0d8972f9/pyvips_binary-8.18.7-cp37-abi3-macosx_10_15_x86_64.whl",
+          "sha256": "f7678611d18b7b40e2a90062412b7efc49d436fe21d9bfd4f82ac8e09285693f",
+          "size": 8909009
+        },
+        {
+          "name": "cffi",
+          "version": "2.1.1",
+          "filename": "cffi-2.1.1-cp312-cp312-macosx_10_15_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/10/69/43965eccfdead3b9220015fd1320e117be8c6ed01a62ffab76eeb752f5d5/cffi-2.1.1-cp312-cp312-macosx_10_15_x86_64.whl",
+          "sha256": "c8c69575568085ba0b1b10c0249d779a214aea6f6522e949a0fc9fb0fcb449d0",
+          "size": 184821
         }
       ]
     },
@@ -285,6 +347,22 @@
           "url": "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl",
           "sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
           "size": 11050
+        },
+        {
+          "name": "pyvips-binary",
+          "version": "8.18.7",
+          "filename": "pyvips_binary-8.18.7-cp37-abi3-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/a8/b2/5a67537d18853f09b7e896adb2656722f03915db4ede0d9242f1f86fac23/pyvips_binary-8.18.7-cp37-abi3-macosx_11_0_arm64.whl",
+          "sha256": "4531cfbda41534b22d2824287ab2dd3aa696bc18bce1abf4560d73c047f4dd81",
+          "size": 8018757
+        },
+        {
+          "name": "cffi",
+          "version": "2.1.1",
+          "filename": "cffi-2.1.1-cp312-cp312-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/54/7d/16e5a096677b5e313ca80cd5e5170efa3ea44624a82bb111925522da64b1/cffi-2.1.1-cp312-cp312-macosx_11_0_arm64.whl",
+          "sha256": "f81b3b8f3d4e343550fa4baa0e479bba9f2d29ce9c2e9b51d1ce1718d7442fcf",
+          "size": 184719
         }
       ]
     }

@@ -204,8 +204,8 @@ are proposals with a default that the maintainer confirms or changes before the 
    with bounded memory. *Smallest alternative considered:* a minimal TIFF reader written here with the scope of `app/js/tiff.js` (no
    dependency, but no JPEG-in-TIFF, slower and new code to secure against hostile files); `tifffile` (0.3 MB) plus `imagecodecs` (19 MB).
    *Cost:* about 8-9 MB per platform wheel (Windows x64, macOS arm64 and x86_64 from 10.15, Linux x86_64 with glibc 2.28 or newer, and
-   musl), plus `cffi` and `pycparser`; pinned with hashes in `desktop/runtime-lock.json` like the other packages, so offline packaging is
-   unchanged; libvips is LGPL-2.1-or-later (dynamically linked; licence texts shipped with the package). *Probe on the M8.4.13 fixtures
+   musl), plus `cffi` (`pycparser` turned out not to be needed); pinned with hashes in `desktop/runtime-lock.json` like the other packages,
+   so offline packaging is unchanged; the prepared Windows runtime grew by 19 MiB (measured in M8.4.14); libvips is LGPL-2.1-or-later (dynamically linked; licence texts shipped with the package). *Probe on the M8.4.13 fixtures
    (16 November 2026, Windows, outside the program):* `rgb8g`, `deflate8g`, `strip2g` and `gray16_2g` opened in 6 ms, 512 x 512 regions
    read in a median of 1.3-6.1 ms and **equal byte for byte to the generator's pixels** (8 regions each; one first read of the striped file
    took 0.84 s); the 4,096 x 65,500 JPEG was streamed whole in 1.0 s. JPEG and PNG larger than 1 GiB decoded are refused with a message that
