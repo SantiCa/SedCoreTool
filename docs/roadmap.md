@@ -63,9 +63,9 @@ Updated 15 November 2026.
 - **Progress of 16 November 2026:** M8.4.7, the M8.4.8 measurements, M8.4.12, M8.4.20, M8.4.13 (fixtures
   in `C:\sedcore-large-fixtures`, outside the repository, and the Windows baseline) and M2.1.4 are done. The three-system gate of M8.4.8 passed on
   `f4ec92a`, and `tests` and *Desktop builds* also succeeded on `01d6de7` (includes M8.4.20) on Windows, macOS and Linux (both pushed on the maintainer's request).
-  M2.1.4 is local. Session checks: `pytest` 724 passed / 9 skipped on M8.4.20; the other checks of DEVELOPMENT §3 were not repeated because only Python, tools and documents changed since `01d6de7`.
+  M2.1.4 and the promotion of the visible-row table to the default are in the branch (checks of that change on Windows: `tests/e2e/smoke.mjs` all passed, which includes both table tests; `node --test` 361 passed; typecheck passed; not run: the desktop end-to-end test, macOS, Linux). M2.1.5 (the `coreConvert` defect) is written and Ready. Session checks: `pytest` 724 passed / 9 skipped on M8.4.20; the other checks of DEVELOPMENT §3 were not repeated because only Python, tools and documents changed since `01d6de7`.
 - **Findings of M2.1.4 (Windows, [report](benchmarks/M2.1.4.md)) for the design session:** the native Data table fails the 33 ms target while scrolling (about 13 frames per second) and
-  the visible-rows rendering passes; no rendering reaches beyond 10,400 rows (the 400 + 1,000-row expansion limit); a scatter of 50,000 points redraws in 156 ms (329 ms at
+  the visible-rows rendering passes; both were measured at 10,400 rows (ten clicks of "Show more"), not at 100,000; a scatter of 50,000 points redraws in 156 ms (329 ms at
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next step:** with all measuring cards of part C done and D11 recorded, **a design session** (the most capable model, or the maintainer) details M8.4.14-M8.4.19 with the measured numbers; an implementing
@@ -75,9 +75,9 @@ Updated 15 November 2026.
   macOS and Linux, clean Windows machine, cold-cache first launch, saturated CPUs, package sizes, and the
   numerical/timing/memory/recovery gates). Remind him when a milestone of M8 finishes and before any flag is
   switched on by default or a version with the engine is announced.
-- **Decisions waiting for the maintainer:** (1) the flags in the table below that need a promote/remove decision, in particular the
-  **visible-row table (M2.1.3)**: 17 times faster at 100,000 rows (5,746 -> 333 ms for ten expansions); the design review of 15 November 2026
-  proposed making it the default (it changes the default for users, so it needs the release gate of its own scope: every platform);
+- **Decisions waiting for the maintainer:** (1) the flags in the table below that need a promote/remove decision. **Decided on 16 November 2026: the visible-row table
+  (M2.1.3) is the default** (17 times faster at 100,000 rows; M2.1.4: scrolling passes the 33 ms target where the native table fails); it is in the branch, not in a published
+  version, and **the release gate (every platform) is still required before a version with it is published**;
   (2) any change to the interactive targets of contract §7, before M8.4.12 measures. Decided on 15 November 2026: option A and what follows
   from it (item above), which also answers the timing question of 14 November. Decided on 13 November 2026: acceptance levels (accepted),
   scope of 1.0 (below), publication of V0.149. Decided on 14 November 2026: a milestone gate on macOS and Linux closes every milestone; the
@@ -114,7 +114,7 @@ Every experimental switch, with the decision it is waiting for ([policy: ARCHITE
 | Engine experiment | M8 | environment variable `SEDCORETOOL_ENGINE_EXPERIMENT=1` | off | Removed at M8.6 after the release gate |
 | NumPy multi-row counting in the Python API | M3.1.5 / M3.1.6 / M8.3.3 | environment variable `SEDCORETOOL_EXPERIMENTAL_COUNTS=1` | no effect: the multi-row kernel is the only implementation since M8.3.3 | Maintainer: remove the variable and its tests/benchmark in a cleanup |
 | Navigation preview rollback | M2.2.4 | session control in the Sections panel | preview on | Maintainer: remove the rollback control, or keep it until more memory evidence exists |
-| Visible-row table rendering | M2.1.3 | session-only checkbox in the Data table | off | Maintainer: promote to default or remove |
+| Visible-row table rendering | M2.1.3 | session-only checkbox in the Data table (turns it off for the session) | **on** (since 16 Nov 2026) | Release gate before publishing; then the maintainer decides whether to remove the checkbox and the native path |
 | Desktop operating diagnostics | M1.2.3 | opt-in control in the desktop program | off | Removed after the hang diagnosis of M1.2.2 is accepted |
 
 ## Scope of version 1.0
@@ -858,6 +858,33 @@ data must be checked in the worker with NumPy.
   3. Report each case against the target (frame interval p95 <= 33 ms) and, for each failing case, the slowest step from a CPU profile.
 - **Tests:** the tool's own checks (it measures).
 - **Done when:** the evidence is committed with a verdict per case.
+
+##### M2.1.5 - Multiproxy: build the depth-age relation once per core (found by M2.1.4) — state: Ready
+
+- **Goal:** the first opening of the multiproxy log of a core with 100,000 rows takes at most 2 s (195 s today, 7.7 s at 20,000 rows), with
+  bit-identical results. The target was proposed by this card from the contract's "first useful view <= 2 s" and may be changed by the maintainer before the measurement.
+- **Cause (measured, [report](benchmarks/M2.1.4.md)):** `coreConvert` (`app/js/geo.js:103`) builds, filters and sorts every depth-age pair of the core on each call, and
+  `buildSamples` (`geo.js:170-171`) calls it twice for every sample of the grid: the work grows with the square of the rows. The profile of the cold opening puts about 129 s in
+  `coreConvert` itself and about 180 s with the functions inside it, plus 13 s of garbage collection.
+- **Read first:** `app/js/geo.js` (`coreAges`, `coreConvert`, `buildSamples`, `intervalsOnAxis`, `interpAge`/`lerp`); `tests/app/geo.test.mjs`; `docs/benchmarks/M2.1.4.md`
+  (the profile and the tool); the technical manual's section on depth-age conversion (formulas must still match the code).
+- **Change:** `app/js/geo.js`: a function that prepares the relation of one core for one direction (the sorted source and destination arrays, built once) and returns a function that
+  converts a value; `coreConvert` keeps its signature and result and becomes a wrapper (it is also used by `intervalsOnAxis`, a few calls); `buildSamples` prepares the two directions once
+  per core before the grid loop. No cache that outlives a call (the core's arrays can be edited), so there is nothing to invalidate. `tests/app/geo.test.mjs`; `CHANGELOG.md`
+  ("For users": opening the multiproxy log of a long core is much faster; "Internal" for the tool measurements).
+- **Do not touch:** the interpolation formula and its edge behaviour (clamping, missing values, unsorted input, equal depths), the result of any function, the saved-project format,
+  other modules. If `interpAge` itself is linear in the number of pairs per call, say so under the card instead of redesigning it: measure first.
+- **Steps:**
+  1. Before changing code, write tests against the **current** `coreConvert` and `buildSamples` on small deterministic cores (with `null` depths and ages, unsorted rows, repeated
+     values, one pair, none, `clamp` on and off, both directions) and record their results as expectations. They must pass on the old code.
+  2. Implement the preparation function; make `coreConvert` a wrapper; make `buildSamples` use the prepared converters.
+  3. The same tests pass unchanged, and a randomised test compares old and new results on cores of up to 500 rows with exact equality (keep the old implementation inside the test).
+  4. Measure: `node tools/measure_large_tables.mjs --chrome PATH --out docs/benchmarks/M2.1.5-windows.json --parts figures --rows 20000,100000 --reps 3` and compare the multiproxy
+     rows of the table in M2.1.4.
+- **Tests:** `node --test tests/app/geo.test.mjs`, then the whole `node --test tests/app/*.test.mjs`; `npm run typecheck`; the regression against
+  `legacy/v2.1_console/example_output.csv` is not affected (Python) but `pytest` is run once at the end of the session.
+- **Done when:** the old and new results are exactly equal on the tests; the first opening at 100,000 rows is <= 2 s (or the measured value and the reason are recorded and the
+  maintainer decides); `docs/benchmarks/M2.1.5.md` gives the before and after numbers; the report names what was not measured.
 
 ##### M8.4.14 to M8.4.19 - summaries (detailed by a design session after M2.1.4)
 

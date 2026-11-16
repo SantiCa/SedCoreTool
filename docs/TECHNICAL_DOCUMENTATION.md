@@ -1356,8 +1356,8 @@ groups and validation categories, and rebuilt with each render/export. The same 
 prefix and full CSV. [Cumulative expansion and CSV measurements](benchmarks/M2.1.2.md) describe the validation
 and the remaining cost of the growing DOM.
 
-The session-only **Visible rows only (experimental)** checkbox enables a separate rendering path; the native
-table remains the default. The initial 400-row limit and 1,000-row **Show more** increment still determine how
+The session-only **Visible rows only** checkbox selects the rendering path; the visible-rows path is the default (since 16 November 2026) and
+unchecking returns to the native table for the session. The initial 400-row limit and 1,000-row **Show more** increment still determine how
 many rows are available to scroll. `tableModel(limit, offset)` prepares the requested range across core
 boundaries, retaining the same column/layer discovery and interval matching. Full CSV export calls it without
 a limit or offset and therefore includes every selected source row.

@@ -93,8 +93,8 @@ U-Net on the computer.
 4. **Read the results** per interval (thickness in cm): bioturbation %, % per ichnotaxon, BI and ii. Add an age model
    to work in age.
 5. **Combine and interpret** in the *Core column*, *Data* and *Multiproxy* modes, and prepare figures in *Figures*.
-   In the Data sheet, **Visible rows only (experimental)** limits rendering while you scroll. It is off by default
-   and applies only to the current session. Turn it off to return to the current table; CSV exports always include
+   In the Data sheet, **Visible rows only** limits rendering while you scroll. It is on by default
+   and the checkbox applies only to the current session. Turn it off to return to the previous table; CSV exports always include
    every selected row. Active text selections retain their rows until the selection is cleared.
    In Multiproxy, collapse *Numeric variables used* to free space, drag the edge of the name column in
    *Interval families* to resize it, and use *Column order and visibility* in *Curves* to reorder or hide tracks.

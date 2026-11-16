@@ -88,7 +88,7 @@ async function profiled(page, action) {
 async function tableTrial(rows, visibleRows, withProfile) {
   return withPage(async ({ page, errors }) => {
     await page.evaluate(prepareDataTableFixture, rows);
-    await page.evaluate((flag) => { document.getElementById('modeData').click(); if (flag) document.getElementById('dsViewport').click(); document.getElementById('modeSection').click(); }, visibleRows);
+    await page.evaluate((flag) => { document.getElementById('modeData').click(); { const box = document.getElementById('dsViewport'); if (box.checked !== flag) box.click(); } document.getElementById('modeSection').click(); }, visibleRows);
     await new Promise((resolve) => setTimeout(resolve, 400));
     const run = async () => page.evaluate(async () => {
       const M = window.__m, out = {};

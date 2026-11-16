@@ -22,7 +22,7 @@ try {
   // Configure the session through the real controls before measuring either rendering mode.
   await page.evaluate((enabled) => {
     document.getElementById('modeData').click();
-    if (enabled) document.getElementById('dsViewport').click();
+    { const box = document.getElementById('dsViewport'); if (box.checked !== enabled) box.click(); }   // the visible-rows rendering has been the default since M2.1.3 was promoted
     document.getElementById('modeSection').click();
   }, viewport);
   await new Promise((resolve) => setTimeout(resolve, 400));

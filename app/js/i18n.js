@@ -1858,7 +1858,7 @@ Object.assign(D.en, { 'iv.tidied': 'Overlapping intervals of the same family wer
 // V0.35: Data as a spreadsheet
 Object.assign(D.es, {
   'data.table': 'Hoja de datos', 'ds.edit': 'Permitir editar valores', 'ds.newCol': '+ Columna', 'ds.nMod': '{n} celdas modificadas a mano', 'ds.restoreCell': 'Restaurar celda', 'ds.restoreAll': 'Restaurar todas',
-  'ds.viewport': 'Solo filas visibles (experimental)',
+  'ds.viewport': 'Solo filas visibles',
   'ds.warn': 'Estás editando datos. Cada valor cambiado queda marcado (fondo amarillo y esquina roja), guarda el original y la fecha, se usa en los análisis y figuras y se indica en el CSV exportado. Enter baja una fila; Esc deshace la celda. Las columnas calculadas no se editan: cambia su fórmula (ƒ).',
   'ds.modTip': 'Modificado a mano el {d}. Original: {o}', 'ds.notNumber': 'Escribe un número (o deja la celda vacía para borrar el valor).',
   'ds.type': 'Tipo', 'ds.calc': 'Calculada con otras columnas', 'ds.man': 'Manual (para rellenar a mano)', 'ds.name': 'Nombre', 'ds.formula': 'Fórmula',
@@ -1869,7 +1869,7 @@ Object.assign(D.es, {
 });
 Object.assign(D.en, {
   'data.table': 'Data sheet', 'ds.edit': 'Allow editing values', 'ds.newCol': '+ Column', 'ds.nMod': '{n} cells edited by hand', 'ds.restoreCell': 'Restore cell', 'ds.restoreAll': 'Restore all',
-  'ds.viewport': 'Visible rows only (experimental)',
+  'ds.viewport': 'Visible rows only',
   'ds.warn': 'You are editing data. Every changed value is flagged (yellow background and red corner), keeps the original and the date, is used by the analyses and figures and is listed in the exported CSV. Enter moves down; Esc undoes the cell. Computed columns are not edited: change their formula (ƒ).',
   'ds.modTip': 'Edited by hand on {d}. Original: {o}', 'ds.notNumber': 'Type a number (or leave the cell empty to delete the value).',
   'ds.type': 'Type', 'ds.calc': 'Computed from other columns', 'ds.man': 'Manual (to fill in by hand)', 'ds.name': 'Name', 'ds.formula': 'Formula',

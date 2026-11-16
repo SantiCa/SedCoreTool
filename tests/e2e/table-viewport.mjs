@@ -23,6 +23,11 @@ export async function verifyTableViewport(browser, url) {
     await page.waitForFunction(() => window.ichantool);
     await page.evaluate(prepareDataTableFixture, 2400);
     await page.click('#modeData');
+    // Default since 16 November 2026: the window is mounted without touching the checkbox.
+    assert.equal(await page.$eval('#dsViewport', (input) => input.checked), true);
+    assert.ok(await page.$$eval('#dBody tbody tr', (rows) => rows.length) < 100);
+    // Rollback: unchecking returns to the native table for the session (400 rows), and checking again below restores the window.
+    await page.click('#dsViewport');
     assert.equal(await page.$eval('#dsViewport', (input) => input.checked), false);
     assert.equal(await page.$$eval('#dBody tbody tr', (rows) => rows.length), 400);
     const bounded = await page.evaluate(() => {
@@ -205,7 +210,7 @@ export async function verifyTableViewport(browser, url) {
     try {
       await inherited.goto(url, { waitUntil: 'networkidle0' });
       await inherited.evaluate(prepareDataTableFixture, 2400); await inherited.click('#modeData');
-      assert.equal(await inherited.$eval('#dsViewport', (input) => input.checked), false);
+      assert.equal(await inherited.$eval('#dsViewport', (input) => input.checked), true);
     } finally { await inherited.close(); }
     await page.evaluate(prepareDataTableFixture, 100000);
     await page.click('#modeData');
