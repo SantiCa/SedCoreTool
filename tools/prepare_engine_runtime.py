@@ -113,10 +113,16 @@ def install_wheels(specification, artifacts, destination, *, runner=subprocess.r
     wheels.mkdir()
     for artifact in artifacts:
         shutil.copyfile(artifact, wheels / artifact.name)
+    # pip accepts only the exact platform tags it is given on Linux (not older manylinux tags), so a target may list several.
+    platforms = specification['wheel_platform']
+    platforms = [platforms] if isinstance(platforms, str) else list(platforms)
+    if not platforms or not all(isinstance(item, str) and re.fullmatch('[a-z0-9_]+', item) for item in platforms):
+        raise ValueError('Invalid wheel platform')
     try:
         runner([sys.executable, '-m', 'pip', 'install', '--isolated', '--disable-pip-version-check', '--no-index',
                 '--no-deps', '--only-binary=:all:', '--no-compile', '--require-hashes',
-                '--platform', specification['wheel_platform'], '--python-version', '3.12', '--implementation', 'cp', '--abi', 'cp312',
+                *(argument for platform_tag in platforms for argument in ('--platform', platform_tag)),
+                '--python-version', '3.12', '--implementation', 'cp', '--abi', 'cp312',
                 '--target', str(destination / specification['site_packages']), '--find-links', str(wheels), '-r', str(requirements)],
                check=True, timeout=180)
         # Host pip generates launchers with host/staging paths. The desktop imports these packages;

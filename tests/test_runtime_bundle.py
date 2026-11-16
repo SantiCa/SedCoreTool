@@ -193,3 +193,18 @@ def test_source_packages_refuse_unsafe_or_incomplete_archives(tmp_path, entries,
     with pytest.raises(ValueError, match=message):
         builder.install_sources([SOURCE], [archive], site)
     assert not (tmp_path / 'escape.py').exists() and not (tmp_path / 'outside').exists()
+
+
+def test_wheel_installation_passes_every_platform_tag_of_a_target(tmp_path):
+    calls = []
+    staging = tmp_path / 'stage'
+    (staging / 'site').mkdir(parents=True)
+    for platforms, expected in (('win_amd64', ['win_amd64']), (['manylinux_2_28_x86_64', 'manylinux_2_17_x86_64'], ['manylinux_2_28_x86_64', 'manylinux_2_17_x86_64'])):
+        calls.clear()
+        builder.install_wheels({'wheel_platform': platforms, 'wheels': [], 'site_packages': 'site'}, [], staging, runner=lambda command, **_: calls.append(command))
+        command = calls[0]
+        assert [command[i + 1] for i, item in enumerate(command) if item == '--platform'] == expected
+    with pytest.raises(ValueError, match='Invalid wheel platform'):
+        builder.install_wheels({'wheel_platform': ['bad tag; rm'], 'wheels': [], 'site_packages': 'site'}, [], staging, runner=lambda *a, **k: None)
+    lock = json.loads(builder.LOCK.read_bytes())
+    assert 'manylinux_2_17_x86_64' in lock['targets']['linux-x64']['wheel_platform']   # NumPy, pandas and Pillow publish only 2_17 wheels
