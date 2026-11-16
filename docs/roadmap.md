@@ -58,11 +58,13 @@ Updated 15 November 2026.
   engine dying mid-transfer got its test; **M8.4 is not finished and M8.5 must not start**: M8.4.6-M8.4.8 (part A), M8.4.9-M8.4.11 (part B,
   the cards were written in this review) and part C remain, plus the timing decision (answered on 15 November 2026, above). The browser test `smoke.mjs` could not be run locally in
   the review (starting the local server was refused); the `e2e` job of GitHub runs it on every push.
-- **Progress of 16 November 2026:** M8.4.7, the M8.4.8 measurements, M8.4.12 (outcome D, awaiting the design session) and M8.4.13 (fixtures
+- **Rule D11 settled (16 November 2026, card M8.4.20):** after vectorising the interval kernel the outcome is still D (119.5 ms against 100); accepted for the
+  interactive interval table of tiled sections, which stays in JavaScript; the maintainer can overrule it.
+- **Progress of 16 November 2026:** M8.4.7, the M8.4.8 measurements, M8.4.12, M8.4.20 and M8.4.13 (fixtures
   in `C:\sedcore-large-fixtures`, outside the repository, and the Windows baseline) are done; the three-system gate of M8.4.8 still waits for
   a push, which the maintainer has not asked for.
 - **Next step:** M2.1.4 (tables and figures with 100,000 rows: measurement), the last detailed card of part C. **After it, and with the
-  decision on M8.4.12 (accept D, vectorise the kernel, or change the rule), a design session** (the most capable model, or the maintainer) details M8.4.14-M8.4.19 with the measured numbers; an implementing
+  the decision on D11 now recorded, a design session** (the most capable model, or the maintainer) details M8.4.14-M8.4.19 with the measured numbers; an implementing
   session must not start M8.4.14 from its summary. Also open: card H5 (the `e2e` job must pass ten consecutive pushes).
 - **Reminder for whoever talks to the maintainer:** the maintainer accepted the two acceptance levels on
   13 November 2026 and asked to be **reminded to run the release-gate tests** (the release checklist below:
@@ -754,7 +756,7 @@ filtering, detection, object features and U-Net on tiles, which are M8.5 slices 
 any card that moves float data: the coordinator checks float64 buffers in pure Python (63 ns per value, about 1 s per 128 MiB); large float
 data must be checked in the worker with NumPy.
 
-##### M8.4.12 - Round trip of a one-tile edit, and rule D11 — state: Done (15 Nov 2026); outcome D by the rule, design session to confirm
+##### M8.4.12 - Round trip of a one-tile edit, and rule D11 — state: Done (15 Nov 2026); outcome D by the rule; confirmed after M8.4.20 (16 Nov 2026), see below
 
 - **Goal:** the interactive-calculation rule of contract §7 is applied once, with a measurement through the real chain, and its outcome is
   written into ARCHITECTURE D11. No product code changes.
@@ -788,6 +790,14 @@ data must be checked in the worker with NumPy.
   `pytest` on the touched tests; one full measurement run.
 - **Done when:** the evidence is committed, D11 states its outcome, and the roadmap status names the next card.
 - **Result (15 November 2026):** [summary](validation/M8.4.12-round-trip-summary.md). One-tile edit through the whole chain: median 71.9 ms, p95 793.8 ms (18 samples, one stall of 794 ms, the other 17 between 70 and 117 ms); the row counts of a 349,526-row section take 237.7 ms median to become their table. 794 + 238 > 100: **the rule's outcome is D**. But 225 of those 310 ms are a per-interval Python loop (`sum_by_interval`), which makes the outcome depend on an implementation detail; the card stopped as it prescribes for D. `make_synthetic` gained a `width` option (the default package is byte-identical, checked by hash and test); `tools/measure_interval_table.py` is new. **Needed from a design session before M8.4.14:** accept D, or add a card that vectorises the kernel (exact integer sums, same fixtures) and repeat the measurement, or change the rule.
+
+##### M8.4.20 - Interval sums without a per-interval loop; rule D11 measured again — state: Done (16 Nov 2026), development gate
+
+- **Goal and origin:** M8.4.12 gave D, but 225 of the 238 ms of the table came from a per-interval Python loop. The kernel was vectorised with exact
+  results and the measurement repeated with 20 pairs instead of 6.
+- **Change:** `kernels/binning.py` (`sum_by_interval`, `bin_edges`), `methods/section_intervals.py` (one sum instead of two), `tests/test_kernels.py`.
+- **Result:** [summary](validation/M8.4.20-vectorised-kernel-summary.md). Table 238 -> 35 ms; one-tile edit p95 84.7 ms (60 samples, no stall); 84.7 + 34.8 = 119.5 ms
+  > 100: **still D**. D accepted for the interactive interval table only, on the maintainer's delegation; the rule is unchanged. Cards M8.4.14-M8.4.19 may now be detailed with D as given.
 
 ##### M8.4.13 - Multi-gigabyte fixtures and the baseline (M2.3.1) — state: Done (16 Nov 2026), development gate; [summary](validation/M8.4.13-large-baseline-summary.md)
 

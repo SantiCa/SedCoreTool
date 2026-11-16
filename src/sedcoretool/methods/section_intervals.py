@@ -465,8 +465,9 @@ def run(snapshot: Snapshot, report=lambda stage, completed, total: None, cancell
     depth = s.top + (start + end) / 2 * step
     valid_sum = sum_by_interval(valid_rows, edges)
     has_data = enough_valid(valid_sum, end - start, columns, s.min_valid)
-    pct = percentage(sum_by_interval(bio_rows, edges), valid_sum, has_data)
-    class_pct = percentage(sum_by_interval(class_rows, edges), valid_sum[:, None], has_data[:, None])
+    bio_sum, class_sum = sum_by_interval(bio_rows, edges), sum_by_interval(class_rows, edges)
+    pct = percentage(bio_sum, valid_sum, has_data)
+    class_pct = percentage(class_sum, valid_sum[:, None], has_data[:, None])
     no_data = ~has_data
     padded = _pad_no_data(no_data, depth_top, depth_bottom, s.no_data_pad_cm / unit_factor(s.units))
     pct[padded] = np.nan
@@ -499,8 +500,8 @@ def run(snapshot: Snapshot, report=lambda stage, completed, total: None, cancell
     plain("row_start", start, "<u4")
     plain("row_end", end, "<u4")
     plain("valid_count", valid_sum, "<u8")
-    plain("bio_count", sum_by_interval(bio_rows, edges), "<u8")
-    plain("class_count", sum_by_interval(class_rows, edges), "<u8")
+    plain("bio_count", bio_sum, "<u8")
+    plain("class_count", class_sum, "<u8")
     plain("depth_top", depth_top, "<f8")
     plain("depth_bottom", depth_bottom, "<f8")
     plain("depth", depth, "<f8")

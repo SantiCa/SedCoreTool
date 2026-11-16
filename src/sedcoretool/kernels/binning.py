@@ -44,6 +44,17 @@ def bin_edges(n: int, bin_px: float, keep_partial: bool = True) -> list[tuple[in
     A fractional ``bin_px`` never drifts; an integer one gives fixed-size intervals. The last interval is dropped when
     it is partial and ``keep_partial`` is False.
     """
+    if bin_px >= 1:
+        # The same arithmetic as ``bin_edge`` on all indices at once (``j * bin_px`` is one float64 product, ``floor`` is exact); the edges never decrease.
+        wanted = np.floor(np.arange(int(n / bin_px) + 3, dtype=float) * bin_px + 0.5).astype(np.int64)
+        count = int(np.searchsorted(wanted, n, side="left"))                       # intervals whose first row is inside the image
+        while count == len(wanted):                                                 # (never reached for the estimate above; kept for safety)
+            wanted = np.floor(np.arange(2 * len(wanted), dtype=float) * bin_px + 0.5).astype(np.int64)
+            count = int(np.searchsorted(wanted, n, side="left"))
+        ends = wanted[1:count + 1]
+        if not keep_partial and count and ends[-1] > n:
+            count -= 1
+        return list(zip(wanted[:count].tolist(), np.minimum(ends[:count], n).tolist()))
     out, j = [], 0
     while bin_edge(j, bin_px) < n:
         end = bin_edge(j + 1, bin_px)
@@ -55,8 +66,25 @@ def bin_edges(n: int, bin_px: float, keep_partial: bool = True) -> list[tuple[in
 
 
 def sum_by_interval(values: np.ndarray, edges: list[tuple[int, int]]) -> np.ndarray:
-    """Sum ``values`` (per row, optionally with trailing axes) over each interval; the result is float64."""
-    return np.array([values[a:b].sum(axis=0) for a, b in edges], dtype=float).reshape(len(edges), *values.shape[1:])
+    """Sum ``values`` (per row, optionally with trailing axes) over each interval; the result is float64.
+
+    Integer and boolean values (the row counts) are summed exactly from one cumulative sum, so the cost does not grow with the number of
+    intervals; the result equals the sum of each slice (``values[a:b].sum(axis=0)``) because integer addition is exact and wraps the same way.
+    Float values keep the per-interval loop: a difference of running sums rounds differently from NumPy's pairwise sum of the slice.
+    """
+    bounds = np.asarray(edges, dtype=np.intp).reshape(-1, 2)
+    if values.dtype.kind not in "biu" or (bounds.size and bounds.min() < 0):              # a negative index counts from the end of a slice
+        return np.array([values[a:b].sum(axis=0) for a, b in edges], dtype=float).reshape(len(edges), *values.shape[1:])
+    n = values.shape[0]
+    first = np.minimum(bounds[:, 0], n)
+    last = np.minimum(bounds[:, 1], n)
+    last = np.maximum(first, last)                                                # a reversed range is an empty slice
+    wide = np.uint64 if values.dtype.kind == "u" else np.int64
+    if len(first) and (first < last).all() and (first[1:] == last[:-1]).all():            # consecutive non-empty intervals: one pass, no temporary
+        return np.add.reduceat(values[:last[-1]], first, axis=0, dtype=wide).astype(float)
+    running = np.zeros((n + 1, *values.shape[1:]), dtype=wide)
+    np.cumsum(values, axis=0, dtype=wide, out=running[1:])
+    return (running[last] - running[first]).astype(float)
 
 
 def enough_valid(valid_sum: np.ndarray, rows: np.ndarray, columns: int, min_valid: float) -> np.ndarray:
