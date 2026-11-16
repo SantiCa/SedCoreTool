@@ -241,3 +241,93 @@ test('a buffer.read answer that does not match its request makes the engine unav
     await client.stop();
   }
 });
+
+test('buffer.derive through the real client and engine: a copy that takes only the changed parts, and a hash that must match', { skip: !python }, async (t) => {
+  const client = await clientFixture(t);
+  const data = Buffer.from(Array.from({ length: 300000 }, (_, i) => (i * 5 + 1) % 253)), base = await upload(client, data);
+  const edited = Buffer.from(data); edited.fill(250, 1000, 1500); edited.fill(251, 200000, 200010);
+  const sha = createHash('sha256').update(edited).digest('hex'), descriptor = { dtype: 'u8', shape: [data.length], byte_length: data.length, sha256: sha };
+  const { handle } = await client.request('buffer.derive', { base, ...descriptor });
+  await client.request('buffer.chunk', { handle, offset: 1000, byte_length: 500 }, edited.subarray(1000, 1500));
+  await client.request('buffer.chunk', { handle, offset: 200000, byte_length: 10 }, edited.subarray(200000, 200010));
+  assert.deepEqual((await client.request('buffer.commit', { handle })).sha256, sha);
+  assert.ok((await client.request('buffer.read', { handle, offset: 0, byte_length: 4096 })).bytes.equals(edited.subarray(0, 4096)));
+  assert.ok((await client.request('buffer.read', { handle: base, offset: 1000, byte_length: 8 })).bytes.equals(data.subarray(1000, 1008)), 'the base is untouched');
+  const missed = (await client.request('buffer.derive', { base, ...descriptor })).handle;          // announces the edit and sends nothing
+  await assert.rejects(client.request('buffer.commit', { handle: missed }), { code: 'INVALID_BUFFER' });
+  await assert.rejects(client.request('buffer.derive', { base, ...descriptor, shape: [data.length - 1], byte_length: data.length - 1 }), { code: 'INVALID_BUFFER' });
+  assert.equal(client.status().state, 'ready');
+});
+
+// ---- the engine service starts a new session (card M8.4.7) ----------------------------------------------------------------
+
+const serviceRoot = fileURLToPath(new URL('../../', import.meta.url));
+const newService = () => createEngineService({ enabled: true, packaged: false, executable: python, sourceDirectory: serviceRoot, version: 'test' });
+
+test('restart gives a new ready session, ends the old process and keeps working; one restart at a time', { skip: !python, timeout: 60000 }, async (t) => {
+  const service = newService();
+  await service.start();
+  t.after(() => service.stop());
+  const first = service.session();
+  assert.ok(first);
+  const [a, b] = [service.restart(), service.restart()];
+  assert.equal(service.status().state, 'starting', 'the old engine is not offered while the new one starts');
+  assert.equal(service.session(), null);
+  assert.deepEqual(await a, { restarted: true });
+  assert.deepEqual(await b, { restarted: true });
+  assert.equal(service.status().state, 'ready');
+  assert.notEqual(service.session(), first);
+  const second = service.session();
+  assert.deepEqual(await service.restart(), { restarted: true });
+  assert.notEqual(service.session(), second, 'two requests at the same time share one restart; a later one starts another');
+});
+
+test('a restart after the engine died brings it back, and buffers of the old session are gone', { skip: !python, timeout: 60000 }, async (t) => {
+  const service = newService();
+  await service.start();
+  t.after(() => service.stop());
+  const handle = (await service.request('buffer.begin', { dtype: 'u8', shape: [4], byte_length: 4, sha256: digest(Buffer.alloc(4, 1)) })).handle;
+  const before = service.session();
+  await service.request('shutdown', {});                                          // the coordinator ends by itself, as if it had crashed
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.notEqual(service.status().state, 'ready');
+  assert.deepEqual(await service.restart(), { restarted: true });
+  assert.equal(service.status().state, 'ready');
+  assert.notEqual(service.session(), before);
+  await assert.rejects(service.request('buffer.digest', { handle }), { code: 'INVALID_BUFFER' });
+});
+
+test('an automatic restart is allowed once per program session; the user may restart as often as they like', { skip: !python, timeout: 60000 }, async (t) => {
+  const service = newService();
+  await service.start();
+  t.after(() => service.stop());
+  assert.deepEqual(await service.restart({ automatic: true }), { restarted: true });
+  assert.equal(service.automaticRestarts(), 1);
+  const session = service.session();
+  await assert.rejects(service.restart({ automatic: true }), { code: 'LIMIT_EXCEEDED', field: 'automatic' });
+  assert.equal(service.session(), session, 'a refused restart changes nothing');
+  assert.equal(service.status().state, 'ready');
+  assert.deepEqual(await service.restart({ automatic: false }), { restarted: true });
+  assert.notEqual(service.session(), session);
+  assert.equal(service.automaticRestarts(), 1);
+});
+
+test('a disabled service and one that is closing never restart', { skip: !python, timeout: 60000 }, async () => {
+  const disabled = createEngineService({ enabled: false, packaged: false, version: 'test', sourceDirectory: '/not-used' });
+  await assert.rejects(disabled.restart(), { code: 'ENGINE_UNAVAILABLE' });
+  const service = newService();
+  await service.start();
+  await service.stop();
+  await assert.rejects(service.restart(), { code: 'ENGINE_UNAVAILABLE' });
+  assert.equal(service.status().state, 'stopped');
+});
+
+test('closing the program while a restart is running starts nothing', { skip: !python, timeout: 60000 }, async () => {
+  const service = newService();
+  await service.start();
+  const restarting = service.restart().catch((error) => error.code);
+  await service.stop();
+  assert.equal(await restarting, 'ENGINE_UNAVAILABLE');
+  assert.equal(service.status().state, 'stopped');
+  assert.equal(service.session(), null, 'no engine was started behind the closing program');
+});

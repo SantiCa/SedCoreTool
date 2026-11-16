@@ -32,8 +32,8 @@ describe a planned part as available. When you build a planned part, change its 
                     private stdin/stdout pipes, `SCE1` frames, no network port
 ┌─────────────── Engine process: src/sedcoretool run by the bundled CPython 3.12 ───────────┐
 │  engine/    transport only: frames, buffers, coordinator, job runner, method worker script │
-│  methods/   one module per versioned scientific method (planned)                           │
-│  kernels/   pure NumPy primitives shared by every caller (planned)                         │
+│  methods/   one module per versioned scientific method (built: section.intervals/1)        │
+│  kernels/   pure NumPy primitives shared by every caller (built)                           │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
    Python API and command line (pipeline.py, cli.py, batch.py …) call kernels/methods in-process.
    They never start the engine process.
@@ -41,8 +41,9 @@ describe a planned part as available. When you build a planned part, change its 
 
 The goal of milestone M8 is **one implementation of each scientific method**, written in Python, used by the
 desktop program (through the engine process), by the Python API and by the command line. JavaScript keeps
-interaction, drawing, editing and saving. Today the renderer still calculates everything itself; the engine
-process exists but only answers a diagnostic request.
+interaction, drawing, editing and saving. Today, with the engine experiment off (the default), the renderer still
+calculates everything itself; with it on, the interval table of each section comes from the engine method
+`section.intervals/1` (M8.3) and every other calculation still runs in JavaScript.
 
 ## 2. What is built and what is planned
 
@@ -53,13 +54,15 @@ process exists but only answers a diagnostic request.
 | Python package: intervals, indices, age, export, batch, CLI, U-Net | built | `src/sedcoretool/` |
 | Engine process: frames, bounded buffers, queue, cancellation, isolated worker | built, off by default | `src/sedcoretool/engine/`, `desktop/engine*.js` |
 | Bundled Python runtime, verified at launch | built (Windows measured; macOS/Linux not yet run) | `desktop/runtime-lock.json`, `tools/prepare_engine_runtime.py` |
-| Engine methods: `buffer.digest/1` (a transport diagnostic) and `section.intervals/1` (the first scientific method, not yet used by the interface) | built | `engine/worker.py`, `engine/method_worker.py` |
+| Engine methods: `buffer.digest/1` (a transport diagnostic) and `section.intervals/1` (the first scientific method) | built | `engine/worker.py`, `engine/method_worker.py` |
 | `kernels/` package: binning, counting, classification, age interpolation; `tests/test_architecture.py` | built (M8.3.3) | §3.1 |
 | `methods/` package with the registry and `section.intervals/1`, called directly | built (M8.3.4) | §3.1 |
-| Job runner in the engine process: `section.analyze` runs a registered method in its own worker process, results are adopted as committed buffers and downloaded with `buffer.read` | built (M8.3.5) | §3.1, §4 |
+| Job runner in the engine process: `section.analyze` runs a registered method in the engine's long-lived worker process (one job at a time, replaced after any anomaly), results are adopted as committed buffers and downloaded with `buffer.read` | built (M8.3.5) | §3.1, §4 |
 | Renderer-facing engine bridge (`engine-ipc.js`, `engineclient.js`, `engineanalysis.js`) | **built, experimental, off by default** (M8.3.6–M8.3.7) | §3.2, §3.3 |
-| Section intervals calculated by the engine (`section.intervals/1`) | **planned** (M8.3) | contract §4–§5 |
-| Engine-owned images and tiles, remaining methods | **planned** (M8.4, M8.5) | roadmap |
+| Section intervals calculated by the engine (`section.intervals/1`) and shown by the interface | **built, experimental, off by default** (M8.3.7); slower than JavaScript, see the M8.3.8 evidence | contract §4–§5 |
+| Section inputs kept in the engine between analyses; edits sent as changed rows (`buffer.derive`); remembered counts; one packed result | **built, experimental, off by default** (M8.4.2-M8.4.5); timing gate of contract §7 not met | §4, contract §3 |
+| Engine restart after a failure (once by itself, then the user's Retry): **built, experimental** (M8.4.7). Engine-held pixels of small sections and record tables (part B, M8.4.9-M8.4.11); several sections in one request (M8.4.6, deferred); remaining methods (M8.5) | **planned** | roadmap |
+| Tile store for large images (pixel pyramid, versioned mask tiles), tiled viewer and editing, analysis on tiles, saving of large projects | **planned** (part C of M8.4, cards M8.4.12-M8.4.19; chosen 15 Nov 2026) | §3.4 |
 
 The engine experiment is enabled only by the environment variable `SEDCORETOOL_ENGINE_EXPERIMENT=1`. Keep that
 default until M8.6.
@@ -75,7 +78,7 @@ import, the code is in the wrong layer: move the code, do not break the rule.
 |---|---|---|---|---|
 | Kernels (built, M8.3.3) | `kernels/` | Pure array functions: bin edges and sums, row/class counts from labels, layers and overlap stacks, tier classification, age interpolation | `numpy`, standard library | pandas, Pillow, file or network IO, environment variables, global state, anything from `engine/` or `methods/` |
 | Methods (built, M8.3.4) | `methods/` | One module per versioned method. Each has `NAME` (for example `"section.intervals/1"`), `parse(inputs) -> snapshot` that validates everything, and `run(snapshot, report, cancelled) -> dict` of named NumPy columns. `registry.py` maps names to modules | `kernels`, `numpy`, standard library | pandas, IO, transport details (frames, handles, sessions) |
-| Engine transport | `engine/` | `protocol.py` frames and strict JSON, `buffers.py` staged buffers, `server.py` coordinator, `worker.py` process wrappers (`DigestJob`, `MethodJob`) and the digest script, `specs.py` input tables, `method_worker.py` the script that runs a method, `lifetime.py` | Coordinator: standard library only. Only the script `method_worker.py` imports `numpy`, `kernels` and `methods` (it runs in its own process and registers the package without running its `__init__`, so pandas and Pillow are not loaded); nothing else may import it | The coordinator must never import NumPy or a method (start-up stays fast and control requests stay responsive). No scientific formulas in this layer |
+| Engine transport | `engine/` | `protocol.py` frames and strict JSON, `buffers.py` staged buffers, `server.py` coordinator, `worker.py` process wrappers (`DigestJob`; `MethodRunner`, the long-lived method worker, and `MethodJob`, one job on it) and the digest script, `specs.py` input tables, `method_worker.py` the script that runs a method, `lifetime.py` | Coordinator: standard library only. Only the script `method_worker.py` imports `numpy`, `kernels` and `methods` (it runs in its own process and registers the package without running its `__init__`, so pandas and Pillow are not loaded); nothing else may import it | The coordinator must never import NumPy or a method (start-up stays fast and control requests stay responsive). No scientific formulas in this layer |
 | Public API and CLI | `pipeline.py`, `indices.py`, `depth.py`, `io.py`, `segmentation.py`, `export.py`, `batch.py`, `cli.py`, `plotting.py` | The supported functions and commands. Adapters: validate user input, call kernels/methods, shape the output (DataFrame, CSV, LAS) | `kernels`, `methods`, pandas, Pillow | Starting the engine process; a second copy of a formula that exists in `kernels/` |
 | U-Net (optional) | `unet/` | Tiling, dataset, training, prediction, evaluation. Unchanged until M8.5 | its own optional dependencies | being imported by the base engine |
 
@@ -92,7 +95,7 @@ matching tier and the Python API the **last**; the kernel takes `precedence="fir
 
 | Kind | Rule | Examples |
 |---|---|---|
-| Pure modules | No `document`, `window` or DOM types; state arrives as arguments. Tested with Node in `tests/app/` | `core.js`, `sectiondepth.js`, `sectionanalysis.js`, `engineclient.js`, `engineanalysis.js`, `edit.js`, `imageproc.js`, `learn.js`, `log.js`, `geo.js`, `interp.js`, `locmap.js`, `plot.js`, `sheet.js`, `exportio.js`, `zip.js`, `unet.js`, `unetmodel.js`, `navpreview.js`, `figview.js`, `tableview.js` |
+| Pure modules | No `document`, `window` or DOM types; state arrives as arguments. Tested with Node in `tests/app/` | `core.js`, `sectiondepth.js`, `sectionanalysis.js`, `maskchanges.js`, `engineclient.js`, `engineanalysis.js`, `edit.js`, `imageproc.js`, `learn.js`, `log.js`, `geo.js`, `interp.js`, `locmap.js`, `plot.js`, `sheet.js`, `exportio.js`, `zip.js`, `unet.js`, `unetmodel.js`, `navpreview.js`, `figview.js`, `tableview.js` |
 | State | The shared project state `S` and small helpers | `state.js` |
 | Controllers and views | Read and change `S`, call pure modules, build DOM/SVG, wire events | `app.js`, `columns.js`, `datatab.js`, `figures.js`, `multiproxy.js`, `panels.js`, `diagnostics.js` |
 | Storage | IndexedDB project library | `storage.js` |
@@ -112,11 +115,11 @@ Rules:
 
 Pure modules for M8.3:
 
-- `sectionanalysis.js` — **built** (M8.3.1): everything about analysing one section that does not need the DOM; today
-  the effective class of each object, the legacy calculation that used to live in `app.js::analyze` (moved, not
-  rewritten) and its row-count cache. **Planned** additions (M8.3.2, M8.3.7): the revision key of the scientific
-  inputs, building the engine snapshot of contract §4, and converting an engine result into the existing `s.bins`
-  array so that tables, columns, figures and exports do not change.
+- `sectionanalysis.js` — **built** (M8.3.1, M8.3.2, M8.3.7): everything about analysing one section that does not
+  need the DOM: the effective class of each object, the legacy calculation that used to live in `app.js::analyze`
+  (moved, not rewritten) and its row-count cache, the revision key of the scientific inputs (`analysisRevision`),
+  the engine snapshot of contract §4 (`buildIntervalSnapshot`) and the conversion of an engine result into the
+  existing `s.bins` array (`resultToBins`), so that tables, columns, figures and exports do not change.
 - `engineclient.js` — uploads typed arrays in chunks of at most 1 MiB, starts and cancels jobs and downloads
   results through an injected bridge object. In the desktop program the bridge is `window.corantoolDesktop.engine`;
   in Node tests it is a fake.
@@ -142,7 +145,47 @@ Pure modules for M8.3:
 and nothing in the wire protocol or the method contracts may mention Electron, IPC channels or the renderer.
 Everything Electron-specific stays in `desktop/`.
 
-## 4. Path of one scientific request (target design for M8.3)
+### 3.4 Tile store for large images (planned, part C of M8.4)
+
+Chosen by the maintainer on 15 November 2026 (option A, decision D10) so that the program stays fluid with images of several
+gigabytes. **Not built.** Cards M8.4.12-M8.4.19 of the roadmap build it; every one of them follows these rules, and a card that
+needs to break one stops and asks.
+
+For each tiled section, the engine keeps on disk:
+
+- a **pixel pyramid**: the source image at full resolution and at reduced levels (each half the size of the previous one), cut into
+  tiles of 512 x 512 pixels (unless card M8.4.13 measures a better size), at the source's own bit depth. It never changes once built and
+  can be rebuilt from the source file, so it is a cache, not project data (M2.3.5);
+- **mask tiles**: labels (`i32`) and exclusion (`u8`) at full resolution on the same tile grid, each stored under the SHA-256 of its
+  bytes, and one **manifest** per saved version that lists the hashes for every tile position (no entry = an empty tile). The identity
+  of a version is the SHA-256 of its manifest;
+- **row counts per tile**, if the engine computes the interval table (rule D11), so that an edit recounts only the tiles it touched.
+
+Rules:
+
+1. **One writer.** Only the engine writes the store, on requests that pass through the main process. The page never sees or chooses a
+   path (contract §3); the main process tells the engine which folder belongs to the project.
+2. **A documented format that does not depend on the interface** (D12). JSON metadata and raw little-endian, C-order tile files,
+   specified in the engine contract and the technical manual before the first file is written; nothing in it depends on the browser,
+   IndexedDB or Electron. The pyramid uses a layout compatible with Zarr version 2 (an open format that other programs read) when that
+   needs no new dependency; card M8.4.14 records the choice. A later Rust kernel (option B, roadmap-future M4.1.1) or a native interface
+   (option C, M9.1) must be able to read and write the store from the specification alone.
+3. **Verified, tile by tile.** A tile is used only if its bytes have the SHA-256 that names it. This keeps the condition of M8.4
+   decision 1 (a copy not proven identical is never used), and the cost of hashing follows the size of the edit, not of the image.
+4. **Who owns what.** The page shows tiles from a bounded cache and owns the live edits of loaded tiles and the undo history until the
+   store acknowledges them; if the engine fails, those edits stay in the page and are sent again. Saved state is the store's. A save
+   writes the new tiles, then the new manifest (temporary file and atomic replacement), then the project record that names the
+   manifest's hash. The manifest of the last good save and its tiles are deleted only after a newer save has been committed, so a
+   failure at any step leaves the last good save readable.
+5. **Bounded memory.** The page and the engine each have a declared tile-cache budget; no code decodes a whole multi-gigabyte raster.
+   Coordinates are always full-resolution pixels (§6); a reduced level is only for display and never feeds a count.
+6. **Small sections keep today's path** (pixels and masks in the page) until a measurement shows that the tiled path is at least as
+   fast for them; then one card moves them and part B's M8.4.9 is dropped. Until M8.6 the tiled path needs the engine experiment.
+7. **Drawing** uses 2-D canvas drawing of tile images first. WebGL is used only if the viewer misses the frame target, and only by a
+   decision of the maintainer (D9).
+8. **No scientific calculation is written in JavaScript for tiled sections**, except the interval table if rule D11 chose option D.
+
+## 4. Path of one scientific request (built in M8.3)
 
 Example: the user edits a trace and the interval table must update.
 
@@ -155,14 +198,14 @@ Example: the user edits a trace and the interval table must update.
    `section.analyze`.
 4. **`engine-ipc.js`** validates the request and forwards it with `EngineClient.request`.
 5. **Coordinator** (`engine/server.py`) validates the envelope, pins the input buffers and queues the job. The
-   **job runner** starts the worker process with a job description (method name, input buffer files with dtype and
+   **job runner** sends the long-lived worker (started on the first job, replaced after any anomaly, stopped when idle) a job description (method name, input buffer files with dtype and
    shape, output folder, cancel flag file).
 6. **Worker** (`engine/method_worker.py`) loads the method from `methods/registry.py`, calls `parse` (rejects anything
    invalid before computing) and `run`, and writes each result column as a buffer file. It polls the cancel flag
    between bounded work units and never publishes a partial result.
-7. The coordinator adopts the output files as committed buffers and answers with their handles, dimensions and
-   provenance. The main process downloads them (`buffer.read`, built in M8.3.5; before it a client
-   can upload but not download) and releases every handle of the job.
+7. The coordinator adopts the worker's single packed result file as one committed buffer and answers with its handle, the
+   layout of the columns in it, the dimensions and provenance. The main process downloads it (`buffer.read`) and the page cuts it up
+   by the layout; every handle of the job is released afterwards.
 8. **`sectionanalysis.js`** validates the result (dimensions, revision, settings hash) and converts it to the
    `s.bins` shape. The controller publishes it **only if the section's revision is still the one requested**, then
    runs the same redraw calls as today. A stale, cancelled or failed job changes nothing.
@@ -171,12 +214,18 @@ Rules of this path:
 
 - **No silent fallback.** With the experiment on, a failed job shows an error state; it never recomputes with the
   JavaScript calculation. With the experiment off, only the JavaScript calculation runs. There is no per-job choice.
-- **The renderer owns live editing and saved projects** until M8.4. The engine never reads or writes project
-  files, and a runtime or engine failure must not change live results or the last good save.
-- **Synchronous today, asynchronous tomorrow.** `analyze(s)` currently fills `s.bins` before returning and seven
-  call sites read `s.bins` immediately (`app.js` lines near 1084, 2158, 2247, 2556, 2558, 2691 and `columns.js` 53).
-  The engine path is asynchronous. M8.3.6 converts those call sites to await a single
-  `analyzeSections(sections)` function; M8.3.1 prepares it by moving the calculation out of `app.js`.
+- **The renderer owns live editing and saved projects.** The engine never reads or writes project files, and a runtime or engine
+  failure must not change live results or the last good save. The one planned exception is the tile store of tiled sections (§3.4),
+  which the engine writes only on the page's request and with the same last-good-save guarantee.
+- **Synchronous callers, asynchronous engine.** The seven call sites of `analyze(s)` still call it synchronously.
+  With the experiment off it fills `s.bins` before returning. With it on it only requests the analysis and leaves the
+  section pending (no bins); `engineanalysis.js` calls the controller's `onChange` when a result is published, which
+  redraws, and exports await `analyzeSections(sections)` so they never write a pending section (decided in M8.3.7
+  instead of turning every render path asynchronous).
+- **Inputs stay in the engine (M8.4.2-M8.4.5).** The masks of a section (about 30 MB for 6 Mpixel) are sent once; a change of a
+  setting sends only the settings table, and an edit sends only the rows that changed, which the engine applies to a copy and accepts
+  only if the whole result has the page's SHA-256 (`maskchanges.js`, `buffer.derive`). The renderer stays the owner of the masks,
+  the edit history and the saves; the engine's copy is a verified cache and its failure never changes an edit or a save.
 - Buffers and metadata never travel as JSON arrays or base64. Missing values travel as a value column plus a
   `<name>_valid` column, never as NaN or a magic number.
 
@@ -262,3 +311,6 @@ Do not reopen these without the maintainer; build on them.
 | D7 | The Python API and CLI call the same kernels and methods in-process; they are not clients of the engine process | M8.1 |
 | D8 | Python layering `kernels/` → `methods/` → `engine/` and public API (§3.1); `app.js` only shrinks (§3.2) | 12 Nov 2026 (design; first applied in M8.3) |
 | D9 | Rust kernels, GPU work, WebAssembly, another scientific engine or a UI rewrite are not part of M8; each needs measured need and its own authorised task | 12 Nov 2026 |
+| D10 | Large images and fluidity follow **option A**: the engine owns a tile store on disk (pixel pyramid, versioned mask tiles); the page shows tiles and edits the loaded ones (§3.4). Options considered and not chosen: B, one Rust core compiled for the engine and to WebAssembly for the page; C, a native Python and Qt interface; D, light interactive calculations kept in JavaScript. B and C stay possible later because of D12 | 15 Nov 2026 |
+| D11 | Where the interval table of a tiled section is computed is decided once by a measurement (card M8.4.12) against the rule in contract §7: the engine (A) if one tile's edit round trip plus the table's recomputation is p95 <= 100 ms, otherwise the page (D) with the Python method as reference and parity tests. **Outcome (card M8.4.12, 15 Nov 2026): D by the rule as measured** (one-tile edit p95 794 ms, median 72 ms, plus 238 ms to turn the row counts of a 349,526-row section into its table; the table time is a per-interval Python loop in `kernels/binning.sum_by_interval` that can be vectorised, which would change the outcome). See the [summary](validation/M8.4.12-round-trip-summary.md). **Measured again after vectorising the kernel (card M8.4.20, 16 Nov 2026): still D** (one-tile edit p95 84.7 ms over 60 samples, median 71.0 ms, no stall; table 34.8 ms; 84.7 + 34.8 = 119.5 ms > 100). D is accepted, on the maintainer's delegation, for the interactive interval table only; the rule was not changed; see the [summary](validation/M8.4.20-vectorised-kernel-summary.md) | 16 Nov 2026 |
+| D12 | Data that may outlive the interface (the tile store, method inputs and results) uses documented, versioned formats that do not depend on the browser, IndexedDB or Electron; new scientific methods are written only in Python (§3.2 rule 1) | 15 Nov 2026 |

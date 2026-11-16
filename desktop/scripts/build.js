@@ -23,8 +23,14 @@ const config = {
   // ~150 MB on every launch (about 50 s on the maintainer's computer, see docs/validation/M8.2.3-*).
   win: { target: [{ target: 'nsis', arch: ['x64'] }, { target: 'zip', arch: ['x64'] }], icon: 'build/icon.png', artifactName: `SedCoreTool-${V}-windows-portable.\${ext}` },
   nsis: { oneClick: false, allowToChangeInstallationDirectory: true, artifactName: `SedCoreTool-${V}-windows-setup.\${ext}` },
-  // Both fixed interpreter trees travel unchanged in each half of the universal application.
-  mac: { target: [{ target: 'dmg', arch: ['universal'] }], x64ArchFiles: 'Contents/Resources/engine-runtime/**',
+  // Both fixed interpreter trees travel unchanged in each half of the universal application. `**` does not enter
+  // folders whose name starts with a dot, and the wheels keep their native libraries in `PIL/.dylibs` and
+  // `numpy/.dylibs`, so the second pattern names those folders explicitly (the macOS build failed without it).
+  mac: { target: [{ target: 'dmg', arch: ['universal'] }],
+    x64ArchFiles: '{Contents/Resources/engine-runtime/**,Contents/Resources/engine-runtime/**/.*/**}',
+    // The application has no native modules of its own, and merging the two app.asar archives produced an empty one
+    // (macOS build of 14 November 2026); without merging, identical archives are kept and different ones are split.
+    mergeASARs: false,
     category: 'public.app-category.education', icon: 'build/icon.png', identity: null },
   linux: { target: [{ target: 'AppImage', arch: ['x64'] }, { target: 'deb', arch: ['x64'] }], category: 'Science', icon: 'build/icon.png', maintainer: 'Santiago Casanova-Arenillas' },
   publish: null,

@@ -159,6 +159,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 |------|---------|:----:|
 | `core.js` | Intervals, indices, age model, CSV, RLE encoding, overlapping-trace stacks | ✓ |
 | `sectiondepth.js` | Pure ROI depth/row conversion and pixels per centimetre; independent of interface/state | Yes |
+| `maskchanges.js` | Which rows of each section's label and exclusion masks changed since the engine last received them: `createMaskChanges` (mark, take, restore, mark all) and `indexRangeOfPairs` (the pixels named by an edit-history list). A hint for the engine path, never a proof (§26.2) | Yes |
 | `sectionanalysis.js` | Analysis of one section without the DOM: effective class of each object, class-index table, row counts (cached per section), interval bins with no-data padding, ages and manual indices (§3.2), plus the builders of the engine method's input snapshot and reference result columns (`buildIntervalSnapshot`, `referenceColumns`), the revision key of a section's calculation (`analysisRevision`) and the conversion of engine result columns to `s.bins` (`resultToBins`). `app.js::analyze` passes the project state in | Yes |
 | `imageproc.js` | Enhancement, detection, connected components, magic wand, lasso, descriptors, rotation, downsampling | ✓ |
 | `edit.js` | Editing algorithms: scissors, merging, undo records, project migration | ✓ |
@@ -1355,8 +1356,8 @@ groups and validation categories, and rebuilt with each render/export. The same 
 prefix and full CSV. [Cumulative expansion and CSV measurements](benchmarks/M2.1.2.md) describe the validation
 and the remaining cost of the growing DOM.
 
-The session-only **Visible rows only (experimental)** checkbox enables a separate rendering path; the native
-table remains the default. The initial 400-row limit and 1,000-row **Show more** increment still determine how
+The session-only **Visible rows only** checkbox selects the rendering path; the visible-rows path is the default (since 16 November 2026) and
+unchecking returns to the native table for the session. The initial 400-row limit and 1,000-row **Show more** increment still determine how
 many rows are available to scroll. `tableModel(limit, offset)` prepares the requested range across core
 boundaries, retaining the same column/layer discovery and interval matching. Full CSV export calls it without
 a limit or offset and therefore includes every selected source row.
@@ -2817,7 +2818,7 @@ windows can finish loading without a redundant navigation through the desktop cl
 
 Implementation: `desktop/engine.js` (main-process lifecycle/client), `desktop/engine-ipc.js` (the page bridge: `status`, `beginBuffer`, `appendBuffer` (at most 1 MiB, contiguous offsets), `commitBuffer`, `analyzeSection`, `cancel`, `readBuffer`, `release`; only the top frame of an `app://` page may call; at most 256 buffers and 5 running analyses per page; tokens are released when the page navigates, reloads, crashes or closes; a failed call resolves to `{error: {code, field?}}`), `desktop/engine-protocol.js` (framing),
 `src/sedcoretool/engine/{protocol,buffers,specs,server,worker}.py` (standard-library coordinator, staged data, input tables and
-worker-process wrappers) and `method_worker.py` (the script that runs a scientific method in its own process). This experiment is disabled unless `SEDCORETOOL_ENGINE_EXPERIMENT=1`.
+worker-process wrappers) and `method_worker.py` (the long-lived script that runs scientific methods, one job at a time, in its own process). This experiment is disabled unless `SEDCORETOOL_ENGINE_EXPERIMENT=1`.
 It uses the verified bundled runtime (§26.3), or an explicitly selected absolute `SEDCORETOOL_ENGINE_PYTHON`
 path in source development only. A missing or invalid bundle reports unavailable; packaged applications never
 use that override or search for a user's interpreter. The browser and standalone file do not launch a process. With the experiment on, the interval table of every section is calculated by the engine's `section.intervals/1` (below) and the
@@ -2847,17 +2848,32 @@ isolated subprocess and returns `{sha256,byte_length}`; it tests transport and w
 (`section.analyze`, inputs and results in the [engine contract](roadmap-engine-contract.md) §3–§5) calculates the interval
 table of a section from nine input buffers: the coordinator checks the request's identity fields, that the `settings` buffer's
 SHA-256 equals `settings_hash`, and every handle's dtype and rank, pins the inputs, and queues the job. The job runs in
-`method_worker.py` (NumPy only; the public package and pandas are not loaded), which validates every input and writes the
-result columns to files; the coordinator re-checks each file (size, shape, SHA-256, finite floats) and adopts it as a committed
-buffer charged to the session budget, then answers with the handles. `buffer.read {handle, offset, byte_length}` downloads any
+`method_worker.py` (NumPy only; the public package and pandas are not loaded), a worker the coordinator starts with the first job
+and keeps for the next ones (starting it costs about 0.7 s): the coordinator sends it the path of a job description on stdin and it
+answers each job with one frame. The worker validates every input and writes the
+result columns, one after another and each starting at a multiple of 8 bytes, to a single file with a layout (name, type, shape,
+offset, length); the coordinator checks the layout, moves the file into the store, reads it once to check its SHA-256 and that every
+float64 column is finite, and adopts it as one committed `u8` buffer charged to the session budget, then answers with its handle and
+the layout (one file because every file open costs about 2 ms on Windows; the first version wrote and re-read about 35).
+The worker also remembers, indexed by the SHA-256 that the coordinator verified for each input buffer, the masks it has validated, the
+row counts of masks it has counted (16 entries and 64 MiB at most) and up to 64 decoded metadata tables; a job that changes only the
+settings (the interval size) therefore skips validation, counting and decoding, and the memory is lost with the worker. A mask made
+with `buffer.derive` (an edit, card M8.4.4) arrives with the hash of its base and the byte ranges the coordinator wrote into the copy;
+when the worker remembers the base's checks and counts for the same ROI, number of classes and stack tables, and every object listed
+in both versions has the same effective class (so deleting or adding a trace qualifies, reassigning a class does not), it counts
+only the image rows of those ranges and copies the other rows' counts from the base; the whole label image is still validated when
+the list of objects changed (about 3-6 ms per section), (`section_intervals.changed_rows`,
+`_count_from_base`; identical to a full count, tested on random edits including rows at the ROI edges). Otherwise it does everything. `buffer.read {handle, offset, byte_length}` downloads any
 committed buffer in ranges of at most 1 MiB: the JSON response is followed by exactly one binary frame. A rejected input is an
-error response naming the field; a worker that crashes, exits with an error, lies about its files or exceeds 120 s is
-`INTERNAL` and nothing is adopted. Progress events are not sent yet.
+error response naming the field; a worker that crashes, ends before answering, sends an answer the coordinator does not approve,
+lies about its files or exceeds 120 s is `INTERNAL` and nothing is adopted, and the next job gets a new worker. A cancellation
+that the worker does not acknowledge within 1.5 s, an abandoned job and the end of the engine kill the worker; an idle worker stops
+after 30 s. Progress events are not sent yet.
 
 `buffer.begin`, `chunk`, `commit` and `release` stage data in private temporary files. Validate shape/dtype/
 declared size before allocation; enforce exact offsets, length, SHA-256, finite f64 data and strict metadata
 before commit. Buffers are immutable after commit; releasing a queued/active snapshot revokes new access but
-keeps its file pinned until admitted work finishes. Limits: 128 live handles, 256 MiB per numeric buffer,
+keeps its file pinned until admitted work finishes. Limits: 256 live handles, 256 MiB per numeric buffer,
 4 MiB per metadata buffer, 512 MiB admitted session budget with a 16 MiB transient reserve. Metadata reserves
 64 times its byte length for parsing/object overhead. The session's staged bytes fit below the planned 1 GiB
 scratch-disk cap; this does not claim total RSS or multi-gigabyte support. Main owns the temporary root and
@@ -2882,6 +2898,18 @@ clients may retain a bounded 64 KiB tail. Native math thread environment limits 
 to max(1,min(4,logical CPUs−1)); the digest imports no numerical library and a method worker imports NumPy only, never
 training libraries. Runtime identity
 distinguishes `bundled-verified` from `unverified-development`; only the former uses the resource manifest.
+
+**Changed rows only (card M8.4.4).** After an edit the label and exclusion masks differ from the engine's copy in a few rows. The editing code reports every pixel it writes to `app/js/maskchanges.js` (`setLabel`, `setEx`, undo and redo through the pairs of the edit history; a replaced, rotated or renumbered mask is reported as a whole), which keeps one interval of flat indices per section. `engineanalysis.js` takes that interval when the engine's masks are for another mask identity but of the same size, builds a snapshot whose `labels` and `exclude` carry the rows `[first, end)`, a copy of them and the SHA-256 of the complete current array (`sectionanalysis.js::deriveMasks`; `crypto.subtle.digest` copies its input when called, so the rows, the hash and the mask identity describe the same moment), and the client sends `buffer.derive` on the resident buffer, the rows with `buffer.chunk` and `buffer.commit`. The engine copies the base, applies the rows and accepts the buffer only if its whole content has the page's hash; a record that missed a pixel is therefore a refused commit (`DERIVE_FAILED`), the masks are sent whole and the count `deriveFallbacks` grows, never a wrong result. A change that was taken and not delivered is put back. Two distant strokes cost the rows between them, because the record is one interval; an exclusion mask with a value other than 0 or 1, or none, is sent whole.
+
+**Inputs kept between analyses (card M8.4.2).** `app/js/engineclient.js` keeps the committed input buffers of a section in the engine after a
+successful analysis, for up to 16 sections and 256 MiB (least recently used first; a section larger than the bound is released
+after each analysis). The four masks (`labels`, `exclude`, `stack_offsets`, `stack_members`) are valid for one *mask identity*
+(`sectionanalysis.js::maskIdentity`: mask version, size and the number and members of the overlap stacks, i.e. the invariant of the
+JavaScript row-count cache); each table is valid for the SHA-256 of its bytes. An analysis whose masks are resident leaves them out
+of the snapshot and uploads only the tables whose bytes changed (an interval-size change sends the settings table alone); a changed
+mask identity uploads the four masks and releases the ones they replace. Buffers that the engine no longer knows (it restarted) give
+`RESIDENT_LOST` and the controller uploads a full snapshot once. A failed or cancelled analysis leaves the resident buffers as they
+were and releases what it uploaded. The engine accepts 256 live buffers; the bridge 512 tokens per page.
 
 The [M8.1 contract](roadmap-engine-contract.md) specifies later scientific inputs/results and predeclared
 acceptance gates. Current transport/worker regression tests exercise corruption, admission, cancellation,

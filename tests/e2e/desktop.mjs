@@ -1,7 +1,7 @@
 // V0.48: actual Electron, app://, worker, preload IPC and save-on-close across process restarts.
 // Needs desktop/npm ci + prepare-web and puppeteer-core at the repository root.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -56,7 +56,7 @@ async function close(run) {
   } finally { clearTimeout(timer); run.browser.disconnect(); }
 }
 
-const BRIDGE_OPERATIONS = ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'readBuffer', 'release', 'status'];   // plus the boolean `enabled`
+const BRIDGE_OPERATIONS = ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'deriveBuffer', 'readBuffer', 'release', 'restart', 'status'];   // plus the boolean `enabled`
 const fixture = JSON.parse(readFileSync(new URL('../fixtures/section-intervals/basic-four-intervals.json', import.meta.url), 'utf8'));
 
 /** Runs in the page: uploads a reference fixture through window.corantoolDesktop.engine, analyses it and reads one result column. */
@@ -92,8 +92,9 @@ async function bridgeRoundTrip(fixture) {
     revision: 1, settings_hash: settingsHash, inputs: tokens });
   if (result.error) throw new Error('analyze: ' + JSON.stringify(result));
   outcome.dimensions = result.dimensions;
-  const column = result.outputs.row_start, read = await engine.readBuffer(column.token, 0, column.byte_length);
-  outcome.rowStart = Array.from(new Uint32Array(read.bytes.buffer, read.bytes.byteOffset, column.byte_length / 4));
+  // One packed buffer holds every column; row_start is the first (offset 0 of the layout) of 4-byte items.
+  const column = result.outputs.result, part = result.layout.row_start, read = await engine.readBuffer(column.token, 0, column.byte_length);
+  outcome.rowStart = Array.from(new Uint32Array(read.bytes.buffer.slice(read.bytes.byteOffset + part.offset, read.bytes.byteOffset + part.offset + part.byte_length)));
   await engine.release([column.token, ...Object.values(tokens)]);
   outcome.afterRelease = await engine.readBuffer(column.token, 0, 1);
   outcome.forged = await engine.readBuffer(crypto.randomUUID(), 0, 1);
@@ -234,6 +235,86 @@ try {
   assert.notEqual(edited, before);
   const afterEdit = await p.evaluate(compareWithReference);
   assert.deepEqual(afterEdit.mismatches, [], 'after a deletion the new result matches the reference too');
+  // Undo and redo go through the same analysis path (M8.3.7 left them unchecked): every result must match the reference again.
+  await p.evaluate(() => document.getElementById('undoBtn').click());
+  assert.equal(await p.evaluate(signature), before, 'undo restores the trace');
+  const afterUndo = await p.evaluate(compareWithReference);
+  assert.deepEqual(afterUndo.mismatches, [], 'after undo the result matches the reference');
+  assert.ok(afterUndo.bins > 100, 'undo leaves the intervals in place');
+  await p.evaluate(() => document.getElementById('redoBtn').click());
+  assert.equal(await p.evaluate(signature), edited, 'redo removes the trace again');
+  const afterRedo = await p.evaluate(compareWithReference);
+  assert.deepEqual(afterRedo.mismatches, [], 'after redo the result matches the reference');
+  if (engineOn) {
+    // The deletion, its undo and its redo reached the engine as changed rows (M8.4.4); a refused change would show as a fallback.
+    const stats = await p.evaluate(() => window.ichantool.engineStats());
+    assert.ok(stats.derivations >= 3, `edit, undo and redo were sent as changed rows: ${JSON.stringify(stats)}`);
+    assert.equal(stats.deriveFallbacks, 0, `the engine never refused a change: ${JSON.stringify(stats)}`);
+  } else {
+    assert.equal(await p.evaluate(() => window.ichantool.engineStats()), null, 'without the experiment there is no engine statistic');
+  }
+  if (engineOn) {
+    // M8.4.7: a coordinator that dies is replaced once by itself, and after that by the user's Retry; never by the JavaScript calculation.
+    const coordinator = () => {
+      const out = process.platform === 'win32'
+        ? execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `(Get-CimInstance Win32_Process -Filter "ParentProcessId=${run.child.pid}" | Where-Object { $_.CommandLine -like '*server.py*' } | Select-Object -First 1).ProcessId`], { encoding: 'utf8', windowsHide: true })
+        : execFileSync('pgrep', ['-P', String(run.child.pid), '-f', 'server.py'], { encoding: 'utf8' });
+      const pid = Number(out.trim().split(/\s+/)[0]);
+      assert.ok(pid > 0, `the engine's coordinator is a child of the program (${out})`);
+      return pid;
+    };
+    const reanalyse = (binCm) => p.evaluate(async (value) => {
+      const I = window.ichantool; I.S.settings.binCm = value; await I.analyzeSections(I.S.sections);
+      return I.S.sections.map((s) => (s.analysis?.state === 'error' ? s.analysis.code : s.analysis?.state));
+    }, binCm);
+    const binCm = await p.evaluate(() => window.ichantool.S.settings.binCm);
+    process.kill(coordinator(), 'SIGKILL');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.deepEqual(await reanalyse(binCm + 0.31), Array(6).fill('ready'), 'the first loss is repaired by an automatic restart');
+    assert.deepEqual((await p.evaluate(compareWithReference)).mismatches, [], 'and the restarted engine gives the reference result');
+    process.kill(coordinator(), 'SIGKILL');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.deepEqual(await reanalyse(binCm + 0.62), Array(6).fill('ENGINE_UNAVAILABLE'), 'the second loss is not repaired by itself: an error, no JavaScript result');
+    await p.evaluate(() => document.getElementById('modeSection').click());
+    await p.waitForSelector('#engineRetry', { timeout: 10000 });
+    await p.evaluate(() => document.getElementById('engineRetry').click());
+    await p.waitForFunction(() => window.ichantool.S.sections.every((s) => s.analysis?.state === 'ready'), { timeout: 60000 });
+    assert.deepEqual((await p.evaluate(compareWithReference)).mismatches, [], 'Retry starts a new session and every section matches the reference again');
+    assert.deepEqual(await reanalyse(binCm), Array(6).fill('ready'));
+    // Card M8.4.8: a coordinator killed while the changed rows of an undo are on their way (about 100 ms after the click the page sends them).
+    // Whether the kill lands before, during or after the transfer, the undo stays in the project and the program recovers by Retry.
+    await p.evaluate(() => document.getElementById('undoBtn').click());
+    await new Promise((resolve) => setTimeout(resolve, 110));
+    process.kill(coordinator(), 'SIGKILL');
+    await p.waitForFunction(() => window.ichantool.S.sections.every((s) => s.analysis?.state !== 'pending'), { timeout: 60000 });
+    assert.equal(await p.evaluate(signature), before, 'the undo is in the project whatever the engine did');
+    await reanalyse(binCm + 0.13);                                              // a changed setting makes every section ask the engine, so the loss is noticed
+    if (await p.evaluate(() => window.ichantool.S.sections.some((s) => s.analysis?.state === 'error'))) {
+      await p.evaluate(() => document.getElementById('modeSection').click());
+      await p.waitForSelector('#engineRetry', { timeout: 10000 });
+      await p.evaluate(() => document.getElementById('engineRetry').click());
+    }
+    await p.waitForFunction(() => window.ichantool.S.sections.every((s) => s.analysis?.state === 'ready'), { timeout: 60000 });
+    assert.deepEqual(await reanalyse(binCm), Array(6).fill('ready'));
+    assert.deepEqual((await p.evaluate(compareWithReference)).mismatches, [], 'after the failure the result is the reference');
+    await p.evaluate(() => document.getElementById('redoBtn').click());
+    assert.equal(await p.evaluate(signature), edited, 'redo restores the edited state');
+    assert.deepEqual((await p.evaluate(compareWithReference)).mismatches, [], 'and the engine agrees');
+    await p.waitForFunction(() => document.getElementById('saveState').dataset.state === 'saved', { timeout: 30000 });
+    assert.equal(await p.evaluate(signature), edited, 'the project was not touched by the engine failures');
+  }
+  // The tabs that read the intervals must show them without a page error (checked only by eye in M8.3.7).
+  const tabs = await p.evaluate(async () => {
+    const seen = {};
+    for (const id of ['modeData', 'modeFig', 'modeGeo', 'modeLog', 'modeSection']) {
+      document.getElementById(id).click();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      seen[id] = { pressed: document.getElementById(id).getAttribute('aria-pressed'), rows: document.querySelectorAll('#dataTable tr, #figArea svg, #geoArea svg').length };
+    }
+    return seen;
+  });
+  for (const [id, state] of Object.entries(tabs)) assert.equal(state.pressed, 'true', `${id} opens`);
+  assert.deepEqual(errors, [], 'no page error while the tabs show engine results');
   await close(run); run = null;
   run = await start();
   await run.page.waitForFunction(() => window.ichantool.S.sections.length === 6, { timeout: 60000 });

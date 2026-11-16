@@ -3,7 +3,7 @@
 // handles; it works with tokens that only this module can map to engine handles, and only for the page that made them.
 const { randomUUID } = require('node:crypto');
 
-const MAX_CHUNK = 1048576, MAX_BUFFER = 256 * 1024 * 1024, MAX_TOKENS_PER_PAGE = 256, MAX_RELEASE = 64, MAX_ANALYSES_PER_PAGE = 5;
+const MAX_CHUNK = 1048576, MAX_BUFFER = 256 * 1024 * 1024, MAX_TOKENS_PER_PAGE = 512, MAX_RELEASE = 64, MAX_ANALYSES_PER_PAGE = 5;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const DTYPES = new Set(['u8', 'i32le', 'u32le', 'u64le', 'f64le', 'utf8json']);
@@ -22,6 +22,24 @@ const reject = (code, field) => { throw new Rejected(code, field); };
 const isCount = (value, minimum = 0) => Number.isSafeInteger(value) && value >= minimum;
 const isPlain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 
+const COLUMN_NAME = /^[A-Za-z][A-Za-z_]{0,63}$/;
+const COLUMN_DTYPES = new Set(['u8', 'i32le', 'u32le', 'u64le', 'f64le']);
+/** The layout of the packed result buffer as the page may see it: only the four known fields of at most 64 columns, nothing else. */
+function cleanLayout(layout) {
+  if (!isPlain(layout)) reject('INTERNAL', 'layout');
+  const names = Object.keys(layout);
+  if (!names.length || names.length > 64) reject('INTERNAL', 'layout');
+  const clean = {};
+  for (const name of names) {
+    const part = layout[name];
+    const ok = COLUMN_NAME.test(name) && isPlain(part) && COLUMN_DTYPES.has(part.dtype) && Array.isArray(part.shape) && part.shape.length >= 1 && part.shape.length <= 3
+      && part.shape.every((n) => isCount(n, 1)) && isCount(part.offset) && isCount(part.byte_length, 1);
+    if (!ok) reject('INTERNAL', 'layout');
+    clean[name] = { dtype: part.dtype, shape: [...part.shape], offset: part.offset, byte_length: part.byte_length };
+  }
+  return clean;
+}
+
 /** The error a page sees: a stable code and, for a rejected input, the field at fault. Never a message or a stack. */
 function failure(error) {
   if (error instanceof Rejected) return { error: { code: error.code, ...(error.field ? { field: error.field } : {}) } };
@@ -38,7 +56,7 @@ function bytesOf(value) {
 
 /**
  * @param engine the engine service of desktop/engine.js: `request(op, payload, binary)` returning a promise that carries
- *   `requestId`, and `session()` returning the current session or null.
+ *   `requestId`, `session()` returning the current session or null, and `restart({automatic})`.
  */
 function createEngineIpc({ engine }) {
   const tokens = new Map();      // token -> {owner, session, handle, state, length, next, dtype, shape, sha256}
@@ -72,17 +90,35 @@ function createEngineIpc({ engine }) {
       tokens.set(token, { owner, session, handle, state: 'staging', length, next: 0, dtype, shape, sha256 });
       return { token };
     },
+    /** A new buffer that starts as a copy of the committed buffer `baseToken` (same type, shape and length) and receives only the parts that
+     *  changed, at ascending offsets, before `commitBuffer`; the engine accepts the result only if its whole content has the declared SHA-256. */
+    async deriveBuffer(owner, baseToken, descriptor) {
+      const base = own(owner, baseToken, { committed: true });
+      if (!isPlain(descriptor) || Object.keys(descriptor).sort().join() !== 'byte_length,dtype,sha256,shape') reject('INVALID_REQUEST', 'descriptor');
+      const { dtype, shape, byte_length: length, sha256 } = descriptor;
+      if (dtype === 'utf8json' || dtype !== base.dtype) reject('INVALID_REQUEST', 'dtype');
+      if (!Array.isArray(shape) || shape.length !== base.shape.length || !shape.every((n, i) => n === base.shape[i])) reject('INVALID_REQUEST', 'shape');
+      if (length !== base.length) reject('INVALID_REQUEST', 'byte_length');
+      if (typeof sha256 !== 'string' || !SHA256.test(sha256)) reject('INVALID_REQUEST', 'sha256');
+      if (countOf(owner) >= MAX_TOKENS_PER_PAGE) reject('LIMIT_EXCEEDED', 'tokens');
+      const { handle } = await engine.request('buffer.derive', { base: base.handle, dtype, shape, byte_length: length, sha256 });
+      const session = engine.session(), token = randomUUID();
+      tokens.set(token, { owner, session, handle, state: 'staging', length, next: 0, dtype, shape: [...shape], sha256, derived: true });
+      return { token };
+    },
     async appendBuffer(owner, token, offset, data) {
       const entry = own(owner, token, { committed: false }), bytes = bytesOf(data);
       if (!bytes || bytes.length < 1 || bytes.length > MAX_CHUNK) reject('INVALID_REQUEST', 'bytes');
-      if (!isCount(offset) || offset !== entry.next || offset + bytes.length > entry.length) reject('INVALID_REQUEST', 'offset');
+      // A derived buffer takes its parts at ascending, non-overlapping offsets; any other buffer takes them in order, without gaps.
+      const inOrder = entry.derived ? isCount(offset) && offset >= entry.next : offset === entry.next;
+      if (!isCount(offset) || !inOrder || offset + bytes.length > entry.length) reject('INVALID_REQUEST', 'offset');
       entry.next = offset + bytes.length;   // reserved before the first await, so two appends cannot take the same offset
       try { return await engine.request('buffer.chunk', { handle: entry.handle, offset, byte_length: bytes.length }, Buffer.from(bytes)); }
       catch (error) { tokens.delete(token); throw error; }   // a rejected chunk leaves the engine buffer unusable
     },
     async commitBuffer(owner, token) {
       const entry = own(owner, token, { committed: false });
-      if (entry.next !== entry.length) reject('INVALID_BUFFER', 'byte_length');
+      if (!entry.derived && entry.next !== entry.length) reject('INVALID_BUFFER', 'byte_length');
       const result = await engine.request('buffer.commit', { handle: entry.handle });
       entry.state = 'committed';
       return { token, byte_length: result.byte_length, sha256: result.sha256 };
@@ -132,14 +168,24 @@ function createEngineIpc({ engine }) {
           dtype: output.dtype, shape: output.shape, sha256: output.sha256 });
         outputs[name] = { token, dtype: output.dtype, shape: output.shape, byte_length: output.byte_length, sha256: output.sha256 };
       }
+      let layout;
+      try { layout = cleanLayout(result.layout); }
+      catch (error) { for (const output of Object.values(outputs)) { tokens.delete(output.token); } release(Object.values(result.outputs).map((output) => output.handle)); throw error; }
       return { project: result.project, section: result.section, revision: result.revision, settings_hash: result.settings_hash, method: result.method,
-        dimensions: result.dimensions, outputs, provenance: result.provenance };
+        dimensions: result.dimensions, outputs, layout, provenance: result.provenance };
     },
     async cancel(owner, requestKey) {
       if (typeof requestKey !== 'string' || !UUID.test(requestKey)) reject('INVALID_REQUEST', 'requestKey');
       const running = analyses.get(`${owner}/${requestKey}`);
       if (!running) return { state: 'already_terminal' };
       return engine.request('job.cancel', { request_id: running.engineRequest });
+    },
+    /** A new engine session (card M8.4.7). Every token of every page belonged to the old session and is dropped; the pages upload again. */
+    async restart(owner, options) {
+      if (options !== undefined && (!isPlain(options) || Object.keys(options).some((key) => key !== 'automatic') || (options.automatic !== undefined && typeof options.automatic !== 'boolean'))) reject('INVALID_REQUEST', 'options');
+      await engine.restart({ automatic: options?.automatic === true });
+      tokens.clear();
+      return { restarted: true };
     },
     async release(owner, list) {
       if (!Array.isArray(list) || list.length > MAX_RELEASE || !list.every((token) => typeof token === 'string')) reject('INVALID_REQUEST', 'tokens');

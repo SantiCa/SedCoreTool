@@ -113,7 +113,7 @@ $('dBody').addEventListener('click', (e) => {
   markDirty(); renderDataPlot();
 });
 
-let dataLimit = 400, dataViewportOn = false;
+let dataLimit = 400, dataViewportOn = true;   // M2.1.3 rendering is the default since 16 Nov 2026; the checkbox returns to the native table for the session
 /** @type {ReturnType<typeof mountTableViewport> | null} */
 let dataViewport = null;
 export function disposeDataTable() {

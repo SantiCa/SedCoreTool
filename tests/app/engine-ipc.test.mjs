@@ -32,7 +32,15 @@ function fakeEngine({ answers = {}, session = 'session-1' } = {}) {
       return promise;
     },
   };
-  return { request: engine.request, session: () => engine.session, calls: engine.calls, pending: engine.pending, setSession: (value) => { engine.session = value; } };
+  const restarts = [];
+  /** A restart ends the old session: handles die, the session changes. `answers.restart` may be an Error to refuse it. */
+  const restart = async (options) => {
+    restarts.push(options);
+    if (answers.restart instanceof Error) throw answers.restart;
+    engine.session = `session-${restarts.length + 1}`;
+    return { restarted: true };
+  };
+  return { request: engine.request, restart, restarts, session: () => engine.session, calls: engine.calls, pending: engine.pending, setSession: (value) => { engine.session = value; } };
 }
 const fakeAnswers = () => ({
   'buffer.begin': () => ({ handle: uuid() }),
@@ -55,7 +63,7 @@ const analysisRequest = (inputs, change = {}) => ({ requestKey: uuid(), method: 
 
 test('the bridge offers exactly the documented operations and never an engine operation by name', async () => {
   const ipc = createEngineIpc({ engine: fakeEngine({ answers: fakeAnswers() }) });
-  assert.deepEqual([...ipc.OPERATIONS].sort(), ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'readBuffer', 'release']);
+  assert.deepEqual([...ipc.OPERATIONS].sort(), ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'deriveBuffer', 'readBuffer', 'release', 'restart']);
   for (const name of ['request', 'buffer.begin', 'shutdown', '__proto__', 'constructor', 'toString', 'hasOwnProperty', 7, null, undefined]) {
     assert.deepEqual(await ipc.call(1, name), { error: { code: 'UNSUPPORTED_METHOD' } }, String(name));
   }
@@ -177,10 +185,13 @@ test('analyzeSection rejects each malformed request before the engine and names 
   assert.equal(engine.calls.length, calls, 'the engine never saw a malformed request');
 });
 
-test('analyzeSection sends handles, returns tokens for the result columns and hides every handle', async () => {
-  const outputs = { row_start: { handle: uuid(), dtype: 'u32le', shape: [2], byte_length: 8, sha256: 'a'.repeat(64) }, no_data: { handle: uuid(), dtype: 'u8', shape: [2], byte_length: 2, sha256: 'b'.repeat(64) } };
+const PACKED = { handle: '', dtype: 'u8', shape: [24], byte_length: 24, sha256: 'a'.repeat(64) };
+const LAYOUT = { row_start: { dtype: 'u32le', shape: [2], offset: 0, byte_length: 8 }, no_data: { dtype: 'u8', shape: [2], offset: 8, byte_length: 2 } };
+
+test('analyzeSection sends handles, returns a token for the packed result and its layout, and hides every handle', async () => {
+  const outputs = { result: { ...PACKED, handle: uuid() } };
   const engine = fakeEngine({ answers: { ...fakeAnswers(), 'section.analyze': (payload) => ({ project: payload.project, section: payload.section, revision: payload.revision,
-    settings_hash: payload.settings_hash, method: payload.method, dimensions: { bins: 2, classes: 1, schemes: 2 }, outputs, provenance: { engine_version: 'test' } }) } });
+    settings_hash: payload.settings_hash, method: payload.method, dimensions: { bins: 2, classes: 1, schemes: 2 }, outputs, layout: LAYOUT, provenance: { engine_version: 'test' } }) } });
   const ipc = createEngineIpc({ engine }), inputs = await analysisInputs(ipc, 1);
   const request = analysisRequest(inputs), result = await ipc.call(1, 'analyzeSection', request);
   const sent = engine.calls.find((call) => call.op === 'section.analyze').payload;
@@ -188,16 +199,45 @@ test('analyzeSection sends handles, returns tokens for the result columns and hi
   assert.deepEqual(Object.keys(sent.inputs).sort(), Object.keys(inputs).sort());
   assert.ok(Object.values(sent.inputs).every((handle) => !Object.values(inputs).includes(handle)), 'tokens were replaced by engine handles');
   assert.deepEqual([result.project, result.section, result.revision, result.settings_hash, result.method], [request.project, request.section, 3, request.settings_hash, request.method]);
-  assert.deepEqual(Object.keys(result.outputs), ['row_start', 'no_data']);
+  assert.deepEqual(Object.keys(result.outputs), ['result']);
+  assert.deepEqual(result.layout, LAYOUT, 'the page gets the layout of the packed buffer');
   assert.ok(Object.values(result.outputs).every((item) => /^[0-9a-f-]{36}$/.test(item.token) && !('handle' in item)));
   const text = JSON.stringify(result);
   for (const output of Object.values(outputs)) assert.ok(!text.includes(output.handle), 'an engine handle reached the page');
   for (const handle of Object.values(sent.inputs)) assert.ok(!text.includes(handle));
   // The result columns are readable and releasable by this page only.
-  assert.equal((await ipc.call(2, 'readBuffer', result.outputs.row_start.token, 0, 1)).error.code, 'INVALID_BUFFER');
-  assert.equal((await ipc.call(1, 'release', [result.outputs.row_start.token])).released, 1);
-  assert.equal(engine.calls.at(-1).payload.handles[0], outputs.row_start.handle);
-  assert.equal((await ipc.call(1, 'readBuffer', result.outputs.row_start.token, 0, 1)).error.code, 'INVALID_BUFFER', 'released');
+  assert.equal((await ipc.call(2, 'readBuffer', result.outputs.result.token, 0, 1)).error.code, 'INVALID_BUFFER');
+  assert.equal((await ipc.call(1, 'release', [result.outputs.result.token])).released, 1);
+  assert.equal(engine.calls.at(-1).payload.handles[0], outputs.result.handle);
+  assert.equal((await ipc.call(1, 'readBuffer', result.outputs.result.token, 0, 1)).error.code, 'INVALID_BUFFER', 'released');
+});
+
+test('a layout the page must not see is refused as an internal error and the result is handed back to the engine', async () => {
+  const good = LAYOUT.row_start;
+  const bad = { 'no layout': undefined, 'not an object': 5, 'empty': {}, 'a bad column name': { '../x': good }, 'an unknown dtype': { a: { ...good, dtype: 'f32le' } },
+    'a negative offset': { a: { ...good, offset: -8 } }, 'a zero length': { a: { ...good, byte_length: 0 } }, 'a fractional offset': { a: { ...good, offset: 1.5 } },
+    'a rank of four': { a: { ...good, shape: [1, 1, 1, 1] } }, 'a zero in the shape': { a: { ...good, shape: [0] } }, 'a column given as text': { a: 'u8' },
+    'too many columns': Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`c${i}`, good])) };
+  for (const [label, layout] of Object.entries(bad)) {
+    const handle = uuid();
+    const engine = fakeEngine({ answers: { ...fakeAnswers(), 'section.analyze': (payload) => ({ project: payload.project, section: payload.section, revision: payload.revision,
+      settings_hash: payload.settings_hash, method: payload.method, dimensions: { bins: 2, classes: 1, schemes: 2 }, outputs: { result: { ...PACKED, handle } }, layout, provenance: {} }) } });
+    const ipc = createEngineIpc({ engine }), inputs = await analysisInputs(ipc, 1), before = ipc.size();
+    const result = await ipc.call(1, 'analyzeSection', analysisRequest(inputs));
+    assert.equal(result.error?.code, 'INTERNAL', label);
+    assert.equal(ipc.size(), before, `${label}: no token for the refused result`);
+    assert.ok(engine.calls.some((call) => call.op === 'buffer.release' && call.payload.handles.includes(handle)), `${label}: the refused result was released`);
+  }
+});
+
+test('only the known fields of a layout reach the page', async () => {
+  const handle = uuid();
+  const engine = fakeEngine({ answers: { ...fakeAnswers(), 'section.analyze': (payload) => ({ project: payload.project, section: payload.section, revision: payload.revision,
+    settings_hash: payload.settings_hash, method: payload.method, dimensions: { bins: 2, classes: 1, schemes: 2 }, outputs: { result: { ...PACKED, handle } },
+    layout: { row_start: { ...LAYOUT.row_start, path: 'C:/secret', handle } }, provenance: {} }) } });
+  const ipc = createEngineIpc({ engine }), result = await ipc.call(1, 'analyzeSection', analysisRequest(await analysisInputs(ipc, 1)));
+  assert.deepEqual(result.layout, { row_start: LAYOUT.row_start });
+  assert.ok(!JSON.stringify(result).includes(handle) && !JSON.stringify(result).includes('secret'));
 });
 
 test('the same request key cannot run twice and a page runs a bounded number of analyses at once', async () => {
@@ -346,6 +386,26 @@ async function download(ipc, owner, output) {
   return Array.from(new Type(copy), (value) => Number(value));
 }
 
+/** The whole packed result buffer, read in ranges of 1,000 bytes. */
+async function downloadPacked(ipc, owner, output) {
+  const parts = [];
+  for (let offset = 0; offset < output.byte_length; offset += 1000) {
+    const read = await ipc.call(owner, 'readBuffer', output.token, offset, Math.min(1000, output.byte_length - offset));
+    assert.equal(read.error, undefined, JSON.stringify(read.error));
+    parts.push(Buffer.from(read.bytes));
+  }
+  const bytes = Buffer.concat(parts);
+  assert.equal(sha(bytes), output.sha256, 'downloaded bytes match the engine hash');
+  return bytes;
+}
+
+/** One column of the packed buffer as plain numbers (offsets are multiples of 8, so a typed array can view the copy). */
+function unpack(packed, part) {
+  assert.equal(part.offset % 8, 0);
+  const [Type] = DTYPE_BYTES[part.dtype], copy = packed.buffer.slice(packed.byteOffset + part.offset, packed.byteOffset + part.offset + part.byte_length);
+  return Array.from(new Type(copy), (value) => Number(value));
+}
+
 const EXACT = new Set(['row_start', 'row_end', 'valid_count', 'bio_count', 'class_count', 'no_data', 'manual_BI', 'manual_ii', 'indices']);
 
 /** A request the engine rejects: the page must learn the code and the field, and the engine must stay usable. */
@@ -368,11 +428,13 @@ async function runFixturesThrough(service, names) {
     assert.equal(result.error, undefined, `${name}: ${JSON.stringify(result.error)}`);
     assert.deepEqual([result.project, result.section, result.revision, result.settings_hash], [request.project, request.section, 11, settingsHash]);
     assert.deepEqual(result.dimensions, fixture.expected.dimensions, name);
-    assert.deepEqual(Object.keys(result.outputs).filter((key) => !key.endsWith('_valid')).sort(), Object.keys(fixture.expected.columns).sort(), name);
+    assert.deepEqual(Object.keys(result.outputs), ['result'], 'one buffer carries every column');
+    assert.deepEqual(Object.keys(result.layout).filter((key) => !key.endsWith('_valid')).sort(), Object.keys(fixture.expected.columns).sort(), name);
+    const packed = await downloadPacked(ipc, owner, result.outputs.result);
     for (const [column, expected] of Object.entries(fixture.expected.columns)) {
-      const actual = await download(ipc, owner, result.outputs[column]), want = expected.data;
+      const actual = unpack(packed, result.layout[column]), want = expected.data;
       assert.equal(actual.length, want.length, `${name}.${column}`);
-      const valid = expected.valid ? await download(ipc, owner, result.outputs[`${column}_valid`]) : null;
+      const valid = expected.valid ? unpack(packed, result.layout[`${column}_valid`]) : null;
       want.forEach((value, i) => {
         if (valid && !valid[i]) return;
         if (EXACT.has(column)) assert.equal(actual[i], value, `${name}.${column}[${i}]`);
@@ -408,4 +470,95 @@ test('the bundled runtime runs reference fixtures end to end through the bridge'
   await runFixturesThrough(service, SAMPLE);
   const names = readdirSync(FIXTURES).filter((file) => file.endsWith('.json')).map((file) => file.slice(0, -5));
   assert.ok(SAMPLE.every((name) => names.includes(name)), 'every sampled fixture exists');
+});
+
+// ---- buffers derived from a committed one (card M8.4.4) -----------------------------------------------------------------
+
+test('deriveBuffer starts a copy of a committed buffer and takes the changed parts at ascending offsets', async () => {
+  const engine = fakeEngine({ answers: { ...fakeAnswers(), 'buffer.derive': () => ({ handle: uuid() }) } });
+  const ipc = createEngineIpc({ engine }), bytes = Buffer.alloc(5000, 7);
+  const base = await committed(ipc, 1, bytes);
+  const changed = Buffer.from(bytes); changed.fill(9, 1000, 1010); changed.fill(8, 3000, 3005);
+  const derived = await ipc.call(1, 'deriveBuffer', base, descriptor({ byte_length: 5000, shape: [5000], sha256: sha(changed) }));
+  assert.equal(derived.error, undefined, JSON.stringify(derived.error));
+  const sent = engine.calls.find((call) => call.op === 'buffer.derive').payload;
+  assert.deepEqual(Object.keys(sent).sort(), ['base', 'byte_length', 'dtype', 'sha256', 'shape']);
+  assert.ok(!JSON.stringify(derived).includes(sent.base) && /^[0-9a-f-]{36}$/.test(derived.token) && derived.token !== base);
+  assert.equal((await ipc.call(1, 'appendBuffer', derived.token, 1000, changed.subarray(1000, 1010))).error, undefined);
+  assert.equal((await ipc.call(1, 'appendBuffer', derived.token, 3000, changed.subarray(3000, 3005))).error, undefined);
+  for (const [offset, length] of [[2000, 10], [3003, 4], [0, 10], [4995, 10]]) {
+    assert.equal((await ipc.call(1, 'appendBuffer', derived.token, offset, Buffer.alloc(length))).error?.code, 'INVALID_REQUEST', `${offset}+${length}`);
+  }
+  assert.equal((await ipc.call(1, 'commitBuffer', derived.token)).error, undefined, 'a derived buffer commits without every byte being sent');
+  assert.equal((await ipc.call(1, 'readBuffer', derived.token, 0, 1)).error?.code ?? 'readable', 'readable');
+  assert.equal((await ipc.call(2, 'readBuffer', derived.token, 0, 1)).error.code, 'INVALID_BUFFER', 'owned by this page only');
+});
+
+test('an ordinary buffer still needs every byte and its parts in order', async () => {
+  const ipc = createEngineIpc({ engine: fakeEngine({ answers: fakeAnswers() }) });
+  const { token } = await ipc.call(1, 'beginBuffer', descriptor({ byte_length: 4000, shape: [4000] }));
+  assert.equal((await ipc.call(1, 'appendBuffer', token, 1000, Buffer.alloc(10))).error.code, 'INVALID_REQUEST', 'a gap');
+  assert.equal((await ipc.call(1, 'appendBuffer', token, 0, Buffer.alloc(10))).error, undefined);
+  assert.equal((await ipc.call(1, 'commitBuffer', token)).error.code, 'INVALID_BUFFER', 'incomplete');
+});
+
+test('deriveBuffer refuses everything that is not a derivation of a committed buffer of this page', async () => {
+  const engine = fakeEngine({ answers: { ...fakeAnswers(), 'buffer.derive': () => ({ handle: uuid() }) } });
+  const ipc = createEngineIpc({ engine }), bytes = Buffer.alloc(100, 1);
+  const base = await committed(ipc, 1, bytes), table = await committed(ipc, 1, Buffer.from('{"a":1}'), 'utf8json');
+  const staging = (await ipc.call(1, 'beginBuffer', descriptor())).token;
+  const good = descriptor({ byte_length: 100, shape: [100], sha256: sha(bytes) });
+  const cases = [
+    [base, null, 'INVALID_REQUEST'], [base, { ...good, extra: 1 }, 'INVALID_REQUEST'], [base, { ...good, dtype: 'i32le' }, 'INVALID_REQUEST'],
+    [base, { ...good, shape: [10, 10] }, 'INVALID_REQUEST'], [base, { ...good, byte_length: 99 }, 'INVALID_REQUEST'], [base, { ...good, sha256: 'A'.repeat(64) }, 'INVALID_REQUEST'],
+    [table, descriptor({ dtype: 'utf8json', byte_length: 7, shape: [7], sha256: sha(Buffer.from('{"a":1}')) }), 'INVALID_REQUEST'],
+    [staging, good, 'INVALID_BUFFER'], [uuid(), good, 'INVALID_BUFFER'], [7, good, 'INVALID_BUFFER'],
+  ];
+  for (const [token, value, code] of cases) assert.equal((await ipc.call(1, 'deriveBuffer', token, value)).error?.code, code, JSON.stringify([token === base ? 'base' : 'other', value]));
+  assert.equal((await ipc.call(2, 'deriveBuffer', base, good)).error.code, 'INVALID_BUFFER', 'another page cannot derive from this page\'s buffer');
+  assert.ok(!engine.calls.some((call) => call.op === 'buffer.derive'), 'the engine never saw a refused request');
+  const many = createEngineIpc({ engine });
+  const kept = await committed(many, 1, bytes);
+  for (let i = 1; i < MAX_TOKENS_PER_PAGE; i++) assert.ok((await many.call(1, 'beginBuffer', descriptor())).token);
+  assert.equal((await many.call(1, 'deriveBuffer', kept, good)).error.code, 'LIMIT_EXCEEDED');
+});
+
+// ---- a new engine session (card M8.4.7) -----------------------------------------------------------------------------------
+
+test('restart ends the old session: the tokens of every page are dropped and the pages upload again', async () => {
+  const engine = fakeEngine({ answers: fakeAnswers() }), ipc = createEngineIpc({ engine });
+  const one = await committed(ipc, 1, Buffer.alloc(10, 1)), two = await committed(ipc, 2, Buffer.alloc(10, 2));
+  assert.equal(ipc.size(), 2);
+  assert.deepEqual(await ipc.call(1, 'restart', { automatic: true }), { restarted: true });
+  assert.deepEqual(engine.restarts, [{ automatic: true }]);
+  assert.equal(ipc.size(), 0, 'no token of the old session survives, for any page');
+  assert.equal((await ipc.call(1, 'readBuffer', one, 0, 1)).error.code, 'INVALID_BUFFER');
+  assert.equal((await ipc.call(2, 'readBuffer', two, 0, 1)).error.code, 'INVALID_BUFFER');
+  const again = await committed(ipc, 1, Buffer.alloc(10, 3));
+  assert.equal((await ipc.call(1, 'readBuffer', again, 0, 1)).error?.code ?? 'readable', 'readable', 'the new session works');
+});
+
+test('restart passes only a boolean "automatic" and nothing else', async () => {
+  const engine = fakeEngine({ answers: fakeAnswers() }), ipc = createEngineIpc({ engine });
+  assert.deepEqual(await ipc.call(1, 'restart'), { restarted: true });
+  assert.deepEqual(await ipc.call(1, 'restart', {}), { restarted: true });
+  assert.deepEqual(engine.restarts, [{ automatic: false }, { automatic: false }]);
+  for (const options of [null, 'yes', [], { automatic: 1 }, { automatic: 'true' }, { automatic: true, path: '/x' }, { executable: 'x' }]) {
+    assert.equal((await ipc.call(1, 'restart', options)).error.code, 'INVALID_REQUEST', JSON.stringify(options));
+  }
+  assert.equal(engine.restarts.length, 2, 'a malformed request never reaches the engine service');
+});
+
+test('a refused or failed restart keeps the tokens and tells the page why', async () => {
+  const refusal = Object.assign(new Error('LIMIT_EXCEEDED'), { code: 'LIMIT_EXCEEDED', field: 'automatic' });
+  const engine = fakeEngine({ answers: { ...fakeAnswers(), restart: refusal } }), ipc = createEngineIpc({ engine });
+  const token = await committed(ipc, 1, Buffer.alloc(10, 1));
+  assert.deepEqual(await ipc.call(1, 'restart', { automatic: true }), { error: { code: 'LIMIT_EXCEEDED', field: 'automatic' } });
+  assert.equal(ipc.size(), 1);
+  assert.equal((await ipc.call(1, 'readBuffer', token, 0, 1)).error?.code ?? 'readable', 'readable', 'the engine is the same session');
+});
+
+test('restart is one of the bridge operations and a page reaches it only through them', () => {
+  const ipc = createEngineIpc({ engine: fakeEngine({ answers: fakeAnswers() }) });
+  assert.ok(ipc.OPERATIONS.includes('restart'));
 });

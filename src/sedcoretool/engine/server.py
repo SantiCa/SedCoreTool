@@ -31,7 +31,7 @@ if __package__:
         write_json,
     )
     from .specs import METHOD_INPUTS, SECTION_INTERVALS, SETTINGS_INPUT
-    from .worker import DigestJob, MethodJob
+    from .worker import DigestJob, MethodJob, MethodRunner
 else:
     # Isolated Python excludes both PYTHONPATH and the script directory. Only our fixed source is added.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -52,13 +52,14 @@ else:
         write_json,
     )
     from specs import METHOD_INPUTS, SECTION_INTERVALS, SETTINGS_INPUT
-    from worker import DigestJob, MethodJob
+    from worker import DigestJob, MethodJob, MethodRunner
 
 METHODS = ('buffer.digest/1', SECTION_INTERVALS)
 WORKER_ERROR_CODES = ('INVALID_REQUEST', 'UNSUPPORTED_METHOD', 'UNSUPPORTED_INPUT', 'INVALID_BUFFER', 'LIMIT_EXCEEDED', 'INTERNAL')
 FIELD_NAME = re.compile(r'[A-Za-z0-9_.\[\]]{1,128}')
 COLUMN_NAME = re.compile(r'[A-Za-z][A-Za-z_]{0,63}')
 HEX64 = re.compile('[0-9a-f]{64}')
+RUNNER_IDLE_SECONDS = 30         # an idle method worker holds memory (NumPy, the last job's arrays); it is started again when needed
 
 
 class Coordinator:
@@ -74,6 +75,8 @@ class Coordinator:
         self.store = BufferStore(scratch_directory=scratch_directory)
         self.jobs = deque()
         self.active = None
+        self.runner = None
+        self.runner_idle_seconds = RUNNER_IDLE_SECONDS
         self.closing = False
 
     def response(self, request, status='ok', result=None, error=None):
@@ -128,6 +131,8 @@ class Coordinator:
             raise ProtocolError('handshake required')
         if operation == 'buffer.begin':
             return self.store.begin(payload)
+        if operation == 'buffer.derive':
+            return self.store.derive(payload)
         if operation == 'buffer.chunk':
             return self.store.append(payload, data)
         if operation == 'buffer.commit':
@@ -237,13 +242,30 @@ class Coordinator:
         directory = Path(self.store.directory.name) / f'job-{uuid4()}'
         (directory / 'out').mkdir(parents=True)
         buffers = {name: self.store.buffers[handle] for name, handle in payload['inputs'].items()}
-        specification = {name: {'path': str(value.path), 'dtype': value.dtype, 'shape': list(value.shape)} for name, value in buffers.items()}
+        # expected_hash is the SHA-256 the coordinator verified when the buffer was committed (or adopted).
+        specification = {name: {'path': str(value.path), 'dtype': value.dtype, 'shape': list(value.shape), 'sha256': value.expected_hash,
+                                # What this coordinator itself wrote into a copy of an earlier buffer: every other byte equals the base's.
+                                **({'derived_from': {'sha256': value.base_hash, 'ranges': [list(item) for item in value.changes]}} if value.derived else {})}
+                         for name, value in buffers.items()}
         job_file = directory / 'job.json'
         job_file.write_text(json.dumps({'method': payload['method'], 'cancel_path': str(directory / 'cancel'),
                                         'output_dir': str(directory / 'out'), 'inputs': specification}), encoding='utf-8')
-        worker = MethodJob(job_file, directory / 'cancel', script=self.method_script)
+        worker = MethodJob(self.method_runner(), job_file, directory / 'cancel')
         worker.directory = directory
         return worker
+
+    def method_runner(self):
+        """The long-lived worker for scientific methods; a new one when there is none yet or the last one ended."""
+        if self.runner is not None and not self.runner.alive():
+            self.stop_runner()
+        if self.runner is None:
+            self.runner = MethodRunner(self.method_script)
+        return self.runner
+
+    def stop_runner(self):
+        runner, self.runner = self.runner, None
+        if runner is not None:
+            runner.close()
 
     @staticmethod
     def discard(worker):
@@ -271,6 +293,8 @@ class Coordinator:
         active = self.active
         if active is None:
             self.start_next()
+            if self.active is None and self.runner is not None and time.monotonic() - self.runner.idle_since >= self.runner_idle_seconds:
+                self.stop_runner()
             return
         worker = active['worker']
         if active['cancel_at'] is not None and time.monotonic() - active['cancel_at'] >= 1.5:
@@ -303,7 +327,7 @@ class Coordinator:
             if active['cancel_at'] is not None:
                 self.finish(request, 'cancelled')
                 return
-            if result is None or worker.process.returncode != 0 or result.get('cancelled'):
+            if result is None or result.get('cancelled'):
                 raise RequestError('INTERNAL')
             if 'error' in result:
                 code, field = result['error']['code'], result['error']['field']
@@ -320,28 +344,23 @@ class Coordinator:
 
     def adopt_results(self, payload, result, directory, active):
         """Take the worker's output files as committed buffers and describe them; nothing stays adopted on failure."""
-        dimensions, columns = result['dimensions'], result['columns']
+        dimensions, packed_spec = result['dimensions'], result['packed']
         if (not isinstance(dimensions, dict) or set(dimensions) != {'bins', 'classes', 'schemes'}
-                or not all(type(value) is int and value >= 1 for value in dimensions.values()) or not 1 <= len(columns) <= 64):
+                or not all(type(value) is int and value >= 1 for value in dimensions.values())
+                or not isinstance(packed_spec, dict) or set(packed_spec) != {'byte_length', 'sha256', 'layout'} or not isinstance(packed_spec['layout'], dict)
+                or not all(isinstance(name, str) and COLUMN_NAME.fullmatch(name) for name in packed_spec['layout'])):
             raise RequestError('INTERNAL')
-        outputs = {}
         try:
-            for name, spec in columns.items():
-                valid_spec = isinstance(spec, dict) and set(spec) == {'dtype', 'shape', 'byte_length', 'sha256'}
-                if not isinstance(name, str) or not COLUMN_NAME.fullmatch(name) or not valid_spec:
-                    raise RequestError('INTERNAL')
-                handle = self.store.adopt(directory / f'{name}.bin', spec['dtype'], spec['shape'], spec['byte_length'], spec['sha256'])
-                outputs[name] = {'handle': handle, 'dtype': spec['dtype'], 'shape': spec['shape'],
-                                 'byte_length': spec['byte_length'], 'sha256': spec['sha256']}
+            handle, layout = self.store.adopt_packed(directory / 'result.bin', packed_spec['byte_length'], packed_spec['sha256'], packed_spec['layout'])
         except RequestError as error:
-            for item in outputs.values():
-                self.store.release(item['handle'])
             if error.code == 'LIMIT_EXCEEDED':
                 raise RequestError('LIMIT_EXCEEDED', error.field) from None
             raise RequestError('INTERNAL') from None
+        packed = self.store.buffers[handle]
+        outputs = {'result': {'handle': handle, 'dtype': 'u8', 'shape': list(packed.shape), 'byte_length': packed.length, 'sha256': packed.expected_hash}}
         input_hashes = {name: self.store.buffers[handle].expected_hash for name, handle in payload['inputs'].items()}
         return {'project': payload['project'], 'section': payload['section'], 'revision': payload['revision'],
-                'settings_hash': payload['settings_hash'], 'method': payload['method'], 'dimensions': dimensions, 'outputs': outputs,
+                'settings_hash': payload['settings_hash'], 'method': payload['method'], 'dimensions': dimensions, 'outputs': outputs, 'layout': layout,
                 'provenance': {'engine_version': self.version, 'runtime_id': self.runtime_id, 'method': payload['method'],
                                'revision': payload['revision'], 'deterministic': True, 'input_sha256': input_hashes,
                                'elapsed_ms': int((time.monotonic() - active['started_at']) * 1000)}}
@@ -365,7 +384,10 @@ class Coordinator:
         try:
             self.cancel_all(notify=False)
         finally:
-            self.store.close()
+            try:
+                self.stop_runner()
+            finally:
+                self.store.close()
 
 
 def read_requests(stream, inbox):
@@ -399,7 +421,8 @@ def serve(input_stream, output_stream, *, version, runtime_id, scratch_directory
     try:
         while not coordinator.closing:
             try:
-                item = inbox.get(timeout=0.02)
+                # While a job runs, look again after 2 ms so that its answer is not left waiting (it was up to 20 ms per job).
+                item = inbox.get(timeout=0.002 if coordinator.active else 0.02)
                 if item is None:
                     break
                 if isinstance(item, Exception):

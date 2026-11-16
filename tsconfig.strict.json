@@ -8,6 +8,7 @@
     "app/js/core.js",
     "app/js/sectiondepth.js",
     "app/js/sectionanalysis.js",
+    "app/js/maskchanges.js",
     "app/js/engineclient.js",
     "app/js/engineanalysis.js",
     "app/js/unetmodel.js",

@@ -4,8 +4,9 @@ import hashlib
 import math
 import os
 import re
+import shutil
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
@@ -16,6 +17,7 @@ else:
     from protocol import MAX_CHUNK, MAX_METADATA, ProtocolError, RequestError, require_fields, require_integer, strict_json
 
 MAX_BUFFER = 256 * MAX_CHUNK
+MAX_HANDLES = 256     # live buffers: a page keeps the inputs of up to 16 sections (9 buffers each) between analyses (card M8.4.2)
 SESSION_BUDGET = 512 * MAX_CHUNK
 TRANSIENT_RESERVE = 16 * MAX_CHUNK
 ITEM_BYTES = {'u8': 1, 'i32le': 4, 'u32le': 4, 'u64le': 8, 'f64le': 8, 'utf8json': 1}
@@ -33,6 +35,10 @@ class StagedBuffer:
     pins: int = 0
     released: bool = False
     shape: tuple = ()
+    derived: bool = False       # starts as a copy of a committed buffer; chunks may come at any ascending offsets
+    written: int = 0            # derived buffers: the end of the last chunk
+    base_hash: str = ''         # derived buffers: the SHA-256 of the buffer they were copied from
+    changes: list = field(default_factory=list)   # derived buffers: [start, end) byte ranges written after the copy
 
 
 class BufferStore:
@@ -44,7 +50,7 @@ class BufferStore:
 
     def begin(self, payload):
         require_fields(payload, ('dtype', 'shape', 'byte_length', 'sha256'))
-        if len(self.buffers) >= 128:
+        if len(self.buffers) >= MAX_HANDLES:
             raise RequestError('LIMIT_EXCEEDED')
         dtype, shape = payload['dtype'], payload['shape']
         if not isinstance(dtype, str) or dtype not in ITEM_BYTES:
@@ -73,6 +79,27 @@ class BufferStore:
         self.reserved += charge
         return {'handle': handle}
 
+    def derive(self, payload):
+        """A staging buffer that starts as a copy of the committed buffer `base` and ends as a new, different one.
+
+        The descriptor (dtype, shape, length) must be the base's: only the content may differ. The client then sends only the parts that
+        changed, with `buffer.chunk` at ascending, non-overlapping offsets, and `buffer.commit` accepts the result only when the whole
+        content has the declared SHA-256, exactly as for a buffer sent in full. A client that missed a change therefore gets a refused
+        commit, never a wrong buffer. The base is not touched. Metadata buffers cannot be derived."""
+        require_fields(payload, ('base', 'dtype', 'shape', 'byte_length', 'sha256'))
+        base = self.get(payload['base'], committed=True)
+        if base.dtype == 'utf8json' or payload['dtype'] != base.dtype or payload['shape'] != list(base.shape) or payload['byte_length'] != base.length:
+            raise RequestError('INVALID_BUFFER', 'base')
+        handle = self.begin({key: payload[key] for key in ('dtype', 'shape', 'byte_length', 'sha256')})['handle']
+        value = self.buffers[handle]
+        try:
+            shutil.copyfile(base.path, value.path)
+        except OSError:
+            self.release(handle)
+            raise RequestError('INTERNAL') from None
+        value.derived, value.base_hash = True, base.expected_hash
+        return {'handle': handle}
+
     def get(self, handle, *, committed=False):
         if not isinstance(handle, str):
             raise RequestError('INVALID_BUFFER', 'handle')
@@ -86,6 +113,16 @@ class BufferStore:
         value = self.get(payload['handle'])
         offset = require_integer(payload['offset'], 'offset')
         length = require_integer(payload['byte_length'], 'byte_length', 1, MAX_CHUNK)
+        if value.derived:
+            if value.committed or data is None or length != len(data) or offset < value.written or offset + length > value.length:
+                raise RequestError('INVALID_BUFFER')
+            with value.path.open('r+b') as stream:
+                stream.seek(offset)
+                stream.write(data)
+            value.written = offset + length
+            value.received += length
+            value.changes.append([offset, offset + length])
+            return {'next_offset': value.written}
         if value.committed or data is None or length != len(data) or offset != value.received or offset + length > value.length:
             raise RequestError('INVALID_BUFFER')
         with value.path.open('ab') as stream:
@@ -96,7 +133,7 @@ class BufferStore:
     def commit(self, payload):
         require_fields(payload, ('handle',))
         value = self.get(payload['handle'])
-        if value.received != value.length:
+        if value.received != value.length and not value.derived:
             raise RequestError('INVALID_BUFFER')
         if not value.committed:
             self.verify(value)
@@ -107,50 +144,76 @@ class BufferStore:
     def verify(value):
         """Size, SHA-256, finite float64 data and strict metadata of a complete file; raises RequestError."""
         digest = hashlib.sha256()
+        text = bytearray()                       # a metadata buffer is read once, for the hash and for the JSON check
         with value.path.open('rb') as stream:
             while chunk := stream.read(MAX_CHUNK):
                 digest.update(chunk)
+                if value.dtype == 'utf8json':
+                    text += chunk
                 if value.dtype == 'f64le' and any(not math.isfinite(item[0]) for item in struct.iter_unpack('<d', chunk)):
                     raise RequestError('INVALID_BUFFER')
         if digest.hexdigest() != value.expected_hash:
             raise RequestError('INVALID_BUFFER', 'sha256')
         if value.dtype == 'utf8json':
             try:
-                strict_json(value.path.read_bytes(), metadata=True)
+                strict_json(bytes(text), metadata=True)
             except ProtocolError as error:
                 raise RequestError('INVALID_BUFFER') from error
 
-    def adopt(self, source, dtype, shape, byte_length, sha256):
-        """Take a result file written by a worker as a committed, immutable buffer; returns its handle.
+    def adopt_packed(self, source, byte_length, sha256, layout):
+        """Take the single result file of a worker as a committed, immutable `u8` buffer; returns `(handle, layout)`.
 
-        The file moves into the store (it must be on the same filesystem) after the same checks a client upload gets,
-        so a worker cannot publish data that does not match the size, shape or hash it declared."""
-        if len(self.buffers) >= 128:
+        `layout` maps a column name to `{dtype, shape, offset, byte_length}`: every column must start at a multiple of 8 bytes, lie inside
+        the file, not overlap another, have a length equal to its shape times its item size, and the file must end exactly where the last
+        column's padding ends, so nothing in it is unaccounted for. The file moves into the store (same filesystem) and is then read once:
+        its SHA-256 must be the declared one and every float64 column must hold finite numbers. Nothing stays adopted on failure.
+        One file and one handle replace about 35 of each; opening a file is the expensive step on Windows."""
+        if len(self.buffers) >= MAX_HANDLES:
             raise RequestError('LIMIT_EXCEEDED')
-        if not isinstance(dtype, str) or dtype not in ITEM_BYTES or dtype == 'utf8json':
-            raise RequestError('INVALID_BUFFER', 'dtype')
-        if not isinstance(shape, list) or not 1 <= len(shape) <= 3 or not all(type(item) is int and item >= 1 for item in shape):
+        total = require_integer(byte_length, 'byte_length', 8, MAX_BUFFER)
+        if not isinstance(sha256, str) or not re.fullmatch('[0-9a-f]{64}', sha256) or not isinstance(layout, dict) or not 1 <= len(layout) <= 64:
             raise RequestError('INVALID_BUFFER', 'shape')
-        length = require_integer(byte_length, 'byte_length', 1, MAX_BUFFER)
-        elements = math.prod(shape)
-        if elements * ITEM_BYTES[dtype] != length or not isinstance(sha256, str) or not re.fullmatch('[0-9a-f]{64}', sha256):
-            raise RequestError('INVALID_BUFFER', 'shape')
-        if self.reserved + length > self.budget:
+        end = 0
+        for part in sorted(layout.values(), key=lambda item: item['offset'] if isinstance(item, dict) and type(item.get('offset')) is int else -1):
+            valid = (isinstance(part, dict) and set(part) == {'dtype', 'shape', 'offset', 'byte_length'} and isinstance(part['dtype'], str)
+                     and part['dtype'] in ITEM_BYTES and part['dtype'] != 'utf8json' and isinstance(part['shape'], list) and 1 <= len(part['shape']) <= 3
+                     and all(type(item) is int and item >= 1 for item in part['shape']) and type(part['offset']) is int and type(part['byte_length']) is int)
+            if not valid or part['offset'] % 8 or part['offset'] < end:
+                raise RequestError('INVALID_BUFFER', 'shape')
+            if math.prod(part['shape']) * ITEM_BYTES[part['dtype']] != part['byte_length'] or part['byte_length'] < 1:
+                raise RequestError('INVALID_BUFFER', 'shape')
+            end = part['offset'] + part['byte_length']
+        if total != -(-end // 8) * 8:
+            raise RequestError('INVALID_BUFFER', 'byte_length')
+        if self.reserved + total > self.budget:
             raise RequestError('LIMIT_EXCEEDED', 'byte_length')
-        if not source.is_file() or source.is_symlink() or source.stat().st_size != length:
+        if not source.is_file() or source.is_symlink() or source.stat().st_size != total:
             raise RequestError('INVALID_BUFFER', 'byte_length')
         handle = str(uuid4())
         target = Path(self.directory.name) / handle
-        value = StagedBuffer(target, dtype, length, sha256, length, received=length, committed=True, shape=tuple(shape))
         os.replace(source, target)
         try:
-            self.verify(value)
-        except RequestError:
+            digest = hashlib.sha256()
+            with target.open('rb') as stream:
+                while chunk := stream.read(MAX_CHUNK):
+                    digest.update(chunk)
+                if digest.hexdigest() != sha256:
+                    raise RequestError('INVALID_BUFFER', 'sha256')
+                for part in layout.values():
+                    if part['dtype'] == 'f64le':
+                        stream.seek(part['offset'])
+                        remaining = part['byte_length']
+                        while remaining:
+                            chunk = stream.read(min(remaining, MAX_CHUNK))
+                            remaining -= len(chunk)
+                            if not chunk or any(not math.isfinite(item[0]) for item in struct.iter_unpack('<d', chunk)):
+                                raise RequestError('INVALID_BUFFER')
+        except BaseException:
             target.unlink(missing_ok=True)
             raise
-        self.buffers[handle] = value
-        self.reserved += length
-        return handle
+        self.buffers[handle] = StagedBuffer(target, 'u8', total, sha256, total, received=total, committed=True, shape=(total,))
+        self.reserved += total
+        return handle, {name: dict(part, shape=list(part['shape'])) for name, part in layout.items()}
 
     def read(self, payload):
         """A range of a committed buffer: ``(result, bytes)``; the coordinator sends the bytes as one binary frame."""

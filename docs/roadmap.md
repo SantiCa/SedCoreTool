@@ -13,33 +13,88 @@ file and leave one line here.
 
 ## Status and handoff
 
-Updated 14 November 2026.
+Updated 16 November 2026.
 
-- **Released version:** V0.150 (14 November 2026), integrated into `master` on the maintainer's instruction ("haz commit y push de todo a
-  master con una nueva version 0.150"). **No tag and no GitHub Release exist for V0.149 or V0.150**: a tag publishes a Release and is the
+- **Released version:** V0.151 (16 November 2026), integrated into `master` on the maintainer's instruction ("haz push de todo y luego publica en
+  master"), which overrides the decision of 14 November 2026 that nothing goes to `master` until M8.4 is finished (part A is done; parts C and B are not). It contains the
+  visible-row Data table as the default (the release gate of every platform is still required before it is announced to users). V0.150 (14 November 2026) was integrated on the instruction "haz commit y push de todo a
+  master con una nueva version 0.150". **No tag and no GitHub Release exist for V0.149, V0.150 or V0.151**: a tag publishes a Release and is the
   owner's decision. The *Desktop builds* workflow is started by hand for the macOS and Linux builds (see the release checklist).
-- **Active work branch:** `work/2026-11-13` (pushed), which `master` now contains. Changes after V0.150 accumulate under `## Unreleased`.
+- **Active work branch:** `work/2026-11-13` (pushed), which `master` now contains. Changes after V0.151 accumulate under `## Unreleased` (add the heading when the first change is made).
 - **Checks:** see the last line of this block; it is rewritten at the end of every session.
-- **Where we are:** M8.1 and M8.2 are done at the development gate (Windows). M8.3 is complete: with `SEDCORETOOL_ENGINE_EXPERIMENT=1` the
-  desktop program calculates the interval table of every section in the Python engine and shows it, with a pending state, stale-result
-  rejection, cancellation and an error state, never falling back to JavaScript. The measurements of card M8.3.8 are recorded in
-  [docs/validation/M8.3.8-engine-analysis-summary.md](validation/M8.3.8-engine-analysis-summary.md).
-- **Next step:** the maintainer's decision recorded under card M8.3.8: continue to M8.4, or correct first. Recommended: correct first
-  (a persistent worker process, cheaper transfer of the label image, a memory sampler at the contract's 25 ms cadence, then re-measure
-  the ten-cycle memory gate, which failed by +110 MiB). Also open: card H5 (the `e2e` job on Linux).
+- **Full checks of 16 November 2026 on the V0.151 state (maintainer's Windows computer, run one after another):** `pytest -q` 724 passed / 9 skipped (Python 3.12); `npm test` 361 passed
+  (its first run inside the check script returned exit 1 with no output that could be read; four reruns, 361 passed each, so it is recorded as an unexplained, not reproduced incident);
+  `npm run typecheck` (no new diagnostics); `sync_version.py --check`; `ruff check src tests tools` (ruff under Python 3.14); runtime rebuilt; `tests/e2e/desktop.mjs`; `tests/e2e/smoke.mjs`.
+  The GitHub run on the version commit is recorded below once it has finished.
+- **Where we are:** M8.1 and M8.2 are done at the development gate (Windows). M8.3 is complete at the development gate: with
+  `SEDCORETOOL_ENGINE_EXPERIMENT=1` the desktop program calculates the interval table of every section in the Python engine and shows it,
+  with a pending state, stale-result rejection, cancellation and an error state, never falling back to JavaScript. Measurements of card
+  M8.3.8: [summary](validation/M8.3.8-engine-analysis-summary.md). **The engine path is 30-60 times slower than JavaScript and fails the
+  matched-timing gate of contract §7**; about 90 % of the time is moving the label image on every analysis (design review of 14 November 2026).
+- **Milestone gate of M8.2-M8.3 (card M8.3.9): passed on 14 November 2026**, commit `89512c1`: `tests` and *Desktop builds* succeeded on Windows,
+  macOS and Linux (the desktop end-to-end test with the engine experiment off and on, the package check and the packaged-runtime start). It was
+  the first time the engine work was built on macOS and Linux; it found three faults, all fixed (see the card). Still not covered, and on the
+  release checklist: launching the *packaged* program on macOS and Linux, Intel Macs, clean machines.
+- **Where M8.4 stands (14 November 2026):** cards M8.4.1-M8.4.5 are done and pushed. Measured on Windows (3 pairs, warm, flag off against
+  flag on), from the baseline before M8.4.1 to now: interval-size change on all sections 1,779 -> 229 ms (public) and 3,730 -> 259 ms (synthetic),
+  limit about 51 ms; edit, undo, redo 358 -> 147 ms and 569 -> 211 ms, limit 59-68 ms; unchanged re-analysis, memory peak and parity pass. **The
+  timing gate of contract §7 still fails for (a) and (b).** What remains in (b), measured through the interface on a 2.6-Mpixel section: about
+  35 ms are the interface's own redraw after the edit (it runs on the page's thread; with JavaScript it happens after the measured result, with
+  the engine it falls inside the chain of calls), 10 ms the snapshot and full hash in the page, about 50 ms the upload (the objects table and
+  both masks are derived and fully re-hashed by the engine), about 20 ms the engine. With the full-content hash that the maintainer's condition
+  of decision 1 requires and the page thread shared with drawing, this design cannot reach about 60 ms; the decision of 15 November 2026
+  (next item) moves the fix to part C.
+- **Decision of 15 November 2026 - direction for fluidity: option A.** The maintainer wants the program to stay very fluid with very heavy
+  images and with tables of tens of thousands of rows. Chosen: the engine owns a **tile store** on disk (a pixel pyramid and versioned mask
+  tiles); the page shows tiles and edits the loaded ones ([ARCHITECTURE §3.4, D10-D12](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84)).
+  What it changes:
+  1. **Order:** part A closes with M8.4.7 and M8.4.8 (V0.151 when the maintainer asks), then **part C** (tiles), then part B, then M8.5.
+     M8.4.6 is deferred.
+  2. **The timing question of 14 November is answered:** absolute interactive targets in [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates)
+     are the gate for interactive paths from part C on; the JavaScript-relative verdicts are still measured and reported. The numbers were
+     proposed by the design session and adopted with the choice; the maintainer may change them before M8.4.12 measures.
+  3. **Measure before committing (rule D11):** card M8.4.12 decides with one measurement whether the interval table of tiled sections is
+     computed by the engine (A) or stays in JavaScript (D).
+  4. **Doors kept open** for a later Rust core (option B) or a native interface (option C): the store format is documented and independent
+     of the browser and Electron, and no new scientific method is written in JavaScript (AGENTS.md §4).
+- **Review of M8.4.1-M8.4.5 (14 November 2026, second design session):** no scientific or safety fault found in the code; two defects fixed
+  (the change record cost about 8 ns for every pixel written, also with the engine off, and the engine's copies of the old project were not
+  released when a project was replaced); documents that still said "every analysis uploads every input" corrected; the guarantee about an
+  engine dying mid-transfer got its test; **M8.4 is not finished and M8.5 must not start**: M8.4.6-M8.4.8 (part A), M8.4.9-M8.4.11 (part B,
+  the cards were written in this review) and part C remain, plus the timing decision (answered on 15 November 2026, above). The browser test `smoke.mjs` could not be run locally in
+  the review (starting the local server was refused); the `e2e` job of GitHub runs it on every push.
+- **Rule D11 settled (16 November 2026, card M8.4.20):** after vectorising the interval kernel the outcome is still D (119.5 ms against 100); accepted for the
+  interactive interval table of tiled sections, which stays in JavaScript; the maintainer can overrule it.
+- **Progress of 16 November 2026:** M8.4.7, the M8.4.8 measurements, M8.4.12, M8.4.20, M8.4.13 (fixtures
+  in `C:\sedcore-large-fixtures`, outside the repository, and the Windows baseline) and M2.1.4 are done. The three-system gate of M8.4.8 passed on
+  `f4ec92a`, and `tests` and *Desktop builds* also succeeded on `01d6de7` (includes M8.4.20) on Windows, macOS and Linux (both pushed on the maintainer's request).
+  M2.1.4 and the promotion of the visible-row table to the default are in the branch (checks of that change on Windows: `tests/e2e/smoke.mjs` all passed, which includes both table tests; `node --test` 361 passed; typecheck passed; not run: the desktop end-to-end test, macOS, Linux). M2.1.5 (the `coreConvert` defect) is written and Ready. Session checks: `pytest` 724 passed / 9 skipped on M8.4.20; the other checks of DEVELOPMENT §3 were not repeated because only Python, tools and documents changed since `01d6de7`.
+- **Findings of M2.1.4 (Windows, [report](benchmarks/M2.1.4.md)) for the design session:** the native Data table fails the 33 ms target while scrolling (about 13 frames per second) and
+  the visible-rows rendering passes; both were measured at 10,400 rows (ten clicks of "Show more"), not at 100,000; a scatter of 50,000 points redraws in 156 ms (329 ms at
+  100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
+  complexity that is independent of the tile store.
+- **Next step:** with all measuring cards of part C done and D11 recorded, **a design session** (the most capable model, or the maintainer) details M8.4.14-M8.4.19 with the measured numbers; an implementing
+  session must not start M8.4.14 from its summary. Also open: card H5 (the `e2e` job must pass ten consecutive pushes).
 - **Reminder for whoever talks to the maintainer:** the maintainer accepted the two acceptance levels on
   13 November 2026 and asked to be **reminded to run the release-gate tests** (the release checklist below:
   macOS and Linux, clean Windows machine, cold-cache first launch, saturated CPUs, package sizes, and the
   numerical/timing/memory/recovery gates). Remind him when a milestone of M8 finishes and before any flag is
   switched on by default or a version with the engine is announced.
-- **Decisions waiting for the maintainer:** only the flags in the table below that need a promote/remove decision.
-  Decided on 13 November 2026: acceptance levels (accepted), scope of 1.0 (below), publication of V0.149.
-- **Last full checks: passed** on 14 November 2026 at the V0.150 state, run one after another on the maintainer's Windows computer:
-  `pytest -q` 594 passed / 8 skipped; `npm test` 295 passed; `npm run typecheck` (no new diagnostics); `sync_version.py --check`;
-  `ruff check src tests tools`; standalone build; `tests/e2e/desktop.mjs` with the engine experiment on (six sections equal to the JavaScript
-  reference before and after an edit) and off, bundled runtime rebuilt first (`prepare.js`, then `prepare_engine_runtime.py`). The
-  measurements of card M8.3.8 are separate evidence. **GitHub workflow `tests`** on the commit before V0.150: all Python jobs, `checks` and
-  `web-app` pass; the `e2e` job still fails on the Linux navigation-preview check (card H5).
+- **Decisions waiting for the maintainer:** (1) the flags in the table below that need a promote/remove decision. **Decided on 16 November 2026: the visible-row table
+  (M2.1.3) is the default** (17 times faster at 100,000 rows; M2.1.4: scrolling passes the 33 ms target where the native table fails); it is in the branch, not in a published
+  version, and **the release gate (every platform) is still required before a version with it is published**;
+  (2) any change to the interactive targets of contract §7, before M8.4.12 measures. Decided on 15 November 2026: option A and what follows
+  from it (item above), which also answers the timing question of 14 November. Decided on 13 November 2026: acceptance levels (accepted),
+  scope of 1.0 (below), publication of V0.149. Decided on 14 November 2026: a milestone gate on macOS and Linux closes every milestone; the
+  five decisions of M8.4 (answers recorded there, among them **multi-gigabyte images are required for 1.0**).
+- **Last checks: passed** on 14 November 2026 on commit `381f2cf` (review of M8.4, branch `work/2026-11-13`, maintainer's Windows computer):
+  `pytest -q` 664 passed / 9 skipped (Python 3.12); `node --test tests/app/*.test.mjs` 343 passed; `npm run typecheck` (no new diagnostics);
+  `sync_version.py --check`; `ruff check src tests tools` (ruff 0.17.5 under Python 3.14, the only interpreter on this computer that has it);
+  standalone build; `tests/e2e/desktop.mjs` with the engine experiment on and off, bundled runtime rebuilt first. GitHub `tests` (including the
+  `e2e` job, which runs `smoke.mjs`) and *Desktop builds* succeeded on `381f2cf` on Windows, macOS and Linux. Not run locally: `tests/e2e/smoke.mjs`
+  (starting the local server was refused in that session). The commit of 15 November 2026 after it changes documents only (design of part C);
+  no code changed, so no checks were repeated. The scenario measurements of M8.4.1-M8.4.5 are separate evidence (baseline committed; later
+  runs summarised in each card).
 
 ## How work is accepted
 
@@ -49,10 +104,11 @@ every platform and performance gate had to pass before the next task could start
 | Level | Needed for | What must be true |
 |---|---|---|
 | **Development gate** | Starting the next card | The card's "Done when" holds; its tests and the session checks pass on the maintainer's Windows workstation; anything unfinished is behind a flag that is off by default; evidence states what was not measured. |
+| **Milestone gate** (added 14 November 2026) | Starting the next milestone or M8.5 slice; integrating a version into `master` | On one commit of the work branch: the `tests` and *Desktop builds* workflows (both run on every push of a `work/**` branch) pass on Windows, macOS (Apple Silicon runner) and Linux, including `tests/e2e/desktop.mjs` with the engine experiment on and off and the package check ([how: DEVELOPMENT §8](DEVELOPMENT.md#8-versions-ci-and-releases)). Each failure is fixed, or recorded with its message and a decision of the maintainer. It is the last card of every milestone. |
 | **Release gate** | Switching a flag on by default, or publishing a version to users | Everything in the [release checklist](#release-checklist): all supported platforms, clean machines, and the numerical, timing, memory and recovery gates of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates). |
 
-Never report the release gate as met from development evidence. A failed gate is recorded with its measurement;
-it is not hidden, and limits are not relaxed to pass it.
+Never report the release gate as met from development or milestone evidence. A failed gate is recorded with its
+measurement; it is not hidden, and limits are not relaxed to pass it.
 
 ### Flags
 
@@ -63,7 +119,7 @@ Every experimental switch, with the decision it is waiting for ([policy: ARCHITE
 | Engine experiment | M8 | environment variable `SEDCORETOOL_ENGINE_EXPERIMENT=1` | off | Removed at M8.6 after the release gate |
 | NumPy multi-row counting in the Python API | M3.1.5 / M3.1.6 / M8.3.3 | environment variable `SEDCORETOOL_EXPERIMENTAL_COUNTS=1` | no effect: the multi-row kernel is the only implementation since M8.3.3 | Maintainer: remove the variable and its tests/benchmark in a cleanup |
 | Navigation preview rollback | M2.2.4 | session control in the Sections panel | preview on | Maintainer: remove the rollback control, or keep it until more memory evidence exists |
-| Visible-row table rendering | M2.1.3 | session-only checkbox in the Data table | off | Maintainer: promote to default or remove |
+| Visible-row table rendering | M2.1.3 | session-only checkbox in the Data table (turns it off for the session) | **on** (since 16 Nov 2026) | Release gate before publishing; then the maintainer decides whether to remove the checkbox and the native path |
 | Desktop operating diagnostics | M1.2.3 | opt-in control in the desktop program | off | Removed after the hang diagnosis of M1.2.2 is accepted |
 
 ## Scope of version 1.0
@@ -72,12 +128,12 @@ Decided by the maintainer on 13 November 2026.
 
 - **In:** M8 complete (one scientific engine; desktop packages for Windows, macOS and Linux passing the release
   gate); **advanced statistics (M6.1–M6.6)** and **radiographs (M7.1–M7.4)**, both built on the engine and its
-  image/data services (so after M8.4); M5.1 compatibility and reproducibility; M5.2 scientific validation and
+  image/data services (so after M8.4 parts A, C and B); M5.1 compatibility and reproducibility; M5.2 scientific validation and
   documentation, including a comparison with expert estimates on real cores; software paper and archived release (DOI).
-- **Not required:** optional acceleration (M4), a new interface shell (M9), multi-gigabyte images beyond what M8.4
-  and M7 need (M2.3 as a whole).
+- **Also in (decided 14 November 2026):** individual images of several gigabytes (M2.3.1–M2.3.5), delivered as part C of M8.4.
+- **Not required:** optional acceleration (M4), a new interface shell (M9).
 - **Consequence for the order:** after M8.6 the next milestones are M6 and M7, in that order unless the
-  maintainer changes it; their cards are written by a design session when M8.4 has passed its development gate,
+  maintainer changes it; their cards are written by a design session when M8.4 has passed its milestone gate,
   because they use the engine's image and data services.
 
 ## Active priority: desktop and one scientific engine
@@ -90,10 +146,10 @@ command line call the same code directly.
 | Order | Milestone | State |
 |---|---|---|
 | 1 | M8.1 Inventory and engine contract | done ([V0.141](../CHANGELOG.md#v0141--2026-11-12)) |
-| 2 | M8.2 Engine process, bundled runtime, packaging | done at the development gate; release items in the checklist |
-| 3 | **M8.3 First scientific slice: section intervals** | **next: cards below** |
-| 4 | M8.4 Engine-owned images and large files (includes M2.3) | cards written when M8.3 passes its development gate |
-| 5 | M8.5 Remaining methods, one slice at a time | idem |
+| 2 | M8.2 Engine process, bundled runtime, packaging | done at the development gate; milestone gate in card M8.3.9; release items in the checklist |
+| 3 | **M8.3 First scientific slice: section intervals** | **done; milestone gate M8.3.9 passed (14 Nov 2026)** |
+| 4 | M8.4 Engine-resident section data and fast analysis | part A done up to M8.4.5 (M8.4.7, M8.4.8 left); then part C (tiles, option A of 15 Nov 2026); then part B |
+| 5 | M8.5 Remaining methods, one slice at a time | cards written when M8.4 passes its milestone gate |
 | 6 | M8.6 Release gate, default-on, duplicate JavaScript science removed, HTML version frozen | idem |
 | 7 | Statistics (M6) and radiographs (M7), both **required for 1.0**; then validation and publication | [roadmap-future.md](roadmap-future.md) |
 | 8 | Conditional: acceleration (M4), interface shell (M9) | [roadmap-future.md](roadmap-future.md) |
@@ -125,24 +181,29 @@ What the development gate does **not** cover. All of it must hold before M8.6 sw
 or a version with the engine is published. Tick an item only with recorded evidence.
 
 - [ ] macOS (Intel, Apple Silicon, universal disk image) and Linux (AppImage, DEB): runtime preparation, native
-      smoke check, packaged start-up and close. Needs those machines or a run of the *Desktop builds* workflow
-      (requires pushing; maintainer's decision).
+      smoke check, packaged start-up and close. The milestone gates cover runtime preparation, the desktop end-to-end
+      test from source and packaging on the Apple Silicon and Linux x64 runners; still needed for the release gate:
+      launching the packaged program (not only building it) on each system, and an Intel Mac (GitHub's Intel macOS
+      runners are being retired; check what is offered before relying on them).
 - [ ] Clean Windows machine (no Python, no Node) and at least one other antivirus configuration.
 - [ ] First launch with a cold disk cache (after a reboot) against the 5 s engine-ready gate. Measured so far:
       3.7–3.9 s right after extraction; 11–25 s before the runtime was pruned. Measure once after the next reboot
       with `tools/measure_packaged_startup.mjs <exe> --runs 1`.
 - [ ] Whole-process memory, timing, responsiveness, cancellation and recovery gates of contract §7 on the first
-      scientific slice (measured in card M8.3.8).
+      scientific slice. Measured in card M8.3.8 on Windows: responsiveness, cancellation and recovery pass; **matched
+      timing fails** and the memory peak was not evaluated. Measured again in card M8.4.1 and after each M8.4 card.
 - [ ] Engine start-up with all CPUs saturated: runtime verification took 16 s median before pruning and the
       verification record; repeat `tools/measure_engine_lifecycle.mjs --load 16`.
 - [ ] Installer and portable sizes recorded for every platform.
+- [ ] Interactive targets of contract §7 (part C) on macOS and Linux hardware and on a computer with 16 GiB of memory; the targets are
+      decided on the primary reference host only, and shared CI runners cannot measure them reliably.
 
 ### M8.3 - First scientific slice: section intervals
 
 **Outcome.** With the experiment on, the interval percentages, per-class percentages, BI and ii of a section are
 computed by the engine method `section.intervals/1` and shown by the existing interface; with it off, nothing
 changes. Inputs and results are defined in [contract §4–§5](roadmap-engine-contract.md#4-scientific-input-contract-sectionintervals1);
-the path of a request is [ARCHITECTURE §4](ARCHITECTURE.md#4-path-of-one-scientific-request-target-design-for-m83).
+the path of a request is [ARCHITECTURE §4](ARCHITECTURE.md#4-path-of-one-scientific-request-built-in-m83).
 Cards are done in order. Each one claims the development gate only.
 
 #### M8.3.1 - Move the section analysis out of `app.js` — state: Done (12 Nov 2026, [V0.149](../CHANGELOG.md#v0149--2026-11-13))
@@ -359,7 +420,7 @@ Cards are done in order. Each one claims the development gate only.
 #### M8.3.7 - The interface shows engine results under the flag — state: Done (development gate, 14 November 2026)
 
 - **Goal:** with the experiment on, `s.bins` comes from the engine; with it off, from the JavaScript calculation.
-- **Read first:** [ARCHITECTURE §4](ARCHITECTURE.md#4-path-of-one-scientific-request-target-design-for-m83);
+- **Read first:** [ARCHITECTURE §4](ARCHITECTURE.md#4-path-of-one-scientific-request-built-in-m83);
   contract §2; `app/js/sectionanalysis.js`; the seven call sites of `analyze` (`app.js`, `columns.js`).
 - **Change:** `app/js/sectionanalysis.js` (`analysisRevision(section, project)`, `resultToBins(result)`); create
   `app/js/engineclient.js` and its Node test with a fake bridge; `app/js/app.js` and `columns.js` (callers await
@@ -383,11 +444,12 @@ Cards are done in order. Each one claims the development gate only.
   rules, stale-result rejection, cancellation, queueing and the error state are tested in `tests/app/engine-analysis.test.mjs`
   (17 tests; 23 deliberate faults caught, two needed extra tests first). The six sections of the public example match the JavaScript
   reference (exact counts, indices and nulls, 1e-9 floats) in `tests/e2e/desktop.mjs` with the bundled runtime, before and after an edit;
-  with the experiment off the same file passes unchanged. Not done: undo/redo and save → reopen under the flag were not exercised
-  separately (the revision key covers them by construction); the figures, data and map tabs refresh through `setMode` after a publish,
-  which was not checked visually.
+  with the experiment off the same file passes unchanged. Closed on 14 November 2026 (closing M8.3): the desktop end-to-end test now also undoes and
+  redoes the deletion and compares every result with the reference after each step, then opens the data, figures, map, log and section tabs and requires
+  no page error; save → reopen was already covered by the restart steps of the same test. Limits: the tab check confirms that each tab opens without an
+  error, it does not compare their content, and the new assertions were not mutation-tested; run on Windows locally and not yet by the workflows.
 
-#### M8.3.8 - Acceptance measurements and decision — state: Done (measured 14 November 2026; waiting for the maintainer's decision)
+#### M8.3.8 - Acceptance measurements and decision — state: Done (measured and corrected 14 November 2026)
 
 - **Goal:** the gates of contract §7 are measured on the first slice and the maintainer decides what follows.
 - **Change:** a measuring tool under `tools/`, evidence under `docs/validation/`, the release checklist above.
@@ -403,25 +465,557 @@ Cards are done in order. Each one claims the development gate only.
   cancellation, worker and coordinator kills. Fail: the ten-cycle memory gate (+109.7 MiB, gate +64). Not met: the 25 ms memory cadence
   (0.9 s). Timing is reported: the engine is about 60 to 160 times slower than the JavaScript calculation on these inputs (4.2 s against
   27 ms; 6.9 s against 110 ms), mostly per-job overhead. The measurement also exposed a real bug (a section left pending when its inputs
-  changed under a waiting job), fixed in the same delivery. **Decision for the maintainer:** continue to M8.4, or correct first
-  (recommended: a persistent worker, cheaper transfer, a faster memory sampler, then re-measure). The experiment stays off by default.
+  changed under a waiting job), fixed in the same delivery. **Corrections (14 November 2026, on the maintainer's instruction to fix errors before M8.4):**
+  one long-lived method worker (contract amended), a psutil memory sampler at 25 ms (median 25.4 ms), then the whole measurement was repeated
+  ([corrected evidence](validation/M8.3.8-engine-analysis-windows-corrected.json)): cold analysis is 1.6 s (public) and 3.4-3.9 s (synthetic)
+  against 0.03 s and 0.11 s in JavaScript, the ten-cycle memory gate passed in four of four runs. **Verdicts corrected by the design review of the same
+  day:** matched timing is a gate of contract §7 and fails (the tool had reported it as "not a gate"), and the memory-peak gate was not evaluated
+  (no flag-off sample of the Electron tree); parity, responsiveness, cancellation, cycles and kills pass. The cost is data movement (M8.4).
+  The experiment stays off by default.
 
-### M8.4 to M8.6 - summaries
+#### M8.3.9 - Milestone gate of M8.2 and M8.3 on Windows, macOS and Linux — state: Done (14 Nov 2026, branch `work/2026-11-13`)
 
-Cards are written by a design session when the previous milestone passes its development gate.
+- **Goal:** the engine work of M8.2-M8.3 is built and tested on the three systems before M8.4 builds on it. Today it
+  has run only on Windows: *Desktop builds* last ran on 8 November 2026 (V0.84, failed).
+- **Read first:** [AGENTS.md §6](../AGENTS.md#6-working-on-a-task) (milestone gate);
+  [DEVELOPMENT §8](DEVELOPMENT.md#8-versions-ci-and-releases); `.github/workflows/desktop.yml`; card H5 (how CI
+  failures were read and fixed without logs).
+- **Change:** `.github/workflows/desktop.yml` (add a run of `tests/e2e/desktop.mjs` with the experiment off, next to
+  the existing run with it on, on every system; run on every push of a `work/**` branch, because the maintainer asked
+  the assistant to start the build and only the maintainer can start a manual run; later steps run even after an
+  earlier failure); whatever a failure shows to be broken, each fix with its own test; this card's result; the
+  status block; the release checklist.
+- **Do not touch:** the `release` job and its conditions (no tag, no draft, no Release); `master`; the experiment
+  default; tolerances and deadlines of the tests (a failure is fixed or recorded, never relaxed).
+- **Steps:**
+  1. Make the workflow changes; commit; push the work branch (allowed). Both workflows start by themselves.
+  2. Confirm the `tests` workflow passes on that commit.
+  3. Read the *Desktop builds* result through the public API. For each failing system: find the cause from the annotations or by
+     reproducing it, fix it on the branch with a test, push (which starts a new run). Separate failures of the program
+     from failures of the runner (for example a missing system library on Linux) and record which is which.
+  4. Record the run id, commit, per-system result, the duration of the runtime preparation and the size of every
+     artifact (partial evidence for the "package sizes" item of the release checklist; the CI artifact is not the
+     signed product).
+- **Tests:** the two workflows themselves.
+- **Done when:** one *Desktop builds* run on the branch head passes on Windows, macOS and Linux and `tests` passes on
+  the same commit, or each remaining failure is recorded here with its message and the maintainer has decided what
+  to do. Claims the milestone gate only: packaged start-up on macOS/Linux, Intel Macs and clean machines stay on the
+  release checklist.
+- **Result (14 November 2026):** run on commit `89512c1` succeeded on Windows (5 min 37 s), Linux (2 min 44 s) and macOS (6 min 2 s) including
+  runtime preparation, both desktop end-to-end runs and the package check; `tests` succeeded on the same commit. CI artifact sizes (unsigned,
+  not the product): Windows 376 MiB, macOS 320 MiB, Linux 388 MiB. The first run found three faults, none in the engine's behaviour: (1) `check-package.js`
+  still expected only `buffer.digest/1` from the packaged engine (all systems); (2) the macOS universal build refused the native libraries in
+  `PIL/.dylibs`, because the `x64ArchFiles` glob does not enter dot folders; (3) after (2), the merged `app.asar` of the universal bundle was empty (28 bytes),
+  so the package check failed; `mergeASARs: false` fixed it, but **the reason the merge emptied the archive is not known** (the registers show the merge
+  running for 0.1 s). The check now also names what an archive contains when it fails. Also: the interrupted-saves test read Spanish
+  messages in windows that were already open on an English host (all systems). Not covered: the packaged program was built and its runtime started
+  by the check, but not launched with a window on macOS or Linux.
 
-- [ ] **M8.4 - Bounded engine data and image services.** Engine-owned native images, chunked operations and a
-      bounded tile/cache interface; the renderer receives visible tiles, editing updates and result summaries
-      instead of holding a second copy of every image. Implements M2.3.1–M2.3.5
-      ([roadmap-future.md](roadmap-future.md)).
-  - Acceptance: the multi-gigabyte contract covers the complete Electron/engine process tree, disk usage, buffer
-    ownership and memory release after closing a project; native pixels, editing coordinates, masks/history and
-    atomic save/backup recovery are preserved; raising heap or image limits alone does not pass.
+### M8.4 - Engine-resident section data and fast analysis
+
+Proposed by the design review of 14 November 2026; replaces the earlier summary ("bounded engine data and image
+services, implements M2.3.1-M2.3.5"). Every card claims the development gate; M8.4.8 is the milestone gate.
+
+**Why the plan changed.** Measured on one 6.1-Mpixel section with the worker already running: snapshot 56 ms,
+upload 195 ms (24 round trips of 1 MiB through page, main process and engine, written to the scratch disk and
+hashed in the page and again in the engine), engine 132 ms, download 9 ms (about 35 result buffers, one read
+each): about 392 ms. JavaScript takes 17 ms, and under 1 ms when only the interval size changes, because it keeps
+its row counts. The NumPy method itself takes about 50 ms in-process (parse 8 ms, run 41 ms). So the engine path is
+slow because it moves the whole label image for every analysis, even when only a setting changed; copying and
+hashing in the page are not the main cost (6 ms and 15 ms in Node 22). Moving image ownership to the engine, as the
+earlier summary proposed, would not remove that cost for editing: every brush stroke would then cross two processes.
+
+**Decisions of the maintainer (14 November 2026, all five answered):**
+
+1. **Who owns live masks: the renderer**, on the condition that the program stays as fast, fluid and protected against errors as
+   possible. The renderer keeps live editing, undo/redo and saving (decision D1); the engine holds a verified copy of each
+   section's analysis inputs, which the renderer updates with the changed rows. This withdraws the last paragraph of contract §2
+   (engine-owned masks, edit commands sent to the engine, tiles sent back). The condition becomes acceptance criteria (card M8.4.4):
+   the edit path never waits for the engine; the renderer's data is always authoritative and a failure of the engine, of a transfer
+   or of the copy never loses or changes an edit or a saved project; a copy that is not proven identical (full SHA-256) is never
+   used; input-to-next-frame during an edit is not worse with the engine on than off.
+2. **Multi-gigabyte images are required for 1.0** (the maintainer rejected moving them after 1.0). M2.3.1–M2.3.5 are delivered as
+   **part C of M8.4** (since 15 November 2026 part C comes before part B and builds its own image access, the tile store); V0.151
+   does not wait for them. They also constrain M8.5:
+   from slice (b) on, an image method works on regions of an engine-held image, never on a whole decoded raster.
+3. **Timing scenarios: accepted.** Contract §7's "warm end-to-end median" is evaluated on three named warm scenarios: (a) the
+   interval size changes on all sections, (b) one edit, its undo and its redo on the largest section, (c) an unchanged re-analysis.
+   Cold opening of a project is reported separately, as §7 already allows. The limits do not change.
+4. **V0.151 goes to `master` after part A** (M8.4.1–M8.4.8), not after part B.
+5. **Engine restart: accepted.** The error state of a section offers "Retry", which starts a new engine session and resubmits
+   only the current snapshots (contract §3 already requires fresh tokens), plus at most one automatic restart per program session,
+   announced to the user.
+
+**Decision of 15 November 2026 (option A; roadmap status and [ARCHITECTURE D10-D12](ARCHITECTURE.md#7-decisions-on-record)).** The
+whole-image path cannot reach the JavaScript-relative limits; the fluid path for every image size is the tile store of part C. So:
+part A closes with M8.4.7 and M8.4.8; part C follows (cards below, its first card measures and applies rule D11); part B comes after
+part C and is reviewed then; M8.4.6 is deferred. Interactive paths are accepted from part C on against the absolute targets of
+[contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates).
+
+**Outcome of part A.** With the experiment on, changing a setting re-analyses without uploading any image, and an
+edit uploads only the changed rows; scenarios (a)-(c), the memory peak and parity have verdicts on the maintainer's Windows computer.
+Nothing changes with the experiment off; no fallback to JavaScript. The maintainer wants an efficient program (14 November 2026): part A
+was not to be accepted while a scenario still failed, and a design session was to add the next card. That session (15 November 2026)
+chose part C as the fix: part A closes with the matched-timing failure of (a) and (b) **recorded, not hidden**, and the engine
+experiment stays off by default.
+
+#### M8.4.1 - Measure the scenarios and give every gate a verdict — state: Done (14 Nov 2026, branch `work/2026-11-13`)
+
+- **Goal:** `tools/measure_engine_analysis.mjs` reports pass or fail for matched timing on scenarios (a)-(c) and for
+  the memory peak, and records a baseline before any optimisation.
+- **Read first:** contract §7; [M8.3.8 summary](validation/M8.3.8-engine-analysis-summary.md) including its
+  correction; the tool.
+- **Change:** contract §7 (the scenarios, as decided); the tool; new evidence `docs/validation/M8.4-baseline-windows.json`
+  and a short summary next to it; this card's result.
+- **Do not touch:** the limits of §7; engine, bridge and interface code.
+- **Steps:**
+  1. Write the decided scenarios into §7.
+  2. Scenario (a): set the interval size from 2 to 1.37 cm and back; there is no new mask version, so the JavaScript
+     reference uses its cached row counts. Scenario (b): one edit through the interface's own edit path on the largest
+     section (a stroke of about 20 x 100 pixels), then undo, then redo, each timed to the published result.
+     Scenario (c): no change. Cold opening: reported only.
+  3. Sample the Electron process tree with the experiment off as well, so the memory-peak gate has its comparison.
+  4. Replace `timing_not_a_gate` by verdicts computed from the formula of §7, written as a pure helper.
+- **Tests:** `node --test` on the verdict helper with hand-computed limits on both sides of each boundary; one full run.
+- **Done when:** the baseline is committed with a verdict for every gate and scenario. Expected today: (a) and (b) fail.
+- **Result (14 November 2026):** [baseline](validation/M8.4-baseline-summary.md). (a) fails (public 1,779 ms against a limit of 51 ms; synthetic 3,730 ms), (b) fails (358 ms against 59; 569 against 68), (c) passes, the memory peak passes (880 MiB against 1,052; 1,010 against 1,092) and parity passes. New: `tools/engine_gates.mjs` (the rules of §7 as pure functions, 7 tests) and the `scenarios` phase of the measuring tool, which now also samples the memory of the flag-off run. The edit is the deletion of a trace, not a paint stroke (the contract text says so).
+
+#### M8.4.2 - Section inputs stay resident in the engine — state: Done (14 Nov 2026, branch `work/2026-11-13`)
+
+- **Goal:** when the mask did not change, an analysis uploads only the five JSON tables; labels, exclusion and
+  overlap stacks already in the engine are reused.
+- **Read first:** `app/js/engineclient.js`, `engineanalysis.js`; `sectionanalysis.js` (`analysisRevision`,
+  `buildIntervalSnapshot`); `desktop/engine-ipc.js` (token ownership, `MAX_TOKENS_PER_PAGE`);
+  `src/sedcoretool/engine/buffers.py` (session budget, the 128-buffer cap); contract §3 limits; in `app.js`,
+  `lazyMask`, `beginOp` and `afterChange` (where the mask version `_mv` changes).
+- **Change:** `engineclient.js` (a per-section table of resident input tokens and the mask version they hold,
+  least-recently-used, bounded at 256 MiB); `engineanalysis.js` (drop a section's resident inputs when the section or
+  the project closes); `buffers.py` and `engine-ipc.js` (buffer and token count caps sized for resident inputs; the
+  512 MiB byte budget does not change); contract §3 (the reuse rule and the caps); tests.
+- **Do not touch:** the method, the result contract, `s.bins`, saving; the rule that the page never sees engine handles.
+- **Steps:**
+  1. Reuse only when the section's `_mv`, width, height and a signature of `s.stacks` (length and number of members)
+     all equal those of the upload: the invariant the JavaScript row-count cache `_rc` already relies on. Otherwise
+     upload again.
+  2. `LIMIT_EXCEEDED` when beginning a buffer: release the least recently used resident inputs of other sections and
+     try once more; a second failure is the section's error state.
+  3. A token the bridge no longer knows (the engine restarted) makes the section upload again once.
+- **Tests:** Node with the fake bridge: after an interval-size change only the JSON tables are uploaded; after an
+  edit everything is; eviction order and byte bound; release on close; a restarted engine. Python: the new caps.
+  Desktop end-to-end: an interval-size change with the experiment on matches the JavaScript reference. Measure (a).
+- **Done when:** the tests pass and scenario (a) is measured and recorded (it may still fail until M8.4.3).
+- **Result (14 November 2026):** `engineclient.js` keeps each section's four masks (valid for one `maskIdentity`) and five tables (valid for their SHA-256) in the engine; an interval-size change uploads only the settings table. 14 new tests in `engine-analysis.test.mjs` (reuse, replacement, eviction by bytes and by section count, a section too large to keep, restart of the engine, abort, full engine budget) and 12 deliberate faults, all caught; one existing queue test waited on the wrong promise and now waits on the current request's. Caps raised: 256 live handles in the engine (`MAX_HANDLES`, was 128), 512 tokens per page. Measured (2 pairs, development evidence): interval change 782 ms public (was 1,779) and 1,452 ms synthetic (was 3,730); edit/undo/redo 363 and 620 ms (unchanged); still failing, as the card allowed. The memory peak passes but the synthetic margin is small (1,075 MiB against a limit of 1,081). The remaining cost per section (about 130-180 ms) is the engine's recount and the 35 result buffers: card M8.4.3.
+
+#### M8.4.3 - Row counts reused in the engine; one result buffer per job — state: Done (14 Nov 2026, branch `work/2026-11-13`)
+
+- **Goal:** an analysis whose mask inputs and effective classes did not change skips counting, and its result
+  travels as one buffer instead of about 35.
+- **Read first:** `methods/section_intervals.py` (`parse`, `_count`, `run`); `engine/method_worker.py`, `worker.py`,
+  `server.py` (`complete_analysis`), `buffers.py` (`adopt`); contract §2 (cache keys), §3 (`section.analyze` result), §5.
+- **Change:** `methods/section_intervals.py` (split `run` into pure `count(snapshot, cancelled)` and
+  `intervals(snapshot, counts)`); `engine/method_worker.py` (row counts cached in the worker, bounded at 64 MiB; the
+  coordinator passes the verified SHA-256 of every input in the job description); one packed result file with a
+  layout table, verified as a whole by the coordinator; `desktop/engine-ipc.js` and `app/js/engineclient.js` (one
+  read, split by the layout); contract §2, §3, §5 (columns and dtypes unchanged, only their transport); tests.
+- **Do not touch:** formulas, fixtures, and the method name and version (results are identical).
+- **Steps:**
+  1. Cache key: SHA-256 of `labels`, `exclude`, `stack_offsets` and `stack_members`, the bytes of the object-to-class
+     table that `parse` derives, the set of listed object IDs, and the ROI. Nothing outside the key may influence
+     `count`. The label check of `parse` is skipped only on a hit.
+  2. Layout `{name: {dtype, shape, offset, byte_length}}`: offsets aligned to 8 bytes, inside the buffer, no overlap,
+     exactly the columns of §5; anything else is `INTERNAL` and nothing is adopted.
+  3. The cache lives and dies with the worker, which is replaced after any anomaly and stopped after 30 s idle.
+- **Tests:** a hit and a miss for every key component, mutation-tested (dropping any component must fail a test); the
+  byte bound; no entry survives a replaced worker; every fixture through the real coordinator unchanged; layout
+  attacks (overlap, out of range, wrong dtype, missing or extra column).
+- **Done when:** the tests pass; scenario (a) is measured with its stage breakdown and verdict.
+- **Result (14 November 2026):** (1) the worker remembers, by the SHA-256 of the inputs that the coordinator verified, the masks it validated and counted (16 entries, 64 MiB), and up to 64 decoded tables; (2) the worker writes ONE packed result file with a layout and the coordinator verifies it in one pass and moves it (`BufferStore.adopt_packed`; the first version packed in the coordinator and spent 99 ms of 125 ms opening 55 files, found by profiling), so a result is one handle, one download; (3) three latency fixes: the coordinator looks for a finished job every 2 ms instead of every 20, a metadata buffer is read once to verify, and the client no longer waits for buffers to be released. Contract §3/§5 amended (`outputs.result` + `layout`). Tests: 32 for the memory (every part of the key, bounds, rejections), 9 for the packing (25 refusals), 25 misbehaving-worker cases rewritten, a worker-level test that counting really happens once; 45 deliberate faults, all caught (the symbolic-link refusal can only be exercised on Linux and macOS: it is skipped on this Windows account). Measured (3 pairs; before M8.4.1 / now): interval change 1,779 -> 198 ms (public) and 3,730 -> 285 ms (synthetic), limit 52; edit, undo, redo 358 -> 227 ms and 569 -> 381 ms, limit 58-68. Per section the interval change now costs 33-36 ms (about 15 ms engine, 15 ms of bridge calls, the rest dispatch), so eight sections cannot reach 51 ms one request at a time: see the new card M8.4.6.
+
+#### M8.4.4 - After an edit, only the changed rows travel — state: Done (14 Nov 2026, branch `work/2026-11-13`)
+
+- **Goal:** an edit, undo or redo uploads only the changed rows of labels and exclusion onto the resident copy; the
+  engine verifies the complete result before using it.
+- **Read first:** in `app.js`, `beginOp`, `commitOp`, `swapEditStep`, `compactSectionStacks`, `lazyMask`;
+  `app/js/engineclient.js`; `engine/buffers.py`; contract §3 (`buffer.begin`, `buffer.chunk`, `buffer.commit`).
+- **Change:** contract §3: new `buffer.derive {base, byte_length, sha256}`, a staging buffer that starts as a copy of
+  the committed `base` (same dtype and shape), whose chunks may come at ascending, non-overlapping offsets; commit
+  verifies the SHA-256 of the whole result as today; the full length is charged to the budget.
+  `engine/buffers.py`, `server.py`; `desktop/engine-ipc.js`, `preload.js` (`deriveBuffer`); new pure module
+  `app/js/maskchanges.js` (changed row ranges since a mask version); `app.js`, wiring only (`commitOp` and
+  `swapEditStep` report the rows of `op.lm` and `op.ex`; the mask setter and stack compaction, which renumbers
+  overlap codes everywhere, report all rows); `engineclient.js`; `tools/build_standalone.py` (`ORDER`); tests.
+- **Do not touch:** the editing tools, edit history and saving; the rule that a buffer is committed only when its full
+  SHA-256 matches.
+- **Guarantees (maintainer's condition for decision 1):** (1) the edit path never waits for the engine: the changed rows are sent
+  afterwards, in the background, and a newer edit replaces a pending send; (2) the renderer's data is the only source of truth: any
+  engine, transfer or copy failure leaves the edit, the undo history and the last good save exactly as they were and shows an error
+  state (no JavaScript fallback); (3) a derived copy is used only after its full SHA-256 equals the renderer's; (4) input-to-next-frame
+  p95 during a stroke with the engine on is not worse than with it off (measured by `tools/measure_engine_analysis.mjs`); (5) a test
+  kills the engine in the middle of a send and requires an unchanged project and a successful save.
+- **Steps:**
+  1. The page hashes the current labels and exclusion in full (15 ms for 24.6 MB in Node 22) and sends only the changed
+     row ranges; unknown ranges mean a full upload.
+  2. A hash mismatch at commit means a change was missed: drop the resident copy, upload in full, and count the event
+     in the opt-in diagnostics; the end-to-end test requires the count to stay at 0.
+- **Tests:** Node: row ranges from edits, undo and redo, and their merging; the mismatch path. Python: derive from a
+  staging or released base; chunks out of order, overlapping or out of range; a mismatched hash commits nothing and
+  restores the budget. Desktop end-to-end: paint, undo and redo with the experiment on match the JavaScript reference,
+  and a small stroke uploads less than 5 % of the mask bytes. Measure (b).
+- **Done when:** the tests pass; scenario (b) is measured with its verdict.
+- **Result (14 November 2026):** `buffer.derive` in the store, the coordinator, the main-process allowlist, the bridge (`deriveBuffer`; parts at ascending offsets) and the client; `app/js/maskchanges.js` (new, pure, strict type check) records the rows the editing code writes (`setLabel`, `setEx`, undo/redo through the history pairs, whole-mask replacement and stack renumbering as "all"); the page hashes the whole current array and the engine accepts the derived buffer only on that hash. The guarantees of the card hold by construction and by test: the edit path never waits for the engine (it is requested in the background as before); a failed or cancelled transfer puts the change back; a missed pixel is a refused commit, then a full upload, counted (`deriveFallbacks`, visible as `window.ichantool.engineStats()`); the renderer's arrays are never touched. The desktop end-to-end test with the engine on asserts that a deletion, its undo and its redo travelled as rows (3 derivations, 0 fallbacks). Tests: 7 for the record, 11 for the client flow (rows only, unreported write, whole-mask changes, undelivered change, restarted engine, abort), 3 IPC, 6 store, 1 coordinator, 1 with the real client and engine; 22 deliberate faults, all caught (one equivalent mutant: an incomplete ordinary buffer is refused with another error field either way). Found by the end-to-end test only: the main-process client has its own allowlist of operations and did not know `buffer.derive`. Measured (3 pairs; before M8.4.1 / after M8.4.3 / now): edit, undo, redo 358 / 227 / 149 ms (public) and 569 / 381 / 224 ms (synthetic), limit 56-67 ms: still failing; what is left is the page's hash of the masks (about 20 ms), the engine's copy and verification of two buffers (about 30 ms), the count (about 40 ms) and the bridge: card M8.4.5.
+
+#### M8.4.5 - Recount only the changed rows — state: Done (14 Nov 2026, branch `work/2026-11-13`)
+
+- **Goal:** after an edit, the worker counts only the rows that changed. Measured before this card (M8.4.3): counting a
+  6.1-Mpixel section takes about 40 ms and a whole edit about 230-380 ms; with M8.4.4 the upload disappears, and what
+  remains is the page's hash of the masks (15 ms), the engine's verification (about 15 ms), this count and the bridge.
+- **Read first:** `methods/section_intervals.py` (`_counts`, `new_memo`); `engine/method_worker.py`; `engine/buffers.py`
+  (`derive`, from M8.4.4); contract §3 (job description).
+- **Change:** `buffer.derive` records, on the derived buffer, the SHA-256 of its base and the merged row ranges that
+  differ; the job description gives the worker, for each mask, `derived_from: {sha256, rows: [[first, last), ...]}`;
+  `section_intervals.run` takes a `base_counts` (the counts memo of the base masks, same ROI, class table and stacks):
+  it copies them and recounts only the rows of the ranges inside the ROI. Contract §3 and the technical manual.
+- **Do not touch:** the result, its layout or the full-count path (a missing base, another class table or another ROI counts
+  everything, as now).
+- **Tests:** an edited section counted from its base equals the full count, exactly, for random edits including rows at
+  the ROI edges, overlaps and exclusions; a base that is not in the memo, a class table that changed or a range that is
+  not what the hashes imply falls back to a full count and never to a partial one; mutation tests for the ranges.
+- **Done when:** the tests pass and scenario (b) is measured with its verdict.
+- **Result (14 November 2026):** the coordinator records, for a buffer made with `buffer.derive`, the hash of its base and the byte ranges it wrote, and passes them to the worker (`derived_from`); the worker validates and counts only those rows when it remembers the base and every object listed in both versions has the same effective class (deleting or adding a trace qualifies; reassigning a class, other stack tables, another ROI or number of classes count everything), and the whole label image is still validated whenever the list of objects changed. The first version required an identical object-to-class table and so never applied to a deletion: the measurement showed no gain and a check confirmed it. Tests: 12 random edits (rows at the ROI edges, several ranges, whole image) equal to a full count with exactly the written rows counted; deletion, addition, reassignment; a deletion whose pixels remain outside the written rows is refused; label and exclusion checks limited to written rows only when the base is known; a worker-level test that counts the rows. 21 deliberate faults, all caught. Measured (3 pairs): edit, undo, redo 147 ms (public) and 211 ms (synthetic), from 149 and 224 after M8.4.4; limit 59-68 ms, still failing. A breakdown of a deletion through the interface on the largest public section (2.6 Mpixel): snapshot about 10 ms, upload about 53 ms (the objects table changes with every deletion; both masks are derived even when only the labels changed, and each derived mask is copied and fully re-hashed by the engine), engine 18-40 ms, download 1 ms, and 30-50 ms between the action and the job. The full-content hash that the maintainer's condition requires costs about 15 ms per 6 Mpixel on each side.
+
+#### M8.4.6 - Several sections in one request — state: Deferred (15 November 2026)
+
+- **Deferred** by the decision of 15 November 2026: a whole-project setting change already measures 229-259 ms (M8.4.5), within the
+  300 ms interactive target of contract §7, and the whole-image path is not where the fluidity work goes. Resumed only if a part C
+  measurement shows that the fixed cost of one request per section (about 15 ms of bridge calls) makes a tiled project miss that target.
+  The design below stays valid.
+- **Why:** an interval-size change touches every section of a project. Measured after M8.4.3, one request per section costs
+  33-36 ms of which about 15 ms is the engine (starting the job, reading the settings, computing from remembered counts, writing
+  the result) and about 15 ms is six calls through the page, the main process and the engine. Eight sections one after another
+  cannot meet the limit of about 51 ms for all of them, whatever is tuned inside one request.
+- **Goal:** the sections that need an analysis are sent in ONE request, computed one after another from remembered counts
+  and returned in ONE packed result; scenario (a) meets §7.
+- **Design:**
+  1. New operation `section.analyze_batch`: `{method, items: [{project, section, revision, settings_hash, inputs}, ...]}`,
+     at most 16 items; each item has the inputs and checks of `section.analyze`; the settings of an item may travel in the
+     request as an object (at most 8 KiB each, 64 KiB the frame) instead of as an uploaded buffer, and the coordinator writes
+     them as the `settings` input and derives the hash itself, so nothing is uploaded per item.
+  2. One job: the description lists the items; the worker runs them in order with its memories, polls the cancellation marker
+     between items and between blocks, and writes ONE packed file whose layout has one section per item. An item with a
+     rejected input returns `{error}` for that item only. The answer lists `items: [{section, revision, settings_hash,
+     dimensions, layout | error}]` and the one `outputs.result`.
+  3. The page asks for the batch from `analyzeSections(sections)` (and from a project load); `engineanalysis.js` keeps its
+     per-section revisions, cancellation and stale-result rules: a result is published per item and only if its revision is
+     still current.
+  4. Limits: the packed result obeys the 256 MiB buffer limit; a batch whose estimated result would exceed it is split.
+- **Do not touch:** `section.analyze` (kept for a single section), the method, the columns and their formulas.
+- **Tests:** a batch equals the same sections analysed one by one, for every fixture and for mixed valid and invalid items;
+  cancellation during a batch; a stale item is not published while its neighbours are; a batch with 17 items, an item whose
+  inputs are not resident, and the result-size split; a misbehaving worker for the batch frame; mutation tests.
+- **Done when:** the tests pass and scenario (a) is measured with its verdict. If it still fails, record the stage breakdown
+  and stop: the next change would be to run the interval table of resident sections inside the engine without a request per
+  change, which needs a decision of the maintainer.
+
+#### M8.4.7 - Restart after a coordinator failure — state: Done (15 Nov 2026, branch `work/2026-11-13`)
+
+- **Goal:** the behaviour chosen in decision 5: a section in the error state offers "Retry", which starts a new engine
+  session and resubmits only the current snapshots (contract §3 already requires fresh tokens); at most one automatic
+  restart per program session, announced with a notice. The JavaScript calculation is never used.
+- **Read first:** `desktop/engine.js` (`createEngineService`: start, stop, status); `desktop/engine-ipc.js` (tokens belong to
+  a session); `app/js/engineanalysis.js` (`retry`, error state); `app/js/i18n.js` (`engine.error.*`); the kill phase of
+  `tools/measure_engine_analysis.mjs`.
+- **Change:** `desktop/engine.js` (a `restart()` that stops what is left, starts a new coordinator and handshake, refuses
+  to run twice at once and counts automatic restarts); `desktop/preload.js` and `engine-ipc.js` (the call `restart`, with
+  the sender check; it drops the page's tokens: they belong to the old session); `engineclient.js` (forget all resident
+  buffers when the session changes); `engineanalysis.js` and the interface (a "Retry" control in the error state of a section;
+  one automatic attempt per session when the engine is unavailable, with a notice); texts in Spanish and English.
+- **Do not touch:** the rule that a failed engine shows an error and never falls back to JavaScript; the experiment flag.
+- **Tests:** Node: restart after the coordinator dies, a second restart request while one runs, the automatic attempt is made
+  once and announced, tokens of the old session are refused, resident buffers are re-uploaded; the kill case of the
+  measuring tool now ends with every section analysed again; desktop end-to-end with a killed coordinator.
+- **Done when:** the tests pass and the kill measurement shows the engine `ready` again and parity with the reference.
+- **Result (15 November 2026):** `createEngineService.restart({automatic})` (desktop/engine.js) ends the old process tree, starts a new coordinator and shakes hands; two requests at once share one restart, a disabled service or one that is closing refuses it, and an automatic request after the first is refused with `LIMIT_EXCEEDED` (field `automatic`). The bridge operation `restart` (engine-ipc.js, preload) validates its options (only a boolean `automatic`) and drops the tokens of every page. `engineclient.js::restart` forgets every resident input without releasing it into the new session. `engineanalysis.js`: an analysis that fails with `ENGINE_UNAVAILABLE` asks for the one automatic restart (not if it was cancelled meanwhile), announces it with a notice and sends everything whole; if refused or failed the section keeps the error. `restartAndRetry(sections)` is the user's Retry (button `#engineRetry` in the error state of the results panel): new session, then only the sections in error are analysed again. The JavaScript calculation is never used. Tests: 8 in `engine-analysis.test.mjs`, 4 in `engine-ipc.test.mjs`, 5 with the real engine in `engine.test.mjs`; 14 deliberate faults, all caught (one of them, removing the guard against repeated restarts, loops forever and is caught by the time-out). Desktop end-to-end (engine on): the coordinator killed twice, the first loss repaired by itself with results equal to the reference, the second shows `ENGINE_UNAVAILABLE` on all six sections, Retry brings them back equal to the reference, the project unchanged; engine off unchanged. Kill phase of the measuring tool: after the coordinator is killed the engine is `ready` again and all six sections `ready`. **Not working any more:** the worker-kill part of that phase (it kills a worker while a job runs) found no worker to kill in three attempts, because jobs now last about 150 ms; its verdict `kill_recovery` therefore reads `pass: false`. Not part of this card; a design session should redo that check with a job held in the worker (a test hook) instead of a race.
+
+#### M8.4.8 - Milestone gate of part A — state: Done (16 Nov 2026): measurements 15 Nov; `tests` and *Desktop builds* succeeded on Windows, macOS and Linux on commit `f4ec92a` (all jobs, including `e2e`; the `release` job was skipped, as designed). Still pending from the card: item 3's local run of `smoke.mjs` (the `e2e` job ran it). V0.151 only when the maintainer asks
+
+- **Goal:** the measurement of M8.4.1 repeated on the final state, with a verdict for every gate and scenario, and the
+  milestone gate on Windows, macOS and Linux. V0.151 follows when the maintainer asks for it (decision 4: after part A).
+- **Also measured here (review of 14 November 2026, items the earlier cards promised and did not measure):**
+  1. Guarantee (4) of M8.4.4: input-to-next-frame p95 during a paint stroke with the engine on is not worse than with it off
+     (the `responsiveness` phase of the tool measures an interval-size change; add a stroke: 60 injected pointer moves while
+     the brush writes and the previous edit's analysis is in flight).
+  2. A coordinator killed in the middle of a derived transfer (desktop end-to-end, not only the Node test): the section shows
+     the error, the project is unchanged, and the save that follows succeeds and reopens.
+  3. The `smoke.mjs` browser test run locally (it needs the server of DEVELOPMENT §2), and the three-system *Desktop builds*
+     on the final commit.
+  4. The verdicts of contract §7 for the whole-image path: matched timing for (a)-(c) (expected to fail for (a) and (b): record it with
+     the stage breakdown, it is not a reason to stop) and, for information, the interactive targets that already apply to it ((a) p95 <= 300 ms,
+     (b) p95 <= 150 ms). Neither blocks the milestone gate: by the decision of 15 November 2026 the timing fix is part C, and the engine
+     experiment stays off by default.
+
+#### Part C - Multi-gigabyte images and fluidity (option A)
+
+Decided on 15 November 2026 and done **before part B**; required for 1.0 (decision 2 above). It delivers M2.3.1-M2.3.5 of
+[roadmap-future.md](roadmap-future.md#m2---large-projects-and-responsive-display) on the tile store of
+[ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), whose rules every card follows. Acceptance is
+measured against the interactive targets of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates).
+Cards M8.4.12, M8.4.13 and M2.1.4 are detailed below and only measure; **M8.4.14-M8.4.19 are summaries that a design session details with
+those measurements before any of them starts.** Every card claims the development gate; M8.4.19 is the milestone gate. Not in part C:
+filtering, detection, object features and U-Net on tiles, which are M8.5 slices (b) and (e) working on regions of the store. Known trap for
+any card that moves float data: the coordinator checks float64 buffers in pure Python (63 ns per value, about 1 s per 128 MiB); large float
+data must be checked in the worker with NumPy.
+
+##### M8.4.12 - Round trip of a one-tile edit, and rule D11 — state: Done (15 Nov 2026); outcome D by the rule; confirmed after M8.4.20 (16 Nov 2026), see below
+
+- **Goal:** the interactive-calculation rule of contract §7 is applied once, with a measurement through the real chain, and its outcome is
+  written into ARCHITECTURE D11. No product code changes.
+- **Why a stand-in is enough:** the tile store does not exist yet, but the chain that an edit of a tiled section will use (page, main
+  process, coordinator, worker, result, page) exists. In a project whose sections are exactly one tile (512 x 512 pixels), an edit makes
+  that chain carry about the bytes and hashes of one edited tile, so scenario (b) on such a project measures the fixed cost of the chain
+  plus one tile. The rest of a large section (turning its row counts into the interval table) is measured in-process and added.
+- **Read first:** contract §7 (matched timing, the scenarios, the interactive targets and the rule); `tools/measure_engine_analysis.mjs`
+  (`scenarioRun`, option `--synthetic`); `tools/benchmark.py` (`make_synthetic`, which has a `height` option and a fixed width of 960);
+  `src/sedcoretool/methods/section_intervals.py` (`run`, `_counts`: a call whose counts are remembered goes straight from row counts to
+  the table); `tests/test_section_intervals.py` (how inputs are built for `parse`); the [M8.4 baseline summary](validation/M8.4-baseline-summary.md)
+  as the model of the evidence; DEVELOPMENT §4 (rebuild the bundled runtime and `desktop/web` before measuring).
+- **Change:** `tools/benchmark.py` (a `width` option for `make_synthetic`, default 960; traces placed inside the width; the default package
+  must stay byte-identical, shown by its SHA-256 before and after); new `tools/measure_interval_table.py`; evidence
+  `docs/validation/M8.4.12-round-trip-windows.json` and `docs/validation/M8.4.12-round-trip-summary.md`; ARCHITECTURE D11 (the outcome);
+  this card's result; `docs/TECHNICAL_DOCUMENTATION.md` §1.4 (the new tool); `CHANGELOG.md` (Internal).
+- **Do not touch:** engine, bridge and interface code; the targets and the rule in contract §7 (changing them is a maintainer decision).
+- **Steps:**
+  1. Generate the stand-in project: eight sections of 512 x 512 pixels (`make_synthetic(path, width=512, height=512)`), seed unchanged;
+     record its SHA-256 and the area of the trace that scenario (b) deletes (the one closest to 2,000 pixels, as today).
+  2. On the primary reference host (the maintainer's Windows computer), with runtime and `desktop/web` rebuilt:
+     `node tools/measure_engine_analysis.mjs --only scenarios --pairs 6 --synthetic <stand-in>`. Keep the raw JSON. The number used is
+     the p95 of scenario (b) with the engine on, edit, undo and redo pooled (18 samples: the p95 is close to the maximum; say so).
+  3. `tools/measure_interval_table.py`: build inputs for `parse` of one section of **349,526 rows** (the height of the 8 GiB fixture planned
+     in M8.4.13) and 16 classes, 64 columns wide (a remembered count does not depend on the width), call `run` once with a memo to fill it,
+     then time 20 more calls with the same memo (all remembered). Report median and p95. Use the method's own functions; copy no formula.
+  4. Apply the rule: **A** if p95(step 2) + median(step 3) <= 100 ms, otherwise **D**. Write both numbers, the computer and the outcome into
+     ARCHITECTURE D11 and into this card's result. If the outcome is D, stop: a design session revises cards M8.4.14-M8.4.19 first.
+- **Tests:** `make_synthetic` with a width option: dimensions, determinism, traces inside the image, and the default package unchanged
+  (hash); `tools/measure_interval_table.py` checks that every timed call returned the same columns as the first (a memo hit, not a recount).
+  `pytest` on the touched tests; one full measurement run.
+- **Done when:** the evidence is committed, D11 states its outcome, and the roadmap status names the next card.
+- **Result (15 November 2026):** [summary](validation/M8.4.12-round-trip-summary.md). One-tile edit through the whole chain: median 71.9 ms, p95 793.8 ms (18 samples, one stall of 794 ms, the other 17 between 70 and 117 ms); the row counts of a 349,526-row section take 237.7 ms median to become their table. 794 + 238 > 100: **the rule's outcome is D**. But 225 of those 310 ms are a per-interval Python loop (`sum_by_interval`), which makes the outcome depend on an implementation detail; the card stopped as it prescribes for D. `make_synthetic` gained a `width` option (the default package is byte-identical, checked by hash and test); `tools/measure_interval_table.py` is new. **Needed from a design session before M8.4.14:** accept D, or add a card that vectorises the kernel (exact integer sums, same fixtures) and repeat the measurement, or change the rule.
+
+##### M8.4.20 - Interval sums without a per-interval loop; rule D11 measured again — state: Done (16 Nov 2026), development gate
+
+- **Goal and origin:** M8.4.12 gave D, but 225 of the 238 ms of the table came from a per-interval Python loop. The kernel was vectorised with exact
+  results and the measurement repeated with 20 pairs instead of 6.
+- **Change:** `kernels/binning.py` (`sum_by_interval`, `bin_edges`), `methods/section_intervals.py` (one sum instead of two), `tests/test_kernels.py`.
+- **Result:** [summary](validation/M8.4.20-vectorised-kernel-summary.md). Table 238 -> 35 ms; one-tile edit p95 84.7 ms (60 samples, no stall); 84.7 + 34.8 = 119.5 ms
+  > 100: **still D**. D accepted for the interactive interval table only, on the maintainer's delegation; the rule is unchanged. Cards M8.4.14-M8.4.19 may now be detailed with D as given.
+
+##### M8.4.13 - Multi-gigabyte fixtures and the baseline (M2.3.1) — state: Done (16 Nov 2026), development gate; [summary](validation/M8.4.13-large-baseline-summary.md)
+
+- **Goal:** deterministic generated images of 2, 4 and 8 GiB (and a compressed file whose decoded size is 8 GiB) can be produced on demand,
+  and what the current program does with them is measured. This gives part C its test material and its starting point. No product
+  code changes.
+- **Read first:** M2.3.1 in [roadmap-future.md](roadmap-future.md#m2---large-projects-and-responsive-display) (what to record); contract §7
+  (interactive targets, memory sampler); `app/js/tiff.js` (`decodeTiffBlocks`: the program already reads TIFF and BigTIFF in blocks) and
+  `app/js/app.js` `decodeBytes` (how the working downsampling factor is chosen); `tools/benchmark.py` (generator conventions, seed);
+  `tools/measure_engine_analysis.mjs` (how a desktop measurement drives the program and samples memory).
+- **Change:** new `tools/make_large_fixtures.py`; new `tools/measure_large_images.mjs`; evidence `docs/validation/M8.4.13-large-baseline-windows.json`
+  and its summary; `docs/TECHNICAL_DOCUMENTATION.md` §1.4 (the two tools); `CHANGELOG.md` (Internal).
+- **Do not touch:** the program. **No fixture is ever committed** (they are gigabytes): the generator writes to a folder given on the command
+  line, refuses a folder inside the repository, and checks the free disk space before writing.
+- **Steps:**
+  1. Generator, standard library + NumPy only (no new dependency). Pixel content is a pure function of the coordinates and the seed
+     (138501): every 512 x 512 block gets its own PCG64 stream seeded with (seed, block row, block column), drawn over a structure of
+     horizontal layers and burrow-like blobs that depends only on the row and column. So any region can be regenerated exactly, which later
+     cards use as the independent reference. Files, all 8,192 pixels wide (16 tiles):
+     (a) uncompressed tiled BigTIFF, RGB 8-bit, 87,382 / 174,763 / 349,526 rows (about 2, 4 and 8 GiB decoded);
+     (b) the 2 GiB image as striped BigTIFF; (c) a grey 16-bit tiled BigTIFF of 131,072 rows (2 GiB);
+     (d) the 8 GiB image as a deflate-compressed tiled BigTIFF; (e) a baseline JPEG of 65,500 rows (the most that Pillow's libjpeg writes; the format allows 65,535).
+     TIFF files are written by the generator's own minimal writer (`struct`, `zlib`); write in blocks so memory stays below 1 GiB. Option
+     `--only` selects files. The whole set needs about 20-30 GiB (it depends on how well (d) compresses): print the estimate in the help
+     text and before writing.
+  2. Independent check of every file: Pillow on the small sizes used by the unit tests; for the large files the program's own block reader
+     (`tiff.js`, loaded in Node with `fs.openAsBlob`) on 20 sampled regions per file, compared byte for byte with the generator's function.
+     Record per file: dimensions, channels, bit depth, compression, tile or strip layout, encoded and decoded bytes, SHA-256, generation time.
+  3. Baseline on the primary reference host, engine experiment off and on: import each file through the interface, record what happens
+     (refusal and its message, the downsampling factor chosen, or the failure), the time to the first frame with image content, the
+     process-tree memory peak (the sampler of §7), and whether pan, zoom, one brush stroke and the interval table work. Failures are results
+     here, not defects to fix.
+  4. Record the hardware. A 16 GiB computer is listed as not measured unless one is available.
+  5. From the baseline, propose (do not decide) the size above which a section should be tiled, for the design session.
+- **Tests:** the generator on small sizes: determinism (same bytes twice), header fields read back by Pillow, region equality with the pure
+  function, refusal of an output folder inside the repository and of a disk without room (simulated). `pytest` and `node --test` for the
+  touched tools.
+- **Done when:** the generator and the baseline evidence are committed, and the summary lists, per file, what works today and what does not.
+
+##### M2.1.4 - Tables and figures with 100,000 rows: measure — state: Done (16 Nov 2026), development gate; [report](benchmarks/M2.1.4.md)
+
+- **Goal:** know where the program stops being fluid with tens of thousands of data rows: the Data table (with and without the visible-row
+  rendering of M2.1.3), the figures and the multiproxy charts. Measure only; the fixes become cards of the design session.
+- **Read first:** [M2.1.3 benchmark](benchmarks/M2.1.3.md) (its fixtures and tool); contract §7, last row of the interactive targets;
+  `app/js/tableview.js`; `app/js/plot.js`, `figures.js`, `multiproxy.js` (how a figure is drawn: one SVG element per point or not).
+- **Change:** extend the M2.1 measuring tool or add `tools/measure_large_tables.mjs`; evidence `docs/benchmarks/M2.1.4.md` (raw JSON small, or
+  outside the repository: card H3); `docs/TECHNICAL_DOCUMENTATION.md` §1.4 if a tool is added; `CHANGELOG.md` (Internal).
+- **Do not touch:** the program.
+- **Steps:**
+  1. Reuse the generated M2.1 projects at 20,000 and 100,000 rows (public or generated data only).
+  2. Measure: frame intervals while scrolling the Data table for 5 s, visible-row rendering off and on; opening the table; drawing a depth
+     plot and a cross-plot of 50,000 and 100,000 points, and redrawing them after one setting change; the multiproxy chart with the same
+     series; the response to hovering and selecting a point. Count the DOM and SVG elements each view creates.
+  3. Report each case against the target (frame interval p95 <= 33 ms) and, for each failing case, the slowest step from a CPU profile.
+- **Tests:** the tool's own checks (it measures).
+- **Done when:** the evidence is committed with a verdict per case.
+
+##### M2.1.5 - Multiproxy: build the depth-age relation once per core (found by M2.1.4) — state: Ready
+
+- **Goal:** the first opening of the multiproxy log of a core with 100,000 rows takes at most 2 s (195 s today, 7.7 s at 20,000 rows), with
+  bit-identical results. The target was proposed by this card from the contract's "first useful view <= 2 s" and may be changed by the maintainer before the measurement.
+- **Cause (measured, [report](benchmarks/M2.1.4.md)):** `coreConvert` (`app/js/geo.js:103`) builds, filters and sorts every depth-age pair of the core on each call, and
+  `buildSamples` (`geo.js:170-171`) calls it twice for every sample of the grid: the work grows with the square of the rows. The profile of the cold opening puts about 129 s in
+  `coreConvert` itself and about 180 s with the functions inside it, plus 13 s of garbage collection.
+- **Read first:** `app/js/geo.js` (`coreAges`, `coreConvert`, `buildSamples`, `intervalsOnAxis`, `interpAge`/`lerp`); `tests/app/geo.test.mjs`; `docs/benchmarks/M2.1.4.md`
+  (the profile and the tool); the technical manual's section on depth-age conversion (formulas must still match the code).
+- **Change:** `app/js/geo.js`: a function that prepares the relation of one core for one direction (the sorted source and destination arrays, built once) and returns a function that
+  converts a value; `coreConvert` keeps its signature and result and becomes a wrapper (it is also used by `intervalsOnAxis`, a few calls); `buildSamples` prepares the two directions once
+  per core before the grid loop. No cache that outlives a call (the core's arrays can be edited), so there is nothing to invalidate. `tests/app/geo.test.mjs`; `CHANGELOG.md`
+  ("For users": opening the multiproxy log of a long core is much faster; "Internal" for the tool measurements).
+- **Do not touch:** the interpolation formula and its edge behaviour (clamping, missing values, unsorted input, equal depths), the result of any function, the saved-project format,
+  other modules. If `interpAge` itself is linear in the number of pairs per call, say so under the card instead of redesigning it: measure first.
+- **Steps:**
+  1. Before changing code, write tests against the **current** `coreConvert` and `buildSamples` on small deterministic cores (with `null` depths and ages, unsorted rows, repeated
+     values, one pair, none, `clamp` on and off, both directions) and record their results as expectations. They must pass on the old code.
+  2. Implement the preparation function; make `coreConvert` a wrapper; make `buildSamples` use the prepared converters.
+  3. The same tests pass unchanged, and a randomised test compares old and new results on cores of up to 500 rows with exact equality (keep the old implementation inside the test).
+  4. Measure: `node tools/measure_large_tables.mjs --chrome PATH --out docs/benchmarks/M2.1.5-windows.json --parts figures --rows 20000,100000 --reps 3` and compare the multiproxy
+     rows of the table in M2.1.4.
+- **Tests:** `node --test tests/app/geo.test.mjs`, then the whole `node --test tests/app/*.test.mjs`; `npm run typecheck`; the regression against
+  `legacy/v2.1_console/example_output.csv` is not affected (Python) but `pytest` is run once at the end of the session.
+- **Done when:** the old and new results are exactly equal on the tests; the first opening at 100,000 rows is <= 2 s (or the measured value and the reason are recorded and the
+  maintainer decides); `docs/benchmarks/M2.1.5.md` gives the before and after numbers; the report names what was not measured.
+
+##### M8.4.14 to M8.4.19 - summaries (detailed by a design session after M2.1.4)
+
+- [ ] **M8.4.14 - Tile store and pyramid import (M2.3.2).** The store format of §3.4 specified in the engine contract (a new section) and the
+      technical manual before any file is written; the engine imports a source file into a pixel pyramid in the background, with progress,
+      cancellation and a bounded memory budget, and reads tiles by level and position; the main process names the store folder. Includes the
+      decoder choice for TIFF/BigTIFF (tiled, striped, deflate, 16-bit) and JPEG, comparing Pillow, a minimal own TIFF reader and other
+      libraries on capability, packaging size and offline cost: **a new dependency needs the maintainer's approval** (AGENTS §3.9). Acceptance:
+      sampled pixels equal the generator's function exactly; corrupt tiles, oversized declarations, interruption and a full disk are handled;
+      pyramid-building throughput reported.
+- [ ] **M8.4.15 - Tiled viewer (M2.3.3, display).** The section view, the navigation strip and the depth mapping show a tiled section from a
+      bounded page cache (visible tiles and a margin, prefetch, obsolete requests cancelled, a lower level shown while the full level
+      arrives), with full-resolution coordinates and depth positions identical to today's. Behind a new flag (its row added to the flag table
+      when built). Acceptance: the pan, zoom, first-view and memory targets on the M8.4.13 fixtures. Also measures the tiled path on small
+      sections, for rule 6 of §3.4.
+- [ ] **M8.4.16 - Tiled masks, editing and undo (M2.3.3, editing).** Mask tiles in the store (content-addressed, versioned); every editing
+      tool works on loaded tiles; undo and redo bounded and per tile; changed tiles sent in the background and sent again after an engine
+      failure. Acceptance: the input-to-next-frame target during strokes; the guarantees of M8.4.4 at tile granularity; exported masks
+      identical to the whole-image path on fixtures that fit in memory.
+- [ ] **M8.4.17 - Interval table of tiled sections (M2.3.4, counting).** Per D11: row counts per tile and the interval table in the engine
+      (A) or in the page (D). Acceptance: exact equality with `section.intervals/1` on whole images that fit in memory, including objects and
+      overlaps that cross tile seams, exclusions and fractional intervals; the 150 ms and 300 ms targets.
+- [ ] **M8.4.18 - Saving, reopening, backup and export of large projects (M2.3.5 and the export part of M2.3.4).** The save order of §3.4
+      rule 4; the project record names the store version (a versioned extension of the project format, with old projects opening unchanged);
+      folder backup; a portable copy versus a reference to an external source file, with checksums and recovery of a missing or moved source;
+      streamed export of masks and images. Acceptance: failure tests (disk full, interrupted save, partial cache, killed engine) that keep the
+      last good save; multi-gigabyte projects reopen with unchanged source bytes, masks and results.
+- [ ] **M8.4.19 - Milestone gate of part C.** Windows, macOS and Linux on one commit; the interactive targets measured on the primary
+      reference host with the fixtures; what was not measured listed (16 GiB computer, Intel Mac, clean machines, macOS and Linux timing).
+
+- **Result of the measurements (15 November 2026):** [summary](validation/M8.4.8-final-summary.md). Matched timing still fails for (a) and (b) (public 226 and 166 ms against limits of 51 and 60; synthetic 305 and 271 against 51 and 68); (c), the memory peak and parity pass; the interactive targets are met for (a) on the public example and not for (b); input during a stroke is 15.6 ms p95 with the engine on and off; the desktop end-to-end test survives a coordinator killed during an undo. The three-system milestone gate is the push of the work branch (item 3 above needs the CI runners).
+
+#### M8.4.20 - Engine speed: what is left of the "velocidad del motor" list — state: Ready after M8.4.8 (placed here at the maintainer's request, 15 November 2026)
+
+- **Origin:** the maintainer asked for a card "Velocidad del motor" with six items: a persistent worker, uploading each label image once and reusing it by hash, shared memory instead of IPC chunks, a faster hash, several sections in parallel or in one job, and the 25 ms memory sampler with the M8.3.8 measurements repeated; approved or failed by the timing comparison. Four of the six exist (persistent worker: corrections after M8.3.8; label image uploaded once and reused: M8.4.2; only changed rows travel: M8.4.4; sampler at 25 ms and the repeated measurements: M8.3.8, M8.4.1, M8.4.8). The number M8.3.9 of the request was already the cross-platform gate.
+- **Goal:** evaluate, with measurements, the three items that are not done, and decide for each: adopt, reject, or ask the maintainer.
+- **Read first:** [M8.4.8 summary](validation/M8.4.8-final-summary.md) (where the time goes: upload about 50 ms per edit, engine about 20 ms, bridge about 15 ms per request); M8.4.6 (batch design, deferred); contract section 3 (SHA-256 in `buffer.begin` and `buffer.commit`, 1 MiB frames).
+- **Change:** evidence only unless a measurement justifies a change; any change is its own card. Items:
+  1. **Shared memory instead of 1 MiB chunks** for large buffers: measure the copy and framing cost of one 25 MB upload (page, main process, engine) against a memory-mapped file in the scratch folder written by the main process. The page still never names paths; the file is in the engine's private scratch folder; the same hash check applies.
+  2. **A faster hash** (xxHash, BLAKE3): the contract requires SHA-256 for identity (cache keys, settings hash, verified copies). **A change of hash is a decision for the maintainer, not an implementation detail**: report the measured saving first (the page hashes about 15 ms per 24 MB and the engine verifies again).
+  3. **Several sections in one job**: resume the design of M8.4.6 only if a measurement shows that the per-request cost (about 33 ms per section) matters for the interactive targets of contract section 7.
+- **Acceptance (as the maintainer stated it; measured, not argued):** (i) analysis of one large section <= 100 ms with a cold cache and the worker already running; (ii) the whole public example <= 2x the JavaScript time; (iii) the ten-cycle memory test within +64 MiB; (iv) identical results on the fixtures. Measured today: (i) not met (a cold analysis of the six public sections took 1.6 s in M8.3.8, about 0.6 s with resident inputs); (ii) not met (226 ms against 2 x 1.4 ms); (iii) met (M8.3.8, corrected); (iv) met. **Criteria (i) and (ii) cannot be met by the whole-image path** with a separate process that verifies every image by its full hash; the design session of 15 November 2026 chose the tile store of part C for that reason. This card therefore reports the verdicts and **does not block part C** unless the maintainer declares it blocking.
+- **Do not touch:** the hash in the contract, the transport and the method, without a decision.
+- **Done when:** the three evaluations are recorded with numbers, the four criteria have a verdict, and the maintainer has been asked about the hash if its saving is worth a change.
+
+**Part B - what M8.5 needs from the engine (cards written in the design review of 14 November 2026).**
+
+**Order (15 November 2026): part B comes after part C** and the design session that closes part C reviews these cards: if every section
+moves to the tile store ([ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84) rule 6), M8.4.9 is
+replaced by reading tiles from the store; M8.4.10 does not depend on images and stays as written.
+
+Why part B exists: the image methods of M8.5b/e and the table methods of M8.5a/d would otherwise upload their inputs on every
+call, which is exactly what made the first slice 30-60 times slower than JavaScript. Design choice recorded here: **in part B the
+engine receives the pixels the interface has already decoded** (the working array after downsampling, crop and rotation), once per
+section, and does not decode image files itself. Reason: the renderer's decoders (browser decoding, `tiff.js`, the downsampling
+factor) are the authority for what a section's pixels are; a second decoder in the engine would need its own proof of identity
+for every format and would still disagree on JPEG. The engine decodes files only in part C, where a multi-gigabyte file cannot
+be decoded by the interface at all, and that card will carry the parity evidence.
+
+#### M8.4.9 - Section pixels resident in the engine — state: after part C (reviewed then; may be replaced)
+
+- **Goal:** a section's working pixels (8-bit RGBA `orig` and, when present, 16-bit `orig16`) are in the engine under an identity,
+  so that a method takes handles instead of an upload. No scientific method changes.
+- **Read first:** `app/js/engineclient.js` (the resident-input code of M8.4.2); `app/js/app.js` where pixels are created or replaced
+  (`newSection`, the loader near `s.orig = r.rgba`, `cut` at crop, `rotate90`, the downsample reload near `s.ds = k2`); contract §3
+  (limits) and §4; `src/sedcoretool/engine/buffers.py`, `specs.py`.
+- **Change:**
+  1. Extract the resident-input registry of `engineclient.js` (owner, name, identity, token, bytes, least-recently-used, bounds,
+     eviction, `keep`, `forget`) into a pure module `app/js/residentstore.js` with its own tests; `engineclient.js` uses it. No behaviour
+     change: the existing 47 tests pass unchanged (this is the review's request for modularity: masks, pixels and tables will share it).
+  2. Add the type `u16le` end to end (`buffers.py` `ITEM_BYTES`, `specs.py` `NUMPY_DTYPES`/`CONTRACT_DTYPES`, `engine-ipc.js` `DTYPES`,
+     `engineclient.js` `OUTPUT_TYPES`, contract §3), with the same tests the other types have.
+  3. `sectionanalysis.js` (or a new pure module `sectionpixels.js`): `pixelIdentity(section)`, the SHA-256 of the working array bytes
+     plus its width, height and bit depth, computed when the pixels are loaded or replaced and stored on the section (`s._pxid`), never
+     per analysis (hashing 24 MB costs about 15 ms); `buildPixelBuffers(section)` returns `{rgba: u8[h,w,4], rgba16?: u16le[h,w,4]}` as views.
+  4. `engineclient.js`: `ensurePixels(owner, section)` uploads those buffers when the resident identity differs and returns their tokens;
+     they count against a pixel budget of their own in the registry. A section whose pixels do not fit is not resident (part C).
+  5. Budgets: the engine's session budget is 512 MiB. Masks (up to 256 MiB), pixels (up to 192 MiB) and the transient reserve do not
+     fit together with working copies. Decide with a measurement of the public example and the generated project, then record in
+     contract §3 either lower resident bounds or a session budget of 768 MiB (the disk cap stays 1 GiB). Do not raise it without the
+     measurement.
+- **Do not touch:** the interface's own use of `orig`/`orig16` and its memory management (`MEM`, `pxTouch`): the renderer still holds
+  its copy until part C; the saved project; any method.
+- **Tests:** registry unit tests (eviction order, bounds, identity change replaces and releases, forget); identity changes on
+  crop, rotation, downsampling and reload, and not on a settings change; upload of a 16-bit section end to end through the real
+  engine (bytes read back equal); a section that does not fit is not kept; release on project replacement; mutation tests; the
+  desktop end-to-end with the experiment on and off; memory peak measured with pixels resident (record it, compare with §7).
+- **Done when:** the tests pass, the memory peak is recorded against the §7 limit, and a probe method (a test-only method that
+  sums a region of the resident pixels) reads the same bytes as the interface holds.
+
+#### M8.4.10 - Record tables resident in the engine — state: Ready after M8.4.9
+
+- **Goal:** the tables that M8.5a, M8.5d and M6 consume (depth/age records, data tables, multiproxy series) can be held in the engine
+  in one columnar format, so those methods take handles. No scientific method changes.
+- **Read first:** M8.4.9 (the registry); contract §4-§5 (the convention for missing values: a value column and a `<name>_valid`
+  column, never NaN); `app/js/log.js`, `geo.js` (`featureSeries`, `buildSamples`), `sheet.js` for the shapes of the tables.
+- **Change:** a pure module `app/js/tablesnapshot.js`: `buildTableSnapshot(columns)` takes named numeric columns (plain arrays,
+  null for missing) and returns `f64le` value columns, `u8` validity columns, the names and units as a small `utf8json` table and an
+  identity; limits (columns, rows, bytes) stated and enforced; decoding on the engine side in a helper of `methods/validation.py`
+  (`table(inputs, name, columns)`) that rejects a shape, a non-finite valid value or a name that is not allowed, naming the field. Contract
+  §4 gets a "tables" paragraph. Resident through `residentstore.js`.
+- **Do not touch:** the interface's tables and formulas; saved projects.
+- **Tests:** round trip of random tables with missing values, exact for every value and every missing slot; rejection cases for the
+  helper; limits; the identity changes with any value, name or unit and with nothing else; a probe method that returns column sums.
+- **Done when:** the tests pass and the probe through the real engine equals the interface's own sums.
+
+#### M8.4.11 - Milestone gate of part B — state: after M8.4.10
+
+- **Goal:** the milestone gate (Windows, macOS, Linux on one commit) for part B, and the memory and timing evidence of M8.4.9 (or of its
+  replacement) repeated on the final commit. M8.5 may start only after this card and the milestone gate of part C (M8.4.19).
+
+### M8.5 and M8.6 - summaries
+
+Cards are written by a design session when the previous milestone passes its milestone gate. **Prerequisites of M8.5:** the milestone gates of
+M8.4 part C (card M8.4.19: the tile store) and part B (card M8.4.11: pixels of small sections and tables). From slice (b) on, an image
+method works on regions of the tile store, never on a whole decoded raster.
+
 - [ ] **M8.5 - Migrate the remaining scientific methods,** one slice at a time with the recipe of
       [ARCHITECTURE §5.1](ARCHITECTURE.md#51-add-or-migrate-a-scientific-method): (a) depth/age parsing and
       record/formula transformations; (b) image filters, detection and object features; (c) ichnotaxon
       classifiers and embeddings; (d) multiproxy rules, models, interpolation and fitted statistics; (e) U-Net
-      inference, then training integration after M3.2.5.
+      inference, then training integration after M3.2.5. Slices (a) and (d) use M8.4.10, (b) and (e) use the tile store
+      (and M8.4.9 for small sections if it is kept), (c) follows (b).
+  - Lessons of M8.3, for every slice: the inputs are resident in the engine from the start (M8.4 services); the
+    second card measures the matched timing of the first end-to-end path with the M8.4 tool, before any interface
+    card (M8.3 found its 30-60 times slowdown only at its last card); each slice ends with a milestone gate.
   - Acceptance per slice: independent reference fixtures, explicit provenance, unchanged public contracts; exact
     counts/masks/labels and predeclared tolerances elsewhere; figures and exports unchanged.
 - [ ] **M8.6 - Promote desktop and retire duplicate computation.** After the release checklist passes: the engine
@@ -430,7 +1024,7 @@ Cards are written by a design session when the previous milestone passes its dev
       export/import path for its stored projects.
   - Acceptance: one implementation per method; identical API, CLI and desktop results; complete desktop and
     interrupted-save regressions; storage identifiers and old project readers retained; documents and CI updated
-    in the same delivery; engine errors stay visible.
+    in the same delivery; engine errors stay visible; every earlier milestone gate passed.
 
 ## Small maintenance cards
 
@@ -456,7 +1050,7 @@ Independent of M8; each can be done in under an hour when the maintainer asks.
     a stale folder, a fresh folder of another live session and a look-alike name that must survive.
   - Done when: the test passes and the desktop end-to-end test leaves no `sedcoretool-engine-*` folder behind.
     The end-to-end test's own `sedcoretool-desktop-test-*` profiles should be removed by the test as well.
-- [ ] **H5 - The `e2e` job of the GitHub workflow is red and has been since 10 November 2026.** Findings of 13-14 November 2026
+- [~] **H5 - The `e2e` job of the GitHub workflow was red from 10 November 2026 to 14 November 2026; fixed on the work branch, watching.** Findings of 13-14 November 2026
       (the CI result and its failure message are readable without logs through the public API: the smoke test now emits `::error::`
       annotations, `GET /repos/SantiCa/SedCoreTool/check-runs/<job id>/annotations`; the unauthenticated API allows 60 requests an hour):
       (1) **Fixed:** the five Python jobs failed because `psutil` (imported by `tools/benchmark.py` through the benchmark tests) was not in
@@ -477,10 +1071,14 @@ Independent of M8; each can be done in under an hour when the maintainer asks.
     source at the centre of a texel (no interpolation), not at a rounding tie. Open hypothesis: the legacy path draws straight into the
     `view` canvas at a vertical offset of 14 pixels while the preview draws into a new canvas at the origin and copies, and SwiftShader's
     float arithmetic differs by the offset for this one row. Not tested. Windows (GPU and CPU) is exact.
-  - Next: a design session decides first whether a one-level difference between the two renderers on Linux is a platform rasteriser detail
-    or a real discrepancy of the preview path (M2.2.3 promised exact equality); the exact-equality contract is not weakened without the
-    maintainer's decision. Then handle the remaining flaky waits one at a time, each with its measured values in the failure message
-    (the depth-mapping check already prints them). Done when the `e2e` job passes ten consecutive pushes.
+  - **Cause found and fixed (14 November 2026).** (a) The same stretch drawn at (0,0) and at (6,14) of a canvas differed in 48 values under
+    SwiftShader (probe `offset: 48`); the preview drew at the origin of its own canvas, the legacy path at (6,14) of the view. The preview
+    now stretches at the offset where the view draws it (`navigationPreviewCanvas(s, w, h, origin)`), exact equality unchanged: the
+    check passes on Linux and Windows. It was a rasteriser dependence, not a logic error of the preview. (b) That failure had hidden a second
+    one: two checks of `interrupted-saves.mjs` read Spanish messages and the Linux runner's browser is English; the test now fixes the
+    interface language. First green run: work branch, commit after `0926bbc`. `master` (V0.150) still has the failing job until the next
+    version. (c) The local flakes (the wait for the 16-bit TIFF after reopening, Puppeteer's 180 s protocol timeout) had a product cause, found with the CPU profiler on 14 November 2026: `sectionCanvas` created a new full-strip grey canvas on every call for a section whose picture was not loaded yet, and the image strip asks once per output row (up to 4000), so `toDataURL` took 6-25 s. It now keeps one grey canvas while the section stays pending; the smoke test asserts it (fails without the fix) and names any page call over 5 s. Done when the
+    `e2e` job passes ten consecutive pushes.
 - [ ] **H3 - Move raw benchmark reports out of the repository.** `docs/benchmarks/*.json` weighs about 10 MB.
       Needs the maintainer's decision on where the raw files go; the `.md` summaries stay.
 
@@ -491,7 +1089,7 @@ Not scheduled. Details, acceptance criteria and the backlog are in [roadmap-futu
 | Area | Tasks |
 |---|---|
 | Editing and recovery | M1.2.2 remaining desktop hangs |
-| Large images | M2.3.1–M2.3.5 (delivered through M8.4) |
+| Large images | M2.3.1–M2.3.5 (required for 1.0; scheduled as part C of M8.4, cards M8.4.12-M8.4.19) |
 | Analysis and U-Net | M3.1.6, M3.1.7, M3.2.4, M3.2.5, M3.3.2, M3.3.4 |
 | Optional acceleration | M4.1.1 Rust kernel, M4.1.2 GPU |
 | Release readiness | M5.1, M5.2, M5.4, M5.5 |

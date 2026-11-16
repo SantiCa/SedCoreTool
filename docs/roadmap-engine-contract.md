@@ -4,16 +4,22 @@ Design baseline: V0.141, 12 November 2026. Authorised by the maintainer's instru
 [roadmap](roadmap.md#active-priority-desktop-and-one-scientific-engine). Editor: Codex. Verification:
 source inspection and author-run repository checks; no independent reviewer is assigned.
 
-This is a specification for pending M8.2–M8.6 work, not a description of an implemented engine.
-The current desktop/browser calculations, Python API, file formats and defaults remain unchanged.
-M8.2.1 implements a development-only subset: see [current behaviour and limits](TECHNICAL_DOCUMENTATION.md#262-experimental-engine-process).
-The remaining capabilities below are still design requirements, not claims about that transport slice.
+This is the specification for M8.2–M8.6. M8.2 and M8.3 implement part of it behind the default-off experiment
+flag: the transport, staged buffers, `buffer.read`, `section.analyze` with `section.intervals/1` and the job
+execution model of §3 ([current behaviour and limits](TECHNICAL_DOCUMENTATION.md#262-experimental-engine-process)).
+**Not implemented yet** (15 November 2026): progress events, the batch request for several sections, engine-held source images and tables, the tile store, and everything after M8.4.7. Implemented in card M8.4.7: a new engine session after `ENGINE_UNAVAILABLE` (one automatic restart per program session, then the user's Retry; all tokens and buffers of the old session are invalid; no wire change). Implemented since M8.3 (cards
+M8.4.2-M8.4.5): inputs kept in the engine between analyses, remembered counts, one packed result, `buffer.derive` and the recount of
+written rows. The matched-timing gate of §7 still fails for the interval-size change and for edit/undo/redo (see the roadmap); the
+memory-peak gate passes. Without the flag, the
+desktop/browser calculations, Python API, file formats and defaults are unchanged.
 Protocol version 1 and method `section.intervals/1` below are separate versioned contracts. Changing
 scientific semantics requires a new method version and explicit acceptance, even if the wire format fits.
 
 How the code that implements this contract is layered, and the path of one request through it, are described in
 [ARCHITECTURE.md](ARCHITECTURE.md). Amended on 13 November 2026 (card M8.3.5): §3 now defines `buffer.read`, which downloads
-committed buffers, and the exact shape of the `section.analyze` response; progress events are not yet sent.
+committed buffers, and the exact shape of the `section.analyze` response; progress events are not yet sent. Amended on
+15 November 2026 (option A for large images, ARCHITECTURE D10-D12): §2 describes the ownership of tiled sections, §6 the new order
+of M8.4, and §7 adds absolute interactive targets and the rule that decides where the interval table of a tiled section is computed.
 
 ## 1. Current calculation and ownership inventory
 
@@ -58,10 +64,17 @@ JSON canonicalisation. Equal content under a different revision can reuse immuta
 must still carry the requesting revision. Closing a project releases its queued jobs, snapshots and results;
 process restart creates a new session and invalidates every old handle.
 
-M8.4 changes ownership in a separate delivery: engine/native services own source pixels, masks and derived
-arrays; the renderer receives tiles and summaries and submits revisioned edit commands. Specify a staged edit
-journal and one persistence coordinator before that transition. Do not create two independent writers. Keep
-atomic saves, recoverable backup, native samples, history and the compatibility identifiers in AGENTS.md.
+M8.4 (revised 14 November 2026): the renderer stays the owner of live masks, edit history and saving for sections held in the
+page. The engine keeps a verified copy of each section's analysis inputs, updated with the changed rows (card M8.4.4), so that the
+edit path never waits for it and an engine failure cannot change an edit or a save.
+
+Tiled sections (decided 15 November 2026, option A; planned, part C of M8.4; design in
+[ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84)): the pixels (a pyramid built from the
+source file) and the saved masks live in a tile store on disk that only the engine writes, on the page's request. The page loads the
+tiles it shows and owns the live edits of loaded tiles and the undo history until the store has acknowledged them. A save writes the
+new tiles, then the new store version (atomic replacement), then the project record that names it, so a failure at any step leaves
+the last good save readable. There is still exactly one writer of each file of a project. Keep atomic saves, recoverable backup,
+native samples, history and the compatibility identifiers in AGENTS.md.
 
 ## 3. Private transport v1
 
@@ -94,10 +107,11 @@ fields rather than silently ignore an unsupported setting. Protocol fixtures in 
 | `hello` | `{protocol:1}` | `{protocol:1, engine_version, runtime_id, methods, limits}`; `runtime_id` is the packaged runtime/constraint manifest SHA-256; methods is the explicit supported method-version list. |
 | `buffer.begin` | `{dtype, shape, byte_length, sha256}` | `{handle}`; reserve a staging buffer after checked dimension multiplication and budget admission. |
 | `buffer.chunk` | `{handle, offset, byte_length}` immediately followed by one binary frame of that length | `{next_offset}` after accepting that pair; offsets start at zero and must be contiguous. |
+| `buffer.derive` (card M8.4.4) | `{base, dtype, shape, byte_length, sha256}`: `base` a committed, not released, non-metadata buffer whose dtype, shape and length are exactly those given | `{handle}`; a staging buffer that starts as a copy of `base` and is charged to the session budget like any other. `buffer.chunk` to it may use any ascending, non-overlapping offsets inside the buffer (not necessarily contiguous); `buffer.commit` then succeeds only if the whole content has the declared SHA-256 (and, as always, finite float data), so a client that missed a change gets a refused commit and never a wrong buffer. The base is not modified. |
 | `buffer.commit` | `{handle}` | `{handle, byte_length, sha256}` only after complete size/hash verification; committed buffers are immutable. |
 | `buffer.release` | `{handles:[...]}` (at most 64) | `{released:[...]}`; idempotent for previously released handles in this session. Referenced buffers remain pinned until the job ends. |
 | `buffer.read` | `{handle, offset, byte_length}`, 1 ≤ byte_length ≤ 1,048,576, offset + byte_length ≤ the buffer's length; the buffer must be committed and not released | `{offset, byte_length}`, immediately followed by exactly one binary frame holding those bytes. Any error response is not followed by a binary frame. |
-| `section.analyze` | `{method:"section.intervals/1", project, section, revision, settings_hash, inputs}`: project and section are session-local UUIDs, revision a non-negative integer, `settings_hash` the SHA-256 of the `settings` buffer (the coordinator rejects a different value), and `inputs` maps the names of §4 to committed handles of the matching dtype and rank (`labels` `i32le` 2-D, `exclude` `u8` 2-D of the same shape, `stack_offsets` and `stack_members` `u32le` 1-D, the others `utf8json`); `stack_members` may be omitted when there is no overlap, every other name is required, unknown names are rejected | `{project, section, revision, settings_hash, method, dimensions:{bins,classes,schemes}, outputs, provenance}` echoing the request's identity. `outputs` maps each §5 column name (including each `<name>_valid`) to `{handle, dtype, shape, byte_length, sha256}` of a committed buffer that counts against the session budget until released; download it with `buffer.read`. `provenance` holds `engine_version`, `runtime_id`, `method`, `revision`, `deterministic`, `input_sha256` (hash of every input buffer by name) and `elapsed_ms`. A rejected input is an error response whose `details.field` names the input and member (for example `settings.roi`). Progress events (`{stage, completed, total}`, at most 10 per second) are part of this contract but are not sent yet; the Electron client of card M8.3.6 does not read events. |
+| `section.analyze` | `{method:"section.intervals/1", project, section, revision, settings_hash, inputs}`: project and section are session-local UUIDs, revision a non-negative integer, `settings_hash` the SHA-256 of the `settings` buffer (the coordinator rejects a different value), and `inputs` maps the names of §4 to committed handles of the matching dtype and rank (`labels` `i32le` 2-D, `exclude` `u8` 2-D of the same shape, `stack_offsets` and `stack_members` `u32le` 1-D, the others `utf8json`); `stack_members` may be omitted when there is no overlap, every other name is required, unknown names are rejected | `{project, section, revision, settings_hash, method, dimensions:{bins,classes,schemes}, outputs, layout, provenance}` echoing the request's identity. *Amended in card M8.4.3:* `outputs` holds exactly one entry, `result`, `{handle, dtype:"u8", shape:[N], byte_length, sha256}` of a committed buffer that counts against the session budget until released; it contains every §5 column (including each `<name>_valid`) one after another, and `layout` maps each column name to `{dtype, shape, offset, byte_length}` in it (one buffer instead of about 35 handles and reads). Every column starts at a multiple of 8 bytes, columns do not overlap, nothing in the buffer is unaccounted for, and N is a multiple of 8. Download the buffer with `buffer.read`. `provenance` holds `engine_version`, `runtime_id`, `method`, `revision`, `deterministic`, `input_sha256` (hash of every input buffer by name) and `elapsed_ms`. A rejected input is an error response whose `details.field` names the input and member (for example `settings.roi`). Progress events (`{stage, completed, total}`, at most 10 per second) are part of this contract but are not sent yet; the Electron client of card M8.3.6 does not read events. |
 | `job.cancel` | `{request_id}` | `{state:"requested"}` or `{state:"already_terminal"}`; the target still gets its own one terminal response. |
 | `shutdown` | `{}` | `{}` after cancelling/releasing work; main enforces the shutdown deadline. |
 
@@ -110,13 +124,18 @@ string. Preflight metadata structure/string sizes before constructing rich objec
 memory within the session budget; byte length alone is not a sufficient memory estimate.
 No compressed input is accepted by this initial transport. Validate finite floating inputs before computing.
 
-**Job execution (implemented in card M8.3.5).** A job runs in its own worker process (`engine/method_worker.py`), never in the coordinator. The coordinator writes a job description `{method, cancel_path, output_dir, inputs: {name: {path, dtype, shape}}}` into a private folder of the session scratch directory, starts the worker with `-I -B -u`, and lets it map the numeric inputs read-only. Cancellation is a marker file the method polls between blocks of 256 rows. The worker writes each result column to `<output_dir>/<name>.bin` and answers with one JSON frame: `{ok, dimensions, columns:{name:{dtype,shape,byte_length,sha256}}}`, `{error:{code,field}}` for a rejected input, or `{cancelled}`. The coordinator never trusts it: it checks the frame, then moves each file into the buffer store only after re-checking size, shape, SHA-256 and finite float data against the session budget; any mismatch, a non-zero exit, a crash or the 120 s deadline is `INTERNAL` and nothing is adopted. Job folders are removed when the job ends. Worker error codes are limited to the stable codes of this section and the field to a plain name.
+**Job execution (implemented in card M8.3.5; amended in the corrections after M8.3.8).** A job runs in a worker process (`engine/method_worker.py`), never in the coordinator. *Amendment of 14 November 2026:* the first version started one process per job; measuring M8.3.8 showed that starting the interpreter and importing NumPy cost about 0.7 s of the 0.9 s a large section needed, so the coordinator now keeps **one long-lived worker, started with `-I -B -u`, that runs one job at a time**. Isolation is unchanged where it matters: the coordinator still never trusts the answer (below), kills the worker on a cancellation that is not acknowledged within 1.5 s, on the 120 s deadline, on an answer it does not approve, on any write failure and when a job is abandoned (a surviving worker could answer an old job to a new one), starts a new worker for the next job after any of these or after an unexpected exit, and stops an idle worker after 30 s. The coordinator writes a job description `{method, cancel_path, output_dir, inputs: {name: {path, dtype, shape}}}` into a private folder of the session scratch directory and sends the absolute path of that file as one line on the worker's stdin; end of input stops the worker at once. The worker maps the numeric inputs read-only and unmaps them before it answers, so the coordinator can delete the buffers. Cancellation is a marker file the method polls between blocks of 256 rows. The worker writes all result columns, packed (see "Result buffer" under `section.analyze`), to one file `<output_dir>/result.bin` and answers each job with exactly one JSON frame: `{ok, dimensions, packed:{byte_length, sha256, layout}}`, `{error:{code,field}}` for a rejected input, or `{cancelled}`. The job description also carries the SHA-256 that the coordinator verified for each input (`inputs: {name: {path, dtype, shape, sha256}}`), which lets the worker remember, by those hashes only, the validation and the row counts of masks it has seen and the decoded metadata tables, bounded in size and lost with the worker; a job that changes only the settings then counts nothing. For an input made with `buffer.derive` the description adds `derived_from: {sha256, ranges}`: the hash of the base and the `[start, end)` byte ranges that the coordinator itself wrote into the copy, so every other byte is the base's (card M8.4.5). When the worker holds the base's validation and counts for the same ROI, number of classes and stack tables, and every object listed in both versions has the same effective class, it validates and counts only the image rows those ranges touch (an object listed in only one version cannot occur in the unchanged rows: the whole new label image is validated whenever the list of objects changed, and the base was validated without the new ones); otherwise it does everything, as for any buffer. The coordinator never trusts the answer: it checks the frame and the layout (names, types, shapes against lengths, alignment, no overlap, size of the file), moves the file into the buffer store, then reads it once to check its SHA-256 and that every float64 column is finite, against the session budget; any mismatch, an unapproved or missing answer, a worker that ends before answering, a crash or the 120 s deadline is `INTERNAL` and nothing is adopted. An answer that passed these checks stands even if the worker dies right after it. Job folders are removed when the job ends. Worker error codes are limited to the stable codes of this section and the field to a plain name.
 
 Serialize each descriptor/binary pair without interleaving frames; allow at most two unacknowledged chunks
 per direction. Both ends must continuously drain the opposite pipe, and schedule cancellation/control messages
 between pairs. A partial pair, unexpected binary frame, EOF or malformed frame invalidates the session; main
 cleans it up and reports failure without touching live data. Main applies the same bounded streaming policy
 at the renderer IPC boundary; reading a whole buffer to split it afterwards does not satisfy the contract.
+
+Reuse of inputs (card M8.4.2, client side): a client may keep the committed input buffers of a section between analyses and name them in later
+`section.analyze` requests, bounded by 16 sections and 256 MiB and valid only for the identity of the data they hold (masks) or the
+SHA-256 of their bytes (tables). Because those buffers stay live, the engine admits 256 handles per session (it was 128) and the bridge 512
+tokens per page; the byte budget is unchanged.
 
 Initial limits: 256 MiB per buffer; 512 MiB per engine session for all staged/committed buffers, queued-job
 snapshots, results and admitted scratch arrays together; 1 GiB private scratch-disk cap. Admission uses checked
@@ -225,8 +244,10 @@ export/import and saves before adding that extension. No project format changes 
 2. **M8.3:** object/overlap resolver and shared count primitives, then complete interval postprocessing and
    actual desktop binding. First parity fixtures, then edit/undo/redo, results, CSV and save/reopen. Evaluate
    the existing opt-in NumPy counting path under M3.1.6; this design does not promote it by assertion.
-3. **M8.4:** define the M2.3 multi-gigabyte benchmark/ownership contract first; implement native image access,
-   bounded tile viewing, revisioned editing, analysis and saving as separate accepted increments.
+3. **M8.4** (order decided 15 November 2026): part A (inputs resident in the engine; restart; milestone gate), then part C
+   (M2.3: the round-trip measurement of §7, multi-gigabyte fixtures, tile store and pyramid import, tiled viewer, tiled masks and
+   editing, analysis on tiles, large-project saving), then part B (engine-held pixels of small sections and record tables for
+   M8.5), each as separate accepted increments.
 4. **M8.5a:** depth/age parsing and record/formula transformations; **5b:** image filters, detection and object
    features; **5c:** ichnotaxon classifiers/embeddings; **5d:** multiproxy rules/models/interpolation and fitted
    statistics; **5e:** U-Net inference, then training integration after M3.2.5. Each increment has its own
@@ -258,11 +279,41 @@ bridge/startup and cannot establish desktop end-to-end performance.
 |---|---|
 | Numerical parity | Exact row bounds, valid/total/class counts, masks, label decisions, BI/ii and missing-value patterns. Absolute error <=1e-9 in declared depth units and percentage points; no tolerance relaxation after seeing results. Ages must match existing interpolation on fixed models within 1e-9 declared age units. Validate adjacent half-row binary64 inputs and custom schemes. |
 | Required inputs | Public six-section U1385I-1H and generated eight-section 960×6400 M0.1 project (PCG64 seed 138501), 2 and 1.37 cm. Add small synthetic fixtures for same/different-class overlaps, excluded overlap pixels, non-counted classes, predicted/candidate thresholds, ROI offsets, mm/cm/m, zero valid area, exact min-valid threshold, padding, ordered manual ranges and age boundaries/ranges. Fingerprint bytes and revisions; no private images. |
-| Matched timing | Same desktop binary, hardware, fixture, settings and decoder output, flag off/on; one warm-up then six alternating AB/BA paired fresh-process runs, record every sample. Report cold startup separately, cold analysis and cached unchanged reanalysis separately. Warm end-to-end median <= max(1.25×legacy median, legacy median +50 ms); empirical nearest-rank p95 <= max(1.5×legacy p95, legacy p95 +100 ms). Small sample p95 is the sample maximum; publish that limitation. |
+| Matched timing | Same desktop binary, hardware, fixture, settings and decoder output, flag off/on; one warm-up then six alternating AB/BA paired fresh-process runs, record every sample. Report cold startup separately, cold analysis and cached unchanged reanalysis separately. Warm end-to-end median <= max(1.25×legacy median, legacy median +50 ms); empirical nearest-rank p95 <= max(1.5×legacy p95, legacy p95 +100 ms). Small sample p95 is the sample maximum; publish that limitation. *Warm scenarios (decided 14 November 2026, evaluated by `tools/engine_gates.mjs`):* the formula above is applied separately to (a) the interval size changes on every section with no new mask version; (b) one edit of the largest section (the deletion of the trace whose area is closest to 2,000 pixels, through the interface's own Delete key), its undo and its redo, the three pooled; (c) the same analysis requested again with nothing changed. Each sample runs from the request to the published result of the sections it touches; the 100 ms delay that the interface adds before it analyses after an edit is outside the sample in both modes. Cold opening of a project is reported separately. |
 | Timing boundaries | Full job starts when the analysis snapshot is requested and ends when validated current results are published; include snapshot/hashing, transfers, conversions, queue, computation and return. Report stages separately. Cold engine ready <=5 s from spawn through validated hello, with no dependency/network download. Repeated unchanged analysis must exercise the real cache/publication path. |
 | Responsiveness/cancel | During the largest first-slice fixture, injected UI input-to-next-frame p95 <=100 ms. Cancel acknowledgement <=250 ms; target reaches terminal cancelled (or already completed) and releases temporary work within 2 s. Test cancellation during upload, queue, count and result transfer, plus a noncooperative worker; stale results never publish. |
 | Whole-process memory | Sample simultaneous RSS sum of the complete Electron + engine + worker tree at the M0.1 25 ms target cadence, excluding harness/server; report cadence gaps, process list, idle RSS and observed peak, including transfer/conversion overlap. Peak <= max(1.10×matched legacy peak, legacy peak +256 MiB). Record shared-page double-counting/sampling limits; kernel-only memory is insufficient. |
 | Release/recovery | Ten open/analyse/close cycles release all session project handles; no growth in outstanding buffers/jobs/scratch files. After warm-up, final closed-state RSS <= first closed-state RSS +64 MiB. Kill the worker/coordinator mid-job and interrupt saves; live unsaved edits and the last good save/backup remain recoverable. |
+
+**Interactive targets (adopted 15 November 2026 with option A, ARCHITECTURE D10).** The matched-timing limits above compare the
+engine with the JavaScript calculation, which runs inside the page in 1-17 ms; no out-of-process design can meet them for an edit,
+and they do not describe what the user perceives. From part C of M8.4 on, interactive paths are accepted against the absolute
+targets below, on the primary reference host, warm. The matched-timing formula is still computed and reported for scenarios
+(a)-(c), and stays the gate for every path that has no target here. The numbers were proposed by the design review of 15 November
+2026 and adopted with the maintainer's choice of option A; changing them is a maintainer decision, recorded here before a
+validation run.
+
+| Interaction | Target | How it is measured |
+|---|---|---|
+| Pan and zoom over any image size, tiles already cached | frame interval median <= 17 ms (60 frames per second), p95 <= 33 ms | frame intervals during a scripted 5 s pan and 10 zoom steps |
+| Pan and zoom onto tiles not cached | a lower-resolution level is shown in the next frame; full resolution within 250 ms (p95) | from the frame that needs the tile to the frame that shows it |
+| Input during a brush stroke or a pan | input-to-next-frame p95 <= 33 ms, with the engine experiment on and off | 60 injected pointer moves (the responsiveness method above) |
+| Interval table after an edit that touches at most 4 tiles, any image size | p95 <= 150 ms | as scenario (b): from the analysis request (after the interface's fixed 100 ms grouping delay, which is the same in both modes) to the published table |
+| A setting changed for the whole project (interval size) | p95 <= 300 ms for all sections together | scenario (a) |
+| First useful view of a multi-gigabyte image whose pyramid exists | <= 2 s | from the open command to the first frame with image content |
+| Building the pyramid of a newly imported image | reported (MiB/s); progress at least once a second; cancellation acknowledged <= 250 ms | M8.4.13 fixtures |
+| Response of controls (buttons, menus, tabs) while the engine works | p95 <= 100 ms | injected clicks |
+| Whole-process-tree memory while viewing, editing and analysing any of the 2, 4 and 8 GiB fixtures | peak <= 2 GiB | the sampler of "Whole-process memory" above |
+| Scrolling a table of 100,000 rows; drawing or updating a figure of 50,000 points | frame interval p95 <= 33 ms | card M2.1.4 |
+
+**Interactive-calculation rule (decided 15 November 2026; applied once by card M8.4.12, outcome in ARCHITECTURE D11).** The
+interval table of tiled sections is computed by the engine (option A) if one edit of a one-tile section, sent through the real
+chain (page, main process, coordinator, worker) and published, takes p95 <= 100 ms on the primary reference host **plus** the
+in-process median time to turn the row counts of the tallest fixture section into its interval table. The threshold is stricter
+than the 150 ms target to leave room for the tiled viewer. Otherwise the interval table and percentages of the interactive path
+stay in JavaScript (option D of the review), with the Python method as the reference and exact parity tests on every fixture, and
+every other method still moves to the engine; a design session then revises the part C cards before M8.4.14. macOS and Linux
+numbers are not part of the rule (shared CI runners are too noisy for a 100 ms decision); they are measured at the release gate.
 
 Primary reference host: the existing Windows 11/Ryzen 7 7700X/approximately 32 GiB baseline machine. Record
 actual OS, RAM, CPU topology, Electron/Node/Python/native library versions, thread limits, power settings,

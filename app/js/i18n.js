@@ -1858,7 +1858,7 @@ Object.assign(D.en, { 'iv.tidied': 'Overlapping intervals of the same family wer
 // V0.35: Data as a spreadsheet
 Object.assign(D.es, {
   'data.table': 'Hoja de datos', 'ds.edit': 'Permitir editar valores', 'ds.newCol': '+ Columna', 'ds.nMod': '{n} celdas modificadas a mano', 'ds.restoreCell': 'Restaurar celda', 'ds.restoreAll': 'Restaurar todas',
-  'ds.viewport': 'Solo filas visibles (experimental)',
+  'ds.viewport': 'Solo filas visibles',
   'ds.warn': 'Estás editando datos. Cada valor cambiado queda marcado (fondo amarillo y esquina roja), guarda el original y la fecha, se usa en los análisis y figuras y se indica en el CSV exportado. Enter baja una fila; Esc deshace la celda. Las columnas calculadas no se editan: cambia su fórmula (ƒ).',
   'ds.modTip': 'Modificado a mano el {d}. Original: {o}', 'ds.notNumber': 'Escribe un número (o deja la celda vacía para borrar el valor).',
   'ds.type': 'Tipo', 'ds.calc': 'Calculada con otras columnas', 'ds.man': 'Manual (para rellenar a mano)', 'ds.name': 'Nombre', 'ds.formula': 'Fórmula',
@@ -1869,7 +1869,7 @@ Object.assign(D.es, {
 });
 Object.assign(D.en, {
   'data.table': 'Data sheet', 'ds.edit': 'Allow editing values', 'ds.newCol': '+ Column', 'ds.nMod': '{n} cells edited by hand', 'ds.restoreCell': 'Restore cell', 'ds.restoreAll': 'Restore all',
-  'ds.viewport': 'Visible rows only (experimental)',
+  'ds.viewport': 'Visible rows only',
   'ds.warn': 'You are editing data. Every changed value is flagged (yellow background and red corner), keeps the original and the date, is used by the analyses and figures and is listed in the exported CSV. Enter moves down; Esc undoes the cell. Computed columns are not edited: change their formula (ƒ).',
   'ds.modTip': 'Edited by hand on {d}. Original: {o}', 'ds.notNumber': 'Type a number (or leave the cell empty to delete the value).',
   'ds.type': 'Type', 'ds.calc': 'Computed from other columns', 'ds.man': 'Manual (to fill in by hand)', 'ds.name': 'Name', 'ds.formula': 'Formula',
@@ -2125,6 +2125,7 @@ Object.assign(D.es, {
   'engine.error.INVALID_REQUEST': 'El motor rechazó los datos de esta sección', 'engine.error.UNSUPPORTED_INPUT': 'El motor no admite los datos de esta sección', 'engine.error.INVALID_BUFFER': 'El motor perdió los datos enviados; edita la sección para reintentar',
   'engine.error.LIMIT_EXCEEDED': 'La sección supera los límites del motor', 'engine.error.BUSY': 'El motor está ocupado; edita la sección para reintentar', 'engine.error.UNSUPPORTED_METHOD': 'El motor no ofrece este método',
   'engine.error.INTERNAL': 'El motor falló al calcular esta sección',
+  'engine.retry': 'Reintentar', 'engine.restarted': 'El motor científico se detuvo y se reinició. Se recalculan las secciones.', 'engine.restartFailed': 'No se pudo reiniciar el motor científico. Las secciones siguen con su error.',
 });
 Object.assign(D.es, { 'nav.preview': 'Miniatura de navegación optimizada', 'nav.previewTip': 'Activada al iniciar. Desactívala para usar el renderizado anterior durante esta sesión; las figuras y los datos no cambian.' });
 Object.assign(D.en, {
@@ -2132,5 +2133,6 @@ Object.assign(D.en, {
   'engine.error.INVALID_REQUEST': 'The engine rejected the data of this section', 'engine.error.UNSUPPORTED_INPUT': 'The engine does not support the data of this section', 'engine.error.INVALID_BUFFER': 'The engine lost the data it was sent; edit the section to retry',
   'engine.error.LIMIT_EXCEEDED': 'The section exceeds the engine limits', 'engine.error.BUSY': 'The engine is busy; edit the section to retry', 'engine.error.UNSUPPORTED_METHOD': 'The engine does not offer this method',
   'engine.error.INTERNAL': 'The engine failed to calculate this section',
+  'engine.retry': 'Retry', 'engine.restarted': 'The scientific engine stopped and was restarted. The sections are being recalculated.', 'engine.restartFailed': 'The scientific engine could not be restarted. The sections keep their error.',
 });
 Object.assign(D.en, { 'nav.preview': 'Optimised navigation preview', 'nav.previewTip': 'Enabled at startup. Disable it to use the previous renderer for this session; figures and data are unchanged.' });

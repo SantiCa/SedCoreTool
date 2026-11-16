@@ -84,7 +84,10 @@ Never do any of these without an explicit request from the maintainer in the cur
   New scientific methods are written once, in Python; the interface requests and displays their results. Existing
   JavaScript calculations change only to fix or preserve current behaviour until their M8 slice replaces them.
   `app.js` only shrinks. Keep the engine protocol, method contracts and result formats free of Electron and
-  renderer details; Electron-specific code stays in `desktop/`.
+  renderer details; Electron-specific code stays in `desktop/`. Data that may outlive the interface (the planned
+  tile store of large images, method inputs and results) uses documented formats that do not depend on the browser,
+  IndexedDB or Electron, so that the interface or the language of a kernel can be replaced later
+  ([ARCHITECTURE §3.4 and D10-D12](docs/ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84)).
 - **Modularity and review cost.** The maintainer requires a modular, understandable and easily editable program.
   One module, one responsibility, explicit inputs and outputs. A reviewer must be able to find a behaviour and
   understand its contract without reading the whole application. Prefer small, independently verifiable diffs.
@@ -133,7 +136,8 @@ Session work happens on a branch; a version is created only when the maintainer 
    not repeat them on an unchanged, verified state.
 5. **New version, only when the maintainer asks:** next number `V0.<n>` after the top versioned entry of
    `CHANGELOG.md`. Set `DELIVERY` in `app/js/app.js`, run `python tools/sync_version.py`, rename `## Unreleased`
-   to `## V0.<n> — YYYY-MM-DD`, make sure the full checks pass on the final state, and integrate the branch into
+   to `## V0.<n> — YYYY-MM-DD`, make sure the full checks pass on the final state (and, when the version closes a
+   milestone, that its milestone gate passed on that state; §6), and integrate the branch into
    `master` as one commit `V0.<n>: <summary>`. Version 1.0 is reserved for when the owner declares the program
    complete.
 6. **Releases** (tags, GitHub Release, DOI) are decided only by the owner; see DEVELOPMENT §8.
@@ -165,11 +169,16 @@ Done when:    observable acceptance criteria.
   alter scientific results, a saved-project format or a public interface; a new dependency seems necessary; you
   would have to edit files outside the card; or a test you did not write fails and a focused diagnosis does not
   explain it.
-- **Two acceptance levels.** The *development gate* lets work continue to the next card: the card's tests and the
-  session checks pass on the maintainer's workstation and the feature stays behind its flag. The *release gate*
-  is required before a flag is switched on by default or a version is published to users: every supported
-  platform, clean machines, and the performance and recovery gates of the engine contract §7. A card states which
-  gate it claims. Never report a release gate as met from development evidence.
+- **Three acceptance levels.** The *development gate* lets work continue to the next card: the card's tests and the
+  session checks pass on the maintainer's workstation and the feature stays behind its flag. The *milestone gate*
+  closes every milestone (for example M8.3 before the first card of M8.4) and every slice of M8.5: the GitHub
+  workflows `tests` and *Desktop builds* (both run on every push of a `work/**` branch) pass on Windows, macOS and
+  Linux on the same commit, including the desktop end-to-end test with the engine experiment on and off
+  and the package check; each failure is fixed, or recorded with its message and a decision of the maintainer,
+  before the next milestone starts. The *release gate* is required before a flag is switched on by default or a
+  version is published to users: every supported platform, clean machines, and the performance and recovery gates
+  of the engine contract §7. A card states which gate it claims. Never report a release gate as met from
+  development or milestone evidence.
 - **One editor at a time** on the shared checkout, even for different files. All assistants work in this same
   local folder, so handoffs are local commits plus the roadmap status; nothing is pushed unless asked.
 

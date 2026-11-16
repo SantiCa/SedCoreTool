@@ -1,0 +1,798 @@
+{
+ "schema": 1,
+ "tool": "tools/measure_engine_analysis.mjs",
+ "started": "2026-11-15T00:36:29.461Z",
+ "commit": "296a63dc7f41051e7a2662b30919cef7f185d33d",
+ "host": {
+  "os": "Windows_NT 10.0.26300",
+  "cpu": "AMD Ryzen 7 7700X 8-Core Processor             ",
+  "logical_cpus": 16,
+  "memory_gib": 31.1,
+  "node": "v22.23.4",
+  "electron": "45.2.2",
+  "runtime": "3.12.16"
+ },
+ "fixtures": {
+  "synthetic": {
+   "package": "synthetic.sedcoretool",
+   "bytes": 12039629,
+   "sha256": "aadd7befe779ba54dd8cf00afdc5ae0007162150b7e354a14ab4bddcf6d9bfbb"
+  }
+ },
+ "parameters": {
+  "pairs": 3,
+  "cycles": 10,
+  "bin_sizes_cm": [
+   2,
+   1.37
+  ]
+ },
+ "results": {
+  "scenarios_public": {
+   "warmup": {
+    "off": {
+     "interval_ms": [
+      2.799999952316284,
+      1.100000023841858
+     ],
+     "edit_ms": 11,
+     "undo_ms": 15,
+     "redo_ms": 9.399999976158142,
+     "unchanged_ms": [
+      2.899999976158142,
+      2
+     ],
+     "notes": [],
+     "trace_area_px": 2087,
+     "deleted": true,
+     "restored": true,
+     "deleted_again": true,
+     "mismatch_count": 0,
+     "states": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+     ],
+     "memory": {
+      "samples": 62,
+      "peak_mib": 818,
+      "median_mib": 769,
+      "max_processes": 4,
+      "cadence_median_ms": 25.3,
+      "cadence_max_gap_ms": 237.7
+     }
+    },
+    "on": {
+     "interval_ms": [
+      317.5,
+      210.79999995231628
+     ],
+     "edit_ms": 1644.3999999761581,
+     "undo_ms": 165.60000002384186,
+     "redo_ms": 196.70000004768372,
+     "unchanged_ms": [
+      0.20000004768371582,
+      0.19999992847442627
+     ],
+     "notes": [],
+     "trace_area_px": 2087,
+     "deleted": true,
+     "restored": true,
+     "deleted_again": true,
+     "mismatch_count": 0,
+     "states": [
+      "ready",
+      "ready",
+      "ready",
+      "ready",
+      "ready",
+      "ready"
+     ],
+     "memory": {
+      "samples": 125,
+      "peak_mib": 873,
+      "median_mib": 843.4,
+      "max_processes": 8,
+      "cadence_median_ms": 25.3,
+      "cadence_max_gap_ms": 396.8
+     }
+    }
+   },
+   "pairs": [
+    {
+     "order": [
+      "off",
+      "on"
+     ],
+     "off": {
+      "interval_ms": [
+       2.399999976158142,
+       1.399999976158142
+      ],
+      "edit_ms": 8.600000023841858,
+      "undo_ms": 9.899999976158142,
+      "redo_ms": 5.5,
+      "unchanged_ms": [
+       1.1999999284744263,
+       1.0999999046325684
+      ],
+      "notes": [],
+      "trace_area_px": 2087,
+      "deleted": true,
+      "restored": true,
+      "deleted_again": true,
+      "mismatch_count": 0,
+      "states": [
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ],
+      "memory": {
+       "samples": 66,
+       "peak_mib": 822,
+       "median_mib": 787.2,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 240.7
+      }
+     },
+     "on": {
+      "interval_ms": [
+       187.60000002384186,
+       270.10000002384186
+      ],
+      "edit_ms": 180.10000002384186,
+      "undo_ms": 149.80000007152557,
+      "redo_ms": 196.5,
+      "unchanged_ms": [
+       0.2999999523162842,
+       0.20000004768371582
+      ],
+      "notes": [],
+      "trace_area_px": 2087,
+      "deleted": true,
+      "restored": true,
+      "deleted_again": true,
+      "mismatch_count": 0,
+      "states": [
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready"
+      ],
+      "memory": {
+       "samples": 91,
+       "peak_mib": 913,
+       "median_mib": 879.7,
+       "max_processes": 8,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 250.6
+      }
+     }
+    },
+    {
+     "order": [
+      "on",
+      "off"
+     ],
+     "on": {
+      "interval_ms": [
+       196.70000004768372,
+       226.19999992847443
+      ],
+      "edit_ms": 164.20000004768372,
+      "undo_ms": 166,
+      "redo_ms": 149.5,
+      "unchanged_ms": [
+       0.20000004768371582,
+       0.09999990463256836
+      ],
+      "notes": [],
+      "trace_area_px": 2087,
+      "deleted": true,
+      "restored": true,
+      "deleted_again": true,
+      "mismatch_count": 0,
+      "states": [
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready"
+      ],
+      "memory": {
+       "samples": 90,
+       "peak_mib": 906.9,
+       "median_mib": 883.4,
+       "max_processes": 8,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 258.9
+      }
+     },
+     "off": {
+      "interval_ms": [
+       2.6999999284744263,
+       1
+      ],
+      "edit_ms": 50.699999928474426,
+      "undo_ms": 8.899999976158142,
+      "redo_ms": 10.399999976158142,
+      "unchanged_ms": [
+       1.5999999046325684,
+       1.2000000476837158
+      ],
+      "notes": [],
+      "trace_area_px": 2087,
+      "deleted": true,
+      "restored": true,
+      "deleted_again": true,
+      "mismatch_count": 0,
+      "states": [
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ],
+      "memory": {
+       "samples": 63,
+       "peak_mib": 798.1,
+       "median_mib": 770.2,
+       "max_processes": 4,
+       "cadence_median_ms": 25.4,
+       "cadence_max_gap_ms": 245.8
+      }
+     }
+    },
+    {
+     "order": [
+      "off",
+      "on"
+     ],
+     "off": {
+      "interval_ms": [
+       2.799999952316284,
+       0.8999999761581421
+      ],
+      "edit_ms": 58.90000009536743,
+      "undo_ms": 14.800000071525574,
+      "redo_ms": 12.899999976158142,
+      "unchanged_ms": [
+       3,
+       1.899999976158142
+      ],
+      "notes": [],
+      "trace_area_px": 2087,
+      "deleted": true,
+      "restored": true,
+      "deleted_again": true,
+      "mismatch_count": 0,
+      "states": [
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ],
+      "memory": {
+       "samples": 66,
+       "peak_mib": 795,
+       "median_mib": 768.4,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 224.9
+      }
+     },
+     "on": {
+      "interval_ms": [
+       272,
+       286.2000000476837
+      ],
+      "edit_ms": 258.09999990463257,
+      "undo_ms": 1280.7999999523163,
+      "redo_ms": 163.10000002384186,
+      "unchanged_ms": [
+       0.20000004768371582,
+       0.20000004768371582
+      ],
+      "notes": [],
+      "trace_area_px": 2087,
+      "deleted": true,
+      "restored": true,
+      "deleted_again": true,
+      "mismatch_count": 0,
+      "states": [
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready"
+      ],
+      "memory": {
+       "samples": 100,
+       "peak_mib": 890.4,
+       "median_mib": 852.7,
+       "max_processes": 8,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 1224
+      }
+     }
+    }
+   ]
+  },
+  "scenarios_synthetic": {
+   "warmup": {
+    "off": {
+     "interval_ms": [
+      1.600000023841858,
+      1.100000023841858
+     ],
+     "edit_ms": 19.700000047683716,
+     "undo_ms": 24.5,
+     "redo_ms": 101.5,
+     "unchanged_ms": [
+      2.3000000715255737,
+      1
+     ],
+     "notes": [],
+     "trace_area_px": 2100,
+     "deleted": true,
+     "restored": true,
+     "deleted_again": true,
+     "mismatch_count": 0,
+     "states": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+     ],
+     "memory": {
+      "samples": 72,
+      "peak_mib": 847.5,
+      "median_mib": 814.5,
+      "max_processes": 4,
+      "cadence_median_ms": 25.3,
+      "cadence_max_gap_ms": 206.8
+     }
+    },
+    "on": {
+     "interval_ms": [
+      349.5,
+      399.5
+     ],
+     "edit_ms": 289.5,
+     "undo_ms": 255.20000004768372,
+     "redo_ms": 302.39999997615814,
+     "unchanged_ms": [
+      0.20000004768371582,
+      0.10000002384185791
+     ],
+     "notes": [],
+     "trace_area_px": 2100,
+     "deleted": true,
+     "restored": true,
+     "deleted_again": true,
+     "mismatch_count": 0,
+     "states": [
+      "ready",
+      "ready",
+      "ready",
+      "ready",
+      "ready",
+      "ready",
+      "ready",
+      "ready"
+     ],
+     "memory": {
+      "samples": 111,
+      "peak_mib": 951.1,
+      "median_mib": 908.8,
+      "max_processes": 8,
+      "cadence_median_ms": 25.3,
+      "cadence_max_gap_ms": 238.4
+     }
+    }
+   },
+   "pairs": [
+    {
+     "order": [
+      "off",
+      "on"
+     ],
+     "off": {
+      "interval_ms": [
+       1.9000000953674316,
+       1.399999976158142
+      ],
+      "edit_ms": 21.799999952316284,
+      "undo_ms": 24.299999952316284,
+      "redo_ms": 97.60000002384186,
+      "unchanged_ms": [
+       2.5,
+       1.100000023841858
+      ],
+      "notes": [],
+      "trace_area_px": 2100,
+      "deleted": true,
+      "restored": true,
+      "deleted_again": true,
+      "mismatch_count": 0,
+      "states": [
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ],
+      "memory": {
+       "samples": 70,
+       "peak_mib": 844.9,
+       "median_mib": 823.2,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 268.4
+      }
+     },
+     "on": {
+      "interval_ms": [
+       317.09999990463257,
+       288.1999999284744
+      ],
+      "edit_ms": 1088.5,
+      "undo_ms": 287.60000002384186,
+      "redo_ms": 223.59999990463257,
+      "unchanged_ms": [
+       0.20000004768371582,
+       0
+      ],
+      "notes": [],
+      "trace_area_px": 2100,
+      "deleted": true,
+      "restored": true,
+      "deleted_again": true,
+      "mismatch_count": 0,
+      "states": [
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready"
+      ],
+      "memory": {
+       "samples": 113,
+       "peak_mib": 960.2,
+       "median_mib": 920.3,
+       "max_processes": 8,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 923.6
+      }
+     }
+    },
+    {
+     "order": [
+      "on",
+      "off"
+     ],
+     "on": {
+      "interval_ms": [
+       268.39999997615814,
+       354.1999999284744
+      ],
+      "edit_ms": 272.59999990463257,
+      "undo_ms": 226.29999995231628,
+      "redo_ms": 272.6999999284744,
+      "unchanged_ms": [
+       0.19999992847442627,
+       0.10000002384185791
+      ],
+      "notes": [],
+      "trace_area_px": 2100,
+      "deleted": true,
+      "restored": true,
+      "deleted_again": true,
+      "mismatch_count": 0,
+      "states": [
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready"
+      ],
+      "memory": {
+       "samples": 109,
+       "peak_mib": 987.9,
+       "median_mib": 915.2,
+       "max_processes": 8,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 253.5
+      }
+     },
+     "off": {
+      "interval_ms": [
+       1.5,
+       0.8999999761581421
+      ],
+      "edit_ms": 13.899999976158142,
+      "undo_ms": 18.5,
+      "redo_ms": 15.899999976158142,
+      "unchanged_ms": [
+       1.7000000476837158,
+       0.7999999523162842
+      ],
+      "notes": [],
+      "trace_area_px": 2100,
+      "deleted": true,
+      "restored": true,
+      "deleted_again": true,
+      "mismatch_count": 0,
+      "states": [
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ],
+      "memory": {
+       "samples": 66,
+       "peak_mib": 823.1,
+       "median_mib": 803.6,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 180.7
+      }
+     }
+    },
+    {
+     "order": [
+      "off",
+      "on"
+     ],
+     "off": {
+      "interval_ms": [
+       1.7000000476837158,
+       0.9000000953674316
+      ],
+      "edit_ms": 17.899999976158142,
+      "undo_ms": 18.399999976158142,
+      "redo_ms": 15.599999904632568,
+      "unchanged_ms": [
+       1.100000023841858,
+       1.3000000715255737
+      ],
+      "notes": [],
+      "trace_area_px": 2100,
+      "deleted": true,
+      "restored": true,
+      "deleted_again": true,
+      "mismatch_count": 0,
+      "states": [
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ],
+      "memory": {
+       "samples": 69,
+       "peak_mib": 847.4,
+       "median_mib": 817.6,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 167.4
+      }
+     },
+     "on": {
+      "interval_ms": [
+       923.5,
+       304.60000002384186
+      ],
+      "edit_ms": 269.39999997615814,
+      "undo_ms": 271.2999999523163,
+      "redo_ms": 238.89999997615814,
+      "unchanged_ms": [
+       0.20000004768371582,
+       0
+      ],
+      "notes": [],
+      "trace_area_px": 2100,
+      "deleted": true,
+      "restored": true,
+      "deleted_again": true,
+      "mismatch_count": 0,
+      "states": [
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready"
+      ],
+      "memory": {
+       "samples": 124,
+       "peak_mib": 991.9,
+       "median_mib": 914.9,
+       "max_processes": 8,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 321.3
+      }
+     }
+    }
+   ]
+  }
+ },
+ "verdicts": {
+  "scenarios_public": {
+   "n_pairs": 3,
+   "note": "p95 of few samples is the maximum (nearest rank)",
+   "interval_change": {
+    "pass": false,
+    "samples": 6,
+    "median": {
+     "off": 1.399999976158142,
+     "on": 226.19999992847443,
+     "limit": 51.39999997615814,
+     "pass": false
+    },
+    "p95": {
+     "off": 2.799999952316284,
+     "on": 286.2000000476837,
+     "limit": 102.79999995231628,
+     "pass": false
+    }
+   },
+   "edit_undo_redo": {
+    "pass": false,
+    "samples": 9,
+    "median": {
+     "off": 10.399999976158142,
+     "on": 166,
+     "limit": 60.39999997615814,
+     "pass": false
+    },
+    "p95": {
+     "off": 58.90000009536743,
+     "on": 1280.7999999523163,
+     "limit": 158.90000009536743,
+     "pass": false
+    }
+   },
+   "unchanged": {
+    "pass": true,
+    "samples": 6,
+    "median": {
+     "off": 1.2000000476837158,
+     "on": 0.20000004768371582,
+     "limit": 51.200000047683716,
+     "pass": true
+    },
+    "p95": {
+     "off": 3,
+     "on": 0.2999999523162842,
+     "limit": 103,
+     "pass": true
+    }
+   },
+   "memory_peak": {
+    "pass": true,
+    "off_mib": 798.1,
+    "on_mib": 906.9,
+    "limit_mib": 1054.1,
+    "basis": "median over the pairs of the peak of each run",
+    "max_off_mib": 822,
+    "max_on_mib": 913
+   },
+   "parity": {
+    "pass": true,
+    "mismatches": 0
+   },
+   "pass": false
+  },
+  "scenarios_synthetic": {
+   "n_pairs": 3,
+   "note": "p95 of few samples is the maximum (nearest rank)",
+   "interval_change": {
+    "pass": false,
+    "samples": 6,
+    "median": {
+     "off": 1.399999976158142,
+     "on": 304.60000002384186,
+     "limit": 51.39999997615814,
+     "pass": false
+    },
+    "p95": {
+     "off": 1.9000000953674316,
+     "on": 923.5,
+     "limit": 101.90000009536743,
+     "pass": false
+    }
+   },
+   "edit_undo_redo": {
+    "pass": false,
+    "samples": 9,
+    "median": {
+     "off": 18.399999976158142,
+     "on": 271.2999999523163,
+     "limit": 68.39999997615814,
+     "pass": false
+    },
+    "p95": {
+     "off": 97.60000002384186,
+     "on": 1088.5,
+     "limit": 197.60000002384186,
+     "pass": false
+    }
+   },
+   "unchanged": {
+    "pass": true,
+    "samples": 6,
+    "median": {
+     "off": 1.100000023841858,
+     "on": 0.10000002384185791,
+     "limit": 51.10000002384186,
+     "pass": true
+    },
+    "p95": {
+     "off": 2.5,
+     "on": 0.20000004768371582,
+     "limit": 102.5,
+     "pass": true
+    }
+   },
+   "memory_peak": {
+    "pass": true,
+    "off_mib": 844.9,
+    "on_mib": 987.9,
+    "limit_mib": 1100.9,
+    "basis": "median over the pairs of the peak of each run",
+    "max_off_mib": 847.4,
+    "max_on_mib": 991.9
+   },
+   "parity": {
+    "pass": true,
+    "mismatches": 0
+   },
+   "pass": false
+  },
+  "not_measured": [
+   "macOS and Linux",
+   "a clean Windows machine",
+   "cold cache after a reboot",
+   "saturated CPU",
+   "save interrupted during a job (covered separately by tests/e2e/interrupted-saves.mjs)"
+  ]
+ },
+ "finished": "2026-11-15T00:39:18.074Z"
+}

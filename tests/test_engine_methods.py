@@ -93,20 +93,26 @@ def analysis(session, handles, settings_hash, override=None):
     return request(session, "section.analyze", {**payload, **(override or {})})
 
 
-def download(coordinator, session, outputs, chunk=100_000):
-    """The result columns, read back with buffer.read in ranges of `chunk` bytes."""
-    columns = {}
-    for name, item in outputs.items():
-        data = bytearray()
-        while len(data) < item["byte_length"]:
-            asked = request(session, "buffer.read", {"handle": item["handle"], "offset": len(data), "byte_length": min(chunk, item["byte_length"] - len(data))})
-            coordinator.receive(asked)
-            responses, binaries = frames(coordinator)
-            assert responses[asked["id"]]["status"] == "ok"
-            data += binaries[asked["id"]]
-        assert hashlib.sha256(data).hexdigest() == item["sha256"]
-        dtype = np.dtype(fixtures.DTYPES[item["dtype"]])
-        columns[name] = np.frombuffer(bytes(data), dtype=dtype).reshape(item["shape"])
+def download(coordinator, session, result, chunk=100_000):
+    """The result columns: the one packed buffer, read back with buffer.read in ranges of `chunk` bytes, cut up by the layout."""
+    assert list(result["outputs"]) == ["result"], "one buffer carries every column"
+    item = result["outputs"]["result"]
+    assert (item["dtype"], item["shape"]) == ("u8", [item["byte_length"]])
+    data = bytearray()
+    while len(data) < item["byte_length"]:
+        asked = request(session, "buffer.read", {"handle": item["handle"], "offset": len(data), "byte_length": min(chunk, item["byte_length"] - len(data))})
+        coordinator.receive(asked)
+        responses, binaries = frames(coordinator)
+        assert responses[asked["id"]]["status"] == "ok"
+        data += binaries[asked["id"]]
+    assert hashlib.sha256(data).hexdigest() == item["sha256"]
+    columns, end = {}, 0
+    for name, part in sorted(result["layout"].items(), key=lambda entry: entry[1]["offset"]):
+        dtype = np.dtype(fixtures.DTYPES[part["dtype"]])
+        assert part["offset"] % 8 == 0 and part["offset"] >= end, f"{name}: aligned and not overlapping"
+        end = part["offset"] + part["byte_length"]
+        assert end <= item["byte_length"] and part["byte_length"] == int(np.prod(part["shape"])) * dtype.itemsize
+        columns[name] = np.frombuffer(bytes(data), dtype=dtype, count=int(np.prod(part["shape"])), offset=part["offset"]).reshape(part["shape"])
     return columns
 
 
@@ -129,10 +135,10 @@ def test_real_worker_reproduces_a_reference_fixture_and_results_download_in_rang
         assert result["provenance"]["input_sha256"] == {key: coordinator.store.buffers[h].expected_hash for key, h in handles.items()}
         assert (result["provenance"]["engine_version"], result["provenance"]["method"], result["provenance"]["revision"]) == ("test", METHOD, 7)
         assert all(coordinator.store.buffers[h].pins == 0 for h in handles.values()), "inputs are unpinned after the job"
-        columns = download(coordinator, session, result["outputs"])
+        columns = download(coordinator, session, result)
         fixtures.assert_columns_match(name, fixture["expected"]["columns"], columns)
         # Results are charged to the session budget and give it back when released.
-        assert coordinator.store.reserved == baseline + sum(item["byte_length"] for item in result["outputs"].values())
+        assert coordinator.store.reserved == baseline + result["outputs"]["result"]["byte_length"]
         coordinator.receive(request(session, "buffer.release", {"handles": [item["handle"] for item in result["outputs"].values()]}))
         assert coordinator.store.reserved == baseline
         assert not [p for p in Path(coordinator.store.directory.name).iterdir() if p.name.startswith("job-")], "the job directory is removed"
@@ -279,43 +285,54 @@ def fake_worker(tmp_path, body):
     return script
 
 
+# A stand-in for method_worker.py: the job file path arrives as one line on stdin, the answer is one frame on stdout. These
+# scripts answer one job and exit; the coordinator must cope with that as it does with a worker that crashes.
 COLUMN_FRAME = (
-    "import json, sys\nfrom pathlib import Path\nsys.path.insert(0, {engine!r})\nfrom protocol import write_json\n"
-    "job = json.loads(Path(sys.argv[1]).read_text())\nout = Path(job['output_dir'])\n")
+    "import hashlib, json, struct, sys\nfrom pathlib import Path\nsys.path.insert(0, {engine!r})\nfrom protocol import write_json\n"
+    "job = json.loads(Path(sys.stdin.readline().strip()).read_text())\nout = Path(job['output_dir'])\n"
+    "ROW = {{'row_start': {{'dtype': 'u32le', 'shape': [1], 'offset': 0, 'byte_length': 4}}}}\n"
+    "def packed(data=None, layout=None, length=None, sha=None, dims=(1, 1, 1), write=True):\n"
+    "    data = bytes(8) if data is None else data\n"
+    "    if write:\n"
+    "        out.mkdir(parents=True, exist_ok=True)\n"
+    "        (out / 'result.bin').write_bytes(data)\n"
+    "    write_json(sys.stdout.buffer, {{'ok': True, 'dimensions': {{'bins': dims[0], 'classes': dims[1], 'schemes': dims[2]}},\n"
+    "        'packed': {{'byte_length': len(data) if length is None else length, 'sha256': sha or hashlib.sha256(data).hexdigest(),\n"
+    "                   'layout': ROW if layout is None else layout}}}})\n")
+
+
+def column(dtype="u32le", shape=(1,), offset=0, length=4):
+    return repr({"dtype": dtype, "shape": list(shape), "offset": offset, "byte_length": length})
 
 
 @pytest.mark.parametrize("label,body,code", [
     ("exits with an error", "raise SystemExit(1)\n", "INTERNAL"),
     ("writes nothing", "pass\n", "INTERNAL"),
     ("writes garbage", "sys = __import__('sys'); sys.stdout.buffer.write(b'not a frame')\n", "INTERNAL"),
+    ("answers with a shape that is none of the three", "write_json(sys.stdout.buffer, {'foo': 1})\n", "INTERNAL"),
+    ("answers twice", "write_json(sys.stdout.buffer, {'cancelled': True})\nwrite_json(sys.stdout.buffer, {'cancelled': True})\n", "INTERNAL"),
     ("reports an unknown error code", "write_json(sys.stdout.buffer, {'error': {'code': 'TEAPOT', 'field': None}})\n", "INTERNAL"),
     ("reports a field that is not a name", "write_json(sys.stdout.buffer, {'error': {'code': 'INVALID_BUFFER', 'field': '../etc'}})\n", "INTERNAL"),
-    ("claims a file that does not exist", "write_json(sys.stdout.buffer, {'ok': True, 'dimensions': {'bins': 1, 'classes': 1, 'schemes': 1},"
-                                         " 'columns': {'row_start': {'dtype': 'u32le', 'shape': [1], 'byte_length': 4, 'sha256': '0' * 64}}})\n", "INTERNAL"),
-    ("declares a wrong hash", "(out / 'row_start.bin').write_bytes(bytes(4))\nwrite_json(sys.stdout.buffer, {'ok': True,"
-                              " 'dimensions': {'bins': 1, 'classes': 1, 'schemes': 1}, 'columns': {'row_start': {'dtype': 'u32le', 'shape': [1],"
-                              " 'byte_length': 4, 'sha256': '0' * 64}}})\n", "INTERNAL"),
-    ("declares a wrong size", "(out / 'row_start.bin').write_bytes(bytes(8))\nwrite_json(sys.stdout.buffer, {'ok': True,"
-                              " 'dimensions': {'bins': 1, 'classes': 1, 'schemes': 1}, 'columns': {'row_start': {'dtype': 'u32le', 'shape': [1],"
-                              " 'byte_length': 4, 'sha256': '" + hashlib.sha256(bytes(4)).hexdigest() + "'}}})\n", "INTERNAL"),
-    ("names a path as a column", "write_json(sys.stdout.buffer, {'ok': True, 'dimensions': {'bins': 1, 'classes': 1, 'schemes': 1},"
-                                 " 'columns': {'../x': {'dtype': 'u32le', 'shape': [1], 'byte_length': 4, 'sha256': '0' * 64}}})\n", "INTERNAL"),
-    ("exits with an error after a valid result",
-     "import hashlib\ndata = bytes(4)\n(out / 'row_start.bin').write_bytes(data)\n"
-     "write_json(sys.stdout.buffer, {'ok': True, 'dimensions': {'bins': 1, 'classes': 1, 'schemes': 1}, 'columns': {'row_start':"
-     " {'dtype': 'u32le', 'shape': [1], 'byte_length': 4, 'sha256': hashlib.sha256(data).hexdigest()}}})\nraise SystemExit(3)\n", "INTERNAL"),
-    ("declares less than the file holds, with the hash of the file",
-     "import hashlib\ndata = bytes(8)\n(out / 'row_start.bin').write_bytes(data)\n"
-     "write_json(sys.stdout.buffer, {'ok': True, 'dimensions': {'bins': 1, 'classes': 1, 'schemes': 1}, 'columns': {'row_start':"
-     " {'dtype': 'u32le', 'shape': [1], 'byte_length': 4, 'sha256': hashlib.sha256(data).hexdigest()}}})\n", "INTERNAL"),
-    ("names a column so that its file lies outside the output folder",
-     "import hashlib\ndata = bytes(4)\n(out.parent / 'x.bin').write_bytes(data)\n"
-     "write_json(sys.stdout.buffer, {'ok': True, 'dimensions': {'bins': 1, 'classes': 1, 'schemes': 1}, 'columns': {'../x':"
-     " {'dtype': 'u32le', 'shape': [1], 'byte_length': 4, 'sha256': hashlib.sha256(data).hexdigest()}}})\n", "INTERNAL"),
-    ("returns non-finite float data", "import struct\n(out / 'depth.bin').write_bytes(struct.pack('<d', float('nan')))\n"
-                                      "import hashlib\nwrite_json(sys.stdout.buffer, {'ok': True, 'dimensions': {'bins': 1, 'classes': 1, 'schemes': 1},"
-                                      " 'columns': {'depth': {'dtype': 'f64le', 'shape': [1], 'byte_length': 8, 'sha256':"
-                                      " hashlib.sha256(struct.pack('<d', float('nan'))).hexdigest()}}})\n", "INTERNAL"),
+    ("answers in the old one-file-per-column form", "write_json(sys.stdout.buffer, {'ok': True, 'dimensions': {'bins': 1, 'classes': 1, 'schemes': 1},"
+                                                    " 'columns': {'row_start': {'dtype': 'u32le', 'shape': [1], 'byte_length': 4, 'sha256': '0' * 64}}})\n", "INTERNAL"),
+    ("claims a file that does not exist", "packed(write=False)\n", "INTERNAL"),
+    ("declares a wrong hash", "packed(sha='0' * 64)\n", "INTERNAL"),
+    ("declares a wrong size", "packed(bytes(16), length=8, sha=hashlib.sha256(bytes(8)).hexdigest())\n", "INTERNAL"),
+    ("declares less than the file holds, with the hash of the file", "packed(bytes(16), length=8)\n", "INTERNAL"),
+    ("holds data that no column accounts for", "packed(bytes(16))\n", "INTERNAL"),
+    ("names a path as a column", "packed(layout={'../x': " + column() + "})\n", "INTERNAL"),
+    ("names a column with a space", "packed(layout={'row start': " + column() + "})\n", "INTERNAL"),
+    ("starts a column off a multiple of 8", "packed(bytes(16), {'a': " + column(offset=4) + "})\n", "INTERNAL"),
+    ("lets two columns overlap", "packed(bytes(8), {'a': " + column() + ", 'b': " + column() + "})\n", "INTERNAL"),
+    ("puts a column past the end of the file", "packed(bytes(8), {'a': " + column(offset=8) + "})\n", "INTERNAL"),
+    ("gives a column a shape that does not match its length", "packed(bytes(8), {'a': " + column(shape=(2,)) + "})\n", "INTERNAL"),
+    ("gives a column a type that does not exist", "packed(bytes(8), {'a': " + column(dtype="f32le") + "})\n", "INTERNAL"),
+    ("gives a column a length of zero", "packed(bytes(8), {'a': " + column(length=0) + "})\n", "INTERNAL"),
+    ("gives a column an extra field", "packed(bytes(8), {'a': {**" + column() + ", 'path': '/etc'}})\n", "INTERNAL"),
+    ("declares more columns than allowed", "packed(bytes(8 * 65), {'c%d' % i: " + column(offset=0) + " for i in range(65)})\n", "INTERNAL"),
+    ("returns non-finite float data", "packed(struct.pack('<d', float('nan')), {'depth': " + column("f64le", (1,), 0, 8) + "})\n", "INTERNAL"),
+    ("returns infinite float data after finite data", "packed(struct.pack('<2d', 1.0, float('inf')), {'depth': " + column("f64le", (2,), 0, 16) + "})\n", "INTERNAL"),
+    ("declares a dimension of zero", "packed(dims=(0, 1, 1))\n", "INTERNAL"),
 ])
 def test_a_misbehaving_worker_is_an_internal_error_and_adopts_nothing(tmp_path, label, body, code):
     coordinator, session = new_coordinator(method_script=fake_worker(tmp_path, COLUMN_FRAME.format(engine=str(ENGINE)) + body))
@@ -330,6 +347,190 @@ def test_a_misbehaving_worker_is_an_internal_error_and_adopts_nothing(tmp_path, 
         assert coordinator.store.reserved == baseline and len(coordinator.store.buffers) == count, f"{label}: nothing is adopted"
         assert all(coordinator.store.buffers[h].pins == 0 for h in handles.values())
         assert not [p for p in Path(coordinator.store.directory.name).iterdir() if p.name.startswith("job-")]
+        assert sorted(p.name for p in Path(coordinator.store.directory.name).iterdir()) == sorted(coordinator.store.buffers), f"{label}: no file left behind"
+    finally:
+        coordinator.close()
+
+
+VALID_ANSWER = "packed()\n"
+
+
+def test_the_stand_in_worker_of_these_tests_can_succeed(tmp_path):
+    # Control for the parametrised test above: without it every case could pass because the stand-in itself is broken.
+    coordinator, session = new_coordinator(method_script=fake_worker(tmp_path, COLUMN_FRAME.format(engine=str(ENGINE)) + VALID_ANSWER))
+    try:
+        handles, settings_hash = upload(coordinator, fixtures.load("basic-four-intervals"))
+        job = analysis(session, handles, settings_hash)
+        coordinator.receive(job)
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][job["id"]]["status"] == "ok"
+    finally:
+        coordinator.close()
+
+
+def test_a_worker_that_dies_after_a_checked_answer_is_replaced_for_the_next_job(tmp_path):
+    # The answer is verified on its own (frame, sizes, hashes, finite values), so a late crash does not undo it; the damaged
+    # process is never given another job.
+    coordinator, session = new_coordinator(method_script=fake_worker(tmp_path, COLUMN_FRAME.format(engine=str(ENGINE)) + VALID_ANSWER + "raise SystemExit(3)\n"))
+    try:
+        handles, settings_hash = upload(coordinator, fixtures.load("basic-four-intervals"))
+        pids = []
+        for _ in range(2):
+            job = analysis(session, handles, settings_hash)
+            coordinator.receive(job)
+            pids.append(coordinator.runner.process.pid)
+            run_until_idle(coordinator)
+            assert frames(coordinator)[0][job["id"]]["status"] == "ok"
+            coordinator.runner.process.wait(timeout=10)
+        assert pids[0] != pids[1]
+    finally:
+        coordinator.close()
+
+
+def test_one_worker_process_serves_consecutive_analyses_and_ends_with_the_engine():
+    fixture = fixtures.load("basic-four-intervals")
+    coordinator, session = new_coordinator()
+    try:
+        handles, settings_hash = upload(coordinator, fixture)
+        pids, answers = [], []
+        for _ in range(3):
+            job = analysis(session, handles, settings_hash)
+            coordinator.receive(job)
+            pids.append(coordinator.runner.process.pid)
+            run_until_idle(coordinator)
+            answers.append(frames(coordinator)[0][job["id"]])
+        assert len(set(pids)) == 1 and all(answer["status"] == "ok" for answer in answers)
+        assert answers[0]["result"]["outputs"].keys() == answers[2]["result"]["outputs"].keys()
+        runner = coordinator.runner
+    finally:
+        coordinator.close()
+    assert coordinator.runner is None and runner.process.poll() is not None
+
+
+def test_inputs_can_be_deleted_as_soon_as_the_answer_arrives_while_the_worker_lives():
+    # The worker maps its inputs; on Windows a file that is still mapped cannot be deleted, so the worker must unmap before it
+    # answers (the page releases a section's buffers right after the result arrives).
+    coordinator, session = new_coordinator()
+    try:
+        handles, settings_hash = upload(coordinator, fixtures.load("basic-four-intervals"))
+        job = analysis(session, handles, settings_hash)
+        coordinator.receive(job)
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][job["id"]]["status"] == "ok" and coordinator.runner.alive()
+        paths = [coordinator.store.buffers[handle].path for handle in handles.values()]
+        for handle in handles.values():
+            coordinator.store.release(handle)
+        assert not any(path.exists() for path in paths)
+    finally:
+        coordinator.close()
+
+
+def test_abandoning_a_running_job_ends_its_worker_so_its_answer_cannot_reach_another_job():
+    coordinator, session = new_coordinator()
+    try:
+        handles, settings_hash = upload(coordinator, fixtures.load("large-mixed"))
+        job = analysis(session, handles, settings_hash)
+        coordinator.receive(job)
+        runner = coordinator.runner
+        coordinator.cancel_all()
+        assert runner.process.wait(timeout=10) is not None and coordinator.active is None
+        assert frames(coordinator)[0][job["id"]]["status"] == "cancelled"
+        after = analysis(session, handles, settings_hash)
+        coordinator.receive(after)
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][after["id"]]["status"] == "ok" and coordinator.runner is not runner
+    finally:
+        coordinator.close()
+
+
+def test_a_worker_stuck_inside_an_abandoned_job_is_killed(tmp_path):
+    # Only the coordinator can end this worker: it has read its job and then does nothing, so a surviving process would
+    # answer an old job later, to whoever is waiting by then.
+    script = fake_worker(tmp_path, "import sys, time\nsys.stdin.readline()\ntime.sleep(120)\n")
+    coordinator, session = new_coordinator(method_script=script)
+    try:
+        handles, settings_hash = upload(coordinator, fixtures.load("basic-four-intervals"))
+        job = analysis(session, handles, settings_hash)
+        coordinator.receive(job)
+        runner = coordinator.runner
+        time.sleep(0.5)
+        coordinator.cancel_all()
+        assert runner.process.wait(timeout=10) is not None
+    finally:
+        coordinator.close()
+
+
+def test_a_worker_stops_by_itself_when_the_coordinator_is_gone():
+    process = subprocess.Popen([sys.executable, "-I", "-B", "-u", str(ENGINE / "method_worker.py")],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    try:
+        process.stdin.close()                                       # what the coordinator's death looks like to the worker
+        assert process.wait(timeout=60) == 1
+    finally:
+        process.kill()
+        process.stdout.close()
+
+
+def test_the_idle_clock_restarts_when_a_job_is_answered():
+    coordinator, session = new_coordinator()
+    try:
+        handles, settings_hash = upload(coordinator, fixtures.load("basic-four-intervals"))
+        job = analysis(session, handles, settings_hash)
+        coordinator.receive(job)
+        started = coordinator.runner.idle_since
+        run_until_idle(coordinator)
+        assert coordinator.runner.idle_since > started
+    finally:
+        coordinator.close()
+
+
+def test_a_killed_worker_costs_one_job_and_the_next_gets_a_new_process():
+    coordinator, session = new_coordinator()
+    try:
+        handles, settings_hash = upload(coordinator, fixtures.load("basic-four-intervals"))
+        first = analysis(session, handles, settings_hash)
+        coordinator.receive(first)
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][first["id"]]["status"] == "ok"
+        pid = coordinator.runner.process.pid
+        coordinator.runner.kill()
+        coordinator.runner.process.wait(timeout=10)
+        second = analysis(session, handles, settings_hash)
+        coordinator.receive(second)
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][second["id"]]["status"] == "ok" and coordinator.runner.process.pid != pid
+        third = analysis(session, handles, settings_hash)
+        coordinator.receive(third)
+        coordinator.runner.kill()                                   # killed in the middle of a job
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][third["id"]]["error"]["code"] == "INTERNAL"
+        assert not [p for p in Path(coordinator.store.directory.name).iterdir() if p.name.startswith("job-")]
+        fourth = analysis(session, handles, settings_hash)
+        coordinator.receive(fourth)
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][fourth["id"]]["status"] == "ok"
+    finally:
+        coordinator.close()
+
+
+def test_an_idle_worker_is_stopped_and_started_again_when_needed():
+    coordinator, session = new_coordinator()
+    try:
+        coordinator.runner_idle_seconds = 0.2
+        handles, settings_hash = upload(coordinator, fixtures.load("basic-four-intervals"))
+        first = analysis(session, handles, settings_hash)
+        coordinator.receive(first)
+        run_until_idle(coordinator)
+        runner = coordinator.runner
+        deadline = time.monotonic() + 10
+        while coordinator.runner is not None and time.monotonic() < deadline:
+            coordinator.poll()
+            time.sleep(0.02)
+        assert coordinator.runner is None and runner.process.poll() is not None
+        second = analysis(session, handles, settings_hash)
+        coordinator.receive(second)
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][second["id"]]["status"] == "ok"
     finally:
         coordinator.close()
 
@@ -401,13 +602,234 @@ def test_a_method_worker_does_not_load_pandas_or_the_public_package():
 
 def test_the_liveness_watcher_starts_only_after_numpy_and_the_methods_are_imported():
     # On Windows a thread blocked reading the stdin pipe made `import numpy` hang in a clean environment (GitHub runner,
-    # 13 November 2026), while Anaconda's NumPy was unaffected. Guard the start order in the worker's entry point.
+    # 13 November 2026), while Anaconda's NumPy was unaffected. The reader thread of the job loop is that thread now: it must
+    # be started by `serve`, which the entry point calls only after `load_modules()`, and nothing else may start a thread first.
     import ast
 
     tree = ast.parse((ENGINE / "method_worker.py").read_text(encoding="utf-8"))
     main = next(node for node in tree.body if isinstance(node, ast.If) and "__main__" in ast.dump(node.test))
     calls = [ast.unparse(statement) for statement in main.body]
     imports = next(i for i, call in enumerate(calls) if "load_modules()" in call)
-    watcher = next(i for i, call in enumerate(calls) if "watch_coordinator" in call)
-    assert imports < watcher, calls
+    serving = next(i for i, call in enumerate(calls) if "serve(" in call)
+    assert imports < serving, calls
+    serve = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "serve")
+    assert any("Thread(" in ast.unparse(statement) for statement in serve.body), "serve starts the reader thread"
+    outside = [ast.unparse(node) for node in tree.body if not isinstance(node, ast.FunctionDef) and node is not main and "Thread" in ast.unparse(node)]
+    assert not outside, outside
 
+
+def test_a_second_job_that_changes_only_the_settings_gives_the_result_of_a_fresh_calculation():
+    """The worker keeps the counts of masks it has seen (card M8.4.3); the answer must still be the answer of a calculation from nothing."""
+    fixture = fixtures.load("large-mixed")
+    coordinator, session = new_coordinator()
+    try:
+        handles, settings_hash = upload(coordinator, fixture)
+        for bin_cm in (None, 1.37, 7.5, 0.4):
+            current = handles
+            if bin_cm is not None:
+                settings = {**fixture["inputs"]["settings"], "bin_cm": bin_cm}
+                data = json.dumps(settings, separators=(",", ":")).encode()
+                current = {**handles, "settings": put(coordinator, data, "utf8json", [len(data)])}
+            job = analysis(session, current, coordinator.store.buffers[current["settings"]].expected_hash)
+            coordinator.receive(job)
+            run_until_idle(coordinator)
+            response = frames(coordinator)[0][job["id"]]
+            assert response["status"] == "ok", response
+            columns = download(coordinator, session, response["result"])
+            direct_inputs = {**inputs_from(fixture)}
+            if bin_cm is not None:
+                direct_inputs["settings"] = {**direct_inputs["settings"], "bin_cm": bin_cm}
+            direct = section_intervals.run(section_intervals.parse(direct_inputs))
+            assert columns.keys() == direct.columns.keys()
+            for key in columns:
+                np.testing.assert_array_equal(columns[key], direct.columns[key], err_msg=f"bin_cm {bin_cm}: {key}")
+            coordinator.receive(request(session, "buffer.release", {"handles": [item["handle"] for item in response["result"]["outputs"].values()]}))
+    finally:
+        coordinator.close()
+
+
+def inputs_from(fixture):
+    """The decoded inputs of a fixture as the method takes them."""
+    raw = fixture["inputs"]
+    out = {name: json.loads(json.dumps(raw[name])) for name in ("objects", "classes", "settings", "age_model", "manual_indices")}
+    for name in ("labels", "exclude", "stack_offsets"):
+        out[name] = fixtures.array(raw[name])
+    out["stack_members"] = fixtures.array(raw["stack_members"]) if raw["stack_members"] else None
+    return out
+
+
+def test_the_job_description_carries_the_verified_hash_of_every_input(tmp_path):
+    fixture = fixtures.load("basic-four-intervals")
+    coordinator, session = new_coordinator()
+    try:
+        handles, settings_hash = upload(coordinator, fixture)
+        request_ = analysis(session, handles, settings_hash)
+        coordinator.receive(request_)
+        description = json.loads((coordinator.active["worker"].directory / "job.json").read_text(encoding="utf-8"))
+        assert {name: spec["sha256"] for name, spec in description["inputs"].items()} == {name: coordinator.store.buffers[h].expected_hash for name, h in handles.items()}
+        run_until_idle(coordinator)
+    finally:
+        coordinator.close()
+
+
+def worker_job(tmp_path, fixture, name, settings_change=None, hashes=True):
+    """A job.json for the worker function, with input files written the way the coordinator keeps them."""
+    raw = fixture["inputs"]
+    folder = tmp_path / name
+    folder.mkdir()
+    specification = {}
+
+    def write(key, data, dtype, shape):
+        path = folder / key
+        path.write_bytes(data)
+        specification[key] = {"path": str(path), "dtype": dtype, "shape": shape, **({"sha256": hashlib.sha256(data).hexdigest()} if hashes else {})}
+
+    for key, dtype in (("labels", "i32le"), ("exclude", "u8"), ("stack_offsets", "u32le")):
+        array = fixtures.array(raw[key])
+        write(key, array.tobytes(), dtype, list(array.shape))
+    if raw["stack_members"]:
+        members = fixtures.array(raw["stack_members"])
+        write("stack_members", members.tobytes(), "u32le", list(members.shape))
+    for key in ("objects", "classes", "settings", "age_model", "manual_indices"):
+        value = json.loads(json.dumps(raw[key]))
+        if key == "settings" and settings_change:
+            value.update(settings_change)
+        data = json.dumps(value, separators=(",", ":")).encode()
+        write(key, data, "utf8json", [len(data)])
+    job = folder / "job.json"
+    job.write_text(json.dumps({"method": METHOD, "cancel_path": str(folder / "cancel"), "output_dir": str(folder / "out"), "inputs": specification}))
+    return job
+
+
+@pytest.fixture
+def worker_module():
+    sys.path.insert(0, str(ENGINE))
+    try:
+        import method_worker
+        yield method_worker, method_worker.load_modules()
+    finally:
+        sys.path.remove(str(ENGINE))
+        sys.modules.pop("method_worker", None)
+
+
+def test_the_worker_counts_a_mask_once_and_only_while_it_remembers_it(tmp_path, worker_module, monkeypatch):
+    worker, modules = worker_module
+    calls = []
+    real = section_intervals.object_row_counts
+    monkeypatch.setattr(section_intervals, "object_row_counts", lambda *a, **k: calls.append(1) or real(*a, **k))
+    fixture = fixtures.load("large-mixed")
+    memos = {}
+    first = worker.run(worker_job(tmp_path, fixture, "a"), modules, memos)
+    counted = len(calls)
+    assert first["ok"] and counted > 0
+    again = worker.run(worker_job(tmp_path, fixture, "b", {"bin_cm": 1.37}), modules, memos)      # same masks, other settings
+    assert again["ok"] and len(calls) == counted, "the worker did not count the same masks twice"
+    assert set(memos) == {METHOD, "tables"}, "one memory per method, and the decoded tables"
+    worker.run(worker_job(tmp_path, fixture, "c"), modules, {})                                   # a worker that remembers nothing counts again
+    assert len(calls) == 2 * counted
+    worker.run(worker_job(tmp_path, fixture, "d", hashes=False), modules, memos)                  # inputs without a verified hash are never remembered
+    assert len(calls) == 3 * counted
+    assert len(memos[METHOD]["counts"]) == 1
+
+
+def test_a_table_with_a_remembered_hash_is_not_read_again(tmp_path, worker_module):
+    worker, modules = worker_module
+    fixture = fixtures.load("basic-four-intervals")
+    memos = {}
+    job = worker_job(tmp_path, fixture, "a")
+    assert worker.run(job, modules, memos)["ok"]
+    description = json.loads(job.read_text())
+    for name in ("objects", "classes", "age_model", "manual_indices"):
+        Path(description["inputs"][name]["path"]).write_bytes(b"{not json")          # the hash says it is the table decoded before
+    assert worker.run(job, modules, memos)["ok"], "the remembered tables were used"
+    with pytest.raises(ValueError, match="JSON"):
+        worker.run(job, modules, {})                                                  # a worker that remembers nothing reads the damaged file
+    for name in ("objects", "classes", "age_model", "manual_indices"):
+        description["inputs"][name].pop("sha256")
+    job.write_text(json.dumps(description))
+    with pytest.raises(ValueError, match="JSON"):
+        worker.run(job, modules, memos)                                               # no hash, no memory
+    assert len(memos["tables"]) <= worker.TABLE_CACHE_ENTRIES
+
+
+def test_the_table_memory_is_bounded(tmp_path, monkeypatch, worker_module):
+    worker, _ = worker_module
+    monkeypatch.setattr(worker, "TABLE_CACHE_ENTRIES", 3)
+    tables = {}
+    for k in range(7):
+        path = tmp_path / f"t{k}"
+        path.write_bytes(json.dumps({"k": k}).encode())
+        assert worker.decoded_table(path, f"{k:064x}", tables) == {"k": k}
+    assert list(tables) == [f"{k:064x}" for k in (4, 5, 6)]
+
+
+def test_a_job_on_a_derived_mask_names_what_was_written_and_gives_the_result_of_a_fresh_calculation():
+    fixture = fixtures.load("large-mixed")
+    coordinator, session = new_coordinator()
+    try:
+        handles, settings_hash = upload(coordinator, fixture)
+        first = analysis(session, handles, settings_hash)
+        coordinator.receive(first)
+        run_until_idle(coordinator)
+        assert frames(coordinator)[0][first["id"]]["status"] == "ok"
+        labels = fixtures.array(fixture["inputs"]["labels"]).copy()
+        ids = [o["id"] for o in fixture["inputs"]["objects"]]
+        labels[100:110] = np.resize(np.array(ids + [0]), labels[100:110].shape)
+        data, row_bytes = labels.tobytes(), labels.shape[1] * 4
+        derived = coordinator.store.derive({"base": handles["labels"], "dtype": "i32le", "shape": list(labels.shape), "byte_length": len(data),
+                                            "sha256": hashlib.sha256(data).hexdigest()})["handle"]
+        coordinator.store.append({"handle": derived, "offset": 100 * row_bytes, "byte_length": 10 * row_bytes}, data[100 * row_bytes:110 * row_bytes])
+        coordinator.store.commit({"handle": derived})
+        current = {**handles, "labels": derived}
+        second = analysis(session, current, settings_hash)
+        coordinator.receive(second)
+        description = json.loads((coordinator.active["worker"].directory / "job.json").read_text(encoding="utf-8"))
+        assert description["inputs"]["labels"]["derived_from"] == {"sha256": coordinator.store.buffers[handles["labels"]].expected_hash,
+                                                                   "ranges": [[100 * row_bytes, 110 * row_bytes]]}
+        assert all("derived_from" not in spec for name, spec in description["inputs"].items() if name != "labels")
+        run_until_idle(coordinator)
+        response = frames(coordinator)[0][second["id"]]
+        assert response["status"] == "ok", response
+        columns = download(coordinator, session, response["result"])
+        direct = section_intervals.run(section_intervals.parse({**inputs_from(fixture), "labels": labels}))
+        assert columns.keys() == direct.columns.keys()
+        for key in columns:
+            np.testing.assert_array_equal(columns[key], direct.columns[key], err_msg=key)
+    finally:
+        coordinator.close()
+
+
+def test_the_worker_recounts_only_the_rows_it_is_told_were_written(tmp_path, worker_module, monkeypatch):
+    worker, modules = worker_module
+    fixture = fixtures.load("large-mixed")
+    rows = []
+    real = section_intervals.object_row_counts
+    monkeypatch.setattr(section_intervals, "object_row_counts", lambda labels, *a, **k: rows.append(labels.shape[0]) or real(labels, *a, **k))
+    memos = {}
+    base_job = worker_job(tmp_path, fixture, "base")
+    assert worker.run(base_job, modules, memos)["ok"]
+    base_hash = json.loads(base_job.read_text())["inputs"]["labels"]["sha256"]
+    roi = fixture["inputs"]["settings"]["roi"]
+    rows.clear()
+
+    labels = fixtures.array(fixture["inputs"]["labels"]).copy()
+    ids = [o["id"] for o in fixture["inputs"]["objects"]]
+    first, end = roi["y0"] + 30, roi["y0"] + 42
+    labels[first:end] = np.resize(np.array(ids + [0]), labels[first:end].shape)
+    job_file = worker_job(tmp_path, fixture, "edited")
+    description = json.loads(job_file.read_text())
+    spec = description["inputs"]["labels"]
+    Path(spec["path"]).write_bytes(labels.tobytes())
+    spec["sha256"] = hashlib.sha256(labels.tobytes()).hexdigest()
+    row_bytes = labels.shape[1] * 4
+    spec["derived_from"] = {"sha256": base_hash, "ranges": [[first * row_bytes, end * row_bytes]]}
+    job_file.write_text(json.dumps(description))
+
+    answer = worker.run(job_file, modules, memos)
+    assert answer["ok"]
+    assert sum(rows) == end - first, f"counted {sum(rows)} rows for {end - first} written rows"
+    description["inputs"]["labels"].pop("derived_from")                         # the same job without the information: everything is counted
+    job_file.write_text(json.dumps(description))
+    rows.clear()
+    worker.run(job_file, modules, {})
+    assert sum(rows) == roi["y1"] - roi["y0"]

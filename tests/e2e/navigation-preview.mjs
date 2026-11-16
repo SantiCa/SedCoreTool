@@ -37,7 +37,15 @@ export async function compareNavigationPreview(page) {
       const filled = (context) => { for (let y = 0; y < 100; y++) { context.fillStyle = `rgb(${y + 60},${y + 90},${200 - y})`; context.fillRect(0, y, 80, 1); } };
       const put = (context) => { for (let y = 0; y < 100; y++) context.putImageData(new ImageData(strips(y), 80, 1), 0, y); };
       const same = (a, b) => { let n = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++; return n; };
-      const probe = { creation: same(stretch(filled), stretch(put)), backend: same(stretch(filled), stretch(filled, { willReadFrequently: true })),
+      // Same stretch drawn at the origin of its own canvas (the preview) and at (6, 14) of a larger one (the legacy draw into the view).
+      const placed = (dx, dy) => {
+        const source = document.createElement('canvas'); source.width = 80; source.height = 100; filled(source.getContext('2d'));
+        const target = document.createElement('canvas'); target.width = 40; target.height = view.height; const context = target.getContext('2d');
+        context.drawImage(source, 0, 3, 80, 45, dx, dy, 24, view.height - 30);
+        return context.getImageData(dx, dy, 24, view.height - 30).data;
+      };
+      const offset = same(placed(0, 0), placed(6, 14));
+      const probe = { offset, creation: same(stretch(filled), stretch(put)), backend: same(stretch(filled), stretch(filled, { willReadFrequently: true })),
         cpuCreation: same(stretch(filled, { willReadFrequently: true }), stretch(put, { willReadFrequently: true })) };
       // Where the first mismatching row samples the source: a fraction of exactly .5 is a rounding tie between two source rows.
       const section = window.ichantool.S.sections[0], k = section._lc?.k || 1, roi = section.roi, strip = view.height - 30;

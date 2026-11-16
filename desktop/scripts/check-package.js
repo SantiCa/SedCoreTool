@@ -5,7 +5,7 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { listPackage, extractFile } = require('@electron/asar');
 const { loadRuntime } = require('../engine-runtime');
-const { EngineClient } = require('../engine');
+const { EngineClient, ADVERTISED_METHODS } = require('../engine');
 
 const dist = path.resolve(__dirname, '..', 'dist');
 const files = fs.readdirSync(dist, { recursive: true });
@@ -18,7 +18,10 @@ function checkExamples(archive, expected) {
     .map((file) => file.replaceAll('\\', '/').replace(/^\/+/, ''))
     .filter((file) => file === 'web/examples' || file.startsWith('web/examples/'))
     .sort();
-  assert.deepEqual(examples, expected, `Only the coastline may be packaged as example data in ${archive}`);
+  const all = listPackage(path.join(dist, archive)).map((file) => file.replaceAll('\\', '/').replace(/^\/+/, ''));
+  // Names what the archive holds, so a failure on another system can be understood from the log alone.
+  const hint = `; ${all.length} entries, top level: ${[...new Set(all.map((file) => file.split('/')[0]))].slice(0, 20).join(', ')}; coastline entries: ${all.filter((file) => file.includes('land-50m')).join(', ') || 'none'}; archives in dist: ${archives.join(', ')}; ${archive} is ${fs.statSync(path.join(dist, archive)).size} bytes; next to it: ${fs.readdirSync(path.dirname(path.join(dist, archive))).slice(0, 30).join(', ')}`;
+  assert.deepEqual(examples, expected, `Only the coastline may be packaged as example data in ${archive}${hint}`);
   console.log(`Packaged data verified: ${archive}`);
 }
 
@@ -41,7 +44,9 @@ async function checkRuntime(archive, codeArchive = archive) {
       process.env.PATH = process.platform === 'win32' ? path.join(process.env.SystemRoot, 'System32') : '/usr/bin:/bin';
       const hello = await client.start();
       assert.equal(hello.runtime_id, options.runtimeId);
-      assert.deepEqual(hello.methods, ['buffer.digest/1']);
+      // The packaged engine offers exactly the methods the packaged client accepts (this list was left at the digest
+      // alone when section.intervals/1 was added, and only the cross-platform build noticed).
+      assert.deepEqual([...hello.methods].sort(), [...ADVERTISED_METHODS].sort());
       const data = Buffer.from('public packaged-runtime fixture');
       const sha256 = createHash('sha256').update(data).digest('hex');
       const { handle } = await client.request('buffer.begin', { dtype: 'u8', shape: [data.length], byte_length: data.length, sha256 });

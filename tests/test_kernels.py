@@ -68,6 +68,57 @@ def test_units_edges_sums_and_the_minimum_valid_rule():
     assert result[0] == 50.0 and np.isnan(result[1]) and np.isnan(result[2])
 
 
+def _sum_by_interval_loop(values, edges):
+    """The implementation before card M8.4.20: one slice sum per interval."""
+    return np.array([values[a:b].sum(axis=0) for a, b in edges], dtype=float).reshape(len(edges), *values.shape[1:])
+
+
+@pytest.mark.parametrize("dtype", [np.bool_, np.uint8, np.uint16, np.uint32, np.uint64, np.int8, np.int64, np.float32, np.float64])
+@pytest.mark.parametrize("trailing", [(), (3,), (2, 2)])
+def test_sum_by_interval_equals_the_slice_sums_exactly(dtype, trailing):
+    rng = np.random.default_rng(138501)
+    for _ in range(25):
+        n = int(rng.integers(0, 60))
+        values = (rng.integers(0, 200, size=(n, *trailing)) if np.dtype(dtype).kind != "i" else rng.integers(-100, 100, size=(n, *trailing))).astype(dtype)
+        edges = [(int(a), int(b)) for a, b in rng.integers(-3, n + 8, size=(int(rng.integers(0, 12)), 2))]    # empty, reversed, overlapping, out of range, negative
+        got, want = sum_by_interval(values, edges), _sum_by_interval_loop(values, edges)
+        assert got.dtype == float and got.shape == want.shape
+        np.testing.assert_array_equal(got, want)
+        regular = bin_edges(n, 4)
+        np.testing.assert_array_equal(sum_by_interval(values, regular), _sum_by_interval_loop(values, regular))
+
+
+def _bin_edges_loop(n, bin_px, keep_partial=True):
+    """The implementation before card M8.4.20: one ``bin_edge`` call per boundary."""
+    out, j = [], 0
+    while bin_edge(j, bin_px) < n:
+        end = bin_edge(j + 1, bin_px)
+        if end > n and not keep_partial:
+            break
+        out.append((bin_edge(j, bin_px), min(n, end)))
+        j += 1
+    return out
+
+
+def test_bin_edges_equal_the_per_boundary_loop_exactly():
+    rng = np.random.default_rng(138501)
+    sizes = [1.0, 1.5, 2.0, 3.0, 12.5, 30.0, 0.5 + 1e-9, 7.000000000000001, 6.999999999999999, 1e6]
+    sizes += [float(x) for x in rng.uniform(1, 200, size=60)] + [float(x) for x in rng.uniform(0.01, 1, size=5)]   # below 1 uses the loop
+    counts = [0, 1, 2, 3, 29, 30, 31, 100, 4097, 349_526] + [int(x) for x in rng.integers(0, 20_000, size=15)]
+    for bin_px in sizes:
+        for n in counts:
+            if (bin_px < 1 and n > 200) or (bin_px < 3 and n > 20_000):
+                continue                                                           # the reference loop would need millions of steps
+            for keep in (True, False):
+                assert bin_edges(n, bin_px, keep) == _bin_edges_loop(n, bin_px, keep), (n, bin_px, keep)
+
+
+def test_sum_by_interval_integer_sums_wrap_like_the_slice_sums():
+    values = np.full(4, np.iinfo(np.uint64).max, dtype=np.uint64)                                   # sums overflow: both paths wrap the same way
+    edges = [(0, 2), (1, 4), (2, 2)]
+    np.testing.assert_array_equal(sum_by_interval(values, edges), _sum_by_interval_loop(values, edges))
+
+
 # ---- ages ------------------------------------------------------------------------------------------------------------
 
 def test_age_interpolation_ends_gaps_extrapolation_and_degenerate_models():

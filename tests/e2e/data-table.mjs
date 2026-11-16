@@ -10,6 +10,8 @@ export async function verifyDataTable(browser, url) {
     const result = await page.evaluate(async () => {
       const { t } = await import('./js/i18n.js');
       document.getElementById('modeData').click();
+      // The visible-rows rendering is the default; this test covers the native table, which stays available as the session rollback.
+      { const box = document.getElementById('dsViewport'); if (box.checked) box.click(); }
       const { S } = window.ichantool;
       const initial = document.querySelectorAll('#dBody tbody tr').length;
       const total = document.getElementById('dInfo').textContent === t('data.info', { r: 2400, c: 6 });

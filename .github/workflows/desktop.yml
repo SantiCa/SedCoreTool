@@ -2,12 +2,16 @@
 # Runs when a delivery tag (V0.1, V0.2…) is pushed (tools/release.sh does it), or by hand from the Actions tab
 # (artifacts by default, or an unpublished draft when draft_release is checked). V0.40: no `release` trigger (a release made on the web also pushes its tag,
 # which ran the build twice).
+# Card M8.3.9: it also runs on every push of a work branch (`work/**`), so the milestone gate (AGENTS.md §6) has a
+# Windows, macOS and Linux result for every pushed commit; such runs only build and test (the release job needs a tag
+# or a manual draft on master), and a newer push cancels the older run of the same branch.
 # The owner's private data is git-ignored, so it never reaches these builds.
 name: Desktop builds
 
 on:
   push:
     tags: ['V*']
+    branches: ['work/**']
   workflow_dispatch:
     inputs:
       draft_release:
@@ -58,19 +62,33 @@ jobs:
         run: npm run prepare-runtime
       - run: npm i --no-save --package-lock=false puppeteer-core@23
         working-directory: .
-      - run: xvfb-run -a node tests/e2e/desktop.mjs
+      - name: Desktop end-to-end, engine experiment off
+        run: xvfb-run -a node tests/e2e/desktop.mjs
         working-directory: .
         if: runner.os == 'Linux'
-        env: { SEDCORETOOL_ENGINE_EXPERIMENT: '1' }
-      - run: node tests/e2e/desktop.mjs
+      - name: Desktop end-to-end, engine experiment off
+        run: node tests/e2e/desktop.mjs
         working-directory: .
         if: runner.os != 'Linux'
+      # The later checks run even when an earlier one failed (but not after a cancellation), so one run reports
+      # every failure of the milestone gate.
+      - name: Desktop end-to-end, engine experiment on
+        run: xvfb-run -a node tests/e2e/desktop.mjs
+        working-directory: .
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        env: { SEDCORETOOL_ENGINE_EXPERIMENT: '1' }
+      - name: Desktop end-to-end, engine experiment on
+        run: node tests/e2e/desktop.mjs
+        working-directory: .
+        if: ${{ !cancelled() && runner.os != 'Linux' }}
         env: { SEDCORETOOL_ENGINE_EXPERIMENT: '1' }
       - run: npm run dist
+        if: ${{ !cancelled() }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'   # unsigned builds (no paid certificates)
       - name: Check packaged application data
         run: node scripts/check-package.js
+        if: ${{ !cancelled() }}
       - uses: actions/upload-artifact@v7
         with:
           name: sedcoretool-${{ matrix.os }}

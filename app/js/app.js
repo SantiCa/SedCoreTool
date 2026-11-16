@@ -4,6 +4,7 @@ import { pxPerCm, depthAtRow, rowAtDepth } from './sectiondepth.js';
 import { effectiveClassId, effectiveClassIndex, computeSectionBins, binRowsOfSection } from './sectionanalysis.js';
 import { createEngineClient } from './engineclient.js';
 import { createEngineAnalysis } from './engineanalysis.js';
+import { createMaskChanges, indexRangeOfPairs } from './maskchanges.js';
 export { pxPerCm, depthAtRow, rowAtDepth };
 import { withProvenance, ageModelText, bioturbationTable, objectsTable } from './exportio.js';
 
@@ -30,7 +31,7 @@ import { frameRatio, panelPrefs, savePanels } from './panels.js';
 import { addRecordFromTable, defaultLogView, lastLog, mode, renderLog, renderLogPanel, renderRecList, scheduleLog, sectionCanvas, navigationPreviewCanvas, clearNavigationPreviews, setMode } from './columns.js';
 import { GROUP_COLORS, addImported, addNamedIntervals, attachMapZoom, coreListUI, defaultGeo, exportMapPNG, geoComputeSamples, geoLand, geoLayer, geoMarkDirty, geoRT, geoReset, geoTrain, interpUI, loadGeoDemo, loadLand, mapBackground, mapStyleUI, mapTip, normalizeGeo, renderGeo, renderGeoMap, scheduleGeo, valueLayer, initMultiproxy } from './multiproxy.js';
 /** Delivery number (V27…): shown in the header, the start screen, the help, the window title, project files and the name of the offline file. */
-export const DELIVERY = 'V0.150';
+export const DELIVERY = 'V0.151';
 /* V0.17: input of the ichnotaxon classifier — 12 shape/colour descriptors ('shape') or the vector of a pre-trained
    vision model ('vision', DINOv2). Vectors of the two sets are never mixed. */
 const visionOn = () => (S.settings.ml?.features || 'shape') === 'vision';
@@ -68,6 +69,9 @@ function newSection({ name, file, w, h, orig, orig16 = null, ds = 1, labels = nu
   return /** @type {typeof s & import('./state.js').SectionState} */ (s);
 }
 
+/** Which rows of each section's masks changed since the engine last received them (maskchanges.js). A hint for the engine path, see there. */
+const maskChanges = createMaskChanges();
+
 /* ───────────── V0.1: images on disk, pixels in memory only while a section is in use ───────────── */
 const MEM = { px: [], mask: [], pinned: new Set(), pxBudget: 9e8, maskBudget: 5e8 };
 /** A mask layer stored packed (RLE array) and unpacked on first access; `init` = array, { rle } or null (empty). */
@@ -77,7 +81,7 @@ function lazyMask(s, key, Type, init) {
   Object.defineProperty(s, key, {
     enumerable: true, configurable: true,
     get() { if (!arr) { arr = rleDecode(rle, s.w * s.h, Type); rle = null; maskTouch(s); } return arr; },
-    set(v) { arr = v; rle = null; s._mv = (s._mv || 0) + 1; },
+    set(v) { arr = v; rle = null; s._mv = (s._mv || 0) + 1; maskChanges.markAll(s); },
   });
   // V0.2: the RLE of an unchanged mask is reused (saving no longer re-encodes every section every time)
   let cache = null;
@@ -505,6 +509,7 @@ function compactSectionStacks(s, force = false) {
   s._stackEdits = (s._stackEdits || 0) + 1;
   if (!force && s._stackEdits < 32 && s.stacks.length < (s._stackLimit || 64)) return;
   s.stacks = compactStacks(s.labels, s.stacks);
+  maskChanges.markAll(s);                       // the overlap codes of the label image were renumbered
   s._six = null;
   s._stackEdits = 0;
   s._stackLimit = Math.max(64, 2 * s.stacks.length);
@@ -563,7 +568,14 @@ function finishPixelOp(op, target = 0) {
   afterChange(s);
 }
 
+/** Tells the engine path which rows an operation wrote. Read from the operation's own history lists when it is confirmed, not per pixel: the
+ *  record cost about 8 ns for every pixel written (50 ms for a whole 6-Mpixel image) even with the engine switched off. */
+function reportWrittenRows(op) {
+  for (const range of [indexRangeOfPairs(op.lm), indexRangeOfPairs(op.ex)]) if (range) maskChanges.markRange(op.s, range.first, range.last);
+}
+
 function commitOp(op) {
+  reportWrittenRows(op);
   for (const [id, previous] of op.objs) if (!previous && !op.s.objects.has(id)) op.objs.delete(id);
   if (!op.lm.length && !op.ex.length && !op.objs.size) return;
   S.redo.length = 0;
@@ -612,6 +624,7 @@ function replayEditHistory(from, to, forward) {
 function swapEditStep(op, forward) {
   const s = op.s;
   swapHistoryPixels(s.labels, s.exclude, op.lm, op.ex, s.stacks, op.stackChanged ? six(s) : null, forward);
+  reportWrittenRows(op);
   if (op.stackChanged) compactSectionStacks(s);
   swapHistoryTraces(op);
   [s.nextId, op.nextId] = [op.nextId, s.nextId];
@@ -1090,7 +1103,7 @@ export function effClassArray(s) { return effectiveClassIndex(s, S.classes, S.se
 const analysisProject = () => ({ classes: S.classes, settings: S.settings, ageModel: S.age.model, ageUnits: S.age.units });
 let engineRefresh = 0;
 const engineBridge = /** @type {any} */ (window).corantoolDesktop?.engine;
-const engineAnalysis = engineBridge?.enabled === true ? createEngineAnalysis({ client: createEngineClient(engineBridge), project: analysisProject, onChange: () => {
+const engineAnalysis = engineBridge?.enabled === true ? createEngineAnalysis({ client: createEngineClient(engineBridge), project: analysisProject, maskChanges, onNotice: (key) => toast(t(key), 6000), onChange: () => {
   clearTimeout(engineRefresh);
   engineRefresh = setTimeout(() => { renderResults(); requestRender(); if (mode === 'log') scheduleLog(0); else if (mode !== 'section') setMode(mode); }, 50);
 } }) : null;
@@ -1452,10 +1465,10 @@ function drawNav(s, cw, ch) {
   const roi = s.roi, rh = roi.y1 - roi.y0, rw = roi.x1 - roi.x0, H = ch - 30, z = S.view.zoom, y = 14;
   if (H < 60) return;
   const W = Math.round(Math.max(8, Math.min(24, (H * rw) / rh))), x = 6;
-  const preview = navigationPreviewOn ? navigationPreviewCanvas(s, W, H) : null;
+  const preview = navigationPreviewOn ? navigationPreviewCanvas(s, W, H, { x, y }) : null;
   const cv = preview ? null : sectionCanvas(s), kk = s._lc?.k || 1;
   try {
-    if (preview) vctx.drawImage(preview, x, y);
+    if (preview) vctx.drawImage(preview, x, y, W, H, x, y, W, H);
     else { vctx.drawImage(cv, roi.x0 * kk, roi.y0 * kk, rw * kk, rh * kk, x, y, W, H); }
   } catch { /* pending */ }
   vctx.strokeStyle = '#3a4240'; vctx.lineWidth = 1; vctx.strokeRect(x - 0.5, y - 0.5, W + 1, H + 1);
@@ -2125,7 +2138,9 @@ function renderLearn() {
 function renderResults() {
   const s = sec(), sum = $('resSummary'), tab = $('resTable');
   if (s?.analysis?.state === 'pending') { sum.innerHTML = `<p class="note">${t('engine.pending')}</p>`; tab.innerHTML = ''; return; }
-  if (s?.analysis?.state === 'error') { sum.innerHTML = `<p class="note" role="alert">${esc(t(`engine.error.${s.analysis.code}`) === `engine.error.${s.analysis.code}` ? t('engine.error.INTERNAL') : t(`engine.error.${s.analysis.code}`))}${s.analysis.field ? ` (${esc(s.analysis.field)})` : ''}</p>`; tab.innerHTML = ''; return; }
+  if (s?.analysis?.state === 'error') { sum.innerHTML = `<p class="note" role="alert">${esc(t(`engine.error.${s.analysis.code}`) === `engine.error.${s.analysis.code}` ? t('engine.error.INTERNAL') : t(`engine.error.${s.analysis.code}`))}${s.analysis.field ? ` (${esc(s.analysis.field)})` : ''}</p><p><button class="btn small" id="engineRetry">${t('engine.retry')}</button></p>`; tab.innerHTML = '';
+    $('engineRetry').onclick = () => { void engineAnalysis?.restartAndRetry(S.sections); };   // a new engine session, then every failed section again
+    return; }
   if (!s || !s.bins?.length) { sum.innerHTML = `<p class="note">${t('r.empty')}</p>`; tab.innerHTML = ''; return; }
   let v = 0, b = 0; const cls = new Array(S.classes.length).fill(0);
   for (const x of s.bins) { if (!x.valid) continue; v += x.valid; b += (x.pct / 100) * x.valid; x.classPct.forEach((p, k) => (cls[k] += ((p || 0) / 100) * x.valid)); }
@@ -2894,6 +2909,7 @@ async function loadProject(p) {
   const source = p;
   blankStart = false;
   resetState(); loading = true; loadMigrated = false; clearTimeout(saveTimer);
+  engineAnalysis?.releaseAll();   // the engine keeps the masks of the sections it analysed; the old project's are no longer needed
   readOnlyProject = (p?.version || 0) > FORMAT_VERSION;   // V0.36: written by a newer SedCoreTool
   try {
     p = upgradeProject(p);
@@ -4362,4 +4378,4 @@ initializeDiagnostics({
 const startupReady = startup();
 
 // Exposed for automated tests.
-window.ichantool = { S, ready: startupReady, saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, setTool, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };
+window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, setTool, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };

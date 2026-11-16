@@ -126,6 +126,11 @@ the roadmap. State in the report what was **not** measured.
 | `tools/measure_engine_lifecycle.mjs` | Runtime verification, engine ready, orderly stop, forced kill, leftovers; optional CPU load (`--load N`) |
 | `tools/measure_engine_cancellation.mjs` | Buffer upload speed, cancellation latency (running and queued jobs), engine memory |
 | `tools/measure_packaged_startup.mjs <exe>` | Packaged program: time to window and to engine ready, close, leftover processes, process-tree memory and idle CPU. `--keep-profile` reuses one user-data folder (verification record present after the first launch); `--wait-ms` shortens the failure timeout |
+| `tools/measure_engine_analysis.mjs` | The gates of contract §7 for an engine method run from the desktop program: parity, matched timing, stages per section, responsiveness, cancellation, process-tree memory (through `tools/process_tree_sampler.py`, needs `psutil`), ten open/analyse/close cycles, worker and coordinator kills. `--only scenarios` runs the three warm scenarios (interval change, edit/undo/redo, unchanged) flag off against flag on in alternating fresh processes and writes a pass/fail verdict per scenario and for the memory peak (rules in `tools/engine_gates.mjs`, tested by `tests/app/engine-gates.test.mjs`); `--synthetic <package>` adds the eight-section project of `tools/benchmark.py::make_synthetic` |
+| `tools/measure_interval_table.py` | In-process time to turn remembered row counts into the interval table for a section of any height (default 349,526 rows); card M8.4.12 |
+| `tools/make_large_fixtures.py FOLDER [--only ...] [--verify]` | Writes deterministic 2-8 GiB TIFF/BigTIFF images and a JPEG to a folder outside the repository (20-30 GiB for the set); `--verify` reads 20 sampled regions of each TIFF with the program's own reader (`tools/verify_large_fixtures.mjs`) and compares them with the generator's pixel function; card M8.4.13 |
+| `node tools/measure_large_tables.mjs --chrome PATH --out FILE [--rows 20000,100000] [--reps 3] [--parts table,figures] [--merge] [--profile-first-open]` | Opens the real application from a local static server in headless Chrome and measures the Data table (native and visible-rows rendering), the depth plot, the cross-plot and the multiproxy log on the deterministic M2.1 fixture; needs `puppeteer-core`; card M2.1.4 |
+| `node tools/measure_large_images.mjs FOLDER --out FILE [--only ...] [--original NAME]` | Windows only. Imports each generated image into a fresh desktop program, engine off and on, and records outcome, working size, time to first frame, process-tree memory peak, pan/zoom/stroke frame times and the interval-table time; needs `puppeteer-core` and `desktop/scripts/prepare.js --with-examples`; card M8.4.13 |
 | `tools/benchmark*.py`, `tools/benchmark*.mjs` | Earlier performance baselines (see `docs/benchmarks/*.md` for how each was run) |
 
 ## 8. Versions, CI and releases
@@ -134,7 +139,17 @@ the roadmap. State in the report what was **not** measured.
   `python tools/sync_version.py` copies the number from `DELIVERY` in `app/js/app.js` to the other files; rebuild
   the runtime afterwards (§4).
 - `.github/workflows/tests.yml` runs the test suites on pushes and pull requests; `.github/workflows/desktop.yml`
-  builds Windows, macOS and Linux packages on a version tag or on a manual run. A manual run with
-  `draft_release=false` produces artifacts without a release. Never push a tag only to get a build: tags publish.
+  builds Windows, macOS and Linux packages on every push of a `work/**` branch (build and test only), on a version
+  tag, or on a manual run. A manual run with `draft_release=false` produces artifacts without a release. Never push
+  a tag only to get a build: tags publish.
+- **Milestone gate** ([AGENTS.md §6](../AGENTS.md#6-working-on-a-task)): push the work branch; *Desktop builds* starts
+  by itself (a newer push cancels the older run of the same branch; it can also be started by hand from Actions →
+  Desktop builds → Run workflow, `draft_release` off). It prepares the bundled runtime, runs `tests/e2e/desktop.mjs`
+  with the engine experiment off and on, packages and checks the package on Windows, macOS (Apple Silicon runner)
+  and Linux; the later steps run even when an earlier one failed, so one run reports every failure. The `tests`
+  workflow must pass on the same commit. Results can be read without
+  logging in: `GET https://api.github.com/repos/SantiCa/SedCoreTool/actions/runs/<run id>/jobs` and, for a failed
+  job, `GET .../check-runs/<job id>/annotations` (60 unauthenticated requests per hour). Record the run id, commit
+  and per-system result in the roadmap status.
 - `tools/release.sh` checks branch, clean tree, versions and tests, then pushes the tag. Only the owner decides to
   push, release or request a DOI.
