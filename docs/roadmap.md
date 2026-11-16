@@ -82,14 +82,13 @@ Updated 16 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step:** the design session of part C was held on 16 November 2026: decisions in [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84),
-  cards M8.4.14-M8.4.19 detailed below. **M8.4.14 starts when the maintainer answers Q2 and Q3** (Q1 is needed by M8.4.16). Any model may implement the cards.
+- **Next step: M8.4.14** (tile store format and pyramid import, engine only; Ready). The design session of part C was held on 16 November 2026: decisions in
+  [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
-- **Questions for the maintainer from the design of part C (16 November 2026), each with the proposed default:**
-  **Q1** masks of a tiled section at full resolution (default: yes; the alternative is a fixed power-of-two level chosen at import, cheaper on disk);
-  **Q2** disk budget for the pyramid cache (default: 50 GiB, least-recently-used pyramids deleted beyond it, never the open project's; a pyramid takes
-  about 1.33 times the decoded image, less if M8.4.14 adopts compression); **Q3** largest JPEG or PNG accepted for tiling, which Pillow decodes whole
-  (default: 1 GiB decoded; larger ones refused with a message that suggests TIFF).
+- **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
+  ("lo que tú recomiendes"); Q3 JPEG or PNG above 1 GiB decoded: refused with a message that suggests TIFF. And: **add libraries when they make the program
+  faster and more stable** ("no tengas miedo en añadir librerías si eso acelera el programa y da estabilidad"); each one is still recorded with its capability,
+  the smallest alternative and its cost (AGENTS §3, item 9). First use: libvips for reading images (decision 4).
 - **Reminder for whoever talks to the maintainer:** the maintainer accepted the two acceptance levels on
   13 November 2026 and asked to be **reminded to run the release-gate tests** (the release checklist below:
   macOS and Linux, clean Windows machine, cold-cache first launch, saturated CPUs, package sizes, and the
@@ -923,12 +922,12 @@ data must be checked in the worker with NumPy.
 ##### Design of M8.4.14-M8.4.19 (design session of 16 November 2026)
 
 The decisions are in [ARCHITECTURE §3.4, "Design of part C"](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84). Three of them are
-**proposals waiting for the maintainer** (Q1-Q3 in the roadmap status); M8.4.14 may start once Q2 and Q3 are answered, M8.4.16 needs Q1. Every card claims
+proposals that the maintainer answered on 16 November 2026 (Q1-Q3 in the roadmap status); decoding uses libvips (decision 4, revised the same day). Every card claims
 the development gate; each later card is re-read by its implementing session against what the earlier cards measured, and stops if a number
 invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p95 85 ms; D11 = D), M8.4.13 (all seven fixtures open today only at
 1/6-1/19 of their resolution, peak 1.1-2.8 GiB, 3-61 s to the first frame), M2.1.4-M2.1.6.
 
-##### M8.4.14 - Tile store format and pyramid import (engine only) — state: Ready after Q2 and Q3
+##### M8.4.14 - Tile store format and pyramid import (engine only) — state: Ready
 
 - **Goal:** the engine imports a supported source image into a pixel pyramid in the store, with progress, cancellation and bounded memory and
   disk, and serves verified tiles by level and position. The format is documented before the first file is written. No interface change.
@@ -936,7 +935,8 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   sampler); [M8.4.13 summary](validation/M8.4.13-large-baseline-summary.md); `tools/make_large_fixtures.py` (`pixel_region`, the reference);
   `app/js/tiff.js` (the scope of formats supported today); `src/sedcoretool/engine/server.py`, `buffers.py`, `method_worker.py` (operations,
   budgets, job isolation); `desktop/engine.js`, `desktop/engine-ipc.js` (what the main process supplies and allows).
-- **Change:** new package `src/sedcoretool/store/` (`format.py`: paths, Zarr v2 metadata, tile-hash files; `tiffread.py`: block reader;
+- **Change:** `desktop/runtime-lock.json` and the runtime preparation (add `pyvips`, `pyvips-binary`, `cffi`, `pycparser` with hashes for every
+  platform; licence texts in the package); new package `src/sedcoretool/store/` (`format.py`: paths, Zarr v2 metadata, tile-hash files; `source.py`: reading sources with libvips;
   `pyramid.py`: the build job; `tiles.py`: verified reads and the engine tile cache); `engine/server.py` (operations `store.open`, `pyramid.build`,
   `tile.read`); `desktop/engine.js` (the main process passes the two store roots, never the renderer); new contract §8 "Tile store v1" and a
   technical-manual section; new `tools/measure_tile_store.py`; tests; `docs/TECHNICAL_DOCUMENTATION.md` §1.4; `CHANGELOG.md` (Internal).
@@ -946,11 +946,13 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
      file (`<level>/.tiles.sha256`: `rows x cols` records of 32 bytes, row-major), source identity (SHA-256 and size of the source file, computed
      while reading it), a `pyramid.json` with format version 1 and a `complete` field written last, the three operations with closed payloads,
      limits (tile cache 256 MiB, build working memory 512 MiB) and error codes (reuse §3's; disk full is `LIMIT_EXCEEDED` with `details.field = "disk"`).
-  2. `tiffread.py` with the scope of decision 4, reading only the blocks that cover a requested band; every declared size, count and offset is
-     checked against the file length and the limits before allocating. Tests: the same files decoded by `tiff.js` and by `tiffread.py` give identical
-     bytes (the test images of `tests/app/tiff.test.mjs` and small outputs of the generator: tiled, striped, deflate, 16-bit, BigTIFF); hostile
-     headers (huge dimensions, offsets past the end, cyclic IFD chains, wrong byte counts) are refused without large allocations. JPEG and PNG
-     through Pillow under the limit of Q3.
+  2. Add libvips to the bundled runtime (decision 4): pin the four packages for every platform, rebuild the runtime, record the change of the
+     installed size and of each installer, check that `tools/check_engine_runtime.py` imports `pyvips` and reads a small TIFF on the packaged
+     runtime, and ship the licence texts. `source.py` opens a source with libvips, reads bands of 512 rows (random access for TIFF, sequential for
+     JPEG and PNG), refuses JPEG or PNG above 1 GiB decoded with a message key that suggests TIFF, and checks declared dimensions against limits before
+     reading. Tests: the same files decoded by `tiff.js` and by `source.py` give identical bytes (the test images of `tests/app/tiff.test.mjs` and small
+     outputs of the generator: tiled, striped, deflate, LZW, 16-bit, BigTIFF); hostile files (huge declared dimensions, truncated files, offsets past
+     the end) fail with an error and without large allocations; libvips' own caches are bounded (`pyvips.cache_set_max_mem`) and counted in the budget.
   3. `pyramid.build` runs in the worker process: it reads the source in bands of 512 rows, writes level 0 tiles, and builds each next level from the
      previous band with the integer mean of decision 5, so memory stays near two bands per level; progress events at most 10 per second;
      cancellation polled per tile row; output written into `<sha256>.partial/` and renamed when `complete` is written. Before starting, the estimated

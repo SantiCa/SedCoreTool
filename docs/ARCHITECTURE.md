@@ -191,17 +191,25 @@ are proposals with a default that the maintainer confirms or changes before the 
 1. **Which sections are tiled.** A section is tiled when its source has more pixels than the working-resolution limit
    (`maxMP`, 8 megapixels by default: the point where today's path starts discarding detail, M8.4.13), the engine is available and the
    flag of M8.4.15 is on. Every other section keeps today's path (rule 6).
-2. **Masks of a tiled section are at full resolution** *(maintainer)*: labels and exclusion on level 0 of the pyramid, so the interval
+2. **Masks of a tiled section are at full resolution** (confirmed by the maintainer, 16 November 2026): labels and exclusion on level 0 of the pyramid, so the interval
    table counts the source pixels. The resolution selector of today's path (`RES_FACTORS`) does not apply to tiled sections.
 3. **Two folders, chosen by the main process.** The pyramid is a cache keyed by the SHA-256 of the source file
-   (`<user data>/pyramids/<sha256>/`), shared by projects and deleted least-recently-used beyond a disk budget *(maintainer: default
-   50 GiB)*; the pyramid of an open project is never deleted. Mask tiles, manifests and tables are **project data**
+   (`<user data>/pyramids/<sha256>/`), shared by projects and deleted least-recently-used beyond a disk budget of 50 GiB (the default the maintainer
+   accepted on 16 November 2026); the pyramid of an open project is never deleted. Mask tiles, manifests and tables are **project data**
    (`<user data>/projects/<project id>/tiles/`), never deleted by a budget, and included in backups (M8.4.18).
-4. **Decoding without a new dependency.** TIFF and BigTIFF are read by a minimal reader written in Python with the scope of
-   `app/js/tiff.js` (classic and BigTIFF, tiled and striped, chunky grey/RGB/RGBA, 8 and 16 bits, compression none, LZW, deflate and
-   PackBits, horizontal predictor), one block at a time. JPEG and PNG use Pillow, already in the runtime, which decodes the whole image:
-   they are accepted for tiling only up to a decoded size of 1 GiB *(maintainer)*; a larger one is refused with a message that suggests
-   TIFF. Other TIFF compressions (JPEG-in-TIFF, ZSTD, ...) are refused with a message, as today.
+4. **Decoding with libvips** (revised on 16 November 2026: the maintainer asked to add libraries when they make the program faster
+   and more stable). The engine reads source images with libvips through `pyvips` and `pyvips-binary` (libvips 8.18.7), which reads
+   regions of TIFF and BigTIFF (tiled, striped, all the usual compressions including JPEG-in-TIFF), streams JPEG and PNG in bands
+   without decoding them whole, and shrinks images fast. *Capability added:* region and band reads of every format the program accepts,
+   with bounded memory. *Smallest alternative considered:* a minimal TIFF reader written here with the scope of `app/js/tiff.js` (no
+   dependency, but no JPEG-in-TIFF, slower and new code to secure against hostile files); `tifffile` (0.3 MB) plus `imagecodecs` (19 MB).
+   *Cost:* about 8-9 MB per platform wheel (Windows x64, macOS arm64 and x86_64 from 10.15, Linux x86_64 with glibc 2.28 or newer, and
+   musl), plus `cffi` and `pycparser`; pinned with hashes in `desktop/runtime-lock.json` like the other packages, so offline packaging is
+   unchanged; libvips is LGPL-2.1-or-later (dynamically linked; licence texts shipped with the package). *Probe on the M8.4.13 fixtures
+   (16 November 2026, Windows, outside the program):* `rgb8g`, `deflate8g`, `strip2g` and `gray16_2g` opened in 6 ms, 512 x 512 regions
+   read in a median of 1.3-6.1 ms and **equal byte for byte to the generator's pixels** (8 regions each; one first read of the striped file
+   took 0.84 s); the 4,096 x 65,500 JPEG was streamed whole in 1.0 s. JPEG and PNG larger than 1 GiB decoded are refused with a message that
+   suggests TIFF (the maintainer's choice, 16 November 2026), although libvips could stream them.
 5. **Pyramid layout:** Zarr version 2 (one array per level, chunks of 512 x 512 x channels, C order, chunk keys `i.j.0`), compressor
    either none or `zlib` level 1, chosen by a predeclared measurement in M8.4.14; levels are 2 x 2 integer means with round-half-up,
    `(a + b + c + d + 2) // 4`; one extra file per level lists the SHA-256 of every tile (rule 3), which Zarr readers ignore.
@@ -334,7 +342,7 @@ Do not reopen these without the maintainer; build on them.
 | D1 | One local Python/NumPy scientific engine in a separate process; JavaScript keeps interface, editing and saving | 12 Nov 2026 |
 | D2 | Electron is the interface shell for now; protocol and methods stay shell-independent so it can be replaced after M8.6 | 12 Nov 2026 |
 | D3 | Private pipes with bounded binary frames; no HTTP server, no listening port | M8.1 |
-| D4 | A pinned CPython 3.12 runtime with NumPy, pandas and Pillow ships inside the program; no system Python, no downloads at run time, no silent fallback when it is invalid | M8.2.2 |
+| D4 | A pinned CPython 3.12 runtime with NumPy, pandas and Pillow (and libvips through `pyvips`, added by card M8.4.14: §3.4 decision 4) ships inside the program; no system Python, no downloads at run time, no silent fallback when it is invalid | M8.2.2 |
 | D5 | Every runtime file is verified at launch; a verified-identity record skips re-hashing while files are unchanged; unused files are pruned from the runtime | 12 Nov 2026 |
 | D6 | The Windows portable form is a ZIP of the program folder, not a self-extracting executable | 12 Nov 2026 |
 | D7 | The Python API and CLI call the same kernels and methods in-process; they are not clients of the engine process | M8.1 |
