@@ -1,0 +1,601 @@
+{
+ "tool": "tools/measure_large_tables.mjs",
+ "card": "M2.1.4",
+ "commit": "b62b14020573f3f81838d50f724a6f3f993a5c00",
+ "generated": "2026-11-16T21:12:54.713Z",
+ "environment": {
+  "os": "Windows_NT 10.0.26300",
+  "cpu": "AMD Ryzen 7 7700X 8-Core Processor",
+  "logical_cpus": 16,
+  "memory_gib": 31.1,
+  "node": "v22.23.4"
+ },
+ "parameters": {
+  "sizes": [
+   20000,
+   100000
+  ],
+  "repetitions": 3,
+  "viewport": "1440 x 900",
+  "scroll_seconds": 5
+ },
+ "table": {},
+ "figures": {
+  "20000": [
+   {
+    "rows": 20000,
+    "points_one_core": 10000,
+    "points_two_cores": 20000,
+    "in_progress": null,
+    "open_plot_ms": 18,
+    "depth_plot_one_core_ms": 11.400000000372529,
+    "depth_plot_one_core": {
+     "svg_elements": 34,
+     "svg_chars": 116341
+    },
+    "depth_plot_hover": {
+     "frames": 601,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 4.3,
+     "long_tasks": 0
+    },
+    "cross_plot_one_core": {
+     "svg_elements": 9770,
+     "svg_chars": 604524
+    },
+    "cross_plot_one_core_redraw_ms": 37.899999998509884,
+    "cross_plot_two_cores_ms": 65.70000000111759,
+    "cross_plot_two_cores": {
+     "svg_elements": 19492,
+     "svg_chars": 1312803
+    },
+    "cross_plot_two_cores_redraw_ms": 58.09999999962747,
+    "cross_plot_hover": {
+     "frames": 595,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 8.3,
+     "long_tasks": 0
+    },
+    "multiproxy_open_ms": 240.19999999925494,
+    "multiproxy": {
+     "svg_elements": 312,
+     "svg_chars": 421395
+    },
+    "multiproxy_redraw_ms": 153,
+    "multiproxy_after": {
+     "svg_elements": 331,
+     "svg_chars": 555092
+    },
+    "multiproxy_hover": {
+     "frames": 592,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 20.9,
+     "long_tasks": 0
+    },
+    "errors": [],
+    "chrome": "Chrome/157.0.8103.51"
+   },
+   {
+    "rows": 20000,
+    "points_one_core": 10000,
+    "points_two_cores": 20000,
+    "in_progress": null,
+    "open_plot_ms": 19.699999999254942,
+    "depth_plot_one_core_ms": 13.099999999627471,
+    "depth_plot_one_core": {
+     "svg_elements": 34,
+     "svg_chars": 116341
+    },
+    "depth_plot_hover": {
+     "frames": 600,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 4.3,
+     "long_tasks": 0
+    },
+    "cross_plot_one_core": {
+     "svg_elements": 9770,
+     "svg_chars": 604524
+    },
+    "cross_plot_one_core_redraw_ms": 45.09999999962747,
+    "cross_plot_two_cores_ms": 61,
+    "cross_plot_two_cores": {
+     "svg_elements": 19492,
+     "svg_chars": 1312803
+    },
+    "cross_plot_two_cores_redraw_ms": 55.5,
+    "cross_plot_hover": {
+     "frames": 599,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 8.3,
+     "long_tasks": 0
+    },
+    "multiproxy_open_ms": 254.90000000037253,
+    "multiproxy": {
+     "svg_elements": 312,
+     "svg_chars": 421395
+    },
+    "multiproxy_redraw_ms": 151,
+    "multiproxy_after": {
+     "svg_elements": 331,
+     "svg_chars": 555092
+    },
+    "multiproxy_hover": {
+     "frames": 594,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 20.9,
+     "long_tasks": 0
+    },
+    "errors": [],
+    "chrome": "Chrome/157.0.8103.51"
+   },
+   {
+    "rows": 20000,
+    "points_one_core": 10000,
+    "points_two_cores": 20000,
+    "in_progress": null,
+    "open_plot_ms": 18.09999999962747,
+    "depth_plot_one_core_ms": 14.099999999627471,
+    "depth_plot_one_core": {
+     "svg_elements": 34,
+     "svg_chars": 116341
+    },
+    "depth_plot_hover": {
+     "frames": 600,
+     "median_ms": 4.2,
+     "p95_ms": 4.2,
+     "max_ms": 4.3,
+     "long_tasks": 0
+    },
+    "cross_plot_one_core": {
+     "svg_elements": 9770,
+     "svg_chars": 604524
+    },
+    "cross_plot_one_core_redraw_ms": 39.40000000037253,
+    "cross_plot_two_cores_ms": 71.10000000149012,
+    "cross_plot_two_cores": {
+     "svg_elements": 19492,
+     "svg_chars": 1312803
+    },
+    "cross_plot_two_cores_redraw_ms": 67.40000000037253,
+    "cross_plot_hover": {
+     "frames": 598,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 8.3,
+     "long_tasks": 0
+    },
+    "profile_cross_plot_two_cores_redraw": [
+     {
+      "function": "(program)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 49.6
+     },
+     {
+      "function": "drawDataPlot",
+      "source": "js/datatab.js",
+      "line": 76,
+      "self_ms": 21.6
+     },
+     {
+      "function": "time",
+      "source": "(benchmark)",
+      "line": 5,
+      "self_ms": 16.8
+     },
+     {
+      "function": "buildXYPlot",
+      "source": "js/plot.js",
+      "line": 129,
+      "self_ms": 3.3
+     },
+     {
+      "function": "plotSymbol",
+      "source": "js/plot.js",
+      "line": 78,
+      "self_ms": 2.8
+     },
+     {
+      "function": "drawSeries",
+      "source": "js/plot.js",
+      "line": 87,
+      "self_ms": 1.5
+     },
+     {
+      "function": "(idle)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 1.5
+     },
+     {
+      "function": "(garbage collector)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 1.5
+     }
+    ],
+    "multiproxy_open_ms": 234.09999999962747,
+    "multiproxy": {
+     "svg_elements": 312,
+     "svg_chars": 421395
+    },
+    "multiproxy_redraw_ms": 160.7999999988824,
+    "multiproxy_after": {
+     "svg_elements": 331,
+     "svg_chars": 555092
+    },
+    "multiproxy_hover": {
+     "frames": 592,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 20.9,
+     "long_tasks": 0
+    },
+    "profile_multiproxy_redraw": [
+     {
+      "function": "(program)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 90
+     },
+     {
+      "function": "drawDataPlot",
+      "source": "js/datatab.js",
+      "line": 76,
+      "self_ms": 19.8
+     },
+     {
+      "function": "(idle)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 15.3
+     },
+     {
+      "function": "renderIntervalList",
+      "source": "js/multiproxy.js",
+      "line": 855,
+      "self_ms": 4.6
+     },
+     {
+      "function": "getBoundingClientRect",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 4.5
+     },
+     {
+      "function": "f2",
+      "source": "js/log.js",
+      "line": 271,
+      "self_ms": 4.4
+     },
+     {
+      "function": "refreshCoreData",
+      "source": "js/app.js",
+      "line": 2715,
+      "self_ms": 3.2
+     },
+     {
+      "function": "buildLogSVG",
+      "source": "js/log.js",
+      "line": 473,
+      "self_ms": 3.2
+     },
+     {
+      "function": "plotStats",
+      "source": "js/plot.js",
+      "line": 13,
+      "self_ms": 3.1
+     },
+     {
+      "function": "renderGeoLogs",
+      "source": "js/multiproxy.js",
+      "line": 726,
+      "self_ms": 3.1
+     }
+    ],
+    "errors": [],
+    "chrome": "Chrome/157.0.8103.51"
+   }
+  ],
+  "100000": [
+   {
+    "rows": 100000,
+    "points_one_core": 50000,
+    "points_two_cores": 100000,
+    "in_progress": null,
+    "open_plot_ms": 61.80000000074506,
+    "depth_plot_one_core_ms": 24.299999998882413,
+    "depth_plot_one_core": {
+     "svg_elements": 34,
+     "svg_chars": 572265
+    },
+    "depth_plot_hover": {
+     "frames": 596,
+     "median_ms": 4.2,
+     "p95_ms": 4.2,
+     "max_ms": 8.3,
+     "long_tasks": 0
+    },
+    "cross_plot_one_core": {
+     "svg_elements": 48689,
+     "svg_chars": 3012083
+    },
+    "cross_plot_one_core_redraw_ms": 135.30000000074506,
+    "cross_plot_two_cores_ms": 272.5,
+    "cross_plot_two_cores": {
+     "svg_elements": 97330,
+     "svg_chars": 6555643
+    },
+    "cross_plot_two_cores_redraw_ms": 329.2999999988824,
+    "cross_plot_hover": {
+     "frames": 584,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 33.4,
+     "long_tasks": 0
+    },
+    "multiproxy_open_ms": 2593.9000000003725,
+    "multiproxy": {
+     "svg_elements": 1112,
+     "svg_chars": 2080918
+    },
+    "multiproxy_redraw_ms": 522.9000000003725,
+    "multiproxy_after": {
+     "svg_elements": 1131,
+     "svg_chars": 2744551
+    },
+    "multiproxy_hover": {
+     "frames": 537,
+     "median_ms": 4.2,
+     "p95_ms": 8.4,
+     "max_ms": 16.7,
+     "long_tasks": 0
+    },
+    "errors": [],
+    "chrome": "Chrome/157.0.8103.51"
+   },
+   {
+    "rows": 100000,
+    "points_one_core": 50000,
+    "points_two_cores": 100000,
+    "in_progress": null,
+    "open_plot_ms": 59.5,
+    "depth_plot_one_core_ms": 27.09999999962747,
+    "depth_plot_one_core": {
+     "svg_elements": 34,
+     "svg_chars": 572265
+    },
+    "depth_plot_hover": {
+     "frames": 596,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 8.4,
+     "long_tasks": 0
+    },
+    "cross_plot_one_core": {
+     "svg_elements": 48689,
+     "svg_chars": 3012083
+    },
+    "cross_plot_one_core_redraw_ms": 139.09999999962747,
+    "cross_plot_two_cores_ms": 281.2000000011176,
+    "cross_plot_two_cores": {
+     "svg_elements": 97330,
+     "svg_chars": 6555643
+    },
+    "cross_plot_two_cores_redraw_ms": 284.5,
+    "cross_plot_hover": {
+     "frames": 582,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 33.4,
+     "long_tasks": 0
+    },
+    "multiproxy_open_ms": 2403,
+    "multiproxy": {
+     "svg_elements": 1112,
+     "svg_chars": 2080918
+    },
+    "multiproxy_redraw_ms": 452.5,
+    "multiproxy_after": {
+     "svg_elements": 1131,
+     "svg_chars": 2744551
+    },
+    "multiproxy_hover": {
+     "frames": 534,
+     "median_ms": 4.2,
+     "p95_ms": 8.3,
+     "max_ms": 16.7,
+     "long_tasks": 0
+    },
+    "errors": [],
+    "chrome": "Chrome/157.0.8103.51"
+   },
+   {
+    "rows": 100000,
+    "points_one_core": 50000,
+    "points_two_cores": 100000,
+    "in_progress": null,
+    "open_plot_ms": 58.29999999888241,
+    "depth_plot_one_core_ms": 22.90000000037253,
+    "depth_plot_one_core": {
+     "svg_elements": 34,
+     "svg_chars": 572265
+    },
+    "depth_plot_hover": {
+     "frames": 596,
+     "median_ms": 4.2,
+     "p95_ms": 4.2,
+     "max_ms": 8.4,
+     "long_tasks": 0
+    },
+    "cross_plot_one_core": {
+     "svg_elements": 48689,
+     "svg_chars": 3012083
+    },
+    "cross_plot_one_core_redraw_ms": 136.2999999988824,
+    "cross_plot_two_cores_ms": 286.09999999962747,
+    "cross_plot_two_cores": {
+     "svg_elements": 97330,
+     "svg_chars": 6555643
+    },
+    "cross_plot_two_cores_redraw_ms": 256.2000000011176,
+    "cross_plot_hover": {
+     "frames": 583,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 33.3,
+     "long_tasks": 0
+    },
+    "profile_cross_plot_two_cores_redraw": [
+     {
+      "function": "(program)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 115.7
+     },
+     {
+      "function": "drawDataPlot",
+      "source": "js/datatab.js",
+      "line": 76,
+      "self_ms": 111.5
+     },
+     {
+      "function": "time",
+      "source": "(benchmark)",
+      "line": 5,
+      "self_ms": 91.5
+     },
+     {
+      "function": "drawSeries",
+      "source": "js/plot.js",
+      "line": 87,
+      "self_ms": 16.4
+     },
+     {
+      "function": "plotSymbol",
+      "source": "js/plot.js",
+      "line": 78,
+      "self_ms": 7.7
+     },
+     {
+      "function": "plotStats",
+      "source": "js/plot.js",
+      "line": 13,
+      "self_ms": 6.1
+     },
+     {
+      "function": "(garbage collector)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 6.1
+     },
+     {
+      "function": "buildXYPlot",
+      "source": "js/plot.js",
+      "line": 129,
+      "self_ms": 4.7
+     },
+     {
+      "function": "okv",
+      "source": "js/plot.js",
+      "line": 11,
+      "self_ms": 1.5
+     },
+     {
+      "function": "xyPairs",
+      "source": "js/plot.js",
+      "line": 12,
+      "self_ms": 1.2
+     }
+    ],
+    "multiproxy_open_ms": 2449.5999999996275,
+    "multiproxy": {
+     "svg_elements": 1112,
+     "svg_chars": 2080918
+    },
+    "multiproxy_redraw_ms": 512.3000000007451,
+    "multiproxy_after": {
+     "svg_elements": 1131,
+     "svg_chars": 2744551
+    },
+    "multiproxy_hover": {
+     "frames": 516,
+     "median_ms": 4.2,
+     "p95_ms": 8.4,
+     "max_ms": 20.9,
+     "long_tasks": 0
+    },
+    "profile_multiproxy_redraw": [
+     {
+      "function": "(program)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 362.4
+     },
+     {
+      "function": "drawDataPlot",
+      "source": "js/datatab.js",
+      "line": 76,
+      "self_ms": 93.6
+     },
+     {
+      "function": "(idle)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 47.2
+     },
+     {
+      "function": "renderGeoLogs",
+      "source": "js/multiproxy.js",
+      "line": 726,
+      "self_ms": 35.1
+     },
+     {
+      "function": "(anonymous)",
+      "source": "js/log.js",
+      "line": 674,
+      "self_ms": 29.9
+     },
+     {
+      "function": "refreshCoreData",
+      "source": "js/app.js",
+      "line": 2715,
+      "self_ms": 15.1
+     },
+     {
+      "function": "plotSymbol",
+      "source": "js/plot.js",
+      "line": 78,
+      "self_ms": 12.2
+     },
+     {
+      "function": "applyCellEdits",
+      "source": "js/app.js",
+      "line": 2747,
+      "self_ms": 11.1
+     },
+     {
+      "function": "getBoundingClientRect",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 10.8
+     },
+     {
+      "function": "buildLogSVG",
+      "source": "js/log.js",
+      "line": 473,
+      "self_ms": 10.4
+     }
+    ],
+    "errors": [],
+    "chrome": "Chrome/157.0.8103.51"
+   }
+  ]
+ }
+}

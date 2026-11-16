@@ -864,7 +864,7 @@ data must be checked in the worker with NumPy.
 - **Tests:** the tool's own checks (it measures).
 - **Done when:** the evidence is committed with a verdict per case.
 
-##### M2.1.5 - Multiproxy: build the depth-age relation once per core (found by M2.1.4) — state: Ready
+##### M2.1.5 - Multiproxy: build the depth-age relation once per core (found by M2.1.4) — state: Done (16 Nov 2026) with the 2 s target **not met** (2.4-2.6 s); [report](benchmarks/M2.1.5.md)
 
 - **Goal:** the first opening of the multiproxy log of a core with 100,000 rows takes at most 2 s (195 s today, 7.7 s at 20,000 rows), with
   bit-identical results. The target was proposed by this card from the contract's "first useful view <= 2 s" and may be changed by the maintainer before the measurement.
@@ -888,6 +888,8 @@ data must be checked in the worker with NumPy.
      rows of the table in M2.1.4.
 - **Tests:** `node --test tests/app/geo.test.mjs`, then the whole `node --test tests/app/*.test.mjs`; `npm run typecheck`; the regression against
   `legacy/v2.1_console/example_output.csv` is not affected (Python) but `pytest` is run once at the end of the session.
+- **Result (16 November 2026):** first opening at 100,000 rows 195 s -> 2.45 s (80 times), at 20,000 rows 7.7 s -> 0.24 s; results exactly equal to the previous code on the tests. The target is missed by 0.4-0.6 s; the profile puts the rest
+  in `buildSamples` (`geo.js:188`, a scan of all intervals for every sample and category, 1.15 s) and the per-sample interval `find` of the labelling (`geo.js:319`, 0.25 s). **Proposed next card (for the maintainer to authorise, not started):** M2.1.6, answer the interval membership with `createIntervalLookup` (half-open boundaries, same results), then repeat this measurement.
 - **Done when:** the old and new results are exactly equal on the tests; the first opening at 100,000 rows is <= 2 s (or the measured value and the reason are recorded and the
   maintainer decides); `docs/benchmarks/M2.1.5.md` gives the before and after numbers; the report names what was not measured.
 
