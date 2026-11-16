@@ -1,0 +1,834 @@
+{
+  "tool": "tools/measure_large_images.mjs",
+  "card": "M8.4.13",
+  "commit": "83991ee43345733ea2c2f1ae7dd68f69cb2d5654",
+  "generated": "2026-11-16T18:01:04.431Z",
+  "environment": {
+    "os": "Windows_NT 10.0.26300",
+    "cpu": "AMD Ryzen 7 7700X 8-Core Processor",
+    "logical_cpus": 16,
+    "memory_gib": 31.1,
+    "node": "v22.23.4",
+    "electron": "45.2.2"
+  },
+  "fixtures": {
+    "seed": 138501,
+    "generator_block": 512,
+    "files": {
+      "deflate8g": {
+        "width": 8192,
+        "rows": 349526,
+        "channels": 3,
+        "bits": 8,
+        "layout": "tiled",
+        "compression": "deflate",
+        "tile": [
+          512,
+          512
+        ],
+        "rows_per_strip": null,
+        "encoded_bytes": 7988114393,
+        "decoded_bytes": 8589950976,
+        "seconds": 269.9,
+        "verified_regions": 20,
+        "sha256": "1ab36e38ab27a3f6a404a3c40918cb3fb86c192ae02ed1bfadfe9d714d3b6a18",
+        "file": "deflate8g.tif"
+      },
+      "gray16_2g": {
+        "width": 8192,
+        "rows": 131072,
+        "channels": 1,
+        "bits": 16,
+        "layout": "tiled",
+        "compression": "none",
+        "tile": [
+          512,
+          512
+        ],
+        "rows_per_strip": null,
+        "encoded_bytes": 2147549436,
+        "decoded_bytes": 2147483648,
+        "seconds": 78,
+        "verified_regions": 20,
+        "sha256": "1078de02d5b5b76131e3524cb6c304d8263ebda955e35b92866fd3ca59a43172",
+        "file": "gray16_2g.tif"
+      },
+      "jpeg": {
+        "width": 4096,
+        "rows": 65500,
+        "channels": 3,
+        "bits": 8,
+        "layout": "baseline",
+        "compression": "jpeg",
+        "tile": null,
+        "rows_per_strip": null,
+        "encoded_bytes": 49375050,
+        "decoded_bytes": 804864000,
+        "seconds": 20.8,
+        "sha256": "5b897b4003498dfa27d43e6635f0c6767688bd3ecb4bd6be94933dab388a5c2c",
+        "file": "jpeg.jpg"
+      },
+      "rgb2g": {
+        "width": 8192,
+        "rows": 87382,
+        "channels": 3,
+        "bits": 8,
+        "layout": "tiled",
+        "compression": "none",
+        "tile": [
+          512,
+          512
+        ],
+        "rows_per_strip": null,
+        "encoded_bytes": 2151721980,
+        "decoded_bytes": 2147500032,
+        "seconds": 51.8,
+        "verified_regions": 20,
+        "sha256": "6ac15f2de509d983244332a0ba11641400ebbbf55cedc606098930933ec5f719",
+        "file": "rgb2g.tif"
+      },
+      "rgb4g": {
+        "width": 8192,
+        "rows": 174763,
+        "channels": 3,
+        "bits": 8,
+        "layout": "tiled",
+        "compression": "none",
+        "tile": [
+          512,
+          512
+        ],
+        "rows_per_strip": null,
+        "encoded_bytes": 4303443708,
+        "decoded_bytes": 4294975488,
+        "seconds": 135.1,
+        "verified_regions": 20,
+        "sha256": "466a4e038826bcf907cce253e27fdcb19c5eeadc96db70ff78fcc9be8743a272",
+        "file": "rgb4g.tif"
+      },
+      "rgb8g": {
+        "width": 8192,
+        "rows": 349526,
+        "channels": 3,
+        "bits": 8,
+        "layout": "tiled",
+        "compression": "none",
+        "tile": [
+          512,
+          512
+        ],
+        "rows_per_strip": null,
+        "encoded_bytes": 8594303996,
+        "decoded_bytes": 8589950976,
+        "seconds": 302.7,
+        "verified_regions": 20,
+        "sha256": "dc1ef08663f27208aab5732eaeb78aeb6973fce4518a259a086ea770e0fce960",
+        "file": "rgb8g.tif"
+      },
+      "strip2g": {
+        "width": 8192,
+        "rows": 87382,
+        "channels": 3,
+        "bits": 8,
+        "layout": "striped",
+        "compression": "none",
+        "tile": null,
+        "rows_per_strip": 64,
+        "encoded_bytes": 2147522120,
+        "decoded_bytes": 2147500032,
+        "seconds": 439.2,
+        "verified_regions": 20,
+        "sha256": "accb4313b9666e2e5da08b232263d1370f5cb5e723cec230bc26473fbf78e193",
+        "file": "strip2g.tif"
+      }
+    }
+  },
+  "results": [
+    {
+      "file": "deflate8g",
+      "mode": "off",
+      "working_resolution_limit": "8 MP (default)",
+      "fixture": {
+        "rows": 349526,
+        "width": 8192,
+        "bits": 8,
+        "encoded_bytes": 7988114393,
+        "decoded_bytes": 8589950976
+      },
+      "outcome": "added",
+      "import_ms": 60916,
+      "to_first_frame_ms": 60925,
+      "section": {
+        "w": 431,
+        "h": 18396,
+        "downsample": 19,
+        "full": {
+          "w": 8192,
+          "h": 349526
+        },
+        "bits16": false
+      },
+      "interactions": {
+        "pan": {
+          "frames": 696,
+          "gap_median_ms": 4.19999999999709,
+          "gap_p95_ms": 4.30000000000291
+        },
+        "zoom": {
+          "frames": 358,
+          "gap_p95_ms": 4.30000000000291
+        },
+        "stroke": {
+          "events": 60,
+          "input_to_frame_p95_ms": 5
+        },
+        "analysis_ms": 39,
+        "analysis_state": "javascript"
+      },
+      "memory": {
+        "idle_mib": 813.3,
+        "peak_mib": 1120.1,
+        "samples": 2621,
+        "max_processes": 4
+      }
+    },
+    {
+      "file": "deflate8g",
+      "mode": "on",
+      "working_resolution_limit": "8 MP (default)",
+      "fixture": {
+        "rows": 349526,
+        "width": 8192,
+        "bits": 8,
+        "encoded_bytes": 7988114393,
+        "decoded_bytes": 8589950976
+      },
+      "outcome": "added",
+      "import_ms": 54877,
+      "to_first_frame_ms": 54920,
+      "section": {
+        "w": 431,
+        "h": 18396,
+        "downsample": 19,
+        "full": {
+          "w": 8192,
+          "h": 349526
+        },
+        "bits16": false
+      },
+      "interactions": {
+        "pan": {
+          "frames": 715,
+          "gap_median_ms": 4.19999999999709,
+          "gap_p95_ms": 4.30000000000291
+        },
+        "zoom": {
+          "frames": 359,
+          "gap_p95_ms": 4.30000000000291
+        },
+        "stroke": {
+          "events": 60,
+          "input_to_frame_p95_ms": 5.300000000279397
+        },
+        "analysis_ms": 135.6999999997206,
+        "analysis_state": "ready"
+      },
+      "memory": {
+        "idle_mib": 879,
+        "peak_mib": 1174.1,
+        "samples": 2381,
+        "max_processes": 8
+      }
+    },
+    {
+      "file": "gray16_2g",
+      "mode": "off",
+      "working_resolution_limit": "8 MP (default)",
+      "fixture": {
+        "rows": 131072,
+        "width": 8192,
+        "bits": 16,
+        "encoded_bytes": 2147549436,
+        "decoded_bytes": 2147483648
+      },
+      "outcome": "added",
+      "import_ms": 8541,
+      "to_first_frame_ms": 8585,
+      "section": {
+        "w": 682,
+        "h": 10922,
+        "downsample": 12,
+        "full": {
+          "w": 8192,
+          "h": 131072
+        },
+        "bits16": true
+      },
+      "interactions": {
+        "pan": {
+          "frames": 715,
+          "gap_median_ms": 4.199999999998909,
+          "gap_p95_ms": 4.200000000000728
+        },
+        "zoom": {
+          "frames": 348,
+          "gap_p95_ms": 4.300000000001091
+        },
+        "stroke": {
+          "events": 60,
+          "input_to_frame_p95_ms": 5
+        },
+        "analysis_ms": 24.59999999962747,
+        "analysis_state": "javascript"
+      },
+      "memory": {
+        "idle_mib": 825.7,
+        "peak_mib": 1411.9,
+        "samples": 562,
+        "max_processes": 4
+      }
+    },
+    {
+      "file": "gray16_2g",
+      "mode": "on",
+      "working_resolution_limit": "8 MP (default)",
+      "fixture": {
+        "rows": 131072,
+        "width": 8192,
+        "bits": 16,
+        "encoded_bytes": 2147549436,
+        "decoded_bytes": 2147483648
+      },
+      "outcome": "added",
+      "import_ms": 7462,
+      "to_first_frame_ms": 7508,
+      "section": {
+        "w": 682,
+        "h": 10922,
+        "downsample": 12,
+        "full": {
+          "w": 8192,
+          "h": 131072
+        },
+        "bits16": true
+      },
+      "interactions": {
+        "pan": {
+          "frames": 691,
+          "gap_median_ms": 4.199999999998909,
+          "gap_p95_ms": 4.300000000001091
+        },
+        "zoom": {
+          "frames": 333,
+          "gap_p95_ms": 8.299999999999272
+        },
+        "stroke": {
+          "events": 60,
+          "input_to_frame_p95_ms": 5.100000000093132
+        },
+        "analysis_ms": 146,
+        "analysis_state": "ready"
+      },
+      "memory": {
+        "idle_mib": 960.7,
+        "peak_mib": 1657.1,
+        "samples": 529,
+        "max_processes": 8
+      }
+    },
+    {
+      "file": "jpeg",
+      "mode": "off",
+      "working_resolution_limit": "8 MP (default)",
+      "fixture": {
+        "rows": 65500,
+        "width": 4096,
+        "bits": 8,
+        "encoded_bytes": 49375050,
+        "decoded_bytes": 804864000
+      },
+      "outcome": "added",
+      "import_ms": 2640,
+      "to_first_frame_ms": 2644,
+      "section": {
+        "w": 682,
+        "h": 10916,
+        "downsample": 6,
+        "full": {
+          "w": 4096,
+          "h": 65500
+        },
+        "bits16": false
+      },
+      "interactions": {
+        "pan": {
+          "frames": 690,
+          "gap_median_ms": 4.199999999999818,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "zoom": {
+          "frames": 359,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "stroke": {
+          "events": 60,
+          "input_to_frame_p95_ms": 4.699999999720603
+        },
+        "analysis_ms": 16.399999999906868,
+        "analysis_state": "javascript"
+      },
+      "memory": {
+        "idle_mib": 820.2,
+        "peak_mib": 2563.6,
+        "samples": 351,
+        "max_processes": 4
+      }
+    },
+    {
+      "file": "jpeg",
+      "mode": "on",
+      "working_resolution_limit": "8 MP (default)",
+      "fixture": {
+        "rows": 65500,
+        "width": 4096,
+        "bits": 8,
+        "encoded_bytes": 49375050,
+        "decoded_bytes": 804864000
+      },
+      "outcome": "added",
+      "import_ms": 4469,
+      "to_first_frame_ms": 4536,
+      "section": {
+        "w": 682,
+        "h": 10916,
+        "downsample": 6,
+        "full": {
+          "w": 4096,
+          "h": 65500
+        },
+        "bits16": false
+      },
+      "interactions": {
+        "pan": {
+          "frames": 648,
+          "gap_median_ms": 4.199999999998909,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "zoom": {
+          "frames": 359,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "stroke": {
+          "events": 60,
+          "input_to_frame_p95_ms": 3.5
+        },
+        "analysis_ms": 132.8000000002794,
+        "analysis_state": "ready"
+      },
+      "memory": {
+        "idle_mib": 1102.3,
+        "peak_mib": 2809.7,
+        "samples": 434,
+        "max_processes": 8
+      }
+    },
+    {
+      "file": "rgb2g",
+      "mode": "off",
+      "working_resolution_limit": "8 MP (default)",
+      "fixture": {
+        "rows": 87382,
+        "width": 8192,
+        "bits": 8,
+        "encoded_bytes": 2151721980,
+        "decoded_bytes": 2147500032
+      },
+      "outcome": "added",
+      "import_ms": 7812,
+      "to_first_frame_ms": 7852,
+      "section": {
+        "w": 819,
+        "h": 8738,
+        "downsample": 10,
+        "full": {
+          "w": 8192,
+          "h": 87382
+        },
+        "bits16": false
+      },
+      "interactions": {
+        "pan": {
+          "frames": 689,
+          "gap_median_ms": 4.199999999998909,
+          "gap_p95_ms": 4.300000000001091
+        },
+        "zoom": {
+          "frames": 328,
+          "gap_p95_ms": 8.299999999999272
+        },
+        "stroke": {
+          "events": 60,
+          "input_to_frame_p95_ms": 3.3999999999068677
+        },
+        "analysis_ms": 24.200000000186265,
+        "analysis_state": "javascript"
+      },
+      "memory": {
+        "idle_mib": 923.2,
+        "peak_mib": 1425.5,
+        "samples": 532,
+        "max_processes": 4
+      }
+    },
+    {
+      "file": "rgb2g",
+      "mode": "on",
+      "working_resolution_limit": "8 MP (default)",
+      "fixture": {
+        "rows": 87382,
+        "width": 8192,
+        "bits": 8,
+        "encoded_bytes": 2151721980,
+        "decoded_bytes": 2147500032
+      },
+      "outcome": "added",
+      "import_ms": 6695,
+      "to_first_frame_ms": 6731,
+      "section": {
+        "w": 819,
+        "h": 8738,
+        "downsample": 10,
+        "full": {
+          "w": 8192,
+          "h": 87382
+        },
+        "bits16": false
+      },
+      "interactions": {
+        "pan": {
+          "frames": 714,
+          "gap_median_ms": 4.199999999998909,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "zoom": {
+          "frames": 353,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "stroke": {
+          "events": 60,
+          "input_to_frame_p95_ms": 5.100000000093132
+        },
+        "analysis_ms": 122.5,
+        "analysis_state": "ready"
+      },
+      "memory": {
+        "idle_mib": 964.1,
+        "peak_mib": 1500.9,
+        "samples": 490,
+        "max_processes": 8
+      }
+    },
+    {
+      "file": "rgb2g",
+      "mode": "off",
+      "working_resolution_limit": "original",
+      "fixture": {
+        "rows": 87382,
+        "width": 8192,
+        "bits": 8,
+        "encoded_bytes": 2151721980,
+        "decoded_bytes": 2147500032
+      },
+      "outcome": "not attempted",
+      "reason": "the decoded RGBA raster would be 2.7 GiB, above the 2 GiB a single typed array can address in this program"
+    },
+    {
+      "file": "rgb4g",
+      "mode": "off",
+      "working_resolution_limit": "8 MP (default)",
+      "fixture": {
+        "rows": 174763,
+        "width": 8192,
+        "bits": 8,
+        "encoded_bytes": 4303443708,
+        "decoded_bytes": 4294975488
+      },
+      "outcome": "added",
+      "import_ms": 15456,
+      "to_first_frame_ms": 15513,
+      "section": {
+        "w": 585,
+        "h": 12483,
+        "downsample": 14,
+        "full": {
+          "w": 8192,
+          "h": 174763
+        },
+        "bits16": false
+      },
+      "interactions": {
+        "pan": {
+          "frames": 705,
+          "gap_median_ms": 4.200000000000728,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "zoom": {
+          "frames": 352,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "stroke": {
+          "events": 60,
+          "input_to_frame_p95_ms": 5.600000000093132
+        },
+        "analysis_ms": 25.600000000093132,
+        "analysis_state": "javascript"
+      },
+      "memory": {
+        "idle_mib": 820.6,
+        "peak_mib": 1580.9,
+        "samples": 833,
+        "max_processes": 4
+      }
+    },
+    {
+      "file": "rgb4g",
+      "mode": "on",
+      "working_resolution_limit": "8 MP (default)",
+      "fixture": {
+        "rows": 174763,
+        "width": 8192,
+        "bits": 8,
+        "encoded_bytes": 4303443708,
+        "decoded_bytes": 4294975488
+      },
+      "outcome": "added",
+      "import_ms": 12890,
+      "to_first_frame_ms": 12932,
+      "section": {
+        "w": 585,
+        "h": 12483,
+        "downsample": 14,
+        "full": {
+          "w": 8192,
+          "h": 174763
+        },
+        "bits16": false
+      },
+      "interactions": {
+        "pan": {
+          "frames": 717,
+          "gap_median_ms": 4.199999999998909,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "zoom": {
+          "frames": 360,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "stroke": {
+          "events": 60,
+          "input_to_frame_p95_ms": 4.699999999720603
+        },
+        "analysis_ms": 125.10000000009313,
+        "analysis_state": "ready"
+      },
+      "memory": {
+        "idle_mib": 953.1,
+        "peak_mib": 1714.2,
+        "samples": 734,
+        "max_processes": 8
+      }
+    },
+    {
+      "file": "rgb8g",
+      "mode": "off",
+      "working_resolution_limit": "8 MP (default)",
+      "fixture": {
+        "rows": 349526,
+        "width": 8192,
+        "bits": 8,
+        "encoded_bytes": 8594303996,
+        "decoded_bytes": 8589950976
+      },
+      "outcome": "added",
+      "import_ms": 29052,
+      "to_first_frame_ms": 29060,
+      "section": {
+        "w": 431,
+        "h": 18396,
+        "downsample": 19,
+        "full": {
+          "w": 8192,
+          "h": 349526
+        },
+        "bits16": false
+      },
+      "interactions": {
+        "pan": {
+          "frames": 709,
+          "gap_median_ms": 4.19999999999709,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "zoom": {
+          "frames": 354,
+          "gap_p95_ms": 4.30000000000291
+        },
+        "stroke": {
+          "events": 60,
+          "input_to_frame_p95_ms": 6.099999999627471
+        },
+        "analysis_ms": 27.200000000186265,
+        "analysis_state": "javascript"
+      },
+      "memory": {
+        "idle_mib": 820.5,
+        "peak_mib": 1692.9,
+        "samples": 1366,
+        "max_processes": 4
+      }
+    },
+    {
+      "file": "rgb8g",
+      "mode": "on",
+      "working_resolution_limit": "8 MP (default)",
+      "fixture": {
+        "rows": 349526,
+        "width": 8192,
+        "bits": 8,
+        "encoded_bytes": 8594303996,
+        "decoded_bytes": 8589950976
+      },
+      "outcome": "added",
+      "import_ms": 24829,
+      "to_first_frame_ms": 24872,
+      "section": {
+        "w": 431,
+        "h": 18396,
+        "downsample": 19,
+        "full": {
+          "w": 8192,
+          "h": 349526
+        },
+        "bits16": false
+      },
+      "interactions": {
+        "pan": {
+          "frames": 705,
+          "gap_median_ms": 4.200000000000728,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "zoom": {
+          "frames": 357,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "stroke": {
+          "events": 60,
+          "input_to_frame_p95_ms": 5.7000000001862645
+        },
+        "analysis_ms": 130.29999999981374,
+        "analysis_state": "ready"
+      },
+      "memory": {
+        "idle_mib": 946.2,
+        "peak_mib": 1805.7,
+        "samples": 1207,
+        "max_processes": 8
+      }
+    },
+    {
+      "file": "strip2g",
+      "mode": "off",
+      "working_resolution_limit": "8 MP (default)",
+      "fixture": {
+        "rows": 87382,
+        "width": 8192,
+        "bits": 8,
+        "encoded_bytes": 2147522120,
+        "decoded_bytes": 2147500032
+      },
+      "outcome": "added",
+      "import_ms": 9189,
+      "to_first_frame_ms": 9194,
+      "section": {
+        "w": 819,
+        "h": 8738,
+        "downsample": 10,
+        "full": {
+          "w": 8192,
+          "h": 87382
+        },
+        "bits16": false
+      },
+      "interactions": {
+        "pan": {
+          "frames": 717,
+          "gap_median_ms": 4.199999999998909,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "zoom": {
+          "frames": 361,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "stroke": {
+          "events": 60,
+          "input_to_frame_p95_ms": 2.6000000000931323
+        },
+        "analysis_ms": 14.700000000186265,
+        "analysis_state": "javascript"
+      },
+      "memory": {
+        "idle_mib": 823,
+        "peak_mib": 1323.1,
+        "samples": 579,
+        "max_processes": 4
+      }
+    },
+    {
+      "file": "strip2g",
+      "mode": "on",
+      "working_resolution_limit": "8 MP (default)",
+      "fixture": {
+        "rows": 87382,
+        "width": 8192,
+        "bits": 8,
+        "encoded_bytes": 2147522120,
+        "decoded_bytes": 2147500032
+      },
+      "outcome": "added",
+      "import_ms": 6671,
+      "to_first_frame_ms": 6674,
+      "section": {
+        "w": 819,
+        "h": 8738,
+        "downsample": 10,
+        "full": {
+          "w": 8192,
+          "h": 87382
+        },
+        "bits16": false
+      },
+      "interactions": {
+        "pan": {
+          "frames": 719,
+          "gap_median_ms": 4.199999999998909,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "zoom": {
+          "frames": 361,
+          "gap_p95_ms": 4.299999999999272
+        },
+        "stroke": {
+          "events": 60,
+          "input_to_frame_p95_ms": 2.599999999627471
+        },
+        "analysis_ms": 125.3000000002794,
+        "analysis_state": "ready"
+      },
+      "memory": {
+        "idle_mib": 957.9,
+        "peak_mib": 1538.8,
+        "samples": 485,
+        "max_processes": 8
+      }
+    }
+  ]
+}

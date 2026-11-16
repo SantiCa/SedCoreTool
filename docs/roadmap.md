@@ -58,10 +58,11 @@ Updated 15 November 2026.
   engine dying mid-transfer got its test; **M8.4 is not finished and M8.5 must not start**: M8.4.6-M8.4.8 (part A), M8.4.9-M8.4.11 (part B,
   the cards were written in this review) and part C remain, plus the timing decision (answered on 15 November 2026, above). The browser test `smoke.mjs` could not be run locally in
   the review (starting the local server was refused); the `e2e` job of GitHub runs it on every push.
-- **Next step:** M8.4.7 (restart, Ready), then M8.4.8 (milestone gate of part A; V0.151 only when the maintainer asks), then the first
-  cards of part C in this order: M8.4.12 (the round-trip measurement and rule D11), M8.4.13 (multi-gigabyte fixtures and the baseline),
-  M2.1.4 (tables and figures with 100,000 rows: measurement). These five cards are detailed and can be implemented by any model. **After
-  them a design session** (the most capable model, or the maintainer) details M8.4.14-M8.4.19 with the measured numbers; an implementing
+- **Progress of 16 November 2026:** M8.4.7, the M8.4.8 measurements, M8.4.12 (outcome D, awaiting the design session) and M8.4.13 (fixtures
+  in `C:\sedcore-large-fixtures`, outside the repository, and the Windows baseline) are done; the three-system gate of M8.4.8 still waits for
+  a push, which the maintainer has not asked for.
+- **Next step:** M2.1.4 (tables and figures with 100,000 rows: measurement), the last detailed card of part C. **After it, and with the
+  decision on M8.4.12 (accept D, vectorise the kernel, or change the rule), a design session** (the most capable model, or the maintainer) details M8.4.14-M8.4.19 with the measured numbers; an implementing
   session must not start M8.4.14 from its summary. Also open: card H5 (the `e2e` job must pass ten consecutive pushes).
 - **Reminder for whoever talks to the maintainer:** the maintainer accepted the two acceptance levels on
   13 November 2026 and asked to be **reminded to run the release-gate tests** (the release checklist below:
@@ -788,7 +789,7 @@ data must be checked in the worker with NumPy.
 - **Done when:** the evidence is committed, D11 states its outcome, and the roadmap status names the next card.
 - **Result (15 November 2026):** [summary](validation/M8.4.12-round-trip-summary.md). One-tile edit through the whole chain: median 71.9 ms, p95 793.8 ms (18 samples, one stall of 794 ms, the other 17 between 70 and 117 ms); the row counts of a 349,526-row section take 237.7 ms median to become their table. 794 + 238 > 100: **the rule's outcome is D**. But 225 of those 310 ms are a per-interval Python loop (`sum_by_interval`), which makes the outcome depend on an implementation detail; the card stopped as it prescribes for D. `make_synthetic` gained a `width` option (the default package is byte-identical, checked by hash and test); `tools/measure_interval_table.py` is new. **Needed from a design session before M8.4.14:** accept D, or add a card that vectorises the kernel (exact integer sums, same fixtures) and repeat the measurement, or change the rule.
 
-##### M8.4.13 - Multi-gigabyte fixtures and the baseline (M2.3.1) — state: In progress (generator done 15 Nov 2026; the files and the baseline measurement are not made yet)
+##### M8.4.13 - Multi-gigabyte fixtures and the baseline (M2.3.1) — state: Done (16 Nov 2026), development gate; [summary](validation/M8.4.13-large-baseline-summary.md)
 
 - **Goal:** deterministic generated images of 2, 4 and 8 GiB (and a compressed file whose decoded size is 8 GiB) can be produced on demand,
   and what the current program does with them is measured. This gives part C its test material and its starting point. No product
@@ -808,7 +809,7 @@ data must be checked in the worker with NumPy.
      cards use as the independent reference. Files, all 8,192 pixels wide (16 tiles):
      (a) uncompressed tiled BigTIFF, RGB 8-bit, 87,382 / 174,763 / 349,526 rows (about 2, 4 and 8 GiB decoded);
      (b) the 2 GiB image as striped BigTIFF; (c) a grey 16-bit tiled BigTIFF of 131,072 rows (2 GiB);
-     (d) the 8 GiB image as a deflate-compressed tiled BigTIFF; (e) a baseline JPEG of 65,535 rows (the format's maximum).
+     (d) the 8 GiB image as a deflate-compressed tiled BigTIFF; (e) a baseline JPEG of 65,500 rows (the most that Pillow's libjpeg writes; the format allows 65,535).
      TIFF files are written by the generator's own minimal writer (`struct`, `zlib`); write in blocks so memory stays below 1 GiB. Option
      `--only` selects files. The whole set needs about 20-30 GiB (it depends on how well (d) compresses): print the estimate in the help
      text and before writing.

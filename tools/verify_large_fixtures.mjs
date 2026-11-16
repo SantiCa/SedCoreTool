@@ -4,14 +4,21 @@
 //   node tools/verify_large_fixtures.mjs FILE '[{"x":0,"y":0,"w":512,"h":512}, ...]'
 //
 // Output: JSON lines {x, y, w, h, bits, channels, sha256, ms}; 8-bit RGB regions hash R,G,B bytes row by row; 16-bit grey regions hash the
-// little-endian 16-bit samples. Memory: one region at a time. The file is read through a Blob, never loaded whole.
+// little-endian 16-bit samples. Memory: one region at a time. The file is read by ranges, never loaded whole.
 import { createHash } from 'node:crypto';
-import { openAsBlob } from 'node:fs';
+import { open, stat } from 'node:fs/promises';
 import { decodeTiffBlocks } from '../app/js/tiff.js';
 
 const [file, regionsJson] = process.argv.slice(2);
 if (!file || !regionsJson) { console.error('usage: node tools/verify_large_fixtures.mjs FILE REGIONS_JSON'); process.exit(2); }
-const source = await openAsBlob(file);
+// Node 22's fs.openAsBlob reports the size of a file larger than 4 GiB modulo 2^32 on Windows (measured: 5,561,655,263 bytes -> 1,266,687,967), so the
+// reader gets the two things it uses of a Blob (size, slice(...).arrayBuffer()) from a file handle instead. The program's File objects in a browser are not affected.
+const handle = await open(file, 'r');
+const source = { size: (await stat(file)).size, slice: (start, end) => ({ arrayBuffer: async () => {
+  const bytes = Buffer.alloc(end - start), { bytesRead } = await handle.read(bytes, 0, end - start, start);
+  if (bytesRead !== end - start) throw new Error('Short read');
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+} }) };
 for (const { x, y, w, h } of JSON.parse(regionsJson)) {
   const started = performance.now();
   const decoded = await decodeTiffBlocks(source, () => ({ x, y, w, h }), () => 1);
@@ -29,3 +36,4 @@ for (const { x, y, w, h } of JSON.parse(regionsJson)) {
   }
   console.log(JSON.stringify({ x, y, w, h, bits: grey16 ? 16 : 8, channels: grey16 ? 1 : 3, sha256: hash.digest('hex'), ms: Math.round(performance.now() - started) }));
 }
+await handle.close();

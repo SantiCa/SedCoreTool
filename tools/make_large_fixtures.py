@@ -12,7 +12,7 @@ Files (all RGB 8-bit, 8,192 pixels wide, unless stated):
   strip2g     the 2 GiB image as an uncompressed striped BigTIFF (64 rows per strip)
   gray16_2g   16-bit grey tiled BigTIFF, 131,072 rows (2 GiB), pixel value = the green-like channel scaled to 16 bits
   deflate8g   the 8 GiB image as a deflate-compressed tiled BigTIFF
-  jpeg        baseline JPEG, 4,096 x 65,535 pixels (the format's largest height; needs about 2 GiB of memory while writing)
+  jpeg        baseline JPEG, 4,096 x 65,500 pixels (the largest dimension that Pillow's libjpeg accepts; the format itself allows 65,535; needs about 2 GiB of memory while writing)
 ``--rows-scale`` (for tests and trials) multiplies every row count, for example 0.001.
 """
 
@@ -44,7 +44,7 @@ FILES = {
     "strip2g": dict(rows=87_382, kind="striped", compression=1, channels=3, bits=8),
     "gray16_2g": dict(rows=131_072, kind="tiled", compression=1, channels=1, bits=16),
     "deflate8g": dict(rows=349_526, kind="tiled", compression=8, channels=3, bits=8),
-    "jpeg": dict(rows=65_535, kind="jpeg", compression=None, channels=3, bits=8, width=4096),
+    "jpeg": dict(rows=65_500, kind="jpeg", compression=None, channels=3, bits=8, width=4096),
 }
 
 
@@ -255,7 +255,7 @@ def main(argv: list[str] | None = None) -> None:
         path = args.folder / f"{name}.{extension}"
         print(f"writing {path.name} ({rows} rows)", file=sys.stderr)
         if spec["kind"] == "jpeg":
-            record = write_jpeg(path, width=spec["width"], rows=min(rows, 65_535))
+            record = write_jpeg(path, width=spec["width"], rows=min(rows, 65_500))
         else:
             record = write_bigtiff(path, width=WIDTH, rows=rows, channels=spec["channels"], bits=spec["bits"], kind=spec["kind"], compression=spec["compression"])
         if args.verify and spec["kind"] != "jpeg":
