@@ -82,8 +82,14 @@ Updated 16 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step:** with all measuring cards of part C done and D11 recorded, **a design session** (the most capable model, or the maintainer) details M8.4.14-M8.4.19 with the measured numbers; an implementing
-  session must not start M8.4.14 from its summary. Also open: card H5 (the `e2e` job must pass ten consecutive pushes).
+- **Next step:** the design session of part C was held on 16 November 2026: decisions in [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84),
+  cards M8.4.14-M8.4.19 detailed below. **M8.4.14 starts when the maintainer answers Q2 and Q3** (Q1 is needed by M8.4.16). Any model may implement the cards.
+  Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
+- **Questions for the maintainer from the design of part C (16 November 2026), each with the proposed default:**
+  **Q1** masks of a tiled section at full resolution (default: yes; the alternative is a fixed power-of-two level chosen at import, cheaper on disk);
+  **Q2** disk budget for the pyramid cache (default: 50 GiB, least-recently-used pyramids deleted beyond it, never the open project's; a pyramid takes
+  about 1.33 times the decoded image, less if M8.4.14 adopts compression); **Q3** largest JPEG or PNG accepted for tiling, which Pillow decodes whole
+  (default: 1 GiB decoded; larger ones refused with a message that suggests TIFF).
 - **Reminder for whoever talks to the maintainer:** the maintainer accepted the two acceptance levels on
   13 November 2026 and asked to be **reminded to run the release-gate tests** (the release checklist below:
   macOS and Linux, clean Windows machine, cold-cache first launch, saturated CPUs, package sizes, and the
@@ -771,8 +777,8 @@ Decided on 15 November 2026 and done **before part B**; required for 1.0 (decisi
 [roadmap-future.md](roadmap-future.md#m2---large-projects-and-responsive-display) on the tile store of
 [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), whose rules every card follows. Acceptance is
 measured against the interactive targets of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates).
-Cards M8.4.12, M8.4.13 and M2.1.4 are detailed below and only measure; **M8.4.14-M8.4.19 are summaries that a design session details with
-those measurements before any of them starts.** Every card claims the development gate; M8.4.19 is the milestone gate. Not in part C:
+Cards M8.4.12, M8.4.13 and M2.1.4 are detailed below and only measure; **M8.4.14-M8.4.19 were detailed by the design session of
+16 November 2026 with those measurements** (decisions in ARCHITECTURE §3.4, questions Q1-Q3 in the status). Every card claims the development gate; M8.4.19 is the milestone gate. Not in part C:
 filtering, detection, object features and U-Net on tiles, which are M8.5 slices (b) and (e) working on regions of the store. Known trap for
 any card that moves float data: the coordinator checks float64 buffers in pure Python (63 ns per value, about 1 s per 128 MiB); large float
 data must be checked in the worker with NumPy.
@@ -914,34 +920,141 @@ data must be checked in the worker with NumPy.
 - **Result:** first opening of the multiproxy log at 100,000 rows 2.45 s -> **0.58 s** (0.54-0.62 s), 20,000 rows 0.24 s -> 0.16 s; the log drawn is identical. `node --test` 373 passed; typecheck passed; `smoke.mjs` passed.
   Not measured: macOS, Linux, other interval counts, a profile of the remaining time.
 
-##### M8.4.14 to M8.4.19 - summaries (detailed by a design session after M2.1.4)
+##### Design of M8.4.14-M8.4.19 (design session of 16 November 2026)
 
-- [ ] **M8.4.14 - Tile store and pyramid import (M2.3.2).** The store format of §3.4 specified in the engine contract (a new section) and the
-      technical manual before any file is written; the engine imports a source file into a pixel pyramid in the background, with progress,
-      cancellation and a bounded memory budget, and reads tiles by level and position; the main process names the store folder. Includes the
-      decoder choice for TIFF/BigTIFF (tiled, striped, deflate, 16-bit) and JPEG, comparing Pillow, a minimal own TIFF reader and other
-      libraries on capability, packaging size and offline cost: **a new dependency needs the maintainer's approval** (AGENTS §3.9). Acceptance:
-      sampled pixels equal the generator's function exactly; corrupt tiles, oversized declarations, interruption and a full disk are handled;
-      pyramid-building throughput reported.
-- [ ] **M8.4.15 - Tiled viewer (M2.3.3, display).** The section view, the navigation strip and the depth mapping show a tiled section from a
-      bounded page cache (visible tiles and a margin, prefetch, obsolete requests cancelled, a lower level shown while the full level
-      arrives), with full-resolution coordinates and depth positions identical to today's. Behind a new flag (its row added to the flag table
-      when built). Acceptance: the pan, zoom, first-view and memory targets on the M8.4.13 fixtures. Also measures the tiled path on small
-      sections, for rule 6 of §3.4.
-- [ ] **M8.4.16 - Tiled masks, editing and undo (M2.3.3, editing).** Mask tiles in the store (content-addressed, versioned); every editing
-      tool works on loaded tiles; undo and redo bounded and per tile; changed tiles sent in the background and sent again after an engine
-      failure. Acceptance: the input-to-next-frame target during strokes; the guarantees of M8.4.4 at tile granularity; exported masks
-      identical to the whole-image path on fixtures that fit in memory.
-- [ ] **M8.4.17 - Interval table of tiled sections (M2.3.4, counting).** Per D11: row counts per tile and the interval table in the engine
-      (A) or in the page (D). Acceptance: exact equality with `section.intervals/1` on whole images that fit in memory, including objects and
-      overlaps that cross tile seams, exclusions and fractional intervals; the 150 ms and 300 ms targets.
-- [ ] **M8.4.18 - Saving, reopening, backup and export of large projects (M2.3.5 and the export part of M2.3.4).** The save order of §3.4
-      rule 4; the project record names the store version (a versioned extension of the project format, with old projects opening unchanged);
-      folder backup; a portable copy versus a reference to an external source file, with checksums and recovery of a missing or moved source;
-      streamed export of masks and images. Acceptance: failure tests (disk full, interrupted save, partial cache, killed engine) that keep the
-      last good save; multi-gigabyte projects reopen with unchanged source bytes, masks and results.
-- [ ] **M8.4.19 - Milestone gate of part C.** Windows, macOS and Linux on one commit; the interactive targets measured on the primary
-      reference host with the fixtures; what was not measured listed (16 GiB computer, Intel Mac, clean machines, macOS and Linux timing).
+The decisions are in [ARCHITECTURE §3.4, "Design of part C"](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84). Three of them are
+**proposals waiting for the maintainer** (Q1-Q3 in the roadmap status); M8.4.14 may start once Q2 and Q3 are answered, M8.4.16 needs Q1. Every card claims
+the development gate; each later card is re-read by its implementing session against what the earlier cards measured, and stops if a number
+invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p95 85 ms; D11 = D), M8.4.13 (all seven fixtures open today only at
+1/6-1/19 of their resolution, peak 1.1-2.8 GiB, 3-61 s to the first frame), M2.1.4-M2.1.6.
+
+##### M8.4.14 - Tile store format and pyramid import (engine only) — state: Ready after Q2 and Q3
+
+- **Goal:** the engine imports a supported source image into a pixel pyramid in the store, with progress, cancellation and bounded memory and
+  disk, and serves verified tiles by level and position. The format is documented before the first file is written. No interface change.
+- **Read first:** ARCHITECTURE §3.4 (rules and "Design of part C"); contract §3 (transport, limits, errors) and §7 (interactive targets, memory
+  sampler); [M8.4.13 summary](validation/M8.4.13-large-baseline-summary.md); `tools/make_large_fixtures.py` (`pixel_region`, the reference);
+  `app/js/tiff.js` (the scope of formats supported today); `src/sedcoretool/engine/server.py`, `buffers.py`, `method_worker.py` (operations,
+  budgets, job isolation); `desktop/engine.js`, `desktop/engine-ipc.js` (what the main process supplies and allows).
+- **Change:** new package `src/sedcoretool/store/` (`format.py`: paths, Zarr v2 metadata, tile-hash files; `tiffread.py`: block reader;
+  `pyramid.py`: the build job; `tiles.py`: verified reads and the engine tile cache); `engine/server.py` (operations `store.open`, `pyramid.build`,
+  `tile.read`); `desktop/engine.js` (the main process passes the two store roots, never the renderer); new contract §8 "Tile store v1" and a
+  technical-manual section; new `tools/measure_tile_store.py`; tests; `docs/TECHNICAL_DOCUMENTATION.md` §1.4; `CHANGELOG.md` (Internal).
+- **Do not touch:** the interface, `section.analyze`, the project format, today's whole-image path.
+- **Steps:**
+  1. Write contract §8 and the manual section first: folder layout of both roots, Zarr v2 metadata of each level, chunk naming, the tile-hash
+     file (`<level>/.tiles.sha256`: `rows x cols` records of 32 bytes, row-major), source identity (SHA-256 and size of the source file, computed
+     while reading it), a `pyramid.json` with format version 1 and a `complete` field written last, the three operations with closed payloads,
+     limits (tile cache 256 MiB, build working memory 512 MiB) and error codes (reuse §3's; disk full is `LIMIT_EXCEEDED` with `details.field = "disk"`).
+  2. `tiffread.py` with the scope of decision 4, reading only the blocks that cover a requested band; every declared size, count and offset is
+     checked against the file length and the limits before allocating. Tests: the same files decoded by `tiff.js` and by `tiffread.py` give identical
+     bytes (the test images of `tests/app/tiff.test.mjs` and small outputs of the generator: tiled, striped, deflate, 16-bit, BigTIFF); hostile
+     headers (huge dimensions, offsets past the end, cyclic IFD chains, wrong byte counts) are refused without large allocations. JPEG and PNG
+     through Pillow under the limit of Q3.
+  3. `pyramid.build` runs in the worker process: it reads the source in bands of 512 rows, writes level 0 tiles, and builds each next level from the
+     previous band with the integer mean of decision 5, so memory stays near two bands per level; progress events at most 10 per second;
+     cancellation polled per tile row; output written into `<sha256>.partial/` and renamed when `complete` is written. Before starting, the estimated
+     size is compared with the free space and the budget of Q2; a full disk during the build removes the partial folder and returns the error.
+  4. **Compression, decided by a rule stated now:** build `rgb2g` with no compressor and with `zlib` level 1; choose `zlib` if its build throughput
+     is at least 70 % of the uncompressed one **and** the p95 of reading one level-0 tile from disk (read, inflate, verify) is at most 10 ms;
+     otherwise no compressor. Record both measurements and the outcome in contract §8.
+  5. `tile.read {store, level, positions: [[row, col], ...]}` with at most 16 positions; every tile is verified against `.tiles.sha256` before it is
+     sent (a mismatch is an error for that tile and the tile is never served); bytes follow in binary frames of at most 1 MiB (a 16-bit RGB tile
+     needs two); an engine LRU cache of verified tiles within its budget.
+  6. Robustness tests: a corrupted tile file, a missing tile file, a tile-hash file of the wrong length, an interrupted build (worker killed: the
+     partial folder is ignored and removed, a new build starts clean), a full disk (simulated), a source changed after its pyramid was built (new
+     SHA-256, so a new pyramid; the old one is only a cache entry).
+  7. Measure with `tools/measure_tile_store.py` on all seven M8.4.13 fixtures (Windows, primary host): build time and throughput (MiB/s of source),
+     disk used, process-tree memory peak during the build (sampler of §7), cancellation acknowledgement (<= 250 ms), progress interval
+     (<= 1 s), tile read latency p50/p95 (one tile, a batch of 16; cold disk cache not claimed), and exactness: 20 regions per file, crossing tile
+     seams, compared byte for byte at level 0 with `pixel_region` and at levels 1-3 with the same integer mean computed by NumPy from `pixel_region`.
+- **Tests:** `pytest` for the reader, the pyramid (determinism: two builds give identical bytes and hashes), the operations (protocol fixtures for
+  the three new operations, closed payloads, limits), robustness (step 6); `node --test` for the main-process allowlist of the new operations.
+- **Done when:** contract §8 and the manual describe the format; every fixture accepted by decision 4 builds and reads back exactly; the
+  memory and cancellation targets hold or are recorded as failed with numbers (then stop and ask); evidence committed.
+
+##### M8.4.15 - Tiled sections in the viewer (behind a flag) — state: after M8.4.14
+
+- **Goal:** with `SEDCORETOOL_TILED_SECTIONS=1` and the engine experiment on, importing an image above the threshold of decision 1 builds its pyramid
+  (progress and cancel shown) and shows the section from tiles: pan, zoom, navigation strip, depth ruler and depth readout, with full-resolution
+  coordinates. Tools of decision 8 are disabled with a message. With the flag off nothing changes.
+- **Read first:** contract §8 and §7; ARCHITECTURE §3.4; `app/js/app.js` (`render`, `drawNav`, `drawRuler`, the import of `#addImg`);
+  `app/js/navpreview.js`; `app/js/sectiondepth.js`; `app/js/engineclient.js`; `desktop/engine-ipc.js`, `desktop/preload.js`; `app/js/i18n.js`.
+- **Change:** new pure module `app/js/tilecache.js` (which tiles are visible, level choice, page cache with a 256 MiB budget, prefetch ring,
+  cancellation of obsolete requests, fallback to a coarser cached level; no DOM, tested in Node; added to `ORDER` in `tools/build_standalone.py`);
+  small hooks in `app.js`; bridge operations for import and tile fetch; flag row in the roadmap's flag table; i18n keys.
+- **Do not touch:** sections below the threshold; saving (a tiled section is not saved yet: the interface says so, and the project's other
+  sections keep saving normally, until M8.4.18); scientific code.
+- **Steps:**
+  1. **Delivery path, decided by a rule stated now:** measure on `rgb8g` (a) `tile.read` through the main process and (b) the main process reading
+     tile files itself and verifying their hashes (a Node reader of contract §8). Use (a) if a batch of 16 uncached level-0 tiles arrives with p95
+     <= 150 ms and a single tile with p95 <= 40 ms; otherwise (b), with format tests shared by both readers. Record the numbers.
+  2. The tiled section record in memory: full-resolution `w`, `h`, the source identity and the pyramid id; no `orig`, no `labels` arrays.
+  3. `tilecache.js`: level = the finest level with at most 1 source pixel per screen pixel at the current zoom; visible tiles plus one ring;
+     a request for tiles no longer visible is cancelled; a missing tile is drawn from the nearest cached coarser level, never left blank.
+  4. Drawing with `drawImage` of `ImageBitmap`s created from tile bytes; 16-bit tiles mapped to 8 bits for display with the rule of today's 16-bit path.
+  5. Navigation strip and ruler from the coarsest level that fits; depth readout and ruler identical to today's for the same full-resolution row.
+  6. Tool gating: list every tool of the Section mode and its state on a tiled section; disabled ones show one message key.
+  7. Measure against §7 on `rgb2g`, `rgb8g`, `deflate8g`, `gray16_2g` (pyramids already built): first useful view <= 2 s; cached pan/zoom frame
+     median <= 17 ms and p95 <= 33 ms; uncached: a coarser level in the next frame and full resolution within 250 ms p95; process-tree peak <= 2 GiB;
+     and the same pan/zoom on a small section shown tiled versus today's path (evidence for rule 6).
+- **Tests:** `node --test` for `tilecache.js` (budget, eviction order, cancellation, level choice, coordinates at every level); a desktop end-to-end
+  test with a small generated image forced through the tiled path (pixels drawn at known positions equal the generator's); flag off: the existing
+  end-to-end tests unchanged.
+- **Done when:** the targets of step 7 are measured (a failure is recorded with numbers and the card stops for a decision); the flag is off by
+  default and in the flag table.
+
+##### M8.4.16 - Masks of tiled sections: storage, editing and undo — state: after M8.4.15 and Q1
+
+- **Goal:** labels and exclusion of a tiled section live as mask tiles in the store (decision 6); every editing tool works on loaded tiles; undo and
+  redo are per tile and bounded; changed tiles are sent in the background and sent again after an engine failure.
+- **Read first:** `app/js/edit.js`, `app/js/maskchanges.js` and the editing handlers in `app.js`; the M8.4.4 guarantees (roadmap history); contract §3
+  and §8; ARCHITECTURE §3.4 rules 3-4.
+- **Change:** `src/sedcoretool/store/masks.py` (content-addressed tiles, manifests, tables); engine operations `mask.put` (tiles and tables of one
+  edit, against a base manifest) and `mask.commit` (returns the new manifest hash); the page's tile-level mask cache, dirty tracking, undo stack
+  with its own budget (64 MiB by default) and resend queue; contract §8 extended.
+- **Steps (outline; the implementing session writes the detailed steps after reading M8.4.15's numbers):** (1) the object table keeps each
+  object's bounding box (it does today, `o.bbox`), so an object operation (split, merge, delete, reclassify) loads exactly the tiles it touches,
+  and refuses visibly an object whose box needs more tiles than the page budget allows; (2) brushes and fills that cross a tile seam write each
+  tile; (3) the overlap-stack table stays one table per section; (4) **measure the metadata limits** (65,536 records and 4 MiB per table, contract
+  §3) against a dense synthetic `rgb8g` annotation and change them in the contract only with that number; (5) a mask tile is acknowledged only
+  after `mask.commit`, and an engine failure leaves the unacknowledged tiles in the page, sent again after the restart of M8.4.7.
+- **Tests and acceptance:** input-to-next-frame p95 <= 33 ms during strokes; the M8.4.4 guarantees at tile granularity (an edit is never lost or
+  applied twice across an engine failure); **exact equality**: a small image opened both ways (whole and forced tiled) with the same scripted edit
+  sequence gives identical labels, exclusion, objects and stacks.
+
+##### M8.4.17 - Interval table of tiled sections — state: after M8.4.16
+
+- **Goal:** the interval table of a tiled section, by decision 7: the engine counts each tile's rows, the page bins them as today.
+- **Read first:** `src/sedcoretool/methods/section_intervals.py` (`parse`, `_counts`) and `kernels/counting.py` (`object_row_counts`);
+  `app/js/core.js` (`rowCounts`, `binRows`); `app/js/sectionanalysis.js` (the `_rc` cache); ARCHITECTURE D11; contract §4 and §7.
+- **Change:** an engine method `section.row_counts/1` (inputs: the manifest hash, the objects, classes and stack tables, and the settings that change
+  counts: ROI, prediction rules, candidate counting; output: the row counts of the ROI as `u32le[rows, 2 + classes]`, and for an update only the
+  rows of the touched tiles); a per-tile cache in the worker keyed by tile hash and table/settings hashes; the page fills `_rc` from it and keeps
+  `binRows` as today.
+- **Acceptance:** exact equality with `section.intervals/1` and with today's JavaScript path on images that fit in memory, including objects and
+  overlaps crossing tile seams, exclusion, a ROI not aligned with tiles and fractional intervals; interval table after an edit touching at most
+  4 tiles p95 <= 150 ms; interval-size change for all sections p95 <= 300 ms (re-binning only); a settings change that changes effective
+  classes recounts every tile: measured on `rgb8g`, shown with progress and cancellable (no target yet: report it).
+
+##### M8.4.18 - Saving, reopening, backup and export of tiled sections — state: after M8.4.17
+
+- **Goal:** projects with tiled sections save, reopen, back up and export without ever losing the last good save, with old projects unchanged.
+- **Read first:** `app/js/storage.js`, `writeProjectFolder` and the save path in `app.js`; `app/js/exportio.js`; ARCHITECTURE §3.4 rule 4 and decision 3.
+- **Change and acceptance (the earlier summary, now with decisions 3 and 8):** the project record of a tiled section names the store format version,
+  the manifest hash and the source identity (a versioned extension of the project format; older projects open unchanged; a build without tiled-section
+  support refuses the section visibly); save order of rule 4 (tiles, manifest by temporary file and atomic rename, then the record); folder backup
+  copies mask tiles by hash (incremental); the source is referenced by path, size and SHA-256, with an option to copy it into the project, and a
+  missing or moved source is located by the user and verified by SHA-256 (the masks stay usable without the source, the pixels do not); streamed
+  export of masks and images. Failure tests: disk full, interrupted save, partial cache, engine killed; each keeps the last good save. Multi-gigabyte
+  projects reopen with unchanged source bytes, masks and results.
+
+##### M8.4.19 - Milestone gate of part C — state: after M8.4.18
+
+- Windows, macOS and Linux on one commit (`tests` and *Desktop builds*, including the desktop end-to-end test with the engine experiment and the
+  tiled flag on and off); the interactive targets measured on the primary host with the M8.4.13 fixtures; listed as not measured: a 16 GiB computer,
+  an Intel Mac, clean machines, macOS and Linux timing. Then the decision on rule 6 (move small sections to the tiled path or keep both) and on
+  promoting the flag (release gate).
 
 - **Result of the measurements (15 November 2026):** [summary](validation/M8.4.8-final-summary.md). Matched timing still fails for (a) and (b) (public 226 and 166 ms against limits of 51 and 60; synthetic 305 and 271 against 51 and 68); (c), the memory peak and parity pass; the interactive targets are met for (a) on the public example and not for (b); input during a stroke is 15.6 ms p95 with the engine on and off; the desktop end-to-end test survives a coordinator killed during an undo. The three-system milestone gate is the push of the work branch (item 3 above needs the CI runners).
 

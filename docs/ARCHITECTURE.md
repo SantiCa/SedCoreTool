@@ -185,6 +185,35 @@ Rules:
    decision of the maintainer (D9).
 8. **No scientific calculation is written in JavaScript for tiled sections**, except the interval table if rule D11 chose option D.
 
+**Design of part C (design session of 16 November 2026).** Detailed in roadmap cards M8.4.14-M8.4.19. Items marked *(maintainer)*
+are proposals with a default that the maintainer confirms or changes before the card that depends on them starts.
+
+1. **Which sections are tiled.** A section is tiled when its source has more pixels than the working-resolution limit
+   (`maxMP`, 8 megapixels by default: the point where today's path starts discarding detail, M8.4.13), the engine is available and the
+   flag of M8.4.15 is on. Every other section keeps today's path (rule 6).
+2. **Masks of a tiled section are at full resolution** *(maintainer)*: labels and exclusion on level 0 of the pyramid, so the interval
+   table counts the source pixels. The resolution selector of today's path (`RES_FACTORS`) does not apply to tiled sections.
+3. **Two folders, chosen by the main process.** The pyramid is a cache keyed by the SHA-256 of the source file
+   (`<user data>/pyramids/<sha256>/`), shared by projects and deleted least-recently-used beyond a disk budget *(maintainer: default
+   50 GiB)*; the pyramid of an open project is never deleted. Mask tiles, manifests and tables are **project data**
+   (`<user data>/projects/<project id>/tiles/`), never deleted by a budget, and included in backups (M8.4.18).
+4. **Decoding without a new dependency.** TIFF and BigTIFF are read by a minimal reader written in Python with the scope of
+   `app/js/tiff.js` (classic and BigTIFF, tiled and striped, chunky grey/RGB/RGBA, 8 and 16 bits, compression none, LZW, deflate and
+   PackBits, horizontal predictor), one block at a time. JPEG and PNG use Pillow, already in the runtime, which decodes the whole image:
+   they are accepted for tiling only up to a decoded size of 1 GiB *(maintainer)*; a larger one is refused with a message that suggests
+   TIFF. Other TIFF compressions (JPEG-in-TIFF, ZSTD, ...) are refused with a message, as today.
+5. **Pyramid layout:** Zarr version 2 (one array per level, chunks of 512 x 512 x channels, C order, chunk keys `i.j.0`), compressor
+   either none or `zlib` level 1, chosen by a predeclared measurement in M8.4.14; levels are 2 x 2 integer means with round-half-up,
+   `(a + b + c + d + 2) // 4`; one extra file per level lists the SHA-256 of every tile (rule 3), which Zarr readers ignore.
+6. **Mask tiles** are stored under the SHA-256 of their uncompressed little-endian bytes (the file itself may be zlib-compressed);
+   all-zero tiles have no entry. A manifest (canonical JSON) lists the tile hashes and the hashes of the objects, classes and overlap
+   tables; its SHA-256 is the version identity.
+7. **Rule D11 = D:** the engine counts the rows of each tile (Python, the existing counting kernel) and returns the row counts of the
+   section; the page turns row counts into the interval table with `core.js` as today. After an edit, only the touched tiles are counted.
+8. **Tiled sections are a desktop feature.** The browser build and the standalone file show a visible message for them and never
+   open them partially. Until M8.5, tools that need the whole image (detection, filters, U-Net, enhancement that changes pixels,
+   rotation, cropping, change of working resolution) are disabled on tiled sections with a message; display contrast is allowed.
+
 ## 4. Path of one scientific request (built in M8.3)
 
 Example: the user edits a trace and the interval table must update.
