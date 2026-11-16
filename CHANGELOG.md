@@ -10,7 +10,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ---
 
-## Unreleased
+## V0.151 — 2026-11-16
 
 ### For users
 

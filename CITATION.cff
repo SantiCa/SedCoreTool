@@ -4,6 +4,6 @@ title: "SedCoreTool"
 authors:
   - family-names: Casanova-Arenillas
     given-names: Santiago
-version: 0.150.0
+version: 0.151.0
 repository-code: "https://github.com/SantiCa/SedCoreTool"
 license: GPL-3.0-or-later

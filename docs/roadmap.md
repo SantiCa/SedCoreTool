@@ -13,14 +13,19 @@ file and leave one line here.
 
 ## Status and handoff
 
-Updated 15 November 2026.
+Updated 16 November 2026.
 
-- **Released version:** V0.150 (14 November 2026), integrated into `master` on the maintainer's instruction ("haz commit y push de todo a
-  master con una nueva version 0.150"). **No tag and no GitHub Release exist for V0.149 or V0.150**: a tag publishes a Release and is the
+- **Released version:** V0.151 (16 November 2026), integrated into `master` on the maintainer's instruction ("haz push de todo y luego publica en
+  master"), which overrides the decision of 14 November 2026 that nothing goes to `master` until M8.4 is finished (part A is done; parts C and B are not). It contains the
+  visible-row Data table as the default (the release gate of every platform is still required before it is announced to users). V0.150 (14 November 2026) was integrated on the instruction "haz commit y push de todo a
+  master con una nueva version 0.150". **No tag and no GitHub Release exist for V0.149, V0.150 or V0.151**: a tag publishes a Release and is the
   owner's decision. The *Desktop builds* workflow is started by hand for the macOS and Linux builds (see the release checklist).
-- **Active work branch:** `work/2026-11-13` (pushed), which `master` now contains. Changes after V0.150 accumulate under `## Unreleased`.
-  The maintainer decided on 14 November 2026 that nothing goes to `master` until M8.4 is finished; that delivery will be V0.151.
+- **Active work branch:** `work/2026-11-13` (pushed), which `master` now contains. Changes after V0.151 accumulate under `## Unreleased` (add the heading when the first change is made).
 - **Checks:** see the last line of this block; it is rewritten at the end of every session.
+- **Full checks of 16 November 2026 on the V0.151 state (maintainer's Windows computer, run one after another):** `pytest -q` 724 passed / 9 skipped (Python 3.12); `npm test` 361 passed
+  (its first run inside the check script returned exit 1 with no output that could be read; four reruns, 361 passed each, so it is recorded as an unexplained, not reproduced incident);
+  `npm run typecheck` (no new diagnostics); `sync_version.py --check`; `ruff check src tests tools` (ruff under Python 3.14); runtime rebuilt; `tests/e2e/desktop.mjs`; `tests/e2e/smoke.mjs`.
+  The GitHub run on the version commit is recorded below once it has finished.
 - **Where we are:** M8.1 and M8.2 are done at the development gate (Windows). M8.3 is complete at the development gate: with
   `SEDCORETOOL_ENGINE_EXPERIMENT=1` the desktop program calculates the interval table of every section in the Python engine and shows it,
   with a pending state, stale-result rejection, cancellation and an error state, never falling back to JavaScript. Measurements of card
