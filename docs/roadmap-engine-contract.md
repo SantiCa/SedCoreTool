@@ -19,7 +19,7 @@ How the code that implements this contract is layered, and the path of one reque
 [ARCHITECTURE.md](ARCHITECTURE.md). Amended on 13 November 2026 (card M8.3.5): §3 now defines `buffer.read`, which downloads
 committed buffers, and the exact shape of the `section.analyze` response; progress events are not yet sent. Amended on
 15 November 2026 (option A for large images, ARCHITECTURE D10-D12): §2 describes the ownership of tiled sections, §6 the new order
-of M8.4, and §7 adds absolute interactive targets and the rule that decides where the interval table of a tiled section is computed.
+of M8.4, and §7 adds absolute interactive targets and the rule that decides where the interval table of a tiled section is computed. Amended on 16 November 2026 (card M8.4.14, step 1): §8 specifies the tile store's pixel pyramids; not implemented yet.
 
 ## 1. Current calculation and ownership inventory
 
@@ -326,3 +326,84 @@ If a gate fails, record the failed measurement and next narrow correction; leave
 these gates requires a documented decision before a new validation run. Rust/GPU or a replacement interface
 needs separate evidence and authorisation. M8.1 is complete when this source-backed contract and its ordered
 gates are delivered; it does not certify M8.2 packaging or M8.3 numerical/performance acceptance.
+
+## 8. Tile store v1: pixel pyramids (card M8.4.14)
+
+Specified on 16 November 2026, before any store file is written; **not implemented yet** (the status line at the top says what is).
+It realises [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84) and its "Design of part C" for
+the pixel pyramid. Mask tiles and manifests (decision 6) extend this section in card M8.4.16. The format is independent of the browser,
+IndexedDB and Electron (D12): a program that reads this section can read and write a store without SedCoreTool.
+
+### 8.1 Roots and ownership
+
+The main process passes the pyramid root when it starts the coordinator (`--pyramid-dir`, an absolute folder under the program's user
+data, `pyramids/`). The engine writes nothing outside that root and its scratch folder. The renderer never sees a path: it names a
+pyramid by its identifier (below), and a source file only through a token the main process issued for a file the user chose (card M8.4.15).
+Only the engine writes the root (ARCHITECTURE §3.4 rule 1).
+
+### 8.2 Identity and layout
+
+A pyramid is identified by the **SHA-256 of the source file's bytes** (64 lowercase hexadecimal characters), computed by the engine while
+the build starts. Its folder is `<root>/<sha256>/`. All integers are little-endian; all JSON is UTF-8 with the strict rules of §3.
+
+| Path inside `<root>/<sha256>/` | Content |
+|---|---|
+| `pyramid.json` | `{format: "sedcoretool.pyramid", version: 1, source: {sha256, size, name}, width, height, channels, bits, tile: 512, levels: [{level, width, height, rows, cols}], compressor, complete: true}`. `name` is the file name without any folder. `channels` is 1 (grey), 3 (RGB) or 4 (RGBA); `bits` 8 or 16. `compressor` is `null` or `{"id": "zlib", "level": 1}` (step 4 of M8.4.14 decides which, then it is fixed for format version 1). The file is written last, through a temporary file and an atomic rename; a folder without it, or with `complete` other than `true`, is not a pyramid. |
+| `.zgroup` | `{"zarr_format": 2}` |
+| `.zattrs` | `{"multiscales": [{"version": "0.4", "axes": [{"name": "y", "type": "space"}, {"name": "x", "type": "space"}, {"name": "c", "type": "channel"}], "datasets": [{"path": "<k>", "coordinateTransformations": [{"type": "scale", "scale": [2^k, 2^k, 1]}]} ...]}]}` |
+| `<k>/.zarray` | Level `k` as a Zarr version 2 array: `{"zarr_format": 2, "shape": [height_k, width_k, channels], "chunks": [512, 512, channels], "dtype": "\|u1"` or `"<u2", "compressor": <as in pyramid.json>, "fill_value": 0, "order": "C", "filters": null, "dimension_separator": "."}` |
+| `<k>/<i>.<j>.0` | The tile in tile row `i`, tile column `j` of level `k`: exactly `512 x 512 x channels` samples in C order (y, x, channel), compressed by `compressor` or raw. Tiles on the right and bottom edges are padded with zeros to the full size, as Zarr requires. |
+| `<k>/.tiles.sha256` | `rows_k x cols_k` records of 32 bytes, row-major: the SHA-256 of each tile's **uncompressed** bytes (padding included). Zarr readers ignore this file. |
+
+Levels: level 0 is the source at full resolution. Level `k + 1` has `ceil(width_k / 2) x ceil(height_k / 2)` pixels; the last level is the
+first one whose width and height are both at most 512. A pixel of level `k + 1` is, for each channel, the integer mean of the `n` pixels
+(1, 2 or 4) of level `k` that it covers, rounded half up: `(sum + n // 2) // n`, so `(a + b + c + d + 2) // 4` inside the image. Grey stays grey,
+RGB stays RGB, RGBA averages alpha like the other channels; 16-bit samples stay 16-bit. No colour management, gamma or orientation tag is
+applied: samples are copied as stored (as `app/js/tiff.js` does today).
+
+### 8.3 Sources
+
+The engine opens a source with libvips (ARCHITECTURE §3.4 decision 4) and accepts only these loaders: TIFF (classic and BigTIFF, first page or
+image only), JPEG and PNG; anything else is `UNSUPPORTED_INPUT` with `details.field = "source"`. Accepted samples: 8-bit or 16-bit unsigned, 1, 3
+or 4 bands (a grey image with alpha, 2 bands, is refused as today). Limits checked from the header before any pixel is read: width at most
+262,144 and height at most 16,777,216 pixels; one band of 512 rows at most 256 MiB (`width x 512 x channels x bytes`); a JPEG or PNG at most
+1 GiB decoded (`width x height x channels x bytes`; maintainer, 16 November 2026), refused otherwise with `UNSUPPORTED_INPUT`, `details.field =
+"source.size"` and a message that suggests TIFF. TIFF sources are read by region (random access); JPEG and PNG sequentially, in bands.
+
+### 8.4 Building
+
+`pyramid.build` runs in the method worker as a job, so the coordinator stays responsive. Order: (1) compute the source SHA-256 (stage `hash`);
+if `<root>/<sha256>/pyramid.json` is complete and its `source.size` matches, the job ends at once with `reused: true`; (2) estimate the disk need
+(all levels, uncompressed, plus 1 %); (3) free space: delete complete pyramids that no session of this coordinator has opened, least recently used
+first (the modification time of `pyramid.json`, touched whenever a pyramid is opened), until the root's total plus the need is at most the budget
+(50 GiB by default, set by the main process with `--pyramid-budget-bytes`) and the disk keeps at least 1 GiB free; if that is not possible, the job
+fails with `LIMIT_EXCEEDED`, `details.field = "disk"`; (4) write everything into `<root>/.partial-<uuid>/`, one band of 512 rows of level 0 at a
+time, each band feeding the next levels as soon as they have two rows of tiles' worth of input (stages `level0` and `levels`), so the working
+memory stays within 512 MiB; (5) write the `.tiles.sha256` files, then `pyramid.json`, then rename the folder to `<sha256>`. If another build
+finished the same pyramid meanwhile, the new folder is removed and the existing one is used. Any failure, a cancellation or a killed worker
+leaves only a `.partial-*` folder, which every coordinator deletes when it starts and before each build. A full disk during the build is
+`LIMIT_EXCEEDED` with `details.field = "disk"`.
+
+Progress: the worker writes `<job folder>/progress` (16 bytes: completed and total, two `u64le`, replaced atomically); the coordinator reads it at
+most 10 times per second and sends events `{stage, completed, total}` (§3). A build has no fixed deadline; the coordinator kills it when its progress
+has not advanced for 60 s. Cancellation follows §3 (marker file, polled at least once per band; acknowledgement within 250 ms; kill after 1.5 s).
+libvips' own caches are limited (`cache_set_max_mem` 64 MiB, `cache_set_max_files` 16) and its thread pool uses the engine's thread cap.
+
+### 8.5 Operations
+
+| Operation | Request payload | Successful result |
+|---|---|---|
+| `pyramid.build` | `{path, name}`: `path` absolute, to a regular file; `name` its display name (no separators). **Accepted only from the main process**; the renderer bridge never forwards a path (card M8.4.15 maps tokens to paths). | `{pyramid, width, height, channels, bits, levels, reused, disk_bytes}`; events `{stage: "hash" \| "level0" \| "levels", completed, total}`. |
+| `pyramid.info` | `{pyramid}` | the parsed `pyramid.json` (only for a complete pyramid; touches its modification time). |
+| `tile.read` | `{pyramid, level, positions: [[row, col], ...]}`, 1 to 16 positions inside the level's grid | `{tiles: [{row, col, byte_length, sha256}, ...]}` in request order, immediately followed by the uncompressed tile bytes of all tiles, concatenated in that order and cut into binary frames of at most 1,048,576 bytes. Each tile is read, decompressed if needed and checked against `.tiles.sha256` before anything is sent; if any tile fails, the response is an error (`INVALID_BUFFER`, `details.field = "tile"`) and no binary frame follows. |
+
+`tile.read` and `pyramid.info` run in the coordinator (standard library only: file reads, `zlib`, `hashlib`); verified tiles are kept in a
+least-recently-used cache of at most 256 MiB. Tile bytes are never charged to the session's buffer budget of §3 (they are not buffers).
+Error codes are those of §3.
+
+### 8.6 What is checked (M8.4.14)
+
+Exactness against the generator of card M8.4.13 (`tools/make_large_fixtures.py`): sampled level-0 regions equal `pixel_region` byte for byte,
+and levels 1-3 equal the same integer mean computed independently with NumPy; two builds of one source give identical tile bytes and hashes.
+Hostile sources (huge declared sizes, truncated files, offsets past the end) fail without large allocations. Interrupted builds, a full disk, a
+corrupted or missing tile file and a tile-hash file of the wrong length are handled as above.

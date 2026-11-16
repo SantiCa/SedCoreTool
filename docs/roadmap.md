@@ -927,7 +927,7 @@ the development gate; each later card is re-read by its implementing session aga
 invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p95 85 ms; D11 = D), M8.4.13 (all seven fixtures open today only at
 1/6-1/19 of their resolution, peak 1.1-2.8 GiB, 3-61 s to the first frame), M2.1.4-M2.1.6.
 
-##### M8.4.14 - Tile store format and pyramid import (engine only) — state: Ready
+##### M8.4.14 - Tile store format and pyramid import (engine only) — state: In progress (step 1 done 16 Nov 2026: contract §8; the manual section follows the code, because the manual describes what the program does)
 
 - **Goal:** the engine imports a supported source image into a pixel pyramid in the store, with progress, cancellation and bounded memory and
   disk, and serves verified tiles by level and position. The format is documented before the first file is written. No interface change.
