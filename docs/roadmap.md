@@ -73,6 +73,7 @@ Updated 16 November 2026.
   the visible-rows rendering passes; both were measured at 10,400 rows (ten clicks of "Show more"), not at 100,000; a scatter of 50,000 points redraws in 156 ms (329 ms at
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
+- **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
 - **Next step:** with all measuring cards of part C done and D11 recorded, **a design session** (the most capable model, or the maintainer) details M8.4.14-M8.4.19 with the measured numbers; an implementing
   session must not start M8.4.14 from its summary. Also open: card H5 (the `e2e` job must pass ten consecutive pushes).
 - **Reminder for whoever talks to the maintainer:** the maintainer accepted the two acceptance levels on
@@ -892,6 +893,13 @@ data must be checked in the worker with NumPy.
   in `buildSamples` (`geo.js:188`, a scan of all intervals for every sample and category, 1.15 s) and the per-sample interval `find` of the labelling (`geo.js:319`, 0.25 s). **Proposed next card (for the maintainer to authorise, not started):** M2.1.6, answer the interval membership with `createIntervalLookup` (half-open boundaries, same results), then repeat this measurement.
 - **Done when:** the old and new results are exactly equal on the tests; the first opening at 100,000 rows is <= 2 s (or the measured value and the reason are recorded and the
   maintainer decides); `docs/benchmarks/M2.1.5.md` gives the before and after numbers; the report names what was not measured.
+
+##### M2.1.6 - Multiproxy: interval membership with a lookup (proposed by M2.1.5) — state: Done (16 Nov 2026), development gate; [report](benchmarks/M2.1.6.md)
+
+- **Goal and authorisation:** the 2 s target of M2.1.5 is met. Authorised by the maintainer on 16 November 2026 ("autoriza M2.1.6").
+- **Change:** `app/js/geo.js` (`buildSamples`, `labelSamples`); `tests/app/geo-intervals.test.mjs`. Tests written first against the old code, with copies of it kept as exact references.
+- **Result:** first opening of the multiproxy log at 100,000 rows 2.45 s -> **0.58 s** (0.54-0.62 s), 20,000 rows 0.24 s -> 0.16 s; the log drawn is identical. `node --test` 373 passed; typecheck passed; `smoke.mjs` passed.
+  Not measured: macOS, Linux, other interval counts, a profile of the remaining time.
 
 ##### M8.4.14 to M8.4.19 - summaries (detailed by a design session after M2.1.4)
 

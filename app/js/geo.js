@@ -185,7 +185,16 @@ export function buildSamples(cores, cfg) {
     }
     if (LF.length) {
       const ivs = intervalsOnAxis((cfg.intervals || []).filter((q) => q.core === (core.id ?? core.name) && !q.auto), cfg.axis, core);
-      for (const r of rows) r.cat = LF.flatMap((l) => l.cats.map((c) => (ivs.some((q) => q.layer === l.id && (q.cat ?? q.label) === c.id && r.x >= q.from && r.x < q.to) ? 1 : 0)));
+      // "Some interval of this layer and category contains x" is "the lookup of that group finds one": one lookup per group instead of a scan of all intervals per sample.
+      const groups = new Map();
+      for (const q of ivs) {
+        if (!groups.has(q.layer)) groups.set(q.layer, new Map());
+        const byCat = groups.get(q.layer), cat = q.cat ?? q.label;
+        if (!byCat.has(cat)) byCat.set(cat, []);
+        byCat.get(cat).push(q);
+      }
+      const lookups = LF.map((l) => l.cats.map((c) => { const group = groups.get(l.id)?.get(c.id); return group ? createIntervalLookup(group) : null; }));
+      for (const r of rows) r.cat = lookups.flatMap((perCat) => perCat.map((look) => (look && look(r.x) ? 1 : 0)));
     }
     out.push(...rows);
   }
@@ -315,8 +324,11 @@ export function labelSamples(samples, { intervals = [], rules = [], useRules = t
   const mine = intervals.filter((q) => !q.auto && (layer == null || q.layer === layer));
   const iv = mine.flatMap((q) => intervalsOnAxis([q], axis, byCore.get(q.core)));
   const rl = rules.filter((r) => layer == null || r.layer === layer);
+  const perCore = new Map();                                                   // intervals of each core in their original order: the first match still wins
+  for (const q of iv) { if (!perCore.has(q.core)) perCore.set(q.core, []); perCore.get(q.core).push(q); }
+  const lookup = new Map([...perCore].map(([core, list]) => [core, createIntervalLookup(list)]));
   return samples.map((s) => {
-    const hit = iv.find((q) => q.core === s.core && s.x >= q.from && s.x < q.to);
+    const hit = lookup.get(s.core)?.(s.x);
     if (hit) return { label: hit.cat ?? hit.label, source: 'interval' };
     if (useRules) for (const r of rl) if (r.enabled !== false && ruleMatches(r, s, features)) return { label: r.cat ?? r.label, source: 'rule' };
     return { label: null, source: null };

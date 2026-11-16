@@ -14,11 +14,12 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### For users
 
-- Opening the Multiproxy log of a long core is much faster: with 100,000 rows the first opening took 3 minutes 15 seconds and now takes about 2.5 seconds (7.7 seconds became 0.24 s at 20,000 rows). Results are identical.
+- Opening the Multiproxy log of a long core is much faster: with 100,000 rows the first opening took 3 minutes 15 seconds and now takes about 0.6 seconds (7.7 seconds became 0.16 s at 20,000 rows). Results are identical.
 
 ### Internal
 
-- Card M2.1.5: `coreConverter` in `app/js/geo.js` builds the depth-age relation of a core once instead of once per sample (`coreConvert` keeps its signature and results; checked for exact equality against the previous implementation on 300 random cores). Target of 2 s not met (2.4-2.6 s); the rest is a scan of all intervals per sample in `buildSamples`; [report](docs/benchmarks/M2.1.5.md).
+- Card M2.1.5: `coreConverter` in `app/js/geo.js` builds the depth-age relation of a core once instead of once per sample (`coreConvert` keeps its signature and results; checked for exact equality against the previous implementation on 300 random cores). [Report](docs/benchmarks/M2.1.5.md): 195 s -> 2.45 s at 100,000 rows.
+- Card M2.1.6: `buildSamples` and `labelSamples` find the intervals that contain a sample with `createIntervalLookup` instead of scanning all intervals per sample (checked for exact equality against copies of the previous code, including overlaps, shared boundaries, non-finite ends and both axes). First opening of the multiproxy log at 100,000 rows: 2.45 s -> 0.58 s, below the 2 s target; [report](docs/benchmarks/M2.1.6.md).
 
 ## V0.151 — 2026-11-16
 
