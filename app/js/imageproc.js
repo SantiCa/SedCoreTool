@@ -14,6 +14,27 @@
 import { hasId } from './core.js';
 // SedCoreTool web — image processing (no DOM): enhancement, detection, selection tools, shape features.
 
+/** Bytes the page keeps for each pixel of a section's working image: the RGBA original and its enhanced copy (4 + 4), the labels (4)
+ * and the exclusion (1); a 16-bit source adds its 16-bit RGBA copy (8). The section form shows the same estimate. */
+export const WORKING_BYTES_PER_PIXEL = 13, WORKING_BYTES_PER_PIXEL_16 = 21;
+/** Largest working image the page accepts (card H6, 16 November 2026). Choosing "full" resolution for a 2 GiB image needed several
+ * gigabytes and the window went blank; above this the image is reduced, or the choice is refused with a message. */
+export const WORKING_MEMORY_LIMIT = 1.5 * 2 ** 30;
+
+/** Estimated page memory, in bytes, of a working image of w x h pixels.
+ * @param {number} w @param {number} h @param {boolean} [bits16] */
+export function workingBytes(w, h, bits16 = false) {
+  return w * h * (bits16 ? WORKING_BYTES_PER_PIXEL_16 : WORKING_BYTES_PER_PIXEL);
+}
+
+/** Smallest reduction factor, at least `k0`, whose working image (floor(w / k) x floor(h / k)) fits `limit`.
+ * @param {number} w @param {number} h @param {number} [k0] @param {boolean} [bits16] @param {number} [limit] */
+export function factorThatFits(w, h, k0 = 1, bits16 = false, limit = WORKING_MEMORY_LIMIT) {
+  let k = Math.max(1, Math.ceil(k0));
+  while (workingBytes(Math.floor(w / k), Math.floor(h / k), bits16) > limit) k++;
+  return k;
+}
+
 /**
  * @param {ArrayLike<number>} rgba
  * @param {number} j

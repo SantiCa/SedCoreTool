@@ -21,6 +21,8 @@ with the same analysis definitions is available for scripting and batch processi
   the Bioturbation Index (BI) and the ichnofabric index (ii) derived automatically or entered manually.
 - **High-resolution TIFF.** Import tiled or stripped TIFF and BigTIFF in supported grayscale or RGB formats.
   Enhancement uses native 16-bit samples for levels and gamma, and the project keeps the original image.
+  Images larger than the **maximum size when adding images** (Settings) are reduced to work fluidly; each section's
+  resolution can be changed later, and sizes that would not fit in memory are not offered.
   See [working resolution and TIFF limits](docs/TECHNICAL_DOCUMENTATION.md#61-working-resolution).
 - **Assisted segmentation.** Image enhancement (including published protocols), automatic detection of candidate
   traces, drawing and editing tools, an exclusion layer for cracks, voids and samples, and optional learned

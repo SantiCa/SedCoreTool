@@ -8,7 +8,7 @@ import { createMaskChanges, indexRangeOfPairs } from './maskchanges.js';
 export { pxPerCm, depthAtRow, rowAtDepth };
 import { withProvenance, ageModelText, bioturbationTable, objectsTable } from './exportio.js';
 
-import { DEFAULT_FILTERS, FILTER_PRESETS, DEFAULT_DETECT, traceSeparation, localSeparability, applyFilters, detectMask, components, regionGrow, polygonPixels, objectStats, features, rotate90, downsampleRGBA, autoLevels, gammaForMedian } from './imageproc.js';
+import { DEFAULT_FILTERS, FILTER_PRESETS, DEFAULT_DETECT, traceSeparation, localSeparability, applyFilters, detectMask, components, regionGrow, polygonPixels, objectStats, features, rotate90, downsampleRGBA, autoLevels, gammaForMedian, factorThatFits, workingBytes, WORKING_MEMORY_LIMIT } from './imageproc.js';
 import { parseTable, decodeText, invertModel, toAxis, compositeRows, abbrevs, traceSymbolPath, validHexColor } from './log.js';
 import { storageAvailable, listProjects, getProject, putProject, putMeta, deleteProject, getPref, setPref, putLite, listLite, getMeta, putImage, getImage, gcImages } from './storage.js';
 import { INTERP_DEFAULT } from './interp.js';
@@ -297,8 +297,11 @@ function loadScript(src, integrity = null) {
  */
 const isTiffImage = (name, type) => /\.(?:tiff?|tf8|btf)$/i.test(name) || /tiff/i.test(type || '');
 
+/** Reduction factor asked for by the import limit in megapixels (before the memory limit is applied). */
+const importFactor = (w, h, maxMP) => Math.max(1, Math.ceil(Math.sqrt((w * h) / ((maxMP || 1e9) * 1e6))));
 async function decodeBytes(bytes, name, type, opt = {}) {
-  const factor = (w, h) => opt.k ?? Math.max(1, Math.ceil(Math.sqrt((w * h) / ((opt.maxMP || 1e9) * 1e6))));
+  // An explicit factor (a section's chosen resolution) is used as given: the section form only offers sizes that fit (H6).
+  const factor = (w, h, bits = 8) => opt.k ?? factorThatFits(w, h, importFactor(w, h, opt.maxMP), bits === 16);
   const area = (fw, fh) => { const c = opt.crop; return c ? { x: Math.max(0, c.x0), y: Math.max(0, c.y0), w: Math.min(fw, c.x1) - Math.max(0, c.x0), h: Math.min(fh, c.y1) - Math.max(0, c.y0) } : { x: 0, y: 0, w: fw, h: fh }; };
   if (isTiffImage(name, type)) {
     const source = bytes instanceof Uint8Array ? new Blob([bytes]) : bytes;
@@ -375,6 +378,7 @@ async function addFiles(files) {
       try {
         const blob = file;
         const { w, h, rgba, rgba16, k, fw, fh } = await decodeBytes(blob, file.name, file.type, { maxMP: S.settings.maxMP });
+        if (k > importFactor(fw, fh, S.settings.maxMP)) toast(t('sec.reducedToFit', { k, gb: fmt(workingBytes(fw, fh, !!rgba16) / 2 ** 30, 2) }));
         const s = newSection({ name: file.name.replace(/\.[^.]+$/, ''), file: { name: file.name, type: file.type, blob }, w, h, orig: rgba, orig16: rgba16, ds: k, full: { w: fw, h: fh } });
         const prev = sec();
         if (prev) { s.units = prev.units; s.top = prev.bottom; s.bottom = prev.bottom + (prev.bottom - prev.top); s.filters = { ...prev.filters }; s.preset = prev.preset; s.detect = { ...prev.detect }; enhance(s); }
@@ -2192,14 +2196,17 @@ function renderResForm(s) {
   if (!span) { sel.innerHTML = `<option>${t('sec.resUnknown', { k: s.ds })}</option>`; $('resNote').textContent = ''; return; }
   const ks = RES_FACTORS.filter((k) => k === s.ds || Math.min(span.w, span.h) / k >= 20);
   sel.innerHTML = ks.map((k) => {
-    const W = Math.floor(span.w / k), H = Math.floor(span.h / k);
-    return `<option value="${k}" ${k === s.ds ? 'selected' : ''}>${k === 1 ? t('sec.resFull') : '1/' + k} · ${fmt(ppcFull / k, 3)} px/cm · ${fmt((W * H) / 1e6, 2)} MP</option>`;
+    const W = Math.floor(span.w / k), H = Math.floor(span.h / k), tooBig = k !== s.ds && workingBytes(W, H, !!s.orig16) > WORKING_MEMORY_LIMIT;
+    return `<option value="${k}" ${k === s.ds ? 'selected' : ''} ${tooBig ? 'disabled' : ''}>${k === 1 ? t('sec.resFull') : '1/' + k} · ${fmt(ppcFull / k, 3)} px/cm · ${fmt((W * H) / 1e6, 2)} MP${tooBig ? ' · ' + t('sec.resTooBig') : ''}</option>`;
   }).join('');
   $('resNote').textContent = t('sec.resNote', { mb: Math.round((13 * s.w * s.h) / 2 ** 20) });
 }
 /** Recompute the working image of s at factor k2 from the original; masks, marks and analysis area follow (nearest pixel). */
 async function changeResolution(s, k2) {
   if (!s || k2 === s.ds) return;
+  const span = s.crop ? { w: s.crop.x1 - s.crop.x0, h: s.crop.y1 - s.crop.y0 } : s.full;
+  const need = span ? workingBytes(Math.floor(span.w / k2), Math.floor(span.h / k2), !!s.orig16) : 0;
+  if (need > WORKING_MEMORY_LIMIT) { toast(t('sec.resRefused', { gb: fmt(need / 2 ** 30, 2) })); renderResForm(s); return; }   // H6: the window would go blank
   await withPixels(s, async () => {
     const k1 = s.ds, turns = ((s.rot % 4) + 4) % 4, r = await decodeWorking(s, k2), q = k1 / k2;
     const U2 = turns % 2 ? { w: r.h, h: r.w } : { w: r.w, h: r.h };

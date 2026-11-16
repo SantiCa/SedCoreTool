@@ -83,6 +83,13 @@ test('16-bit TIFF strips preserve neighboring samples and drive automatic levels
   }
 });
 
+test('the factor callback learns the sample depth, so a 16-bit image can be reduced more (card H6)', async () => {
+  const seen = [];
+  await decodeTiffBlocks(tiffFixture({ signed: true }).source, wholeTiff, (w, h, bits) => { seen.push(bits); return 1; });
+  await decodeTiffBlocks(tiffFixture({ big: true, little: false, tiled: true, rgb: true, virtual: true }).source, () => ({ x: 2, y: 1, w: 2, h: 2 }), (w, h, bits) => { seen.push(bits); return 2; });
+  assert.deepEqual(seen, [16, 16]);
+});
+
 test('signed grayscale TIFF keeps the 16-bit samples in an offset working domain', async () => {
   const { source } = tiffFixture({ signed: true });
   const { rgba16 } = await decodeTiffBlocks(source, wholeTiff, () => 1);

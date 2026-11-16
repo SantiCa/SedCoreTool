@@ -476,10 +476,17 @@ when the original file and estimated decoded buffers total at most 64 MiB.
 
 ### 6.1 Working resolution
 Core scanner images can exceed 40 million pixels per section, which do not fit comfortably in memory (the program
-uses about 13 bytes per pixel across its layers, plus 8 bytes for native 16-bit RGBA). On import, if `width × height > M` megapixels (M = "Working resolution on
-import", 8 MP by default), the image is reduced by an integer factor:
+uses about 13 bytes per pixel across its layers, plus 8 bytes for native 16-bit RGBA). On import, if `width × height > M` megapixels (M = "Maximum size when
+adding images", 8 MP by default; "No reduction" is 1,000 MP), the image is reduced by an integer factor:
 
     k = ⌈ √(width · height / (M · 10⁶)) ⌉
+
+then increased, if needed, to the smallest integer whose working image fits the page's memory limit
+(`factorThatFits` in `app/js/imageproc.js`): `⌊width / k⌋ · ⌊height / k⌋ · b ≤ 1.5 GiB`, with `b` = 13 bytes per pixel, 21 for a 16-bit
+source. A message then says that the image was reduced and how much memory it would have needed. The section's "Resolution of this section"
+offers every factor of `1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32` that leaves at least 20 pixels on the short side, disables those above the
+same limit and refuses them if requested anyway (card H6: above it the renderer could run out of memory and the window went blank; checked on
+Windows with the 8,192 × 87,382 fixture of M8.4.13, which is now added at 1/3, 0.96 GiB estimated).
 
 Each new pixel is the **arithmetic mean** of a `k × k` block of original pixels (in R, G and B). The last
 `width mod k` columns and `height mod k` rows are dropped, that is, fewer than `k` original pixels along the right

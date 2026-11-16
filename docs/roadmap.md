@@ -1224,6 +1224,14 @@ Independent of M8; each can be done in under an hour when the maintainer asks.
     interface language. First green run: work branch, commit after `0926bbc`. `master` (V0.150) still has the failing job until the next
     version. (c) The local flakes (the wait for the 16-bit TIFF after reopening, Puppeteer's 180 s protocol timeout) had a product cause, found with the CPU profiler on 14 November 2026: `sectionCanvas` created a new full-strip grey canvas on every call for a section whose picture was not loaded yet, and the image strip asks once per output row (up to 4000), so `toDataURL` took 6-25 s. It now keeps one grey canvas while the section stays pending; the smoke test asserts it (fails without the fix) and names any page call over 5 s. Done when the
     `e2e` job passes ten consecutive pushes.
+- [x] **H6 - A working resolution that does not fit in memory made the window go blank** (reported by the maintainer, 16 November 2026;
+      done the same day). Choosing "Full" for a section of a 2 GiB image, or adding it with "No reduction", needed about 8.7 GiB of page
+      memory and the renderer died. Now `factorThatFits` (`app/js/imageproc.js`) keeps every working image within 1.5 GiB estimated (13 bytes
+      per pixel, 21 for 16-bit); larger factors are chosen on import with a message, and the section form disables and refuses the rest. The
+      maintainer found the two controls confusing: they are now "Maximum size when adding images" and "Resolution of this section", with notes
+      that point to each other. Checked: `tests/app/working-memory.test.mjs`, a TIFF reader test, and on Windows
+      `tests/e2e/working-memory-desktop.mjs` with `rgb2g.tif` (added at 1/3 with the message, full resolution disabled and refused, the window
+      alive). Not measured: the exact memory at which the renderer dies (the limit is a conservative estimate), macOS and Linux.
 - [ ] **H3 - Move raw benchmark reports out of the repository.** `docs/benchmarks/*.json` weighs about 10 MB.
       Needs the maintainer's decision on where the raw files go; the `.md` summaries stay.
 

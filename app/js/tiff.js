@@ -166,7 +166,7 @@ export async function decodeTiffBlocks(source, chooseArea, chooseFactor) {
     return { fw, fh, legacyBytes: fh * Math.ceil(fw * declaredBits / 8) + fw * fh * 4 };
   }
 
-  const area = chooseArea(fw, fh), k = chooseFactor(area.w, area.h);
+  const area = chooseArea(fw, fh), k = chooseFactor(area.w, area.h, bits);   // bits: the caller's memory estimate depends on 8 or 16 bits
   if (!Number.isInteger(k) || k < 1) throw new Error('Invalid TIFF reduction factor');
   const w = Math.floor(area.w / k), h = Math.floor(area.h / k), pixels = w * h;
   if (!w || !h || !Number.isSafeInteger(pixels)) throw new Error('Empty TIFF working area');
