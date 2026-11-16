@@ -153,7 +153,7 @@ def test_cancellation_leaves_no_partial_folder(tmp_path):
     for after in (0, 3):                                                       # during the hash, during the bands
         calls = iter(range(10_000))
         with pytest.raises(Cancelled):
-            pyr.build(source, tmp_path / "root", name="x", budget=50 * GiB, cancelled=lambda: next(calls) >= after)
+            pyr.build(source, tmp_path / "root", name="x", budget=50 * GiB, cancelled=lambda calls=calls, after=after: next(calls) >= after)
         assert list((tmp_path / "root").iterdir()) == []
 
 
