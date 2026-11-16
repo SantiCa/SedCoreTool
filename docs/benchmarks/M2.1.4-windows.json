@@ -1,0 +1,832 @@
+{
+ "tool": "tools/measure_large_tables.mjs",
+ "card": "M2.1.4",
+ "commit": "01d6de7bbbe299058cd31d64efc60186a9f90b6e",
+ "generated": "2026-11-16T20:00:28.744Z",
+ "environment": {
+  "os": "Windows_NT 10.0.26300",
+  "cpu": "AMD Ryzen 7 7700X 8-Core Processor",
+  "logical_cpus": 16,
+  "memory_gib": 31.1,
+  "node": "v22.23.4"
+ },
+ "parameters": {
+  "sizes": [
+   100000
+  ],
+  "repetitions": 1,
+  "viewport": "1440 x 900",
+  "scroll_seconds": 5
+ },
+ "table": {
+  "20000_native": [
+   {
+    "open_ms": 43.5,
+    "expansions_ms": 6065,
+    "dom_rows": 10400,
+    "dom_elements": 135237,
+    "available": 10400,
+    "scroll": {
+     "frames": 65,
+     "median_ms": 79.20000000000073,
+     "p95_ms": 100,
+     "max_ms": 100.10000000000036,
+     "long_tasks": 16,
+     "travel_px": 207365,
+     "speed_px_s": 51841
+    },
+    "errors": []
+   },
+   {
+    "open_ms": 45.30000000074506,
+    "expansions_ms": 6049,
+    "dom_rows": 10400,
+    "dom_elements": 135237,
+    "available": 10400,
+    "scroll": {
+     "frames": 66,
+     "median_ms": 79.19999999999982,
+     "p95_ms": 95.89999999999964,
+     "max_ms": 100.10000000000036,
+     "long_tasks": 7,
+     "travel_px": 207365,
+     "speed_px_s": 51841
+    },
+    "errors": []
+   },
+   {
+    "open_ms": 44.5,
+    "expansions_ms": 5874.5,
+    "dom_rows": 10400,
+    "dom_elements": 135237,
+    "available": 10400,
+    "scroll": {
+     "frames": 62,
+     "median_ms": 79.20000000000073,
+     "p95_ms": 100.10000000000036,
+     "max_ms": 108.40000000000146,
+     "long_tasks": 7,
+     "travel_px": 207365,
+     "speed_px_s": 51841
+    },
+    "profile_scroll_and_open": [
+     {
+      "function": "time",
+      "source": "(benchmark)",
+      "line": 5,
+      "self_ms": 9403.9
+     },
+     {
+      "function": "(program)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 5655.3
+     },
+     {
+      "function": "(idle)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 2654.8
+     },
+     {
+      "function": "renderDataTable",
+      "source": "js/datatab.js",
+      "line": 179,
+      "self_ms": 2468.9
+     },
+     {
+      "function": "(garbage collector)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 245.3
+     },
+     {
+      "function": "(anonymous)",
+      "source": "(benchmark)",
+      "line": 11,
+      "self_ms": 135.8
+     }
+    ],
+    "errors": []
+   }
+  ],
+  "20000_visible_rows": [
+   {
+    "open_ms": 19.199999999254942,
+    "expansions_ms": 108.1999999973923,
+    "dom_rows": 37,
+    "dom_elements": 537,
+    "available": 10400,
+    "scroll": {
+     "frames": 1089,
+     "median_ms": 4.199999999999818,
+     "p95_ms": 8.300000000000182,
+     "max_ms": 12.5,
+     "long_tasks": 0,
+     "travel_px": 290565,
+     "speed_px_s": 72641
+    },
+    "errors": []
+   },
+   {
+    "open_ms": 17.59999999962747,
+    "expansions_ms": 112.09999999962747,
+    "dom_rows": 37,
+    "dom_elements": 537,
+    "available": 10400,
+    "scroll": {
+     "frames": 1082,
+     "median_ms": 4.199999999999818,
+     "p95_ms": 8.300000000000182,
+     "max_ms": 12.5,
+     "long_tasks": 0,
+     "travel_px": 290565,
+     "speed_px_s": 72641
+    },
+    "errors": []
+   },
+   {
+    "open_ms": 18.90000000037253,
+    "expansions_ms": 111.40000000037253,
+    "dom_rows": 37,
+    "dom_elements": 537,
+    "available": 10400,
+    "scroll": {
+     "frames": 1058,
+     "median_ms": 4.199999999999818,
+     "p95_ms": 8.399999999999636,
+     "max_ms": 12.600000000000364,
+     "long_tasks": 0,
+     "travel_px": 290565,
+     "speed_px_s": 72641
+    },
+    "profile_scroll_and_open": [
+     {
+      "function": "(program)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 4242.9
+     },
+     {
+      "function": "insertRows",
+      "source": "js/tableview.js",
+      "line": 52,
+      "self_ms": 334.2
+     },
+     {
+      "function": "remove",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 196.3
+     },
+     {
+      "function": "(garbage collector)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 65.7
+     },
+     {
+      "function": "(anonymous)",
+      "source": "(benchmark)",
+      "line": 11,
+      "self_ms": 63.2
+     },
+     {
+      "function": "time",
+      "source": "(benchmark)",
+      "line": 5,
+      "self_ms": 49.2
+     }
+    ],
+    "errors": []
+   }
+  ],
+  "100000_native": [
+   {
+    "open_ms": 78.59999999962747,
+    "expansions_ms": 5831.300000000745,
+    "dom_rows": 10400,
+    "dom_elements": 135237,
+    "available": 10400,
+    "scroll": {
+     "frames": 63,
+     "median_ms": 79.30000000000018,
+     "p95_ms": 100,
+     "max_ms": 137.5,
+     "long_tasks": 2,
+     "travel_px": 207365,
+     "speed_px_s": 51841
+    },
+    "errors": []
+   },
+   {
+    "open_ms": 77.5,
+    "expansions_ms": 5534.599999997765,
+    "dom_rows": 10400,
+    "dom_elements": 135237,
+    "available": 10400,
+    "scroll": {
+     "frames": 67,
+     "median_ms": 79.09999999999945,
+     "p95_ms": 95.80000000000018,
+     "max_ms": 95.89999999999964,
+     "long_tasks": 1,
+     "travel_px": 207365,
+     "speed_px_s": 51841
+    },
+    "errors": []
+   },
+   {
+    "open_ms": 82,
+    "expansions_ms": 5571.300000000745,
+    "dom_rows": 10400,
+    "dom_elements": 135237,
+    "available": 10400,
+    "scroll": {
+     "frames": 67,
+     "median_ms": 75,
+     "p95_ms": 91.69999999999891,
+     "max_ms": 100,
+     "long_tasks": 1,
+     "travel_px": 207365,
+     "speed_px_s": 51841
+    },
+    "profile_scroll_and_open": [
+     {
+      "function": "time",
+      "source": "(benchmark)",
+      "line": 5,
+      "self_ms": 9842.3
+     },
+     {
+      "function": "(program)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 5930.8
+     },
+     {
+      "function": "renderDataTable",
+      "source": "js/datatab.js",
+      "line": 179,
+      "self_ms": 2538.2
+     },
+     {
+      "function": "(idle)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 2341.7
+     },
+     {
+      "function": "(garbage collector)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 197.5
+     },
+     {
+      "function": "(anonymous)",
+      "source": "(benchmark)",
+      "line": 11,
+      "self_ms": 152.7
+     }
+    ],
+    "errors": []
+   }
+  ],
+  "100000_visible_rows": [
+   {
+    "open_ms": 49,
+    "expansions_ms": 122.30000000074506,
+    "dom_rows": 37,
+    "dom_elements": 537,
+    "available": 10400,
+    "scroll": {
+     "frames": 939,
+     "median_ms": 4.199999999999818,
+     "p95_ms": 8.400000000000091,
+     "max_ms": 12.599999999999909,
+     "long_tasks": 0,
+     "travel_px": 290565,
+     "speed_px_s": 72641
+    },
+    "errors": []
+   },
+   {
+    "open_ms": 50,
+    "expansions_ms": 122.40000000037253,
+    "dom_rows": 37,
+    "dom_elements": 537,
+    "available": 10400,
+    "scroll": {
+     "frames": 942,
+     "median_ms": 4.199999999999818,
+     "p95_ms": 8.400000000000091,
+     "max_ms": 16.699999999999818,
+     "long_tasks": 0,
+     "travel_px": 290565,
+     "speed_px_s": 72641
+    },
+    "errors": []
+   },
+   {
+    "open_ms": 48.30000000074506,
+    "expansions_ms": 118.70000000111759,
+    "dom_rows": 37,
+    "dom_elements": 537,
+    "available": 10400,
+    "scroll": {
+     "frames": 1034,
+     "median_ms": 4.199999999999818,
+     "p95_ms": 8.399999999999636,
+     "max_ms": 12.600000000000364,
+     "long_tasks": 0,
+     "travel_px": 290565,
+     "speed_px_s": 72641
+    },
+    "profile_scroll_and_open": [
+     {
+      "function": "(program)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 4158.5
+     },
+     {
+      "function": "insertRows",
+      "source": "js/tableview.js",
+      "line": 52,
+      "self_ms": 352.3
+     },
+     {
+      "function": "remove",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 196.3
+     },
+     {
+      "function": "(anonymous)",
+      "source": "(benchmark)",
+      "line": 11,
+      "self_ms": 76.1
+     },
+     {
+      "function": "(garbage collector)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 67.2
+     },
+     {
+      "function": "time",
+      "source": "(benchmark)",
+      "line": 5,
+      "self_ms": 43
+     }
+    ],
+    "errors": []
+   }
+  ]
+ },
+ "figures": {
+  "20000": [
+   {
+    "rows": 20000,
+    "points_one_core": 10000,
+    "points_two_cores": 20000,
+    "open_plot_ms": 20.799999998882413,
+    "depth_plot_one_core_ms": 11.699999999254942,
+    "depth_plot_one_core": {
+     "svg_elements": 34,
+     "svg_chars": 116341
+    },
+    "depth_plot_hover": {
+     "frames": 594,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 8.3,
+     "long_tasks": 0
+    },
+    "cross_plot_one_core": {
+     "svg_elements": 9770,
+     "svg_chars": 604524
+    },
+    "cross_plot_one_core_redraw_ms": 36.09999999962747,
+    "cross_plot_two_cores_ms": 63.90000000037253,
+    "cross_plot_two_cores": {
+     "svg_elements": 19492,
+     "svg_chars": 1312803
+    },
+    "cross_plot_two_cores_redraw_ms": 62.40000000037253,
+    "cross_plot_hover": {
+     "frames": 594,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 8.3,
+     "long_tasks": 0
+    },
+    "multiproxy_open_ms": 7744,
+    "multiproxy": {
+     "svg_elements": 312,
+     "svg_chars": 421395
+    },
+    "multiproxy_redraw_ms": 147.40000000037253,
+    "multiproxy_after": {
+     "svg_elements": 331,
+     "svg_chars": 555092
+    },
+    "multiproxy_hover": {
+     "frames": 571,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 20.8,
+     "long_tasks": 0
+    },
+    "errors": [],
+    "chrome": "Chrome/157.0.8103.51"
+   },
+   {
+    "rows": 20000,
+    "points_one_core": 10000,
+    "points_two_cores": 20000,
+    "open_plot_ms": 20.5,
+    "depth_plot_one_core_ms": 19.59999999962747,
+    "depth_plot_one_core": {
+     "svg_elements": 34,
+     "svg_chars": 116341
+    },
+    "depth_plot_hover": {
+     "frames": 598,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 8.3,
+     "long_tasks": 0
+    },
+    "cross_plot_one_core": {
+     "svg_elements": 9770,
+     "svg_chars": 604524
+    },
+    "cross_plot_one_core_redraw_ms": 35.70000000111759,
+    "cross_plot_two_cores_ms": 62,
+    "cross_plot_two_cores": {
+     "svg_elements": 19492,
+     "svg_chars": 1312803
+    },
+    "cross_plot_two_cores_redraw_ms": 60.40000000037253,
+    "cross_plot_hover": {
+     "frames": 592,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 8.3,
+     "long_tasks": 0
+    },
+    "multiproxy_open_ms": 7764,
+    "multiproxy": {
+     "svg_elements": 312,
+     "svg_chars": 421395
+    },
+    "multiproxy_redraw_ms": 158.5,
+    "multiproxy_after": {
+     "svg_elements": 331,
+     "svg_chars": 555092
+    },
+    "multiproxy_hover": {
+     "frames": 554,
+     "median_ms": 4.2,
+     "p95_ms": 8.3,
+     "max_ms": 25.1,
+     "long_tasks": 0
+    },
+    "errors": [],
+    "chrome": "Chrome/157.0.8103.51"
+   },
+   {
+    "rows": 20000,
+    "points_one_core": 10000,
+    "points_two_cores": 20000,
+    "open_plot_ms": 20.09999999962747,
+    "depth_plot_one_core_ms": 19.700000001117587,
+    "depth_plot_one_core": {
+     "svg_elements": 34,
+     "svg_chars": 116341
+    },
+    "depth_plot_hover": {
+     "frames": 591,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 8.4,
+     "long_tasks": 0
+    },
+    "cross_plot_one_core": {
+     "svg_elements": 9770,
+     "svg_chars": 604524
+    },
+    "cross_plot_one_core_redraw_ms": 29.40000000037253,
+    "cross_plot_two_cores_ms": 65.89999999850988,
+    "cross_plot_two_cores": {
+     "svg_elements": 19492,
+     "svg_chars": 1312803
+    },
+    "cross_plot_two_cores_redraw_ms": 58.30000000074506,
+    "cross_plot_hover": {
+     "frames": 591,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 8.3,
+     "long_tasks": 0
+    },
+    "profile_cross_plot_two_cores_redraw": [
+     {
+      "function": "(program)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 60.8
+     },
+     {
+      "function": "drawDataPlot",
+      "source": "js/datatab.js",
+      "line": 76,
+      "self_ms": 25.2
+     },
+     {
+      "function": "time",
+      "source": "(benchmark)",
+      "line": 5,
+      "self_ms": 20.9
+     },
+     {
+      "function": "plotSymbol",
+      "source": "js/plot.js",
+      "line": 78,
+      "self_ms": 3.2
+     },
+     {
+      "function": "drawSeries",
+      "source": "js/plot.js",
+      "line": 87,
+      "self_ms": 3.1
+     },
+     {
+      "function": "buildXYPlot",
+      "source": "js/plot.js",
+      "line": 129,
+      "self_ms": 1.9
+     }
+    ],
+    "multiproxy_open_ms": 7720.299999998882,
+    "multiproxy": {
+     "svg_elements": 312,
+     "svg_chars": 421395
+    },
+    "multiproxy_redraw_ms": 140.7000000011176,
+    "multiproxy_after": {
+     "svg_elements": 331,
+     "svg_chars": 555092
+    },
+    "multiproxy_hover": {
+     "frames": 577,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 20.8,
+     "long_tasks": 0
+    },
+    "profile_multiproxy_redraw": [
+     {
+      "function": "(program)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 134.5
+     },
+     {
+      "function": "drawDataPlot",
+      "source": "js/datatab.js",
+      "line": 76,
+      "self_ms": 18.1
+     },
+     {
+      "function": "(idle)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 15.3
+     },
+     {
+      "function": "getBoundingClientRect",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 5.2
+     },
+     {
+      "function": "renderIntervalList",
+      "source": "js/multiproxy.js",
+      "line": 855,
+      "self_ms": 4.6
+     },
+     {
+      "function": "renderGeoLogs",
+      "source": "js/multiproxy.js",
+      "line": 726,
+      "self_ms": 3.1
+     }
+    ],
+    "errors": [],
+    "chrome": "Chrome/157.0.8103.51"
+   }
+  ],
+  "100000": [
+   {
+    "rows": 100000,
+    "points_one_core": 50000,
+    "points_two_cores": 100000,
+    "in_progress": null,
+    "open_plot_ms": 74.30000000074506,
+    "depth_plot_one_core_ms": 25.09999999962747,
+    "depth_plot_one_core": {
+     "svg_elements": 34,
+     "svg_chars": 572265
+    },
+    "depth_plot_hover": {
+     "frames": 592,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 12.5,
+     "long_tasks": 0
+    },
+    "cross_plot_one_core": {
+     "svg_elements": 48689,
+     "svg_chars": 3012083
+    },
+    "cross_plot_one_core_redraw_ms": 155.59999999962747,
+    "cross_plot_two_cores_ms": 314.80000000074506,
+    "cross_plot_two_cores": {
+     "svg_elements": 97330,
+     "svg_chars": 6555643
+    },
+    "cross_plot_two_cores_redraw_ms": 329.09999999962747,
+    "cross_plot_hover": {
+     "frames": 576,
+     "median_ms": 4.2,
+     "p95_ms": 4.3,
+     "max_ms": 41.7,
+     "long_tasks": 0
+    },
+    "profile_cross_plot_two_cores_redraw": [
+     {
+      "function": "(program)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 132.5
+     },
+     {
+      "function": "drawDataPlot",
+      "source": "js/datatab.js",
+      "line": 76,
+      "self_ms": 119.9
+     },
+     {
+      "function": "time",
+      "source": "(benchmark)",
+      "line": 5,
+      "self_ms": 105.5
+     },
+     {
+      "function": "drawSeries",
+      "source": "js/plot.js",
+      "line": 87,
+      "self_ms": 16.5
+     },
+     {
+      "function": "plotSymbol",
+      "source": "js/plot.js",
+      "line": 78,
+      "self_ms": 9.4
+     },
+     {
+      "function": "(garbage collector)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 6.2
+     }
+    ],
+    "multiproxy_open_ms": 195269.40000000037,
+    "multiproxy": {
+     "svg_elements": 1112,
+     "svg_chars": 2080918
+    },
+    "multiproxy_redraw_ms": 612.9000000003725,
+    "multiproxy_after": {
+     "svg_elements": 1131,
+     "svg_chars": 2744551
+    },
+    "multiproxy_hover": {
+     "frames": 489,
+     "median_ms": 4.2,
+     "p95_ms": 12.5,
+     "max_ms": 20.8,
+     "long_tasks": 0
+    },
+    "profile_multiproxy_redraw": [
+     {
+      "function": "(program)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 406.4
+     },
+     {
+      "function": "drawDataPlot",
+      "source": "js/datatab.js",
+      "line": 76,
+      "self_ms": 98
+     },
+     {
+      "function": "(idle)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 47.8
+     },
+     {
+      "function": "renderGeoLogs",
+      "source": "js/multiproxy.js",
+      "line": 726,
+      "self_ms": 36.7
+     },
+     {
+      "function": "(anonymous)",
+      "source": "js/log.js",
+      "line": 674,
+      "self_ms": 33.7
+     },
+     {
+      "function": "refreshCoreData",
+      "source": "js/app.js",
+      "line": 2715,
+      "self_ms": 18.5
+     }
+    ],
+    "errors": [],
+    "chrome": "Chrome/157.0.8103.51",
+    "profile_multiproxy_first_open": [
+     {
+      "function": "coreConvert",
+      "source": "js/geo.js",
+      "line": 103,
+      "self_ms": 128791.1
+     },
+     {
+      "function": "(anonymous)",
+      "source": "js/geo.js",
+      "line": 106,
+      "self_ms": 21020.2
+     },
+     {
+      "function": "(anonymous)",
+      "source": "js/geo.js",
+      "line": 111,
+      "self_ms": 16352.1
+     },
+     {
+      "function": "(garbage collector)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 12716.3
+     },
+     {
+      "function": "(anonymous)",
+      "source": "js/geo.js",
+      "line": 109,
+      "self_ms": 12162.5
+     },
+     {
+      "function": "(anonymous)",
+      "source": "js/geo.js",
+      "line": 179,
+      "self_ms": 1378.1
+     },
+     {
+      "function": "(anonymous)",
+      "source": "js/geo.js",
+      "line": 165,
+      "self_ms": 1183.4
+     },
+     {
+      "function": "buildSamples",
+      "source": "js/geo.js",
+      "line": 150,
+      "self_ms": 627.6
+     },
+     {
+      "function": "(program)",
+      "source": "(runtime)",
+      "line": 0,
+      "self_ms": 271.4
+     },
+     {
+      "function": "(anonymous)",
+      "source": "js/geo.js",
+      "line": 308,
+      "self_ms": 196.5
+     }
+    ],
+    "multiproxy_open_ms_profiled": 195113.69999999925
+   }
+  ]
+ },
+ "notes": [
+  "figures[100000][0] holds the one 100,000-row figures trial (one repetition; the first, timed open of the multiproxy log took 195 s). The profile of that cold open comes from a second, separate trial (--profile-first-open), which took 195.1 s; its other numbers are not used."
+ ]
+}

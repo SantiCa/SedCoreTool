@@ -60,12 +60,15 @@ Updated 15 November 2026.
   the review (starting the local server was refused); the `e2e` job of GitHub runs it on every push.
 - **Rule D11 settled (16 November 2026, card M8.4.20):** after vectorising the interval kernel the outcome is still D (119.5 ms against 100); accepted for the
   interactive interval table of tiled sections, which stays in JavaScript; the maintainer can overrule it.
-- **Progress of 16 November 2026:** M8.4.7, the M8.4.8 measurements, M8.4.12, M8.4.20 and M8.4.13 (fixtures
-  in `C:\sedcore-large-fixtures`, outside the repository, and the Windows baseline) are done. The three-system gate of M8.4.8 passed on
-  `f4ec92a` (pushed on the maintainer's request); M8.4.20 (`7a6aed4`) is local and its CI has not run. Session checks after it: `pytest` 724 passed / 9 skipped;
-  the other checks of DEVELOPMENT §3 (node tests, typecheck, e2e) were not repeated because only Python changed.
-- **Next step:** M2.1.4 (tables and figures with 100,000 rows: measurement), the last detailed card of part C. **After it, and with the
-  the decision on D11 now recorded, a design session** (the most capable model, or the maintainer) details M8.4.14-M8.4.19 with the measured numbers; an implementing
+- **Progress of 16 November 2026:** M8.4.7, the M8.4.8 measurements, M8.4.12, M8.4.20, M8.4.13 (fixtures
+  in `C:\sedcore-large-fixtures`, outside the repository, and the Windows baseline) and M2.1.4 are done. The three-system gate of M8.4.8 passed on
+  `f4ec92a`, and `tests` and *Desktop builds* also succeeded on `01d6de7` (includes M8.4.20) on Windows, macOS and Linux (both pushed on the maintainer's request).
+  M2.1.4 is local. Session checks: `pytest` 724 passed / 9 skipped on M8.4.20; the other checks of DEVELOPMENT §3 were not repeated because only Python, tools and documents changed since `01d6de7`.
+- **Findings of M2.1.4 (Windows, [report](benchmarks/M2.1.4.md)) for the design session:** the native Data table fails the 33 ms target while scrolling (about 13 frames per second) and
+  the visible-rows rendering passes; no rendering reaches beyond 10,400 rows (the 400 + 1,000-row expansion limit); a scatter of 50,000 points redraws in 156 ms (329 ms at
+  100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
+  complexity that is independent of the tile store.
+- **Next step:** with all measuring cards of part C done and D11 recorded, **a design session** (the most capable model, or the maintainer) details M8.4.14-M8.4.19 with the measured numbers; an implementing
   session must not start M8.4.14 from its summary. Also open: card H5 (the `e2e` job must pass ten consecutive pushes).
 - **Reminder for whoever talks to the maintainer:** the maintainer accepted the two acceptance levels on
   13 November 2026 and asked to be **reminded to run the release-gate tests** (the release checklist below:
@@ -838,7 +841,7 @@ data must be checked in the worker with NumPy.
   touched tools.
 - **Done when:** the generator and the baseline evidence are committed, and the summary lists, per file, what works today and what does not.
 
-##### M2.1.4 - Tables and figures with 100,000 rows: measure — state: Ready after M8.4.13
+##### M2.1.4 - Tables and figures with 100,000 rows: measure — state: Done (16 Nov 2026), development gate; [report](benchmarks/M2.1.4.md)
 
 - **Goal:** know where the program stops being fluid with tens of thousands of data rows: the Data table (with and without the visible-row
   rendering of M2.1.3), the figures and the multiproxy charts. Measure only; the fixes become cards of the design session.
