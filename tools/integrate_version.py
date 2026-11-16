@@ -60,7 +60,7 @@ def delivery(root: Path) -> str:
 def changelog_problem(root: Path, version: str) -> str | None:
     lines = (root / "CHANGELOG.md").read_text(encoding="utf-8").splitlines()
     if any(line.strip() == "## Unreleased" for line in lines):
-        return f"CHANGELOG.md still has a '## Unreleased' section: rename it to '## {version} — <date>' in the version commit"
+        return f"CHANGELOG.md still has a '## Unreleased' section: rename it to the heading of {version} (with the date, like the other versions) in the version commit"
     if not any(line.startswith(f"## {version} ") for line in lines):
         return f"CHANGELOG.md has no '## {version} ...' heading"
     return None
