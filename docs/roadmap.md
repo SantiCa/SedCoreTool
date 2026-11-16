@@ -16,11 +16,11 @@ file and leave one line here.
 Updated 16 November 2026.
 
 - **Released version:** V0.151 (16 November 2026), integrated into `master` on the maintainer's instruction ("haz push de todo y luego publica en
-  master"), which overrides the decision of 14 November 2026 that nothing goes to `master` until M8.4 is finished (part A is done; parts C and B are not). It contains the
+  master"), which overrides the decision of 14 November 2026 that nothing goes to `master` until M8.4 is finished (part A is done; parts C and B are not). It is `master` commit `e59fff4` (pushed; no tag), whose tree is identical to commit `7aca549` of the work branch, on which `tests` and *Desktop builds* passed on Windows, macOS and Linux. It contains the
   visible-row Data table as the default (the release gate of every platform is still required before it is announced to users). V0.150 (14 November 2026) was integrated on the instruction "haz commit y push de todo a
   master con una nueva version 0.150". **No tag and no GitHub Release exist for V0.149, V0.150 or V0.151**: a tag publishes a Release and is the
   owner's decision. The *Desktop builds* workflow is started by hand for the macOS and Linux builds (see the release checklist).
-- **Active work branch:** `work/2026-11-13` (pushed), which `master` now contains. Changes after V0.151 accumulate under `## Unreleased` (add the heading when the first change is made).
+- **Active work branch:** `work/2026-11-13` (pushed), whose tree `master` now equals. **How the next version is integrated:** a squash merge now conflicts (the V0.150 squash and the branch commits changed the same lines), so `master` is moved to the tested tree with `git checkout master; git read-tree --reset -u work/2026-11-13`, one commit `V0.<n>: ...`, check that `git diff work/2026-11-13 master` is empty, then push `master`. Changes after V0.151 accumulate under `## Unreleased` (add the heading when the first change is made).
 - **Checks:** see the last line of this block; it is rewritten at the end of every session.
 - **Full checks of 16 November 2026 on the V0.151 state (maintainer's Windows computer, run one after another):** `pytest -q` 724 passed / 9 skipped (Python 3.12); `npm test` 361 passed
   (its first run inside the check script returned exit 1 with no output that could be read; four reruns, 361 passed each, so it is recorded as an unexplained, not reproduced incident);
@@ -868,19 +868,19 @@ data must be checked in the worker with NumPy.
 
 - **Goal:** the first opening of the multiproxy log of a core with 100,000 rows takes at most 2 s (195 s today, 7.7 s at 20,000 rows), with
   bit-identical results. The target was proposed by this card from the contract's "first useful view <= 2 s" and may be changed by the maintainer before the measurement.
-- **Cause (measured, [report](benchmarks/M2.1.4.md)):** `coreConvert` (`app/js/geo.js:103`) builds, filters and sorts every depth-age pair of the core on each call, and
+- **Cause (measured, [report](benchmarks/M2.1.4.md)):** `coreConvert` (`app/js/geo.js:103`) also calls `coreAges(core)` on each call (for a core without an age column it parses the age-model text and walks all depths), builds, filters and sorts every depth-age pair of the core on each call, and
   `buildSamples` (`geo.js:170-171`) calls it twice for every sample of the grid: the work grows with the square of the rows. The profile of the cold opening puts about 129 s in
   `coreConvert` itself and about 180 s with the functions inside it, plus 13 s of garbage collection.
 - **Read first:** `app/js/geo.js` (`coreAges`, `coreConvert`, `buildSamples`, `intervalsOnAxis`, `interpAge`/`lerp`); `tests/app/geo.test.mjs`; `docs/benchmarks/M2.1.4.md`
   (the profile and the tool); the technical manual's section on depth-age conversion (formulas must still match the code).
-- **Change:** `app/js/geo.js`: a function that prepares the relation of one core for one direction (the sorted source and destination arrays, built once) and returns a function that
+- **Change:** `app/js/geo.js`: a function that prepares the relation of one core for one direction (the ages from `coreAges`, then the sorted source and destination arrays, all built once) and returns a function that
   converts a value; `coreConvert` keeps its signature and result and becomes a wrapper (it is also used by `intervalsOnAxis`, a few calls); `buildSamples` prepares the two directions once
   per core before the grid loop. No cache that outlives a call (the core's arrays can be edited), so there is nothing to invalidate. `tests/app/geo.test.mjs`; `CHANGELOG.md`
   ("For users": opening the multiproxy log of a long core is much faster; "Internal" for the tool measurements).
 - **Do not touch:** the interpolation formula and its edge behaviour (clamping, missing values, unsorted input, equal depths), the result of any function, the saved-project format,
   other modules. If `interpAge` itself is linear in the number of pairs per call, say so under the card instead of redesigning it: measure first.
 - **Steps:**
-  1. Before changing code, write tests against the **current** `coreConvert` and `buildSamples` on small deterministic cores (with `null` depths and ages, unsorted rows, repeated
+  1. *(Done in the session of 16 November 2026, file `tests/app/geo-convert.test.mjs`, 7 tests that pass on the current code and keep a copy of it as the exact reference.)* Before changing code, write tests against the **current** `coreConvert` and `buildSamples` on small deterministic cores (with `null` depths and ages, unsorted rows, repeated
      values, one pair, none, `clamp` on and off, both directions) and record their results as expectations. They must pass on the old code.
   2. Implement the preparation function; make `coreConvert` a wrapper; make `buildSamples` use the prepared converters.
   3. The same tests pass unchanged, and a randomised test compares old and new results on cores of up to 500 rows with exact equality (keep the old implementation inside the test).
