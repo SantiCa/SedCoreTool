@@ -171,7 +171,7 @@ Goal:         one or two sentences: what will be true afterwards.
 Read first:   the few files and document sections needed. Nothing else is required reading.
 Change:       files to create or modify.
 Do not touch: files and behaviours that must stay as they are.
-Model:        most capable | fast (one reason). See "Which model" below.
+Model:        most capable | fast, effort low | medium | high (one reason). See "Which model" below.
 Steps:        ordered, each small enough to verify on its own.
 Tests:        the tests to add and the commands that must pass.
 Done when:    observable acceptance criteria.
@@ -182,17 +182,22 @@ Done when:    observable acceptance criteria.
   by the maintainer. An implementing session, with any model, does not redesign: if the card is wrong, incomplete or
   blocked, stop, write the problem under the card ("Blocked: …") and in the status, and report it.
 - **Which model** (decided by the maintainer on 16 November 2026; the same rule for every assistant: Claude,
-  ChatGPT/Codex, Gemini or another). Before starting a card, tell the maintainer in one line which tier the card's
-  `Model:` field asks for and why; if the session runs on the other tier, say so and wait for the maintainer to
-  switch or to say "continue". The maintainer chooses the model; the assistant recommends.
+  ChatGPT/Codex, Gemini or another). Before starting a card, tell the maintainer in one line which tier and which
+  effort the card's `Model:` field asks for and why; if the session runs on another tier or effort, say so and wait
+  for the maintainer to switch or to say "continue". The maintainer chooses; the assistant recommends.
   - **Most capable tier** (the strongest reasoning model the provider offers, for example Claude Opus, the top
     GPT reasoning model, Gemini Pro): design sessions; cards where a mistake is costly or hard to undo: permanent
     file formats, saving, backup and recovery, editing that could lose user work, security against hostile input,
     packaging on three systems, a new dependency.
   - **Fast tier** (for example Claude Sonnet, a smaller GPT model, Gemini Flash): detailed, bounded cards checked by
     exact tests or measurements, documentation, small fixes, long repetitive runs.
-  - A card without a `Model:` field defaults to the most capable tier for design work and to the fast tier for an
-    implementing card that only measures or documents.
+  - **Effort** (how long the model reasons before answering: `/effort` or the model menu in Claude Code, "reasoning
+    effort" in ChatGPT/Codex, "thinking" level or budget in Gemini): **high** for design sessions and for the costly
+    cards above (the highest available, such as Claude's `max`, only for a design session with many interacting
+    decisions); **medium** for detailed implementing cards; **low** for documentation, small fixes, running a gate
+    or a measurement that is already scripted.
+  - A card without a `Model:` field defaults to the most capable tier with high effort for design work, and to the
+    fast tier with medium effort for an implementing card that only measures or documents.
 - **One card at a time,** in roadmap order, and only the card the maintainer authorised. Finish or hand over
   before starting another. If a request combines independent workstreams, split it into cards and do the first.
 - **Interpret a broad request by intent:** choose the smallest concrete scope that satisfies it, state the

@@ -82,7 +82,7 @@ Updated 16 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.14** (tile store format and pyramid import, engine only; Ready; **model: most capable**, AGENTS §6 "Which model"). The design session of part C was held on 16 November 2026: decisions in
+- **Next step: M8.4.14** (tile store format and pyramid import, engine only; Ready; **model: most capable, effort high**, AGENTS §6 "Which model"). The design session of part C was held on 16 November 2026: decisions in
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -941,7 +941,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   `tile.read`); `desktop/engine.js` (the main process passes the two store roots, never the renderer); new contract §8 "Tile store v1" and a
   technical-manual section; new `tools/measure_tile_store.py`; tests; `docs/TECHNICAL_DOCUMENTATION.md` §1.4; `CHANGELOG.md` (Internal).
 - **Do not touch:** the interface, `section.analyze`, the project format, today's whole-image path.
-- **Model:** most capable (a permanent file format, a new dependency in three installers, hostile input).
+- **Model:** most capable, effort high (a permanent file format, a new dependency in three installers, hostile input).
 - **Steps:**
   1. Write contract §8 and the manual section first: folder layout of both roots, Zarr v2 metadata of each level, chunk naming, the tile-hash
      file (`<level>/.tiles.sha256`: `rows x cols` records of 32 bytes, row-major), source identity (SHA-256 and size of the source file, computed
@@ -988,7 +988,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   small hooks in `app.js`; bridge operations for import and tile fetch; flag row in the roadmap's flag table; i18n keys.
 - **Do not touch:** sections below the threshold; saving (a tiled section is not saved yet: the interface says so, and the project's other
   sections keep saving normally, until M8.4.18); scientific code.
-- **Model:** either tier; the most capable if step 1 or step 7 calls for a decision (a target missed, path (b) chosen).
+- **Model:** either tier, effort medium; the most capable with effort high if step 1 or step 7 calls for a decision (a target missed, path (b) chosen).
 - **Steps:**
   1. **Delivery path, decided by a rule stated now:** measure on `rgb8g` (a) `tile.read` through the main process and (b) the main process reading
      tile files itself and verifying their hashes (a Node reader of contract §8). Use (a) if a batch of 16 uncached level-0 tiles arrives with p95
@@ -1017,7 +1017,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
 - **Change:** `src/sedcoretool/store/masks.py` (content-addressed tiles, manifests, tables); engine operations `mask.put` (tiles and tables of one
   edit, against a base manifest) and `mask.commit` (returns the new manifest hash); the page's tile-level mask cache, dirty tracking, undo stack
   with its own budget (64 MiB by default) and resend queue; contract §8 extended.
-- **Model:** most capable (editing that could lose user work; the detailed steps are still to be written).
+- **Model:** most capable, effort high (editing that could lose user work; the detailed steps are still to be written).
 - **Steps (outline; the implementing session writes the detailed steps after reading M8.4.15's numbers):** (1) the object table keeps each
   object's bounding box (it does today, `o.bbox`), so an object operation (split, merge, delete, reclassify) loads exactly the tiles it touches,
   and refuses visibly an object whose box needs more tiles than the page budget allows; (2) brushes and fills that cross a tile seam write each
@@ -1037,7 +1037,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   counts: ROI, prediction rules, candidate counting; output: the row counts of the ROI as `u32le[rows, 2 + classes]`, and for an update only the
   rows of the touched tiles); a per-tile cache in the worker keyed by tile hash and table/settings hashes; the page fills `_rc` from it and keeps
   `binRows` as today.
-- **Model:** fast (bounded, checked by exact equality and measured targets).
+- **Model:** fast, effort medium (bounded, checked by exact equality and measured targets).
 - **Acceptance:** exact equality with `section.intervals/1` and with today's JavaScript path on images that fit in memory, including objects and
   overlaps crossing tile seams, exclusion, a ROI not aligned with tiles and fractional intervals; interval table after an edit touching at most
   4 tiles p95 <= 150 ms; interval-size change for all sections p95 <= 300 ms (re-binning only); a settings change that changes effective
@@ -1047,7 +1047,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
 
 - **Goal:** projects with tiled sections save, reopen, back up and export without ever losing the last good save, with old projects unchanged.
 - **Read first:** `app/js/storage.js`, `writeProjectFolder` and the save path in `app.js`; `app/js/exportio.js`; ARCHITECTURE §3.4 rule 4 and decision 3.
-- **Model:** most capable (saving, backup and recovery; a versioned extension of the project format).
+- **Model:** most capable, effort high (saving, backup and recovery; a versioned extension of the project format).
 - **Change and acceptance (the earlier summary, now with decisions 3 and 8):** the project record of a tiled section names the store format version,
   the manifest hash and the source identity (a versioned extension of the project format; older projects open unchanged; a build without tiled-section
   support refuses the section visibly); save order of rule 4 (tiles, manifest by temporary file and atomic rename, then the record); folder backup
@@ -1058,7 +1058,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
 
 ##### M8.4.19 - Milestone gate of part C — state: after M8.4.18
 
-- **Model:** fast (running and recording the gate); the most capable for the decisions that follow it.
+- **Model:** fast, effort low (running and recording the gate); the most capable with effort high for the decisions that follow it.
 - Windows, macOS and Linux on one commit (`tests` and *Desktop builds*, including the desktop end-to-end test with the engine experiment and the
   tiled flag on and off); the interactive targets measured on the primary host with the M8.4.13 fixtures; listed as not measured: a 16 GiB computer,
   an Intel Mac, clean machines, macOS and Linux timing. Then the decision on rule 6 (move small sections to the tiled path or keep both) and on
@@ -1077,7 +1077,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   3. **Several sections in one job**: resume the design of M8.4.6 only if a measurement shows that the per-request cost (about 33 ms per section) matters for the interactive targets of contract section 7.
 - **Acceptance (as the maintainer stated it; measured, not argued):** (i) analysis of one large section <= 100 ms with a cold cache and the worker already running; (ii) the whole public example <= 2x the JavaScript time; (iii) the ten-cycle memory test within +64 MiB; (iv) identical results on the fixtures. Measured today: (i) not met (a cold analysis of the six public sections took 1.6 s in M8.3.8, about 0.6 s with resident inputs); (ii) not met (226 ms against 2 x 1.4 ms); (iii) met (M8.3.8, corrected); (iv) met. **Criteria (i) and (ii) cannot be met by the whole-image path** with a separate process that verifies every image by its full hash; the design session of 15 November 2026 chose the tile store of part C for that reason. This card therefore reports the verdicts and **does not block part C** unless the maintainer declares it blocking.
 - **Do not touch:** the hash in the contract, the transport and the method, without a decision.
-- **Model:** fast (measurements); the hash question goes to the maintainer.
+- **Model:** fast, effort medium (measurements); the hash question goes to the maintainer.
 - **Done when:** the three evaluations are recorded with numbers, the four criteria have a verdict, and the maintainer has been asked about the hash if its saving is worth a change.
 
 **Part B - what M8.5 needs from the engine (cards written in the design review of 14 November 2026).**
