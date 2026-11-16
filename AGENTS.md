@@ -14,12 +14,16 @@ repository (code, comments, documents, commit messages) is written in English.
    branch, the last verified commit, checks still due and the next task card.
 2. **Check the checkout:** `git status --short --branch`. On a clean tree, stay on the branch the status names. A
    dirty tree may be someone else's work: do not stash, reset, clean, discard or switch branches; ask.
+   Then `git fetch origin` and `git log --oneline HEAD..origin/master`: if it lists anything, somebody changed
+   `master` on GitHub (a merged pull request). Merge it into the work branch before anything else
+   (`git merge origin/master`, a normal merge), run the checks and say so in the report (§5.1).
 3. **Run pending checks first** if the status says "checks pending" (§5.4).
 4. **Find the task card** for what the maintainer asked (§6). No card and the request is not trivial: write the
    card first, or ask.
 5. **Read only what the card lists** under "Read first". You rarely need whole documents.
 6. **Make the change** following §3 and §4. Run focused checks as you go.
-7. **Document in the same commit** (§5.2) and **commit on the branch** with explicitly named files.
+7. **Document in the same commit** (§5.2), **commit on the branch** with explicitly named files and **push the
+   branch** when a card or a verified checkpoint is finished (§5.1).
 8. **Update the roadmap status** (commit, checks run, next step, open questions).
 9. **Report to the maintainer in Spanish** (§7).
 
@@ -59,8 +63,9 @@ was measured and what was not.
 
 Never do any of these without an explicit request from the maintainer in the current conversation.
 
-1. **Push, tag, publish, create a version number or change `master`.** Work stays in local commits on the work
-   branch. Never force-push.
+1. **Change `master` in any way, tag, publish or create a version number.** This includes pushing `master`,
+   committing on it and merging a pull request with the button on GitHub. The only thing that is pushed without
+   asking is the work branch (§5.1). Never force-push.
 2. **Modify `legacy/`.**
 3. **Commit unpublished or private data.** The repository holds only public example data.
 4. **Rename compatibility identifiers:** browser storage keys `ichantool.*` and `corantool.*`, the IndexedDB
@@ -119,6 +124,17 @@ Session work happens on a branch; a version is created only when the maintainer 
 
 1. **Work branch.** Continue the branch named in the roadmap status, or create `work/<YYYY-MM-DD>` from `master`.
    Commit with descriptive messages and explicitly selected files. Do not change the version number on the branch.
+   - **Push the work branch after every finished card or verified checkpoint** (decided by the maintainer on
+     16 November 2026). The push is the copy of the work outside this computer and it starts the GitHub checks on
+     Windows, macOS and Linux; read their result and record it.
+   - **`master` only receives versions** (item 5). Nobody commits on it, and pull requests are not merged with the
+     button on GitHub.
+   - **`master` is always contained in the work branch.** If it is not (§1 step 2), merge `master` into the work
+     branch with a normal merge; never the other way round, and never with a strategy that discards one side.
+     This is what keeps a change made on `master` from being lost when the next version is integrated.
+   - **Dependency upgrades proposed by Dependabot** are pull requests against `master`. They stay open until the
+     maintainer asks for one; its change is then made on the work branch (item 9 of §3 applies), checked like any
+     other change, and reaches `master` with the next version.
 2. **Documents in the same commit as the change:**
    - `CHANGELOG.md`, under `## Unreleased`: a short bullet under **"For users"** when what a user sees, does or
      gets changes (say what changed for them, not how the work was organised), or under **"Internal"** for tools,
@@ -137,9 +153,12 @@ Session work happens on a branch; a version is created only when the maintainer 
 5. **New version, only when the maintainer asks:** next number `V0.<n>` after the top versioned entry of
    `CHANGELOG.md`. Set `DELIVERY` in `app/js/app.js`, run `python tools/sync_version.py`, rename `## Unreleased`
    to `## V0.<n> — YYYY-MM-DD`, make sure the full checks pass on the final state (and, when the version closes a
-   milestone, that its milestone gate passed on that state; §6), and integrate the branch into
-   `master` as one commit `V0.<n>: <summary>`. Version 1.0 is reserved for when the owner declares the program
-   complete.
+   milestone, that its milestone gate passed on that state; §6), push the branch, wait for the GitHub checks on
+   that commit, and integrate with `python tools/integrate_version.py --summary "<summary>" --push`
+   ([DEVELOPMENT §8](docs/DEVELOPMENT.md#8-versions-ci-and-releases)). The tool refuses unless the tree is clean,
+   `master` is contained in the branch and the GitHub checks passed on that commit; then it makes the one commit
+   `V0.<n>: <summary>` on `master` with exactly the files of the branch and merges `master` back into the branch.
+   Do not integrate by hand. Version 1.0 is reserved for when the owner declares the program complete.
 6. **Releases** (tags, GitHub Release, DOI) are decided only by the owner; see DEVELOPMENT §8.
 
 ## 6. Working on a task
@@ -180,7 +199,8 @@ Done when:    observable acceptance criteria.
   of the engine contract §7. A card states which gate it claims. Never report a release gate as met from
   development or milestone evidence.
 - **One editor at a time** on the shared checkout, even for different files. All assistants work in this same
-  local folder, so handoffs are local commits plus the roadmap status; nothing is pushed unless asked.
+  local folder, so handoffs are commits on the work branch (pushed, §5.1) plus the roadmap status; `master` is
+  not touched unless asked.
 
 ## 7. Handoff and reporting
 

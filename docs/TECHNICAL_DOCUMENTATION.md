@@ -3079,6 +3079,9 @@ entries that no longer occur. TypeScript is a pinned development dependency and 
   window title), stored in every project (`delivery`) and used for file names. `tools/sync_version.py` writes
   `0.<n>.0` to `pyproject.toml`, `src/sedcoretool/__init__.py` (`__version__`), `CITATION.cff` and
   `desktop/package.json`; `--check` runs in CI and the test `tests/app/version.test.mjs` checks the same thing.
+  A version reaches `master` through `tools/integrate_version.py`: one commit `V0.<n>: <summary>` with exactly the files of
+  the work branch, made only if `master` is contained in that branch and the GitHub workflows succeeded on the commit
+  (`tests/test_integrate_version.py`); it never creates a tag.
 - **Tests in CI** (`.github/workflows/tests.yml`): Python 3.10, 3.12 and 3.13 on Ubuntu and 3.12 on Windows and macOS,
   with coverage (`pytest-cov`); program tests on the three systems (coverage on Ubuntu); the browser end-to-end test;
   version check, `ruff`, ESLint (`eslint.config.js`, correctness rules only) and the build of the offline file.

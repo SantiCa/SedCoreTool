@@ -20,8 +20,15 @@ Updated 16 November 2026.
   visible-row Data table as the default (the release gate of every platform is still required before it is announced to users). V0.150 (14 November 2026) was integrated on the instruction "haz commit y push de todo a
   master con una nueva version 0.150". **No tag and no GitHub Release exist for V0.149, V0.150 or V0.151**: a tag publishes a Release and is the
   owner's decision. The *Desktop builds* workflow is started by hand for the macOS and Linux builds (see the release checklist).
-- **Active work branch:** `work/2026-11-13` (pushed), whose tree `master` now equals. **How the next version is integrated:** a squash merge now conflicts (the V0.150 squash and the branch commits changed the same lines), so `master` is moved to the tested tree with `git checkout master; git read-tree --reset -u work/2026-11-13`, one commit `V0.<n>: ...`, check that `git diff work/2026-11-13 master` is empty, then push `master`. **Before that, check that nothing was merged into `master` meanwhile** (for example a Dependabot pull request): `git fetch origin; git diff e59fff4 origin/master` must be empty (`e59fff4` is the last integration, V0.151); if it is not, bring those changes into the work branch first, because the `read-tree` step would erase them from `master`.
-- **Open pull requests on GitHub (16 November 2026), both from Dependabot against `master`, neither merged:** #25 Electron 45.2.2 -> 45.3.2 (`desktop/package.json` and lock file) and #24 `softprops/action-gh-release` 2 -> 3 (release workflow only). They are dependency upgrades, which are not done without the maintainer's request (AGENTS §3, items 8 and 9); Electron needs the runtime rebuilt, `tests/e2e/desktop.mjs` and the three-system milestone gate first. Decide them together with V0.152, or close them. Committing on the work branch does not affect them. Changes after V0.151 accumulate under `## Unreleased` (add the heading when the first change is made).
+- **Active work branch:** `work/2026-11-13` (pushed). `master` (V0.151, `e59fff4`) is contained in it since the merge of 16 November 2026 (commit `cdc401a`, no file changes),
+  so the two histories no longer diverge.
+- **Way of working (set on 16 November 2026 at the maintainer's request, rules in [AGENTS.md §5](../AGENTS.md#5-delivering-a-change)):** all work happens on the work branch, which is
+  pushed after every finished card (copy outside this computer, and the GitHub checks on three systems); `master` only receives versions, through
+  `python tools/integrate_version.py` ([DEVELOPMENT §8](DEVELOPMENT.md#8-versions-ci-and-releases)), which refuses to run if `master` holds anything that the work branch lacks;
+  every session starts by checking `git log HEAD..origin/master` and, if it lists something, merging `master` into the work branch.
+- **Open pull requests on GitHub (16 November 2026), both from Dependabot against `master`, neither merged:** #25 Electron 45.2.2 -> 45.3.2 (`desktop/package.json` and lock file) and
+  #24 `softprops/action-gh-release` 2 -> 3 (release workflow only). They wait for the maintainer (AGENTS §5.1); the natural moment is the preparation of V0.152. If one is merged on
+  GitHub by mistake nothing is lost: the next session merges `master` into the work branch.
 - **Checks:** see the last line of this block; it is rewritten at the end of every session.
 - **Full checks of 16 November 2026 on the V0.151 state (maintainer's Windows computer, run one after another):** `pytest -q` 724 passed / 9 skipped (Python 3.12); `npm test` 361 passed
   (its first run inside the check script returned exit 1 with no output that could be read; four reruns, 361 passed each, so it is recorded as an unexplained, not reproduced incident);
@@ -187,6 +194,9 @@ or a version with the engine is published. Tick an item only with recorded evide
       test from source and packaging on the Apple Silicon and Linux x64 runners; still needed for the release gate:
       launching the packaged program (not only building it) on each system, and an Intel Mac (GitHub's Intel macOS
       runners are being retired; check what is offered before relying on them).
+- [ ] `tools/release.sh` cannot run as it is: it looks for `const DELIVERY` at the start of a line and the code says `export const DELIVERY`, so it stops with
+      "DELIVERY not found" (found on 16 November 2026; it fails before doing anything). It also calls `python3`, which this Windows computer does not have. Fix and try it
+      when the owner decides the first tagged release; it was not changed now because it cannot be tried without pushing a tag.
 - [ ] Clean Windows machine (no Python, no Node) and at least one other antivirus configuration.
 - [ ] First launch with a cold disk cache (after a reboot) against the 5 s engine-ready gate. Measured so far:
       3.7–3.9 s right after extraction; 11–25 s before the runtime was pruned. Measure once after the next reboot
