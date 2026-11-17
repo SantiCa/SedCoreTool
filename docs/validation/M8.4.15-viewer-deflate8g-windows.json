@@ -1,0 +1,87 @@
+{
+  "file": "deflate8g.tif",
+  "date": "2026-11-17T19:59:18.067Z",
+  "computer": "Windows 11, AMD Ryzen 7 7700X, 31 GiB (maintainer's computer)",
+  "viewport": "1440 x 900",
+  "firstRunSeconds": 110.31,
+  "section": {
+    "tiled": true,
+    "ds": 32,
+    "level": 5,
+    "w": 256,
+    "h": 10923,
+    "full": {
+      "w": 8192,
+      "h": 349526
+    },
+    "bits": 8,
+    "channels": 3
+  },
+  "firstUsefulViewMs": 6503,
+  "cachedPanZoom": {
+    "frameCost": {
+      "n": 120,
+      "median": 7.1,
+      "p95": 10.8,
+      "max": 24.8
+    },
+    "frameInterval": {
+      "n": 119,
+      "median": 8.3,
+      "p95": 12.6,
+      "max": 25
+    }
+  },
+  "jumps": {
+    "firstFrameMs": {
+      "n": 20,
+      "median": 5.2,
+      "p95": 7.5,
+      "max": 8.5
+    },
+    "completeMs": {
+      "n": 20,
+      "median": 180.4,
+      "p95": 206.8,
+      "max": 387.3
+    },
+    "minImageShare": 1,
+    "incomplete": 0
+  },
+  "memory": {
+    "samples": 24,
+    "peakMiB": 1468
+  },
+  "targets": {
+    "firstUsefulViewMs": {
+      "target": 2000,
+      "value": 6503,
+      "ok": false
+    },
+    "cachedFrameMedianMs": {
+      "target": 17,
+      "value": 7.1,
+      "ok": true
+    },
+    "cachedFrameP95Ms": {
+      "target": 33,
+      "value": 10.8,
+      "ok": true
+    },
+    "jumpFirstFrameShowsImage": {
+      "target": 1,
+      "value": 1,
+      "ok": true
+    },
+    "jumpCompleteP95Ms": {
+      "target": 250,
+      "value": 206.8,
+      "ok": true
+    },
+    "processTreePeakMiB": {
+      "target": 2048,
+      "value": 1468,
+      "ok": true
+    }
+  }
+}

@@ -978,7 +978,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   memory and cancellation targets hold or are recorded as failed with numbers (then stop and ask); evidence committed.
 - **Result (17 November 2026):** [summary](validation/M8.4.14-summary.md). Contract §8 and technical manual §26.4 describe the format; libvips in the runtime (+19 MiB on Windows; CI green on Windows, macOS and Linux); all seven fixtures build and read back exactly (80 regions per TIFF at levels 0-3); about 100 MiB/s, 8 GiB in 81 s, memory below 320 MiB, disk 1.33 times the decoded image; **no compressor** by the rule (zlib: 39 % of the throughput). The cancellation target failed first (297-658 ms, the partial folder was deleted before answering) and was fixed in the card (7-15 ms). Two Windows faults found and fixed: libvips crashed while a thread read the worker's stdin pipe; replacing the progress file failed while the coordinator read it. Not measured: macOS/Linux timing, cold cache, a 16 GiB computer.
 
-##### M8.4.15 - Tiled sections in the viewer (behind a flag) — state: In progress (steps 1-6 done 17 Nov 2026: tiles through the engine; tiled sections added with a working image from the pyramid; tile cache and scheduler; tiles drawn; navigation strip, ruler and readouts; tool gating)
+##### M8.4.15 - Tiled sections in the viewer (behind a flag) — state: Blocked at step 7 for a decision (steps 1-7 done 17 Nov 2026; first useful view misses its target: tiles through the engine; tiled sections added with a working image from the pyramid; tile cache and scheduler; tiles drawn; navigation strip, ruler and readouts; tool gating; measurements)
 
 - **Goal:** with `SEDCORETOOL_TILED_SECTIONS=1` and the engine experiment on, importing an image above the threshold of decision 1 builds its pyramid
   (progress and cancel shown) and shows the section from tiles: pan, zoom, navigation strip, depth ruler and depth readout, with full-resolution
@@ -1030,6 +1030,13 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
      A blocked tool chosen on another section becomes Pan when a tiled section is shown. `tests/e2e/tiled-sections.mjs` clicks every tool and
      action and checks the state and the message (public example and `rgb2g`). Not covered: keyboard shortcuts of the tools (they go through the
      same `setTool` check), the U-Net loader and the batch actions of other tabs.
+  7. *Measured (17 November 2026, [summary](validation/M8.4.15-summary.md), `tools/measure_tiled_viewer.mjs`); one target missed, the card stops.* Cached pan and
+     zoom: frame median 6.7-7.1 ms, p95 8.8-11.0 ms (targets 17 and 33); uncached jump: the first frame always shows image, full resolution within 182-207 ms
+     p95 on three files and 78-89 ms on `gray16_2g` (one first run gave 336 ms with a cold disk cache); process-tree peak 1.3-1.5 GiB (target 2 GiB); a small
+     section costs the same tiled or not (6.2 against 6.1 ms median). **Missed: first useful view <= 2 s** - 2.16 s (`rgb2g`), 2.03-2.14 s (`gray16_2g`),
+     6.7 s (`rgb8g`), 6.5 s (`deflate8g`). The cause is `pyramid.build` hashing the whole source file on every import to find the cached pyramid (1.85 s for
+     2 GiB), not the viewer. Options and the recommendation (remember the hash of a file by path, size and modification time) are in the summary; they change
+     the store and contract §8.1, so they need the maintainer's decision. Blocked: the card is closed when this is decided and the first view re-measured.
   5. Navigation strip and ruler from the coarsest level that fits; depth readout and ruler identical to today's for the same full-resolution row.
   6. Tool gating: list every tool of the Section mode and its state on a tiled section; disabled ones show one message key.
   7. Measure against §7 on `rgb2g`, `rgb8g`, `deflate8g`, `gray16_2g` (pyramids already built): first useful view <= 2 s; cached pan/zoom frame
