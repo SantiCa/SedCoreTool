@@ -3070,7 +3070,8 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   the nearest coarser cached tile finer than the working image is drawn in its place, otherwise the working image stays visible (never blank).
   One cache serves the page (256 MiB of bitmaps, least recently used dropped first, never a tile on screen; dropped bitmaps are closed); keys
   carry the pyramid id. Tiles are drawn only while the working image under them shows source pixels too: no filter (or "show original"), no
-  objects and no exclusion in the working image (masks of tiled sections come with card M8.4.16).
+  objects and no exclusion in the working image (masks of tiled sections come with card M8.4.16). The status bar gives the source pixel of
+  the pointer (`floor(x · ds)`, `floor(y · ds)`); the depth readout, the ruler and the navigation strip use the working rows as for any section.
 - **The page's bridge** (`desktop/tile-ipc.js`, only with `SEDCORETOOL_TILED_SECTIONS=1` and the engine experiment): `window.corantoolDesktop.tiles`
   registers a file the user chose (the page gets an opaque token, never the path), builds its pyramid with progress events, cancels, and reads the
   verified tiles of pyramids the page built, through the engine. `desktop/tile-reader.js` reads the store in the main process; it serves only the

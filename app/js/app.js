@@ -1981,7 +1981,9 @@ view.addEventListener('wheel', (e) => {
 function updateStatus(s, p) {
   const inside = inImg(s, p);
   $('stDepth').textContent = inside ? t('status.depth', { d: fmt(depthAtRow(s, p.y), 3), u: s.units }) : '';
-  $('stPx').textContent = inside ? `x ${Math.floor(p.x)} · y ${Math.floor(p.y)}` : '';
+  // A tiled section reports the source's own pixel (full resolution); the depth is the same for the working row and the source row it covers.
+  const scale = s.tiled ? s.ds : 1;
+  $('stPx').textContent = inside ? `x ${Math.floor(p.x * scale)} · y ${Math.floor(p.y * scale)}` : '';
   const id = inside ? topLab(s, Math.floor(p.y) * s.w + Math.floor(p.x)) : 0, o = id && s.objects.get(id);
   $('stObj').textContent = o ? `#${o.id} ${clsById(o.cls || o.pred)?.name || t('obj.unassigned')} · ${t('obj.' + status(o))}` : '';
 }

@@ -138,6 +138,26 @@ try {
     return s.ds;
   });
   assert.equal(refused, section.ds, 'changing the resolution of a tiled section is refused');
+  // Navigation strip, ruler and readouts (step 5). The strip is drawn from the working image; the readout gives the source pixel and the depth of
+  // the source row. Tolerance of the depth: one working row, because the working image has ceil(full height / ds) rows and the depth is
+  // linear over them (3 decimals are shown).
+  const nav = await on.page.evaluate(async () => {
+    const { S } = window.ichantool, s = S.sections.at(-1), canvas = document.getElementById('view');
+    S.view = { x: 0, y: Math.floor(s.h / 3), zoom: 1 };
+    window.ichantool.requestRender(); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const box = canvas.getBoundingClientRect(), sx = 300, sy = 211;
+    canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: box.left + sx, clientY: box.top + sy, bubbles: true, pointerId: 1 }));
+    await new Promise((r) => setTimeout(r, 100));
+    const strip = canvas.getContext('2d').getImageData(6, 14, 8, canvas.height - 40).data, colours = new Set();
+    for (let i = 0; i < strip.length; i += 4 * 7) colours.add(strip[i] + ',' + strip[i + 1] + ',' + strip[i + 2]);
+    return { px: document.getElementById('stPx').textContent, depth: document.getElementById('stDepth').textContent, stripColours: colours.size,
+      row: (S.view.y + sy / S.view.zoom), ds: s.ds, h: s.h, full: s.full, top: s.top, bottom: s.bottom, y0: s.roi.y0, y1: s.roi.y1, x: S.view.x + sx / S.view.zoom };
+  });
+  const sourceRow = Math.floor(nav.row * nav.ds), sourceX = Math.floor(nav.x * nav.ds);
+  assert.equal(nav.px, `x ${sourceX} · y ${sourceRow}`, 'the readout gives the source pixel: ' + JSON.stringify(nav));
+  const readDepth = parseFloat(nav.depth.replace(/^[^0-9-]*/, '')), expected = nav.top + (sourceRow / nav.full.h) * (nav.bottom - nav.top);
+  assert.ok(Math.abs(readDepth - expected) <= (nav.bottom - nav.top) / nav.h + 0.0006, `depth of the source row ${sourceRow}: read ${readDepth}, expected ${expected}`);
+  assert.ok(nav.stripColours >= 2, 'the navigation strip shows the section image: ' + nav.stripColours + ' colours');
   assert.deepEqual(on.errors, []);
   console.log('Tiled sections: added through the interface, working image from the pyramid, not saved, reloaded, tools refused; full-resolution tiles drawn (' + drawn.probes.length + ' probes):', JSON.stringify(section));
 } finally { await on.close(); }
