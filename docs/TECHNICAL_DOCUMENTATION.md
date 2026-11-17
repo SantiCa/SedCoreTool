@@ -213,7 +213,7 @@ colour palette or a U-Net), `kernels/` (pure array primitives: intervals, counti
 `depth.py` (depth and age), `export.py` (CSV and Excel), `plotting.py` (matplotlib figure), `cli.py` (command line),
 `unet/` (U-Net dataset, training, evaluation, prediction, tiling and metrics), `engine/` (experimental desktop
 engine process: framing, staged buffers, coordinator and isolated worker; §26.2), `store/` (the tile store's pixel pyramids:
-`format.py`, `tiles.py`, `source.py`, `pyramid.py`; §26.4).
+`format.py`, `tiles.py`, `source.py`, `pyramid.py`, `identity.py`; §26.4).
 
 Desktop program (`desktop/`): `main.js` (window, `app://` protocol and IPC), `preload.js` (narrow
 `window.corantoolDesktop` bridge), `tile-ipc.js` and `tile-reader.js` (tiled sections, §26.4), `engine.js`, `engine-ipc.js`, `engine-protocol.js` and `engine-runtime.js` (engine process
@@ -3047,6 +3047,11 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
 - **Reading sources** (`store/source.py`): the format is recognised by the file's first bytes and opened only with libvips' TIFF, JPEG or PNG
   loader; limits are checked on the header (width ≤ 262,144, height ≤ 16,777,216, one 512-row band ≤ 256 MiB, JPEG or PNG ≤ 1 GiB decoded).
   Samples are copied as stored (8 or 16 bits; 1, 3 or 4 channels).
+- **Identity of a source** (`store/identity.py`): a pyramid is named by the SHA-256 of the whole source file. After hashing a file whole the
+  engine records its absolute path, size, modification time (ns), the SHA-256 of its first, middle and last MiB and the full SHA-256 in
+  `<root>/identities.json` (at most 1,024 entries, 1 MiB); when the same file is added again in the same state its pyramid is found from the
+  record without reading the file whole (contract §8.2). Measured on Windows (card M8.4.15): the first view of a file whose pyramid exists went
+  from 2.0-6.7 s (2-8 GiB) to 0.8-0.9 s.
 - **Building** (`store/pyramid.py`, in the method worker): the source is hashed, then read once in 512-row bands; each band is cut into tiles
   and halved into the next level, whose rows wait until they fill a band. A level-`k+1` pixel is, per channel, `(sum + n // 2) // n` of the
   `n` covered level-`k` pixels. Everything goes into `.partial-<uuid>/` and is renamed when `pyramid.json` has been written; a failure, a

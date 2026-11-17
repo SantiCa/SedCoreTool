@@ -3,6 +3,7 @@
 The source is read once, in bands of 512 rows. Each band of level ``k`` is cut into tiles and also halved into the next level, whose rows
 accumulate until they fill a band of their own, so memory stays near one band per level whatever the image size. Everything is written
 into ``<root>/.partial-<uuid>/`` and renamed to ``<root>/<sha256>/`` only after ``pyramid.json``; a failure removes the partial folder.
+A source whose whole-file hash was recorded in the same state (``identity.py``) finds its existing pyramid without being hashed again.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import numpy as np
 from sedcoretool.methods.errors import Cancelled, MethodError
 
 from . import format as fmt
+from . import identity
 from .source import Source
 
 HASH_CHUNK = 4 * 2**20
@@ -135,7 +137,20 @@ def build(path: Path, root: Path, *, name: str, budget: int, compressor=None, ke
         raise ValueError('unknown compressor')
     root.mkdir(parents=True, exist_ok=True)
     fmt.remove_partials(root)
+    # A file hashed before in the same state is found through the identity record, without reading it whole (card M8.4.15).
+    key = identity.file_key(path)
+    sample = identity.sample_digest(path, key['size'])
+    known = identity.lookup(root, key, sample)
+    if known is not None and (root / known).is_dir():
+        try:
+            existing = fmt.read_description(root / known)
+            if existing['source']['size'] == key['size']:
+                os.utime(root / known / 'pyramid.json')
+                return result(existing, reused=True, disk_bytes=folder_bytes(root / known))
+        except fmt.InvalidPyramid:
+            pass
     sha256, size = source_digest(path, cancelled, progress)
+    identity.remember(root, key, sample, sha256)
     final = root / sha256
     if final.is_dir():
         try:

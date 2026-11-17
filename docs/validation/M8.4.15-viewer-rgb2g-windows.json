@@ -1,9 +1,9 @@
 {
   "file": "rgb2g.tif",
-  "date": "2026-11-17T19:54:43.720Z",
+  "date": "2026-11-17T20:32:07.042Z",
   "computer": "Windows 11, AMD Ryzen 7 7700X, 31 GiB (maintainer's computer)",
   "viewport": "1440 x 900",
-  "firstRunSeconds": 21.67,
+  "firstRunSeconds": 4.58,
   "section": {
     "tiled": true,
     "ds": 16,
@@ -17,55 +17,55 @@
     "bits": 8,
     "channels": 3
   },
-  "firstUsefulViewMs": 2156,
+  "firstUsefulViewMs": 809,
   "cachedPanZoom": {
     "frameCost": {
       "n": 120,
-      "median": 6.8,
-      "p95": 8.8,
-      "max": 12
+      "median": 6.3,
+      "p95": 8.4,
+      "max": 10.1
     },
     "frameInterval": {
       "n": 119,
       "median": 8.3,
       "p95": 8.4,
-      "max": 12.4
+      "max": 12.6
     }
   },
   "jumps": {
     "firstFrameMs": {
       "n": 20,
-      "median": 6.6,
-      "p95": 8.5,
-      "max": 9
+      "median": 6.5,
+      "p95": 8.4,
+      "max": 8.6
     },
     "completeMs": {
       "n": 20,
-      "median": 164.4,
-      "p95": 182.1,
-      "max": 184.6
+      "median": 169.8,
+      "p95": 185.8,
+      "max": 186.5
     },
     "minImageShare": 1,
     "incomplete": 0
   },
   "memory": {
-    "samples": 14,
-    "peakMiB": 1292
+    "samples": 10,
+    "peakMiB": 1297
   },
   "targets": {
     "firstUsefulViewMs": {
       "target": 2000,
-      "value": 2156,
-      "ok": false
+      "value": 809,
+      "ok": true
     },
     "cachedFrameMedianMs": {
       "target": 17,
-      "value": 6.8,
+      "value": 6.3,
       "ok": true
     },
     "cachedFrameP95Ms": {
       "target": 33,
-      "value": 8.8,
+      "value": 8.4,
       "ok": true
     },
     "jumpFirstFrameShowsImage": {
@@ -75,12 +75,12 @@
     },
     "jumpCompleteP95Ms": {
       "target": 250,
-      "value": 182.1,
+      "value": 185.8,
       "ok": true
     },
     "processTreePeakMiB": {
       "target": 2048,
-      "value": 1292,
+      "value": 1297,
       "ok": true
     }
   }

@@ -148,12 +148,17 @@ def test_an_existing_pyramid_is_reused_and_a_changed_source_gets_a_new_one(tmp_p
     assert (tmp_path / "root" / first["pyramid"]).is_dir()                      # the old one stays, as a cache entry
 
 
+def pyramid_folders(folder):
+    """What a build leaves in the root besides the identity record of card M8.4.15 (written once the source is hashed)."""
+    return [item for item in folder.iterdir() if item.name != "identities.json"]
+
+
 def empty_soon(folder, seconds=10):
     import time
     until = time.monotonic() + seconds
-    while any(folder.iterdir()) and time.monotonic() < until:
+    while pyramid_folders(folder) and time.monotonic() < until:
         time.sleep(0.02)
-    return not any(folder.iterdir())
+    return not pyramid_folders(folder)
 
 
 def test_cancellation_leaves_no_partial_folder(tmp_path):
@@ -177,7 +182,7 @@ def test_a_full_disk_is_reported_and_the_partial_folder_removed(tmp_path, monkey
     with pytest.raises(MethodError) as failure:
         pyr.build(source, tmp_path / "root", name="x", budget=50 * GiB)
     assert (failure.value.code, failure.value.field) == ("LIMIT_EXCEEDED", "disk")
-    assert list((tmp_path / "root").iterdir()) == []
+    assert pyramid_folders(tmp_path / "root") == []
 
 
 def test_the_budget_deletes_least_recently_used_pyramids_but_never_kept_ones(tmp_path):
@@ -204,7 +209,7 @@ def test_leftovers_of_interrupted_builds_and_invalid_folders_are_cleaned(tmp_pat
     (root / sha / "pyramid.json").write_text('{"complete": false}')           # an incomplete or foreign folder under the right name
     result = pyr.build(source, root, name="image.png", budget=50 * GiB)
     assert not result["reused"] and fmt.read_description(root / sha)["complete"] is True
-    assert sorted(p.name for p in root.iterdir()) == [sha]
+    assert sorted(p.name for p in pyramid_folders(root)) == [sha]
 
 
 def test_read_description_refuses_what_readers_cannot_trust(tmp_path):

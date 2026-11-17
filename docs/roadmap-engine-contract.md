@@ -358,6 +358,14 @@ the build starts. Its folder is `<root>/<sha256>/`. All integers are little-endi
 | `<k>/<i>.<j>.0` | The tile in tile row `i`, tile column `j` of level `k`: exactly `512 x 512 x channels` samples in C order (y, x, channel), compressed by `compressor` or raw. Tiles on the right and bottom edges are padded with zeros to the full size, as Zarr requires. |
 | `<k>/.tiles.sha256` | `rows_k x cols_k` records of 32 bytes, row-major: the SHA-256 of each tile's **uncompressed** bytes (padding included). Zarr readers ignore this file. |
 
+**Identity record** (card M8.4.15, decided by the maintainer on 17 November 2026): `<root>/identities.json`, written by the engine after it has hashed a
+source whole, so that adding the same file again does not read it whole (8 GiB took about 7 s). Content: `{format: "sedcoretool.identities", version: 1,
+entries: [{path, size, mtime_ns, sample, sha256}]}`, newest last, at most 1,024 entries and 1 MiB; `path` is the absolute, case-normalised path,
+`mtime_ns` the modification time in nanoseconds, `sample` the SHA-256 of the size (8 bytes, little-endian) followed by the first, middle and last MiB of
+the file (the whole file when it is at most 3 MiB), `sha256` the SHA-256 of the whole file. It is written atomically; a record that is missing, larger
+than 1 MiB or not exactly of this form is ignored and replaced. Readers other than the engine ignore it. **Known limit:** a file rewritten in place with
+the same size, the same modification time to the nanosecond and the same sampled MiB, but other bytes elsewhere, is taken for its old state.
+
 Levels: level 0 is the source at full resolution. Level `k + 1` has `ceil(width_k / 2) x ceil(height_k / 2)` pixels; the last level is the
 first one whose width and height are both at most 512. A pixel of level `k + 1` is, for each channel, the integer mean of the `n` pixels
 (1, 2 or 4) of level `k` that it covers, rounded half up: `(sum + n // 2) // n`, so `(a + b + c + d + 2) // 4` inside the image. Grey stays grey,
@@ -375,7 +383,9 @@ or 4 bands (a grey image with alpha, 2 bands, is refused as today). Limits check
 
 ### 8.4 Building
 
-`pyramid.build` runs in the method worker as a job, so the coordinator stays responsive. Order: (1) compute the source SHA-256 (stage `hash`);
+`pyramid.build` runs in the method worker as a job, so the coordinator stays responsive. Order: (0) if the identity record (§8.2) has an entry with
+the source's path, size, modification time and sampled hash, and the pyramid it names is complete with that `source.size`, the job ends at once with
+`reused: true` without reading the source whole; the record is never used to build; (1) otherwise compute the source SHA-256 (stage `hash`) and record it;
 if `<root>/<sha256>/pyramid.json` is complete and its `source.size` matches, the job ends at once with `reused: true`; (2) estimate the disk need
 (all levels, uncompressed, plus 1 %); (3) free space: delete complete pyramids that no session of this coordinator has opened, least recently used
 first (the modification time of `pyramid.json`, touched whenever a pyramid is opened), until the root's total plus the need is at most the budget
