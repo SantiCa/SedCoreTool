@@ -978,7 +978,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   memory and cancellation targets hold or are recorded as failed with numbers (then stop and ask); evidence committed.
 - **Result (17 November 2026):** [summary](validation/M8.4.14-summary.md). Contract §8 and technical manual §26.4 describe the format; libvips in the runtime (+19 MiB on Windows; CI green on Windows, macOS and Linux); all seven fixtures build and read back exactly (80 regions per TIFF at levels 0-3); about 100 MiB/s, 8 GiB in 81 s, memory below 320 MiB, disk 1.33 times the decoded image; **no compressor** by the rule (zlib: 39 % of the throughput). The cancellation target failed first (297-658 ms, the partial folder was deleted before answering) and was fixed in the card (7-15 ms). Two Windows faults found and fixed: libvips crashed while a thread read the worker's stdin pipe; replacing the progress file failed while the coordinator read it. Not measured: macOS/Linux timing, cold cache, a 16 GiB computer.
 
-##### M8.4.15 - Tiled sections in the viewer (behind a flag) — state: In progress (steps 1-2 done 17 Nov 2026: tiles through the engine; tiled sections added with a working image from the pyramid)
+##### M8.4.15 - Tiled sections in the viewer (behind a flag) — state: In progress (steps 1-3 done 17 Nov 2026: tiles through the engine; tiled sections added with a working image from the pyramid; tile cache and scheduler)
 
 - **Goal:** with `SEDCORETOOL_TILED_SECTIONS=1` and the engine experiment on, importing an image above the threshold of decision 1 builds its pyramid
   (progress and cancel shown) and shows the section from tiles: pan, zoom, navigation strip, depth ruler and depth readout, with full-resolution
@@ -1007,6 +1007,9 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
      source refuse with a message. Checked with `tests/e2e/tiled-sections.mjs` on the public example (10.4 MP) and on `rgb2g` (level 4, 512 x 5,462).
   3. `tilecache.js`: level = the finest level with at most 1 source pixel per screen pixel at the current zoom; visible tiles plus one ring;
      a request for tiles no longer visible is cancelled; a missing tile is drawn from the nearest cached coarser level, never left blank.
+     *Done (17 November 2026):* `app/js/tilecache.js` (pure, `tests/app/tilecache.test.mjs`, 7 tests). The level rule is read as "the coarsest level that
+     still has at least one level pixel per screen pixel" (2^k <= 1/zoom), so nothing is magnified beyond the source; requests already sent finish and
+     their tiles are cached; evicted tiles are closed (bitmap memory released).
   4. Drawing with `drawImage` of `ImageBitmap`s created from tile bytes; 16-bit tiles mapped to 8 bits for display with the rule of today's 16-bit path.
   5. Navigation strip and ruler from the coarsest level that fits; depth readout and ruler identical to today's for the same full-resolution row.
   6. Tool gating: list every tool of the Section mode and its state on a tiled section; disabled ones show one message key.
