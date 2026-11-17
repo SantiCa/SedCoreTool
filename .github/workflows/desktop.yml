@@ -82,6 +82,14 @@ jobs:
         working-directory: .
         if: ${{ !cancelled() && runner.os != 'Linux' }}
         env: { SEDCORETOOL_ENGINE_EXPERIMENT: '1' }
+      - name: Desktop large 16-bit image (card H7)
+        run: xvfb-run -a node tests/e2e/large-16bit-desktop.mjs
+        working-directory: .
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+      - name: Desktop large 16-bit image (card H7)
+        run: node tests/e2e/large-16bit-desktop.mjs
+        working-directory: .
+        if: ${{ !cancelled() && runner.os != 'Linux' }}
       - run: npm run dist
         if: ${{ !cancelled() }}
         env:

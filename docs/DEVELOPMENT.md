@@ -54,6 +54,7 @@ npm run typecheck
 <ruff> check src tests tools
 node tests/e2e/desktop.mjs                          # when desktop/, saving or the interface changed (see §6)
 node tests/e2e/smoke.mjs                            # when the interface changed; needs the server of §2 and Chrome
+node tests/e2e/large-16bit-desktop.mjs              # when image decoding or the memory of sections changed (card H7)
 ```
 
 The end-to-end tests need `npm i --no-save puppeteer-core@23` at the repository root. Record the result and the
@@ -166,7 +167,7 @@ the roadmap. State in the report what was **not** measured.
 - **Milestone gate** ([AGENTS.md §6](../AGENTS.md#6-working-on-a-task)): push the work branch; *Desktop builds* starts
   by itself (a newer push cancels the older run of the same branch; it can also be started by hand from Actions →
   Desktop builds → Run workflow, `draft_release` off). It prepares the bundled runtime, runs `tests/e2e/desktop.mjs`
-  with the engine experiment off and on, packages and checks the package on Windows, macOS (Apple Silicon runner)
+  with the engine experiment off and on and `tests/e2e/large-16bit-desktop.mjs`, packages and checks the package on Windows, macOS (Apple Silicon runner)
   and Linux; the later steps run even when an earlier one failed, so one run reports every failure. The `tests`
   workflow must pass on the same commit. Results can be read without
   logging in: `GET https://api.github.com/repos/SantiCa/SedCoreTool/actions/runs/<run id>/jobs` and, for a failed

@@ -4,7 +4,7 @@
 // A tiled section keeps a small working image taken from one level of its pixel pyramid (at most the "maximum size when adding images"),
 // so the rest of the program works on it as on a reduced section of today's path; the viewer draws full-resolution tiles over it when the
 // zoom needs them. These helpers decide when an image goes to the tile store, which level is the working image, and assemble a level's tiles.
-import { decodeTiffBlocks } from './tiff.js';
+import { decodeTiffBlocks, highBytes } from './tiff.js';
 
 export const TILE = 512;
 const HEAD_BYTES = 256 * 1024, MAX_HEAD_BYTES = 4 * 1024 * 1024;
@@ -120,6 +120,6 @@ export function assembleLevel(tiles, level, channels, bits) {
     }
   }
   if (seen.size !== level.rows * level.cols) throw new Error('missing tiles');
-  const rgba = wide ? Uint8ClampedArray.from(output, (sample) => sample >>> 8) : /** @type {Uint8ClampedArray} */ (output);
+  const rgba = wide ? highBytes(/** @type {Uint16Array} */ (output)) : /** @type {Uint8ClampedArray} */ (output);
   return { w, h, rgba, rgba16: wide ? /** @type {Uint16Array} */ (output) : null };
 }

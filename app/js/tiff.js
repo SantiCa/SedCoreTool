@@ -252,6 +252,18 @@ export async function decodeTiffBlocks(source, chooseArea, chooseFactor) {
     output[o + 2] = wide ? Math.round(b) : b;
     output[o + 3] = max;
   }
-  const rgba = wide ? Uint8ClampedArray.from(output, (sample) => sample >>> 8) : output;
+  const rgba = wide ? highBytes(/** @type {Uint16Array} */ (output)) : output;
   return { w, h, rgba, rgba16: wide ? output : null, k, fw, fh };
+}
+
+/**
+ * The 8-bit display copy of 16-bit samples: each sample's high byte. A plain loop on purpose (card H7): `Uint8ClampedArray.from(samples,
+ * mapFn)` builds a temporary array on the JavaScript heap, takes seconds and kills the page with a fatal out-of-memory error from about
+ * 112 million samples (a 28-megapixel 16-bit image), which no try/catch can stop.
+ * @param {Uint16Array} samples
+ */
+export function highBytes(samples) {
+  const out = new Uint8ClampedArray(samples.length);
+  for (let i = 0; i < samples.length; i++) out[i] = samples[i] >>> 8;
+  return out;
 }

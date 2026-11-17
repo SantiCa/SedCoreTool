@@ -115,3 +115,14 @@ test('a crop only reads intersecting strips and rejects truncated ranges', async
   assert.ok(reads.every(([offset]) => offset !== 2048));
   await assert.rejects(decodeTiffBlocks({ ...source, size: source.size - 1 }, wholeTiff, () => 1), /TIFF block range/);
 });
+
+test('the 8-bit copy of 16-bit samples is their high byte, also above 112 million samples (card H7)', async () => {
+  const { highBytes } = await import('../../app/js/tiff.js');
+  assert.deepEqual([...highBytes(new Uint16Array([0, 0x00ff, 0x0100, 0xabcd, 0xffff]))], [0, 0, 1, 0xab, 0xff]);
+  // Uint8ClampedArray.from(samples, mapFn) died here with a fatal out-of-memory error (a 30-megapixel 16-bit image as RGBA).
+  const samples = new Uint16Array(6000 * 5000 * 4).fill(0x1234);
+  samples[samples.length - 1] = 0xfe01;
+  const out = highBytes(samples);
+  assert.equal(out.length, samples.length);
+  assert.deepEqual([out[0], out.at(-1)], [0x12, 0xfe]);
+});

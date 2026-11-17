@@ -552,7 +552,8 @@ application keeps those samples through working-resolution reduction, crop, rota
 pointwise colour operations. The automatic-levels histogram has 65,536 bins. The colour lookup uses all 16 bits,
 with levels expressed on a 0–255 scale after division by 257. The enhanced image is quantized to 8 bits for the
 histogram equalisation, local contrast and display stages. Existing tools that consume the unenhanced image use
-an 8-bit proxy derived from the high byte of each working sample.
+an 8-bit proxy derived from the high byte of each working sample (`tiff.js::highBytes`, `v >>> 8`, a plain loop: the
+mapped `Uint8ClampedArray.from` it replaced died with a fatal out-of-memory error from about 112 million samples).
 
 ### 7.1 Operations
 Order of the operations on each pixel `(R, G, B)`, with values from 0 to 255:

@@ -1251,18 +1251,18 @@ Independent of M8; each can be done in under an hour when the maintainer asks.
       that point to each other. Checked: `tests/app/working-memory.test.mjs`, a TIFF reader test, and on Windows
       `tests/e2e/working-memory-desktop.mjs` with `rgb2g.tif` (added at 1/3 with the message, full resolution disabled and refused, the window
       alive). Not measured: the exact memory at which the renderer dies (the limit is a conservative estimate), macOS and Linux.
-- [ ] **H7 - Opening the Core log of a maintainer's project makes the page run out of memory** (found 17 November 2026 while measuring a delay
-      the maintainer reported when switching between Bioturbation and Multiproxy; not started, needs the maintainer's authorisation).
-      Measured on Windows with a copy of the maintainer's project "EasterMediterranean" (two sections: 749 x 5,986 at factor 3 with 112 objects,
-      and 2,249 x 14,020 at full resolution; the project is private and stays out of the repository), in the desktop program with hidden windows:
-      the switches themselves take 35-116 ms (the first entry into Multiproxy 1.1 s, which loads the world map), the same in V0.140, V0.151 and
-      the work branch. But the renderer held about 1.4 GB before the Core log opened, rose to about 1.55 GB while it was drawn and then
-      disappeared (no error message; the page stopped answering). V0.140 does the same, so it is older than the engine work. The working images
-      of the two sections are about 0.47 GB by the H6 estimate, so most of that memory is something else.
-  - Read first: `app/js/columns.js` (`renderLog`, `reduceRGBA`), the image track of the Core log, H6 above.
-  - Steps: reproduce with a generated project of the same sizes (public data only); find what holds the memory (heap snapshot) and why the
-    renderer dies at about 1.5 GB although `--max-old-space-size` is higher; fix; check in a visible window.
-  - Done when: the Core log of a project with those sizes opens repeatedly with the window alive, checked by a test with generated data.
+- [x] **H7 - A 16-bit image above about 28 megapixels made the page die while it was decoded** (found 17 November 2026 while measuring a delay
+      the maintainer reported between Bioturbation and Multiproxy; authorised and done the same day). The switches themselves were not slower
+      than in V0.140 (35-116 ms; the first entry into Multiproxy about 1 s). But in the maintainer's project "EasterMediterranean" (private, kept
+      out of the repository; a 2,249 x 14,020 16-bit section at full resolution) opening the Core log decoded that section again and the renderer
+      ended with reason `oom` (code 0xE0000008) at about 1.5 GB, also in V0.140. Cause: `tiff.js` made the 8-bit display copy with
+      `Uint8ClampedArray.from(output, mapFn)`, which builds a temporary array on the JavaScript heap: 5.2 s for 100 million samples and a fatal,
+      uncatchable out-of-memory error from 112 million (Node 22; a 28-megapixel image as RGBA). The H6 limit (1.5 GiB) allows 16-bit sections up
+      to about 76 megapixels, so it did not protect against this. Fix: `tiff.js::highBytes`, a plain loop (0.09 s for 126 million samples), also
+      used by `tiledsection.js`. Checked: `tests/e2e/large-16bit-desktop.mjs` died without the fix (while adding the image) and passes with it
+      (three Core log openings, each decoding again in 1.2-1.5 s), a Node test at 120 million samples, and on a copy of the maintainer's project
+      four rounds of six mode switches without a failure (Windows). Not changed: `Array.from(lab)` in the save path of sections with overlapping
+      traces is slow at the largest sizes (2.1 s and about 1 GB for 123 million pixels in Node) but does not fail.
 - [ ] **H3 - Move raw benchmark reports out of the repository.** `docs/benchmarks/*.json` weighs about 10 MB.
       Needs the maintainer's decision on where the raw files go; the `.md` summaries stay.
 
