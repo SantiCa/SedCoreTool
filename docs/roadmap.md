@@ -1055,7 +1055,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
 - **Done when:** the targets of step 7 are measured (a failure is recorded with numbers and the card stops for a decision); the flag is off by
   default and in the flag table.
 
-##### M8.4.16 - Masks of tiled sections: storage, editing and undo — state: after M8.4.15 and Q1
+##### M8.4.16 - Masks of tiled sections: storage, editing and undo — state: Steps written 17 Nov 2026; waiting for the maintainer's approval of decisions A-E
 
 - **Goal:** labels and exclusion of a tiled section live as mask tiles in the store (decision 6); every editing tool works on loaded tiles; undo and
   redo are per tile and bounded; changed tiles are sent in the background and sent again after an engine failure.
@@ -1064,13 +1064,55 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
 - **Change:** `src/sedcoretool/store/masks.py` (content-addressed tiles, manifests, tables); engine operations `mask.put` (tiles and tables of one
   edit, against a base manifest) and `mask.commit` (returns the new manifest hash); the page's tile-level mask cache, dirty tracking, undo stack
   with its own budget (64 MiB by default) and resend queue; contract §8 extended.
-- **Model:** most capable, effort high (editing that could lose user work; the detailed steps are still to be written).
-- **Steps (outline; the implementing session writes the detailed steps after reading M8.4.15's numbers):** (1) the object table keeps each
-  object's bounding box (it does today, `o.bbox`), so an object operation (split, merge, delete, reclassify) loads exactly the tiles it touches,
-  and refuses visibly an object whose box needs more tiles than the page budget allows; (2) brushes and fills that cross a tile seam write each
-  tile; (3) the overlap-stack table stays one table per section; (4) **measure the metadata limits** (65,536 records and 4 MiB per table, contract
-  §3) against a dense synthetic `rgb8g` annotation and change them in the contract only with that number; (5) a mask tile is acknowledged only
-  after `mask.commit`, and an engine failure leaves the unacknowledged tiles in the page, sent again after the restart of M8.4.7.
+- **Model:** most capable, effort high (editing that could lose user work).
+- **What the steps had to solve (found while writing them, 17 November 2026).** Every editing path of today works on one flat array per section
+  (`s.labels[y * w + x]`, `s.exclude`, `s.orig`): painting (`setLabel`, `addPx`, `dropIds`), object statistics (`objectStats`), overlap stacks
+  (`compactStacks` scans the whole mask), wand (`regionGrow`), lasso, scissors (`splitPieces`) and the pixel logs of undo. At full resolution such an
+  array does not fit (`rgb8g`: 8,192 x 349,526 x 4 bytes = 11 GiB). The pure functions already take a width, a height and a region, so they can run
+  on a smaller array.
+- **Decisions proposed (the maintainer approves or changes them before step 1):**
+  - **A. Edit window.** An edit runs on a rectangle of whole level-0 tiles copied into flat arrays (labels `i32`, exclusion `u8`, pixels RGBA): the
+    visible tiles for strokes, the tiles of the object boxes for object operations. Today's editing code runs on that window unchanged (a window
+    has its own width, height and origin; coordinates are translated at its edges in one new module), and the changed tiles are cut out again.
+  - **B. Editing needs enough zoom.** On a tiled section the editing tools work only when the visible tiles fit the window budget (default
+    96 level-0 tiles, about 120 MiB with pixels; at 1,440 x 900 that is any zoom of at least one screen pixel per 3 source pixels); further out
+    they refuse with one message ("zoom in to edit"). An object operation whose box needs more tiles than the budget refuses visibly (outline step 1).
+  - **C. Undo by tile copies.** Undo keeps, for each step, a copy of the tiles it changed as they were before (copy on first write), within its own
+    budget of 64 MiB; beyond it the oldest steps are dropped with a message. Pixel logs of today's path are not used for tiled sections (a large
+    brush at full resolution writes millions of pixels).
+  - **D. The overview keeps a reduced mask.** The section's working image keeps a reduced copy of the masks (the label of the source pixel at
+    the top-left of each working pixel), updated for the tiles of every edit, so the coarse view, the navigation strip, the Core log and the
+    figures keep working; nothing counts from it (counting is M8.4.17, at full resolution). At fine zoom the viewer draws each tile's mask over its
+    pixel tile.
+  - **E. Where the masks live.** In the project's folder of the store (ARCHITECTURE §3.4 item 3, `<user data>/projects/<project id>/tiles/`), written
+    only by the engine. Until M8.4.18 the project record does not name them, so closing the program still loses a tiled section (as today); the
+    store keeps the last acknowledged manifest, which M8.4.18 will name.
+- **Steps (each one a checkpoint with its own tests; the model of each step is in brackets):**
+  1. **Store format and engine operations** [most capable, high]: `store/masks.py` (a mask tile is `512 x 512` labels `i32` or exclusion `u8`, stored as
+     `<root>/tiles/<sha256>` of its raw little-endian bytes, all-zero tiles not stored; a manifest `{format: "sedcoretool.masks", version: 1, section,
+     width, height, tiles: {"<row>.<col>": {labels, exclude}}, tables: {objects, classes, stacks}}`, canonical JSON, named by its SHA-256);
+     operations `mask.put {base, tiles, tables}` (tiles as verified binary frames), `mask.commit {staged}` -> `{manifest}`, `mask.read {manifest,
+     positions}`; contract §8.7 written before the first file. Python tests: exactness, verification, a killed engine between put and commit leaves
+     the last manifest readable, hostile manifests and tiles refused.
+  2. **Page mask cache and display** [most capable, medium]: pure module `app/js/tiledmasks.js` (tile cache with dirty, pinned and acknowledged states;
+     dirty tiles are never evicted), the reduced mask of decision D, and the overlay drawn per tile at fine zoom; read-only (masks start empty).
+     Node tests; desktop test: an injected mask appears at known positions at every level.
+  3. **Strokes in the edit window** [most capable, high]: brush, erase, exclude, include on the window of decision A, with the zoom rule of B;
+     writes cut back into tiles; objects' statistics from the window (pixels of level 0). Input-to-next-frame p95 <= 33 ms during strokes, measured on
+     `rgb8g`.
+  4. **Background send and recovery** [most capable, high]: dirty tiles go out with `mask.put` after the stroke (never blocking it; a newer edit of a
+     tile replaces a pending send); a tile is acknowledged only after `mask.commit` (outline step 5); after an engine failure the unacknowledged tiles
+     are sent again once M8.4.7 has restarted it. Test: the engine killed during a send; the masks in the page and, after the resend, in the store
+     are unchanged and complete.
+  5. **Undo and redo** [most capable, high]: decision C, swapping tile copies; history per section; the budget and its message. Node tests and the
+     desktop test of step 4 with undo across the failure.
+  6. **Wand, lasso, scissors and object operations** [most capable, medium]: on the window of the object boxes (outline step 1); stacks stay one
+     table per section (outline step 3); refusal when a box exceeds the budget.
+  7. **Metadata limits** [fast, medium]: measure the objects and stacks tables of a dense synthetic `rgb8g` annotation against 65,536 records and
+     4 MiB (outline step 4); change the contract only with that number.
+  8. **Exact equality and closing** [fast, medium]: a small image opened both ways (whole, and forced tiled with a section factor of 1) with the same
+     scripted edit sequence gives identical labels, exclusion, objects and stacks; tool gating of M8.4.15 updated (the editing tools leave the refused
+     list); documents.
 - **Tests and acceptance:** input-to-next-frame p95 <= 33 ms during strokes; the M8.4.4 guarantees at tile granularity (an edit is never lost or
   applied twice across an engine failure); **exact equality**: a small image opened both ways (whole and forced tiled) with the same scripted edit
   sequence gives identical labels, exclusion, objects and stacks.
