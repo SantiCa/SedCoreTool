@@ -214,7 +214,7 @@ engine process: framing, staged buffers, coordinator and isolated worker; §26.2
 `format.py`, `tiles.py`, `source.py`, `pyramid.py`; §26.4).
 
 Desktop program (`desktop/`): `main.js` (window, `app://` protocol and IPC), `preload.js` (narrow
-`window.corantoolDesktop` bridge), `engine.js`, `engine-ipc.js`, `engine-protocol.js` and `engine-runtime.js` (engine process
+`window.corantoolDesktop` bridge), `tile-ipc.js` and `tile-reader.js` (tiled sections, §26.4), `engine.js`, `engine-ipc.js`, `engine-protocol.js` and `engine-runtime.js` (engine process
 client, page bridge, framing and bundled-runtime verification; §26.2–§26.3), `runtime-lock.json` (pinned runtime artifacts;
 §26.3), `trainer.js` and `model-store.js` (U-Net training and model generations; §9.3), `diagnostics.js` (§26.1)
 and `scripts/` (preparation, build and package checks).
@@ -3054,8 +3054,12 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   ([summary](validation/M8.4.14-summary.md)).
 - **Serving tiles** (`store/tiles.py`, in the coordinator): every tile is checked against the SHA-256 listed in `<level>/.tiles.sha256` before
   it is sent; verified tiles are kept in a 256 MiB least-recently-used cache. Up to 16 tiles per request, sent in binary frames of at most 1 MiB.
-- **Tests:** `tests/test_store_source.py`, `tests/test_store_pyramid.py`, `tests/test_engine_store.py` (Python) and the tile-store tests of
-  `tests/app/engine.test.mjs` (the desktop client and the real engine).
+- **The page's bridge** (`desktop/tile-ipc.js`, only with `SEDCORETOOL_TILED_SECTIONS=1` and the engine experiment): `window.corantoolDesktop.tiles`
+  registers a file the user chose (the page gets an opaque token, never the path), builds its pyramid with progress events, cancels, and reads the
+  verified tiles of pyramids the page built, through the engine. `desktop/tile-reader.js` reads the store in the main process; it serves only the
+  measurement option `SEDCORETOOL_TILE_DELIVERY=direct`.
+- **Tests:** `tests/test_store_source.py`, `tests/test_store_pyramid.py`, `tests/test_engine_store.py` (Python), the tile-store tests of
+  `tests/app/engine.test.mjs` (the desktop client and the real engine) and `tests/app/tile-ipc.test.mjs` (the bridge and the reader).
 
 ## 27. Offline single file
 

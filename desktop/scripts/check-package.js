@@ -30,7 +30,7 @@ async function checkRuntime(archive, codeArchive = archive) {
   const packaged = path.join(dist, codeArchive);
   const lockPath = path.resolve(__dirname, '..', 'runtime-lock.json');
   assert.deepEqual(extractFile(packaged, 'runtime-lock.json'), fs.readFileSync(lockPath), 'packaged runtime lock');
-  for (const filename of ['main.js', 'preload.js', 'engine.js', 'engine-ipc.js', 'engine-runtime.js', 'engine-protocol.js']) {
+  for (const filename of ['main.js', 'preload.js', 'engine.js', 'engine-ipc.js', 'engine-runtime.js', 'engine-protocol.js', 'tile-ipc.js', 'tile-reader.js']) {
     assert.deepEqual(extractFile(packaged, filename), fs.readFileSync(path.resolve(__dirname, '..', filename)), `packaged ${filename}`);
   }
   const version = JSON.parse(extractFile(packaged, 'package.json')).version;

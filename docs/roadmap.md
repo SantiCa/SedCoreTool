@@ -82,7 +82,7 @@ Updated 16 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.15** (tiled sections in the viewer, behind a flag; **model: either tier, effort medium**; the most capable with effort high if its delivery-path measurement calls for a decision). M8.4.14 was done on 17 November 2026 ([summary](validation/M8.4.14-summary.md)). The design session of part C was held on 16 November 2026: decisions in
+- **Next step: M8.4.15, step 2 onwards** (tiled sections in the viewer, behind a flag; step 1 done: tiles through the engine; **model: either tier, effort medium**). M8.4.14 was done on 17 November 2026 ([summary](validation/M8.4.14-summary.md)). The design session of part C was held on 16 November 2026: decisions in
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -133,6 +133,7 @@ Every experimental switch, with the decision it is waiting for ([policy: ARCHITE
 | Engine experiment | M8 | environment variable `SEDCORETOOL_ENGINE_EXPERIMENT=1` | off | Removed at M8.6 after the release gate |
 | NumPy multi-row counting in the Python API | M3.1.5 / M3.1.6 / M8.3.3 | environment variable `SEDCORETOOL_EXPERIMENTAL_COUNTS=1` | no effect: the multi-row kernel is the only implementation since M8.3.3 | Maintainer: remove the variable and its tests/benchmark in a cleanup |
 | Navigation preview rollback | M2.2.4 | session control in the Sections panel | preview on | Maintainer: remove the rollback control, or keep it until more memory evidence exists |
+| Tiled sections | M8.4.15 | environment variable `SEDCORETOOL_TILED_SECTIONS=1`, with the engine experiment | off | The milestone gate of part C (M8.4.19), then the release gate |
 | Visible-row table rendering | M2.1.3 | session-only checkbox in the Data table (turns it off for the session) | **on** (since 16 Nov 2026) | Release gate before publishing; then the maintainer decides whether to remove the checkbox and the native path |
 | Desktop operating diagnostics | M1.2.3 | opt-in control in the desktop program | off | Removed after the hang diagnosis of M1.2.2 is accepted |
 
@@ -977,7 +978,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   memory and cancellation targets hold or are recorded as failed with numbers (then stop and ask); evidence committed.
 - **Result (17 November 2026):** [summary](validation/M8.4.14-summary.md). Contract §8 and technical manual §26.4 describe the format; libvips in the runtime (+19 MiB on Windows; CI green on Windows, macOS and Linux); all seven fixtures build and read back exactly (80 regions per TIFF at levels 0-3); about 100 MiB/s, 8 GiB in 81 s, memory below 320 MiB, disk 1.33 times the decoded image; **no compressor** by the rule (zlib: 39 % of the throughput). The cancellation target failed first (297-658 ms, the partial folder was deleted before answering) and was fixed in the card (7-15 ms). Two Windows faults found and fixed: libvips crashed while a thread read the worker's stdin pipe; replacing the progress file failed while the coordinator read it. Not measured: macOS/Linux timing, cold cache, a 16 GiB computer.
 
-##### M8.4.15 - Tiled sections in the viewer (behind a flag) — state: after M8.4.14
+##### M8.4.15 - Tiled sections in the viewer (behind a flag) — state: In progress (step 1 done 17 Nov 2026: delivery path (a), tiles through the engine)
 
 - **Goal:** with `SEDCORETOOL_TILED_SECTIONS=1` and the engine experiment on, importing an image above the threshold of decision 1 builds its pyramid
   (progress and cancel shown) and shows the section from tiles: pan, zoom, navigation strip, depth ruler and depth readout, with full-resolution
@@ -994,6 +995,10 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   1. **Delivery path, decided by a rule stated now:** measure on `rgb8g` (a) `tile.read` through the main process and (b) the main process reading
      tile files itself and verifying their hashes (a Node reader of contract §8). Use (a) if a batch of 16 uncached level-0 tiles arrives with p95
      <= 150 ms and a single tile with p95 <= 40 ms; otherwise (b), with format tests shared by both readers. Record the numbers.
+     *Result (17 November 2026, [evidence](validation/M8.4.15-delivery-windows.json), `tools/measure_tile_delivery.mjs`):* from the page, on `rgb8g`, (a) one tile p95
+     7.9 ms and 16 tiles p95 113 ms; (b) 2.2 ms and 29 ms. (a) meets the rule, so **tiles go through the engine**; (b) stays only as a measurement option
+     (`SEDCORETOOL_TILE_DELIVERY=direct`). Both delivered identical bytes. The page bridge is `desktop/tile-ipc.js` (a chosen file becomes a token; a page reads only
+     the pyramids it built); `desktop/tile-reader.js` is reader (b). The disk cache was warm; not measured cold.
   2. The tiled section record in memory: full-resolution `w`, `h`, the source identity and the pyramid id; no `orig`, no `labels` arrays.
   3. `tilecache.js`: level = the finest level with at most 1 source pixel per screen pixel at the current zoom; visible tiles plus one ring;
      a request for tiles no longer visible is cancelled; a missing tile is drawn from the nearest cached coarser level, never left blank.

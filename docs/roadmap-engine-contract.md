@@ -407,6 +407,11 @@ libvips' own caches are limited (`cache_set_max_mem` 64 MiB, `cache_set_max_file
 least-recently-used cache of at most 256 MiB. Tile bytes are never charged to the session's buffer budget of §3 (they are not buffers).
 Error codes are those of §3. A coordinator started without `--pyramid-dir` answers the three operations with `UNSUPPORTED_METHOD`.
 
+The page reaches these operations only through `desktop/tile-ipc.js` (card M8.4.15, behind `SEDCORETOOL_TILED_SECTIONS=1`): a file the user chose becomes an
+opaque token (the preload passes its path to the main process; a file made by code has none), a page may build pyramids of its own tokens and read only the
+pyramids it built in the session, and every argument is validated again in the main process. Tiles reach the page through `tile.read` (delivery path (a),
+chosen by the rule of M8.4.15: one tile p95 7.9 ms, 16 tiles p95 113 ms from the page on Windows).
+
 The method worker reads its command pipe on a private file descriptor; descriptor 0 and the Windows standard input handle point to the null
 device. With the pipe on descriptor 0, a thread blocked reading it made libvips crash with an access violation in a stress test (12 processes of 12)
 and in about one build in fourteen through the coordinator (found in M8.4.14).

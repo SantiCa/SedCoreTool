@@ -7,6 +7,7 @@ const { Trainer } = require('./trainer');
 const { DiagnosticsLog, diagnosticError, safeDiagnosticEvent } = require('./diagnostics');
 const { createEngineService } = require('./engine');
 const { createEngineIpc } = require('./engine-ipc');
+const { createTileIpc } = require('./tile-ipc');
 const path = require('node:path');
 const os = require('node:os');
 const { pathToFileURL } = require('node:url');
@@ -96,6 +97,7 @@ if (process.versions.electron) {
     ipcMain.handle('engine:status', (event) => { if (!fromApp(event)) throw new Error('forbidden'); return engine.status(); });
     ipcMain.on('engine:enabled', (event) => { event.returnValue = fromApp(event) && engine.status().enabled === true; });
     setupEngineBridge();
+    setupTileBridge();
     void engine.start();
     await setupDiagnostics();
     createWindow();
@@ -183,6 +185,33 @@ if (process.versions.electron) {
     for (const name of bridge.OPERATIONS) {
       ipcMain.handle(`engine:${name}`, (event, ...args) => {
         if (!fromApp(event) || event.senderFrame !== event.sender.mainFrame) throw new Error('forbidden');
+        return bridge.call(event.sender.id, name, ...args);
+      });
+    }
+    app.on('web-contents-created', (_event, contents) => {
+      const owner = contents.id, leave = () => bridge.releasePage(owner);
+      contents.on('did-start-navigation', (details) => { if (details.isMainFrame && !details.isSameDocument) leave(); });
+      contents.on('render-process-gone', leave);
+      contents.on('destroyed', leave);
+    });
+  }
+
+  /* M8.4.15: tiled sections (contract §8), behind SEDCORETOOL_TILED_SECTIONS=1 and the engine experiment. A page registers a file the
+     user chose (the preload turns the File into its path), builds its pyramid with progress events and reads verified tiles; it never
+     sees a path. SEDCORETOOL_TILE_DELIVERY=direct makes the main process read the tiles itself (measurement of card M8.4.15, step 1). */
+  function setupTileBridge() {
+    const enabled = process.env.SEDCORETOOL_TILED_SECTIONS === '1' && engine.status().enabled === true;
+    ipcMain.on('tiles:enabled', (event) => { event.returnValue = fromApp(event) && enabled; });
+    if (!enabled) return;
+    const bridge = createTileIpc({ engine, pyramidRoot: path.join(app.getPath('userData'), 'pyramids'),
+      delivery: process.env.SEDCORETOOL_TILE_DELIVERY === 'direct' ? 'direct' : 'engine' });
+    for (const name of bridge.OPERATIONS) {
+      ipcMain.handle(`tiles:${name}`, (event, ...args) => {
+        if (!fromApp(event) || event.senderFrame !== event.sender.mainFrame) throw new Error('forbidden');
+        if (name === 'build') {
+          const [token, key] = args, sender = event.sender;
+          return bridge.call(sender.id, 'build', token, key, (progress) => { if (!sender.isDestroyed()) sender.send('tiles:progress', key, progress); });
+        }
         return bridge.call(event.sender.id, name, ...args);
       });
     }
