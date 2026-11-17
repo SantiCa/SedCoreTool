@@ -161,6 +161,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `sectiondepth.js` | Pure ROI depth/row conversion and pixels per centimetre; independent of interface/state | Yes |
 | `tiledsection.js` | Tiled sections (card M8.4.15): image sizes read from TIFF, JPEG and PNG headers (`imageDimensions`), the pyramid level that serves as a tiled section's working image (`proxyLevel`) and a level assembled from its tiles into RGBA (`assembleLevel`) and one tile as 8-bit RGBA for display (`tileRgba`) | Yes |
 | `tilecache.js` | Which tiles of a tiled section the viewer needs (card M8.4.15): the level for a zoom (`levelForZoom`: the coarsest with at least one level pixel per screen pixel), the visible tiles plus one ring, nearest the centre first, a coarser cached tile to draw while one is missing (`coarserCover`), a 256 MiB least-recently-used cache that keeps the tiles on screen (`TileCache`) and batched requests, 16 tiles each, two at a time, dropping tiles no longer wanted (`TileScheduler`, keys prefixed per pyramid); where a tile goes on screen (`tilePlacement`) | Yes |
+| `tiledmasks.js` | Masks of tiled sections in the page (card M8.4.16): the cache of level-0 mask tiles (`MaskTiles`: all-zero layers kept as nothing, tiles changed and not acknowledged by the engine never dropped, pinned tiles kept, clean tiles dropped least recently used first beyond 128 MiB), the reduced copy in the working image (`reduceTile`), and the mask layer painted over pixel tiles (`overlayLayout`, `axisMap`, `paintOverlay`) | Yes |
 | `maskchanges.js` | Which rows of each section's label and exclusion masks changed since the engine last received them: `createMaskChanges` (mark, take, restore, mark all) and `indexRangeOfPairs` (the pixels named by an edit-history list). A hint for the engine path, never a proof (§26.2) | Yes |
 | `sectionanalysis.js` | Analysis of one section without the DOM: effective class of each object, class-index table, row counts (cached per section), interval bins with no-data padding, ages and manual indices (§3.2), plus the builders of the engine method's input snapshot and reference result columns (`buildIntervalSnapshot`, `referenceColumns`), the revision key of a section's calculation (`analysisRevision`) and the conversion of engine result columns to `s.bins` (`resultToBins`). `app.js::analyze` passes the project state in | Yes |
 | `imageproc.js` | Enhancement, detection, connected components, magic wand, lasso, descriptors, rotation, downsampling | ✓ |
@@ -3086,9 +3087,21 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   image; alpha 255 unless the source has alpha). The visible tiles plus one ring are requested nearest the centre first; while a tile is missing,
   the nearest coarser cached tile finer than the working image is drawn in its place, otherwise the working image stays visible (never blank).
   One cache serves the page (256 MiB of bitmaps, least recently used dropped first, never a tile on screen; dropped bitmaps are closed); keys
-  carry the pyramid id. Tiles are drawn only while the working image under them shows source pixels too: no filter (or "show original"), no
-  objects and no exclusion in the working image (masks of tiled sections come with card M8.4.16). The status bar gives the source pixel of
+  carry the pyramid id. Tiles are drawn only while the working image under them shows source pixels too: no filter (or "show original").
+  The status bar gives the source pixel of
   the pointer (`floor(x · ds)`, `floor(y · ds)`); the depth readout, the ruler and the navigation strip use the working rows as for any section.
+- **Masks of tiled sections in the page** (`tiledmasks.js`, card M8.4.16; editing is not available yet, so masks start empty): labels and
+  exclusion at full resolution in tiles of 512 x 512 source pixels on the grid of level 0 (`MaskTiles`). The working image keeps a reduced copy
+  for the overview, the navigation strip and the Core log: working pixel `(wx, wy)` takes the value of source pixel `(wx · ds, wy · ds)`, rewritten
+  for the working pixels of each tile that changes (`reduceTile`); nothing is counted from it. When pixel tiles are drawn (above), the masks are
+  painted over them as one RGBA layer clipped to the analysis area, and the working image's own mask mixing is skipped there: at level 0 from the
+  mask tiles, at levels between 0 and the working image's from the reduced copy. The layer reproduces the viewer's formulas for every screen pixel:
+  each object's fill at its alpha, overlaps bottom to top, an opaque edge where the source pixel `step = max(1, round(source pixels per screen
+  pixel))` before or after it in x or y does not hold the object (white when selected, dashed for predictions, hidden objects skipped), and the
+  exclusion hatching (`r·0.3 + 70`, blue `+ 80`, on two of every eight screen diagonals, otherwise `r·0.55`), written as colours with alpha so
+  that drawing the layer gives today's mix (within 2 of 255 per channel, from 8-bit colour and alpha). Measured on Windows with dense masks over
+  `rgb8g` (card M8.4.16 step 2): a pan-and-zoom frame costs 10.5 ms median and 12.9 ms p95, against 4.8 / 7.0 ms without masks
+  ([evidence](validation/M8.4.16-step2-viewer-rgb8g-windows.json)).
 - **The page's bridge** (`desktop/tile-ipc.js`, only with `SEDCORETOOL_TILED_SECTIONS=1` and the engine experiment): `window.corantoolDesktop.tiles`
   registers a file the user chose (the page gets an opaque token, never the path), builds its pyramid with progress events, cancels, and reads the
   verified tiles of pyramids the page built, through the engine. `desktop/tile-reader.js` reads the store in the main process; it serves only the

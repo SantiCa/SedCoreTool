@@ -1,0 +1,112 @@
+{
+  "file": "rgb8g.tif",
+  "date": "2026-11-17T23:31:43.545Z",
+  "computer": "Windows 11, AMD Ryzen 7 7700X, 31 GiB (maintainer's computer)",
+  "viewport": "1440 x 900",
+  "firstRunSeconds": 2.87,
+  "section": {
+    "tiled": true,
+    "ds": 32,
+    "level": 5,
+    "w": 256,
+    "h": 10923,
+    "full": {
+      "w": 8192,
+      "h": 349526
+    },
+    "bits": 8,
+    "channels": 3
+  },
+  "firstUsefulViewMs": 871,
+  "cachedPanZoom": {
+    "frameCost": {
+      "n": 120,
+      "median": 4.8,
+      "p95": 7,
+      "max": 8.8
+    },
+    "frameInterval": {
+      "n": 119,
+      "median": 4.2,
+      "p95": 8.4,
+      "max": 16.7
+    }
+  },
+  "jumps": {
+    "firstFrameMs": {
+      "n": 20,
+      "median": 4.7,
+      "p95": 6.8,
+      "max": 6.8
+    },
+    "completeMs": {
+      "n": 20,
+      "median": 143.7,
+      "p95": 163,
+      "max": 402.5
+    },
+    "minImageShare": 1,
+    "incomplete": 0
+  },
+  "maskTiles": 30,
+  "maskedPanZoom": {
+    "frameCost": {
+      "n": 120,
+      "median": 10.5,
+      "p95": 12.9,
+      "max": 16.7
+    },
+    "frameInterval": {
+      "n": 119,
+      "median": 12.5,
+      "p95": 12.6,
+      "max": 29.2
+    }
+  },
+  "memory": {
+    "samples": 17,
+    "peakMiB": 1712
+  },
+  "targets": {
+    "firstUsefulViewMs": {
+      "target": 2000,
+      "value": 871,
+      "ok": true
+    },
+    "cachedFrameMedianMs": {
+      "target": 17,
+      "value": 4.8,
+      "ok": true
+    },
+    "cachedFrameP95Ms": {
+      "target": 33,
+      "value": 7,
+      "ok": true
+    },
+    "maskedFrameMedianMs": {
+      "target": 17,
+      "value": 10.5,
+      "ok": true
+    },
+    "maskedFrameP95Ms": {
+      "target": 33,
+      "value": 12.9,
+      "ok": true
+    },
+    "jumpFirstFrameShowsImage": {
+      "target": 1,
+      "value": 1,
+      "ok": true
+    },
+    "jumpCompleteP95Ms": {
+      "target": 250,
+      "value": 163,
+      "ok": true
+    },
+    "processTreePeakMiB": {
+      "target": 2048,
+      "value": 1712,
+      "ok": true
+    }
+  }
+}

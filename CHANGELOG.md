@@ -20,6 +20,13 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.16, step 2: `app/js/tiledmasks.js` (pure, tested in Node) keeps the page's full-resolution mask tiles of a tiled section (tiles not yet
+  acknowledged by the engine are never dropped), writes their reduced copy into the working image for the overview, and paints the masks over the
+  pixel tiles at fine zoom with the viewer's colours, edges and exclusion hatching (checked against a copy of `render()`'s formulas over tile seams).
+  Masks start empty: editing comes in the next steps. Pixel tiles are now also drawn when the section has objects or exclusion. Measured with dense
+  masks on the 8 GiB fixture: 10.5 ms per frame (median), 12.9 ms (p95) ([evidence](docs/validation/M8.4.16-step2-viewer-rgb8g-windows.json);
+  `tools/measure_tiled_viewer.mjs` now measures the same pan and zoom with masks). `tests/e2e/tiled-sections.mjs` puts a mask tile in the page and
+  checks the fill, edge, exclusion and unchanged pixels at full resolution and at two coarser zooms.
 - Card M8.4.16, step 1: the engine stores the masks of tiled sections (contract §8.7, written before the code): `src/sedcoretool/store/masks.py`
   (standard library only) keeps every mask tile (labels `i32`, exclusion `u8`, 512 x 512) and table as a zlib-compressed blob named by the SHA-256 of
   its bytes, skips all-zero tiles, and names each version of a section by the SHA-256 of a canonical JSON manifest; files are written to a

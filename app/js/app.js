@@ -28,6 +28,7 @@ import { $, APP, APP_NAMES, CLF_SCOPES, ML_DEFAULT, S, VERSION, clsById, default
 import { figTabsData, loadFigTabs, renderFigPanel, renderFigure, resetFigTabs, scheduleFigure, traceCanvas } from './figures.js';
 import { assembleLevel, imageDimensions, levelPositions, proxyLevel, tileRgba, TILE } from './tiledsection.js';
 import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlacement, tileRange, tilesByDistance } from './tilecache.js';
+import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks.js';
 import { renderData } from './datatab.js';
 import { frameRatio, panelPrefs, savePanels } from './panels.js';
 import { addRecordFromTable, defaultLogView, lastLog, mode, renderLog, renderLogPanel, renderRecList, scheduleLog, sectionCanvas, navigationPreviewCanvas, clearNavigationPreviews, setMode } from './columns.js';
@@ -426,12 +427,34 @@ function tileScheduler(s) {
   return scheduler;
 }
 
-/** Tiles show the source's pixels: drawn only while the working image under them shows them too (no filter, no annotation; M8.4.16 adds masks). */
+/** Tiles show the source's pixels: drawn only while the working image under them shows them too (no filter). Masks are drawn over them. */
 function tilesShowSource(s) {
-  if (!S.showOrig && Object.keys(DEFAULT_FILTERS).some((key) => s.filters[key] !== DEFAULT_FILTERS[key])) return false;
-  if (s.objects.size) return false;
-  if (s.tiled.clearAt !== (s._mv || 0)) { s.tiled.clearAt = s._mv || 0; s.tiled.clear = !s.exclude || !s.exclude.some((v) => v !== 0); }
-  return s.tiled.clear;
+  return S.showOrig || !Object.keys(DEFAULT_FILTERS).some((key) => s.filters[key] !== DEFAULT_FILTERS[key]);
+}
+
+/** Put one mask tile of a tiled section in the page (card M8.4.16): the tile cache, and the reduced copy in the working image (decision D). */
+function putMaskTile(s, row, col, labels, exclude) {
+  s.maskTiles.set(row, col, labels, exclude);
+  const entry = s.maskTiles.get(row, col);
+  reduceTile(s, s.ds, row, col, entry.labels, entry.exclude);
+  s._mv = (s._mv || 0) + 1;
+  requestRender();
+}
+
+/* The masks of a tiled section over its pixel tiles (card M8.4.16 step 2): one RGBA layer (`overlayLayout`, `paintOverlay`) drawn over them. */
+const maskLayer = { canvas: /** @type {HTMLCanvasElement | null} */ (null), data: /** @type {ImageData | null} */ (null) };
+
+function drawMaskOverlay(s, k, rect, viewWidth, viewHeight) {
+  const layout = overlayLayout(s, S.view, k, rect, viewWidth, viewHeight);
+  if (!layout) return;
+  const { sx0, sy0, cw, ch } = layout, canvas = maskLayer.canvas ||= document.createElement('canvas');
+  if (canvas.width < cw || canvas.height < ch) { canvas.width = Math.max(cw, canvas.width); canvas.height = Math.max(ch, canvas.height); }
+  const context = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
+  if (maskLayer.data?.width !== cw || maskLayer.data.height !== ch) maskLayer.data = context.createImageData(cw, ch);
+  const inSel = new Uint8Array(s.nextId + 1); for (const id of S.multi) if (id <= s.nextId) inSel[id] = 1;
+  paintOverlay({ ...layout, out: maskLayer.data.data, px0: sx0, py0: sy0, style: { fill: s.lutFill, line: s.lutLine, sty: s.lutStyle, stacks: s.stacks, selected: S.selected, inSel } });
+  context.putImageData(maskLayer.data, 0, 0);
+  vctx.drawImage(canvas, 0, 0, cw, ch, sx0, sy0, cw, ch);
 }
 
 /**
@@ -462,6 +485,7 @@ function drawTiles(s, cw, ch) {
       if (cover && cover.k < tiled.level) vctx.drawImage(tileCache.get(prefix + cover.key), cover.sx, cover.sy, cover.sw * at.w / TILE, cover.sh * at.h / TILE, dx, dy, dw, dh);
     }
   }
+  drawMaskOverlay(s, k, { x0, y0, x1, y1 }, cw, ch);
   vctx.restore();
 }
 
@@ -506,6 +530,7 @@ async function addTiledSection(file) {
   const s = newSection({ name: file.name.replace(/\.[^.]+$/, ''), file: { name: file.name, type: file.type, tiled: true }, w: working.w, h: working.h,
     orig: working.rgba, orig16: working.rgba16, ds: 2 ** level, full: { w: info.width, h: info.height } });
   s.tiled = tiled;
+  s.maskTiles = new MaskTiles({ width: info.width, height: info.height });   // masks start empty (card M8.4.16)
   const prev = sec();
   // Filters stay at their defaults: they need the whole image (ARCHITECTURE §3.4 decision 8), and the tiles show the source's pixels.
   if (prev) { s.units = prev.units; s.top = prev.bottom; s.bottom = prev.bottom + (prev.bottom - prev.top); s.detect = /** @type {any} */ ({ ...prev.detect }); }
@@ -1331,6 +1356,8 @@ function render() {
   const W = s.w, H = s.h, { x: vx, y: vy, zoom: z } = S.view, roi = s.roi;
   const fill = s.lutFill, line = s.lutLine, sty = s.lutStyle, sel = S.selected, step = Math.max(1, Math.round(1 / z));
   const inSel = new Uint8Array(s.nextId + 1); for (const id of S.multi) if (id <= s.nextId) inSel[id] = 1;
+  // A tiled section at fine zoom: inside the analysis area the masks are painted over the pixel tiles (drawTiles), so they are not mixed in here.
+  const masksOverTiles = !!(s.tiled && TILES && s.maskTiles && tilesShowSource(s) && levelForZoom(s.tiled.levels, z / s.ds) < s.tiled.level);
   const ixs = new Int32Array(cw);
   for (let sx = 0; sx < cw; sx++) ixs[sx] = Math.floor(vx + (sx + 0.5) / z);
   let o = 0;
@@ -1341,7 +1368,8 @@ function render() {
       if (!rowIn || ix < 0 || ix >= W) { d[o] = 22; d[o + 1] = 26; d[o + 2] = 25; d[o + 3] = 255; continue; }
       const i = base + ix, j = i * 4;
       let r = src[j], g = src[j + 1], b = src[j + 2];
-      const v = lab[i], list = v < 0 ? stk[-v] : null;   // V0.20: overlaps are drawn bottom → top
+      const masked = !masksOverTiles || !inY || ix < roi.x0 || ix >= roi.x1;
+      const v = masked ? lab[i] : 0, list = v < 0 ? stk[-v] : null;   // V0.20: overlaps are drawn bottom → top
       for (let q = 0, n = list ? list.length : v ? 1 : 0; q < n; q++) {
         const id = list ? list[q] : v; if (sty[id] === 3) continue;
         const k = id * 4, a = fill[k + 3] / 255;
@@ -1354,7 +1382,7 @@ function render() {
         }
       }
       if (dprob && dprob[i] && doubtful(dprob[i]) && !((sx + sy) & 3)) { r = 236; g = 72; b = 214; }   // V0.15: U-Net doubtful zone
-      if (ex[i]) { if (((sx + sy) & 7) < 2) { r = r * 0.3 + 70; g = g * 0.3 + 70; b = b * 0.3 + 80; } else { r *= 0.55; g *= 0.55; b *= 0.55; } }
+      if (masked && ex[i]) { if (((sx + sy) & 7) < 2) { r = r * 0.3 + 70; g = g * 0.3 + 70; b = b * 0.3 + 80; } else { r *= 0.55; g *= 0.55; b *= 0.55; } }
       if (!inY || ix < roi.x0 || ix >= roi.x1) { r *= 0.42; g *= 0.42; b *= 0.42; }
       d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
     }
@@ -4540,4 +4568,6 @@ initializeDiagnostics({
 const startupReady = startup();
 
 // Exposed for automated tests.
-window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, needPixels, requestRender, setTool, renderSectionForm, t, tilesIdle: () => [...tileSchedulers.values()].every((q) => q.idle), saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };
+window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, needPixels, requestRender, setTool, renderSectionForm, t, tilesIdle: () => [...tileSchedulers.values()].every((q) => q.idle),
+  putMaskTile: (row, col, labels, exclude) => putMaskTile(sec(), row, col, labels, exclude),   // end-to-end tests of tiled masks (card M8.4.16)
+  saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };

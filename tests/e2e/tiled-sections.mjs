@@ -191,6 +191,54 @@ try {
   assert.equal(gating.carried, 'pan', 'a brush chosen on another section does not follow into a tiled one');
   assert.equal(gating.unchanged, true, 'the refused tools changed nothing');
   assert.equal(gating.resValue, String(section.ds), 'the resolution control returns to the current value');
+  // Card M8.4.16 step 2: a mask tile put in the page shows at full resolution over the pixel tiles and, reduced, in the working image at every
+  // coarser zoom. One object (a rectangle) and one excluded rectangle in tile row 10; each probe is compared with the same screen pixel without
+  // the mask, through today's formulas. Tolerance, stated before comparing: 2 levels per channel (8-bit colour and alpha of the drawn layer).
+  const masks = await on.page.evaluate(async () => {
+    const { S } = window.ichantool, s = S.sections.at(-1), canvas = document.getElementById('view'), ctx = canvas.getContext('2d');
+    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const TILE = 512, row = 10, id = s.nextId;
+    s.objects.set(id, { id, order: s.nextTraceOrder++, cls: S.classes[0].id, pred: null, conf: 0, src: 'test', area: 0, bbox: null, stats: null, feat: null });
+    s.nextId = id + 1; s.lutFill = null; S.selected = null; S.multi.clear?.();
+    const labels = new Int32Array(TILE * TILE), exclude = new Uint8Array(TILE * TILE);
+    for (let y = 100; y < 200; y++) for (let x = 300; x < 460; x++) labels[y * TILE + x] = id;            // source x 300-459, y 5220-5319
+    for (let y = 300; y < 350; y++) for (let x = 300; x < 380; x++) exclude[y * TILE + x] = 1;            // source x 300-379, y 5420-5469
+    const probes = [['inside', 380, 5270], ['edge', 300, 5270], ['excluded', 340, 5445], ['outside', 520, 5270]];
+    const views = [['full resolution (level 0)', { x: 0, y: 2560, zoom: s.ds }], ['working image, 1 : 1', { x: -300, y: 2510, zoom: 1 }],
+      ['working image, 1 : 2', { x: -600, y: 2400, zoom: 0.5 }]];
+    const read = async (view) => {
+      S.view = { ...view }; window.ichantool.requestRender(); await frame();
+      for (let i = 0; i < 400 && !window.ichantool.tilesIdle(); i++) await new Promise((r) => setTimeout(r, 25));
+      window.ichantool.requestRender(); await frame();
+      return probes.map(([name, X, Y]) => {
+        const sx = Math.floor((X / s.ds - view.x) * view.zoom), sy = Math.floor((Y / s.ds - view.y) * view.zoom);
+        return { name, sx, sy, rgb: [...ctx.getImageData(sx, sy, 1, 1).data.subarray(0, 3)] };
+      });
+    };
+    const out = [];
+    for (const [name, view] of views) {
+      window.ichantool.putMaskTile(row, 0, null, null);
+      const before = await read(view);
+      window.ichantool.putMaskTile(row, 0, labels, exclude);
+      const after = await read(view);
+      out.push({ name, before, after });
+    }
+    window.ichantool.putMaskTile(row, 0, null, null);
+    const k = id * 4;
+    return { views: out, fill: [...s.lutFill.subarray(k, k + 4)], line: [...s.lutLine.subarray(k, k + 3)], reduced: s.labels[(5270 / s.ds) * s.w + 380 / s.ds] };
+  });
+  const close = (actual, expected, what) => assert.ok(actual.every((v, c) => Math.abs(v - Math.round(expected[c])) <= 2), `${what}: ${actual} vs ${expected.map(Math.round)}`);
+  const alpha = masks.fill[3] / 255;
+  for (const { name, before, after } of masks.views) {
+    const at = (list, probe) => list.find((p) => p.name === probe);
+    const inside = at(before, 'inside').rgb, edge = at(after, 'edge'), excluded = at(after, 'excluded');
+    close(at(after, 'inside').rgb, inside.map((v, c) => v * (1 - alpha) + masks.fill[c] * alpha), `${name}: object fill`);
+    close(edge.rgb, masks.line, `${name}: object edge`);
+    const base = at(before, 'excluded').rgb, hatch = ((excluded.sx + excluded.sy) & 7) < 2;
+    close(excluded.rgb, base.map((v, c) => (hatch ? v * 0.3 + (c === 2 ? 80 : 70) : v * 0.55)), `${name}: exclusion`);
+    assert.deepEqual(at(after, 'outside').rgb, at(before, 'outside').rgb, `${name}: unchanged outside the masks`);
+  }
+  assert.equal(masks.reduced, 0, 'removing the tile clears the reduced masks');
   assert.deepEqual(on.errors, []);
   console.log('Tiled sections: added through the interface, working image from the pyramid, not saved, reloaded, tools refused; full-resolution tiles drawn (' + drawn.probes.length + ' probes):', JSON.stringify(section));
 } finally { await on.close(); }

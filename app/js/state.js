@@ -24,6 +24,7 @@
  *   stacks: import('./core.js').StackTable, bins: SectionBin[], orig: Uint8ClampedArray | null,
  *   orig16?: Uint16Array | null, enh: Uint8ClampedArray | null, ds: number, rot: number,
  *   tiled?: {pyramid: string, level: number, levels: {level: number, width: number, height: number, rows: number, cols: number}[], channels: number, bits: number},
+ *   maskTiles?: import('./tiledmasks.js').MaskTiles,
  *   logVer: number, view: SectionView | null, crop: import('./core.js').Roi | null,
  *   filters: import('./imageproc.js').FilterSettings, _lc?: SectionCanvasCache | null,
  *   _lb?: SectionCanvasCache | null, file: SectionFile, objects: Map<number, TraceObject>, nextId: number, nextTraceOrder: number,

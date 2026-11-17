@@ -43,7 +43,7 @@ export async function imageDimensions(blob) {
   const stop = new Error('dimensions read');
   try {
     // The program's own block reader reads the header and the first directory, then asks for the area: stop there.
-    const result = await decodeTiffBlocks(blob, (w, h) => { found.dims = { w, h }; throw stop; }, () => 1);
+    const result = await decodeTiffBlocks(blob, (/** @type {number} */ w, /** @type {number} */ h) => { found.dims = { w, h }; throw stop; }, () => 1);
     if (result && 'fw' in result && !('rgba' in result)) return { w: result.fw, h: result.fh };   // a layout the block reader leaves to the old decoder
   } catch (error) {
     if (error !== stop) return null;

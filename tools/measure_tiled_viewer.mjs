@@ -13,6 +13,9 @@
 //                       them, so it overstates the time of the visible ones) (target: <= 250 ms p95)
 //   memory              working set summed over the program's whole process tree (Electron and the engine), sampled every 250 ms
 //                       (target: peak <= 2 GiB). Working sets count shared pages in each process, so the sum is an upper bound.
+//   pan and zoom with masks (card M8.4.16 step 2): the same 120 frames after putting dense full-resolution masks in the page around the path
+//                       (6 x 5 level-0 tiles: objects in 200-pixel blocks over 60 % of the area, 8 objects, and a band of exclusion every
+//                       1,000 rows), so the masks are painted over the pixel tiles in every frame (same targets as cached pan and zoom).
 // --small: the same scripted pan and zoom, in working-image coordinates, on a section that is small enough for today's path, shown tiled
 // (flag on) and not tiled (flag off), to compare frame costs (evidence for rule 6 of the card). The disk cache is warm in every run.
 import assert from 'node:assert/strict';
@@ -141,6 +144,34 @@ const inPage = {
     }
     return results;
   },
+  /** Dense masks around the centre of the pan-and-zoom path (card M8.4.16 step 2). */
+  putMasks: async function () {
+    const { S } = window.ichantool, s = S.sections.at(-1), TILE = 512, objects = 8;
+    for (let n = 0; n < objects; n++) {
+      const id = s.nextId++;
+      s.objects.set(id, { id, order: s.nextTraceOrder++, cls: S.classes[n % S.classes.length].id, pred: null, conf: 0, src: 'measure', area: 0, bbox: null, stats: null, feat: null });
+    }
+    s.lutFill = null;
+    const first = s.nextId - objects, cx = s.w / 2 * s.ds, cy = s.h / 2 * s.ds;
+    const row0 = Math.max(0, Math.floor(cy / TILE) - 2), col0 = Math.max(0, Math.floor(cx / TILE) - 3);
+    let tiles = 0;
+    for (let row = row0; row < Math.min(s.maskTiles.rows, row0 + 5); row++) {
+      for (let col = col0; col < Math.min(s.maskTiles.cols, col0 + 6); col++) {
+        const labels = new Int32Array(TILE * TILE), exclude = new Uint8Array(TILE * TILE);
+        for (let y = 0; y < TILE; y++) {
+          const Y = row * TILE + y, by = Math.floor(Y / 200);
+          for (let x = 0; x < TILE; x++) {
+            const X = col * TILE + x, bx = Math.floor(X / 200);
+            if (X >= s.maskTiles.width || Y >= s.maskTiles.height) continue;
+            if ((bx + by) % 5 < 3) labels[y * TILE + x] = first + (bx * 3 + by) % objects;
+            if (Y % 1000 < 100) exclude[y * TILE + x] = 1;
+          }
+        }
+        window.ichantool.putMaskTile(row, col, labels, exclude); tiles++;
+      }
+    }
+    return tiles;
+  },
 };
 
 const percentile = (values, p) => { const s = [...values].sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.ceil(p * s.length) - 1)] : null; };
@@ -184,12 +215,16 @@ if (small) {
     result.cachedPanZoom = m;
     const jumps = await run.page.evaluate(inPage.jumps, { count: 20, seed: 138501 });
     result.jumps = { firstFrameMs: summary(jumps.map((j) => j.firstFrameMs)), completeMs: summary(jumps.map((j) => j.completeMs ?? 1e9)), minImageShare: Math.min(...jumps.map((j) => j.imageShare)), incomplete: jumps.filter((j) => j.completeMs == null).length };
+    result.maskTiles = await run.page.evaluate(inPage.putMasks);
+    result.maskedPanZoom = await measure(run.page, { frames: 120, base: info.ds });
     assert.deepEqual(run.errors, []);
   } finally { result.memory = await run.close(); }
   result.targets = {
     firstUsefulViewMs: { target: 2000, value: result.firstUsefulViewMs, ok: result.firstUsefulViewMs <= 2000 },
     cachedFrameMedianMs: { target: 17, value: result.cachedPanZoom.frameCost.median, ok: result.cachedPanZoom.frameCost.median <= 17 },
     cachedFrameP95Ms: { target: 33, value: result.cachedPanZoom.frameCost.p95, ok: result.cachedPanZoom.frameCost.p95 <= 33 },
+    maskedFrameMedianMs: { target: 17, value: result.maskedPanZoom.frameCost.median, ok: result.maskedPanZoom.frameCost.median <= 17 },
+    maskedFrameP95Ms: { target: 33, value: result.maskedPanZoom.frameCost.p95, ok: result.maskedPanZoom.frameCost.p95 <= 33 },
     jumpFirstFrameShowsImage: { target: 1, value: result.jumps.minImageShare, ok: result.jumps.minImageShare >= 0.95 },
     jumpCompleteP95Ms: { target: 250, value: result.jumps.completeMs.p95, ok: result.jumps.completeMs.p95 <= 250 },
     processTreePeakMiB: { target: 2048, value: result.memory?.peakMiB ?? null, ok: (result.memory?.peakMiB ?? Infinity) <= 2048 },
