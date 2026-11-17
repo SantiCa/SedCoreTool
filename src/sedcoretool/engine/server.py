@@ -64,6 +64,8 @@ RUNNER_IDLE_SECONDS = 30         # an idle method worker holds memory (NumPy, th
 PROGRESS_EVENT_SECONDS = 0.1     # at most ten progress events per second (§3)
 PYRAMID_NAME = re.compile(r'[^/\\:\x00-\x1f]{1,255}')   # a file name for display: no folder separators or control characters
 MAX_PATH = 4096
+MASK_OPERATIONS = ('mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read')
+MAX_STAGINGS = 16                # staged mask versions per session (contract §8.7)
 
 
 def load_store():
@@ -74,13 +76,14 @@ def load_store():
         parent.__path__ = [str(Path(__file__).resolve().parent.parent)]
         sys.modules['sedcoretool'] = parent
     from sedcoretool.store import format as store_format
+    from sedcoretool.store import masks as store_masks
     from sedcoretool.store import tiles as store_tiles
-    return store_format, store_tiles
+    return store_format, store_tiles, store_masks
 
 
 class Coordinator:
     def __init__(self, output, *, version, runtime_id, worker_script=None, method_script=None, scratch_directory=None,
-                 pyramid_directory=None, pyramid_budget=None):
+                 pyramid_directory=None, pyramid_budget=None, projects_directory=None):
         self.output = output
         self.version = version
         self.runtime_id = runtime_id
@@ -103,10 +106,19 @@ class Coordinator:
         self.pyramid_compressor = None    # contract §8.2: no compressor in format version 1 (rule of card M8.4.14, 17 Nov 2026: zlib was 2.5 times slower)
         self.store_format = self.tile_reader = None
         if self.pyramid_root is not None:
-            self.store_format, store_tiles = load_store()
+            self.store_format, store_tiles, _ = load_store()
             self.pyramid_root.mkdir(parents=True, exist_ok=True)
             self.store_format.remove_partials(self.pyramid_root)
             self.tile_reader = store_tiles.TileReader(self.pyramid_root)
+        # Mask store (contract §8.7): only when the main process named the projects folder. Staged versions live in memory only.
+        self.projects_root = Path(projects_directory) if projects_directory else None
+        self.masks = self.mask_cache = None
+        self.mask_stores = {}
+        self.stagings = {}
+        if self.projects_root is not None:
+            self.masks = load_store()[2]
+            self.projects_root.mkdir(parents=True, exist_ok=True)
+            self.mask_cache = self.masks.BlobCache()
 
     def response(self, request, status='ok', result=None, error=None):
         value = {key: request[key] for key in ('v', 'session', 'id', 'op')}
@@ -194,6 +206,8 @@ class Coordinator:
             return None
         if operation in ('pyramid.build', 'pyramid.info', 'tile.read'):
             return self.store_operation(request)
+        if operation in MASK_OPERATIONS:
+            return self.mask_operation(request, data)
         if operation == 'job.cancel':
             require_fields(payload, ('request_id',))
             if not is_uuid(payload['request_id']):
@@ -259,6 +273,98 @@ class Coordinator:
         return {'tiles': [{'row': row, 'col': col, 'byte_length': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
                           for (row, col), data in zip(payload['positions'], tiles)],
                 'frames': [len(part) for part in self.attachments]}
+
+    # ---- mask store (contract §8.7) -------------------------------------------------------------------------------
+
+    def mask_store(self, project):
+        if not self.masks.valid_project(project):
+            raise RequestError('INVALID_REQUEST', 'project')
+        if project not in self.mask_stores:
+            if len(self.mask_stores) >= 64:
+                self.mask_stores.pop(next(iter(self.mask_stores)))
+            self.mask_stores[project] = self.masks.MaskStore(self.projects_root / project / 'tiles', self.mask_cache)
+        return self.mask_stores[project]
+
+    def staging(self, staged):
+        if not is_uuid(staged) or staged not in self.stagings:
+            raise RequestError('INVALID_REQUEST', 'staged')
+        return self.stagings[staged]
+
+    def mask_operation(self, request, data):
+        if self.projects_root is None:
+            raise RequestError('UNSUPPORTED_METHOD')
+        try:
+            return self.mask_request(request['op'], request['payload'], data)
+        except self.masks.MaskError as error:
+            raise RequestError(error.code, error.field) from None
+
+    def mask_request(self, operation, payload, data):
+        if operation == 'mask.begin':
+            require_fields(payload, ('project', 'section', 'width', 'height', 'base'))
+            if len(self.stagings) >= MAX_STAGINGS:
+                raise RequestError('LIMIT_EXCEEDED', 'staged')
+            staging = self.masks.Staging(self.mask_store(payload['project']), payload['section'], payload['width'], payload['height'],
+                                         payload['base'])
+            staged = str(uuid4())
+            self.stagings[staged] = staging
+            return {'staged': staged, 'rows': staging.rows, 'cols': staging.cols}
+        if operation == 'mask.put':
+            require_fields(payload, ('staged', 'layer', 'row', 'col', 'sha256'))
+            if data is None:
+                raise ProtocolError('missing binary frame')
+            stored = self.staging(payload['staged']).put(payload['layer'], payload['row'], payload['col'], payload['sha256'], data)
+            return {'stored': stored}
+        if operation == 'mask.commit':
+            require_fields(payload, ('staged', 'tables'))
+            staging = self.staging(payload['staged'])
+            try:
+                return {'manifest': staging.commit(self.mask_tables(payload['tables']))}
+            finally:
+                del self.stagings[payload['staged']]          # closed also when the commit fails (contract §8.7)
+        if operation == 'mask.discard':
+            require_fields(payload, ('staged',))
+            if not is_uuid(payload['staged']):
+                raise RequestError('INVALID_REQUEST', 'staged')
+            self.stagings.pop(payload['staged'], None)
+            return {}
+        require_fields(payload, ('project', 'manifest', 'layer', 'positions'))      # mask.read
+        store, layer, positions = self.mask_store(payload['project']), payload['layer'], payload['positions']
+        manifest, _ = store.read_manifest(payload['manifest'])
+        if layer not in self.masks.SAMPLE_BYTES:
+            raise RequestError('INVALID_REQUEST', 'layer')
+        rows, cols = self.masks.grid(manifest['width'], manifest['height'])
+        if not isinstance(positions, list) or not 1 <= len(positions) <= 16:
+            raise RequestError('INVALID_REQUEST', 'positions')
+        for position in positions:
+            if (not isinstance(position, list) or len(position) != 2 or not all(type(value) is int for value in position)
+                    or not 0 <= position[0] < rows or not 0 <= position[1] < cols):
+                raise RequestError('INVALID_REQUEST', 'positions')
+        tiles = [store.read_tile(payload['manifest'], layer, row, col) for row, col in positions]
+        joined = b''.join(tile for tile in tiles if tile is not None)
+        self.attachments = [joined[start:start + MAX_CHUNK] for start in range(0, len(joined), MAX_CHUNK)]
+        return {'tiles': [{'row': row, 'col': col, 'sha256': None if tile is None else hashlib.sha256(tile).hexdigest(),
+                           'byte_length': 0 if tile is None else len(tile)} for (row, col), tile in zip(positions, tiles)],
+                'frames': [len(part) for part in self.attachments]}
+
+    def mask_tables(self, tables):
+        """The bytes of the committed buffers named in ``mask.commit`` (None for ``stack_members: null``), checked against their dtypes."""
+        if not isinstance(tables, dict) or not set(tables) <= set(self.masks.TABLES):
+            raise RequestError('INVALID_REQUEST', 'tables')
+        out = {}
+        for name, handle in tables.items():
+            if handle is None and name == 'stack_members':
+                out[name] = None
+                continue
+            value = self.store.get(handle, committed=True)
+            if value.dtype != self.masks.TABLE_DTYPES[name] or len(value.shape) != 1:
+                raise RequestError('INVALID_BUFFER', f'tables.{name}')
+            if value.length > (self.masks.MAX_METADATA_BYTES if value.dtype == 'utf8json' else self.masks.MAX_STACK_BYTES):
+                raise RequestError('LIMIT_EXCEEDED', f'tables.{name}')
+            data = value.path.read_bytes()
+            if len(data) != value.length or hashlib.sha256(data).hexdigest() != value.expected_hash:
+                raise RequestError('INTERNAL')
+            out[name] = data
+        return out
 
     def start_pyramid(self, request):
         directory = Path(self.store.directory.name) / f'job-{uuid4()}'
@@ -562,7 +668,7 @@ def read_requests(stream, inbox):
                 from protocol import strict_json
             request = strict_json(data)
             binary = None
-            if isinstance(request, dict) and request.get('op') == 'buffer.chunk':
+            if isinstance(request, dict) and request.get('op') in ('buffer.chunk', 'mask.put'):     # a descriptor/binary pair (§3)
                 following = read_frame(stream)
                 if following is None or following[0] != BINARY_FRAME:
                     raise ProtocolError('missing binary frame')
@@ -574,9 +680,10 @@ def read_requests(stream, inbox):
         inbox.put(None)
 
 
-def serve(input_stream, output_stream, *, version, runtime_id, scratch_directory, pyramid_directory=None, pyramid_budget=None):
+def serve(input_stream, output_stream, *, version, runtime_id, scratch_directory, pyramid_directory=None, pyramid_budget=None,
+          projects_directory=None):
     coordinator = Coordinator(output_stream, version=version, runtime_id=runtime_id, scratch_directory=scratch_directory,
-                              pyramid_directory=pyramid_directory, pyramid_budget=pyramid_budget)
+                              pyramid_directory=pyramid_directory, pyramid_budget=pyramid_budget, projects_directory=projects_directory)
     inbox = queue.Queue(maxsize=2)
     threading.Thread(target=read_requests, args=(input_stream, inbox), daemon=True).start()
     try:
@@ -603,11 +710,14 @@ def main():
     parser.add_argument('--scratch-dir', required=True)
     parser.add_argument('--pyramid-dir')                       # the tile store's pyramid cache (contract §8.1); absent: no store operations
     parser.add_argument('--pyramid-budget-bytes', type=int, default=50 * 2**30)
+    parser.add_argument('--projects-dir')                      # project data of the tile store: mask tiles and manifests (contract §8.7)
     args = parser.parse_args()
     if not re.fullmatch('[0-9a-f]{64}', args.runtime_id):
         parser.error('runtime-id must be a SHA-256 digest')
     if args.pyramid_dir is not None and not Path(args.pyramid_dir).is_absolute():
         parser.error('pyramid-dir must be absolute')
+    if args.projects_dir is not None and not Path(args.projects_dir).is_absolute():
+        parser.error('projects-dir must be absolute')
     if args.pyramid_budget_bytes < 2**30:
         parser.error('pyramid-budget-bytes must be at least 1 GiB')
     bind_to_process_lifetime()  # best effort; workers also watch the liveness pipe
@@ -617,7 +727,7 @@ def main():
     try:
         # A daemon reader must not hold BufferedReader's lock during interpreter shutdown.
         serve(sys.stdin.buffer.raw, sys.stdout.buffer, version=args.version, runtime_id=args.runtime_id, scratch_directory=args.scratch_dir,
-              pyramid_directory=args.pyramid_dir, pyramid_budget=args.pyramid_budget_bytes)
+              pyramid_directory=args.pyramid_dir, pyramid_budget=args.pyramid_budget_bytes, projects_directory=args.projects_dir)
     except (ProtocolError, RequestError, OSError):
         # No input content, paths or tracebacks on the public transport/diagnostic boundary.
         print('engine transport closed', file=sys.stderr)

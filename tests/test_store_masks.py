@@ -1,0 +1,311 @@
+"""Mask tiles and manifests of tiled sections (card M8.4.16 step 1, contract §8.7): exact round trips, content addressing, immutable versions,
+and refusal of damaged or hostile tiles, blobs and manifests."""
+
+import hashlib
+import json
+import os
+import zlib
+
+import numpy as np
+import pytest
+
+from sedcoretool.store import masks
+
+W, H = 1300, 1100           # a 3 x 3 grid whose right and bottom tiles are partly outside the section
+
+
+def layer_tiles(array, layer):
+    """The 512 x 512 tiles of a full-resolution mask, zero-padded, as the page will cut them: {(row, col): bytes}."""
+    dtype = '<i4' if layer == 'labels' else 'u1'
+    rows, cols = masks.grid(array.shape[1], array.shape[0])
+    out = {}
+    for row in range(rows):
+        for col in range(cols):
+            tile = np.zeros((512, 512), dtype=dtype)
+            part = array[row * 512:(row + 1) * 512, col * 512:(col + 1) * 512]
+            tile[:part.shape[0], :part.shape[1]] = part
+            out[(row, col)] = tile.tobytes()
+    return out
+
+
+def sample_masks(seed=0):
+    rng = np.random.default_rng(seed)
+    labels = np.zeros((H, W), dtype='<i4')
+    labels[100:400, 50:1250] = rng.integers(-3, 40, size=(300, 1200))     # tiles of row 0 only; row 1 and 2 stay empty
+    labels[1050:1100, 1200:1300] = 7                                       # the bottom-right corner tile, up to the section's edge
+    exclude = np.zeros((H, W), dtype='u1')
+    exclude[600:700, :] = 1
+    return labels, exclude
+
+
+TABLES = {'objects': json.dumps([{'id': 7, 'class_id': 'a', 'predicted_class_id': None, 'confidence': 1}]).encode(),
+          'classes': json.dumps([{'id': 'a', 'name': 'Burrow', 'counts': True}]).encode(),
+          'stack_offsets': np.array([0, 0, 2], dtype='<u4').tobytes(), 'stack_members': np.array([7, 8], dtype='<u4').tobytes()}
+
+
+def put_all(staging, labels, exclude):
+    stored = {}
+    for layer, array in (('labels', labels), ('exclude', exclude)):
+        for (row, col), data in layer_tiles(array, layer).items():
+            stored[(layer, row, col)] = staging.put(layer, row, col, hashlib.sha256(data).hexdigest(), data)
+    return stored
+
+
+def store(tmp_path):
+    return masks.MaskStore(tmp_path / 'projects' / 'p1' / 'tiles')
+
+
+def committed_version(tmp_path, seed=0):
+    labels, exclude = sample_masks(seed)
+    target = store(tmp_path)
+    staging = masks.Staging(target, 's1', W, H, None)
+    stored = put_all(staging, labels, exclude)
+    return target, staging.commit(TABLES), labels, exclude, stored
+
+
+def read_back(target, manifest, layer):
+    """The full-resolution mask of a stored version, rebuilt from its tiles."""
+    value, _ = target.read_manifest(manifest)
+    rows, cols = masks.grid(value['width'], value['height'])
+    dtype = '<i4' if layer == 'labels' else 'u1'
+    full = np.zeros((rows * 512, cols * 512), dtype=dtype)
+    for row in range(rows):
+        for col in range(cols):
+            data = target.read_tile(manifest, layer, row, col)
+            if data is not None:
+                full[row * 512:(row + 1) * 512, col * 512:(col + 1) * 512] = np.frombuffer(data, dtype=dtype).reshape(512, 512)
+    return full[:value['height'], :value['width']]
+
+
+def test_a_version_reads_back_exactly_and_empty_tiles_are_not_stored(tmp_path):
+    target, manifest, labels, exclude, stored = committed_version(tmp_path)
+    assert np.array_equal(read_back(target, manifest, 'labels'), labels)
+    assert np.array_equal(read_back(target, manifest, 'exclude'), exclude)
+    value, tiles = target.read_manifest(manifest)
+    assert sorted(tiles) == [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2), (2, 2)]
+    assert tiles[(2, 2)] == {'labels': tiles[(2, 2)]['labels'], 'exclude': None} and tiles[(0, 0)]['exclude'] is None
+    assert stored[('labels', 2, 0)] is False and stored[('exclude', 1, 0)] is True
+    assert value['tables']['stack_members'] == {'sha256': hashlib.sha256(TABLES['stack_members']).hexdigest(), 'byte_length': 8}
+    for name, data in TABLES.items():                                      # tables are blobs of their exact bytes
+        entry = value['tables'][name]
+        assert target.read_blob(entry['sha256'], entry['byte_length'], 'table') == data
+
+
+def test_the_manifest_is_canonical_json_named_by_its_hash_and_blobs_are_compressed(tmp_path):
+    target, manifest, _, _, _ = committed_version(tmp_path)
+    data = target.manifest_path(manifest).read_bytes()
+    assert hashlib.sha256(data).hexdigest() == manifest
+    assert data == json.dumps(json.loads(data), sort_keys=True, separators=(',', ':')).encode()
+    value = json.loads(data)
+    assert (value['format'], value['version'], value['tile'], value['section'], value['width'], value['height']) == ('sedcoretool.masks', 1, 512, 's1', W, H)
+    sha = value['tiles']['0.0']['labels']
+    blob = target.blob_path(sha)
+    assert blob.parent.name == sha[:2] and len(zlib.decompress(blob.read_bytes())) == masks.LAYER_BYTES['labels']
+    assert blob.stat().st_size < masks.LAYER_BYTES['labels']
+    assert not list(target.folder.rglob('*.tmp'))
+
+
+def test_the_same_content_gives_the_same_version_and_a_new_version_leaves_the_base_unchanged(tmp_path):
+    target, first, labels, exclude, _ = committed_version(tmp_path)
+    again = masks.Staging(target, 's1', W, H, None)
+    put_all(again, labels, exclude)
+    assert again.commit(TABLES) == first
+    edit = masks.Staging(target, 's1', W, H, first)
+    changed = labels.copy()
+    changed[1000:1010, 0:10] = 99                                          # one tile of row 1 that was empty
+    data = layer_tiles(changed, 'labels')[(1, 0)]
+    assert edit.put('labels', 1, 0, hashlib.sha256(data).hexdigest(), data) is True
+    erased = bytes(masks.LAYER_BYTES['exclude'])
+    assert edit.put('exclude', 1, 1, hashlib.sha256(erased).hexdigest(), erased) is False   # erasing a layer removes its entry
+    second = edit.commit({})                                               # no table given: the base's tables are kept
+    assert second != first
+    changed_exclude = exclude.copy()
+    changed_exclude[600:700, 512:1024] = 0
+    assert np.array_equal(read_back(target, second, 'labels'), changed)
+    assert np.array_equal(read_back(target, second, 'exclude'), changed_exclude)
+    assert np.array_equal(read_back(target, first, 'labels'), labels) and np.array_equal(read_back(target, first, 'exclude'), exclude)
+    assert target.read_manifest(second)[0]['tables'] == target.read_manifest(first)[0]['tables']
+
+
+def test_tables_kept_replaced_or_required(tmp_path):
+    target, base, _, _, _ = committed_version(tmp_path)
+    staging = masks.Staging(target, 's1', W, H, base)
+    no_overlap = np.array([0, 0], dtype='<u4').tobytes()
+    version = staging.commit({'stack_offsets': no_overlap, 'stack_members': None})
+    tables = target.read_manifest(version)[0]['tables']
+    assert tables['stack_members'] is None and tables['stack_offsets']['byte_length'] == 8
+    assert tables['objects'] == target.read_manifest(base)[0]['tables']['objects']
+    fresh = masks.Staging(target, 's2', W, H, None)
+    with pytest.raises(masks.MaskError) as error:
+        fresh.commit({'objects': TABLES['objects'], 'classes': TABLES['classes']})
+    assert (error.value.code, error.value.field) == ('INVALID_REQUEST', 'tables.stack_offsets')
+    for bad, code in (({'objects': None}, 'INVALID_REQUEST'), ({'stack_offsets': b'\0' * 6}, 'INVALID_BUFFER'),
+                      ({'objects': b' ' * (masks.MAX_METADATA_BYTES + 1)}, 'LIMIT_EXCEEDED'), ({'other': b'[]'}, 'INVALID_REQUEST')):
+        with pytest.raises(masks.MaskError) as error:
+            masks.Staging(target, 's1', W, H, base).commit(bad)
+        assert error.value.code == code
+
+
+def tile_with(layer, setter):
+    tile = np.zeros((512, 512), dtype='<i4' if layer == 'labels' else 'u1')
+    setter(tile)
+    data = tile.tobytes()
+    return data, hashlib.sha256(data).hexdigest()
+
+
+@pytest.mark.parametrize('layer,row,col,setter', [
+    ('labels', 0, 2, lambda t: t.__setitem__((5, 1300 - 1024), 3)),       # right edge: column 276 of the last tile column is outside
+    ('labels', 2, 0, lambda t: t.__setitem__((1100 - 1024, 5), 3)),       # bottom edge: row 76 of the last tile row is outside
+    ('exclude', 0, 0, lambda t: t.__setitem__((5, 5), 2)),                # exclusion is 0 or 1
+], ids=['right-margin', 'bottom-margin', 'exclusion-value'])
+def test_a_tile_with_samples_outside_the_section_or_bad_values_is_refused(tmp_path, layer, row, col, setter):
+    staging = masks.Staging(store(tmp_path), 's1', W, H, None)
+    data, sha = tile_with(layer, setter)
+    with pytest.raises(masks.MaskError) as error:
+        staging.put(layer, row, col, sha, data)
+    assert (error.value.code, error.value.field) == ('INVALID_BUFFER', 'tile') and staging.tiles == {}
+    assert not (staging.store.folder / 'blobs').exists()
+
+
+def test_a_tile_of_the_wrong_length_hash_layer_or_position_is_refused(tmp_path):
+    staging = masks.Staging(store(tmp_path), 's1', W, H, None)
+    data, sha = tile_with('labels', lambda t: t.__setitem__((0, 0), 1))
+    for arguments, expected in ((('labels', 0, 0, sha, data[:-4]), ('INVALID_BUFFER', 'tile')),
+                                (('labels', 0, 0, '0' * 64, data), ('INVALID_BUFFER', 'tile')),
+                                (('exclude', 0, 0, sha, data), ('INVALID_BUFFER', 'tile')),
+                                (('other', 0, 0, sha, data), ('INVALID_REQUEST', 'layer')),
+                                (('labels', 3, 0, sha, data), ('INVALID_REQUEST', 'row')),
+                                (('labels', 0, -1, sha, data), ('INVALID_REQUEST', 'col')),
+                                (('labels', True, 0, sha, data), ('INVALID_REQUEST', 'row')),
+                                (('labels', 0, 0, sha.upper(), data), ('INVALID_REQUEST', 'sha256'))):
+        with pytest.raises(masks.MaskError) as error:
+            staging.put(*arguments)
+        assert (error.value.code, error.value.field) == expected
+    assert staging.tiles == {}
+
+
+def test_identifiers_and_sizes_are_checked():
+    assert masks.valid_project('k3x9a2b') and masks.valid_project('a_b-1')
+    for project in ('', 'Abc', '../x', 'a/b', 'a.b', 'con', 'lpt1', 'x' * 65, 7, None):
+        assert not masks.valid_project(project)
+    for section in ('', 'a/b', 'a b', '..', 'x' * 65):
+        assert not masks.valid_section(section)
+    assert masks.grid(8192, 349_526) == (683, 16)
+    for width, height, field in ((0, 10, 'width'), (262_145, 10, 'width'), (10, 16_777_217, 'height'), (True, 10, 'width')):
+        with pytest.raises(masks.MaskError) as error:
+            masks.grid(width, height)
+        assert error.value.field == field
+    with pytest.raises(masks.MaskError) as error:
+        masks.grid(262_144, 16_777_216)
+    assert (error.value.code, error.value.field) == ('LIMIT_EXCEEDED', 'section.size')
+
+
+def test_a_base_must_be_a_version_of_the_same_section_and_size(tmp_path):
+    target, base, _, _, _ = committed_version(tmp_path)
+    for section, width, height in (('s2', W, H), ('s1', W + 1, H), ('s1', W, H - 1)):
+        with pytest.raises(masks.MaskError) as error:
+            masks.Staging(target, section, width, height, base)
+        assert (error.value.code, error.value.field) == ('INVALID_REQUEST', 'base')
+    with pytest.raises(masks.MaskError) as error:
+        masks.Staging(target, 's1', W, H, 'f' * 64)
+    assert (error.value.code, error.value.field) == ('INVALID_REQUEST', 'manifest')
+
+
+def write_manifest_file(target, data: bytes) -> str:
+    name = hashlib.sha256(data).hexdigest()
+    target.manifest_path(name).parent.mkdir(parents=True, exist_ok=True)
+    target.manifest_path(name).write_bytes(data)
+    return name
+
+
+def valid_manifest(target, base):
+    return json.loads(target.manifest_path(base).read_bytes())
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(',', ':')).encode()
+
+
+@pytest.mark.parametrize('mutate', [
+    lambda m: canonical(m).replace(b',', b', ', 1),                                       # not canonical
+    lambda m: canonical(m)[:-1] + b',"tile":512}',                                        # duplicate key
+    lambda m: canonical({**m, 'extra': 1}),
+    lambda m: canonical({**m, 'version': 2}),
+    lambda m: canonical({**m, 'width': 262_145}),
+    lambda m: canonical({**m, 'section': '../x'}),
+    lambda m: canonical({**m, 'tiles': {**m['tiles'], '3.0': m['tiles']['0.0']}}),        # outside the grid
+    lambda m: canonical({**m, 'tiles': {**m['tiles'], '01.0': m['tiles']['0.0']}}),       # leading zero
+    lambda m: canonical({**m, 'tiles': {**m['tiles'], '2.0': {'labels': None, 'exclude': None}}}),
+    lambda m: canonical({**m, 'tiles': {**m['tiles'], '2.0': {'labels': '../../x', 'exclude': None}}}),
+    lambda m: canonical({**m, 'tables': {**m['tables'], 'objects': None}}),
+    lambda m: canonical({**m, 'tables': {**m['tables'], 'stack_offsets': {**m['tables']['stack_offsets'], 'byte_length': 6}}}),
+    lambda m: canonical({**m, 'tables': {**m['tables'], 'objects': {**m['tables']['objects'], 'byte_length': True}}}),
+    lambda m: canonical(m).replace(b'"height":1100', b'"height":NaN'),
+    lambda m: b'[' * 100_000,
+], ids=['not-canonical', 'duplicate-key', 'extra-member', 'other-version', 'too-wide', 'section-path', 'outside-grid', 'leading-zero',
+        'empty-entry', 'hash-as-path', 'missing-table', 'offsets-length', 'boolean-length', 'nan', 'deep-nesting'])
+def test_a_hostile_manifest_is_refused(tmp_path, mutate):
+    target, base, _, _, _ = committed_version(tmp_path)
+    name = write_manifest_file(target, mutate(valid_manifest(target, base)))
+    with pytest.raises(masks.MaskError) as error:
+        target.read_manifest(name)
+    assert (error.value.code, error.value.field) == ('INVALID_BUFFER', 'manifest')
+
+
+def test_a_manifest_that_does_not_match_its_name_is_refused(tmp_path):
+    target, base, _, _, _ = committed_version(tmp_path)
+    path = target.manifest_path(base)
+    path.write_bytes(path.read_bytes().replace(b'"height":1100', b'"height":1101'))
+    fresh = masks.MaskStore(target.folder)                                 # nothing remembered from the first read
+    with pytest.raises(masks.MaskError) as error:
+        fresh.read_manifest(base)
+    assert error.value.code == 'INVALID_BUFFER'
+
+
+def test_a_damaged_blob_is_never_served_and_is_repaired_by_the_next_write_of_the_same_tile(tmp_path):
+    target, manifest, labels, _, _ = committed_version(tmp_path)
+    sha = target.read_manifest(manifest)[0]['tiles']['0.0']['labels']
+    path = target.blob_path(sha)
+    good = path.read_bytes()
+    damaged = zlib.compress(bytes(masks.LAYER_BYTES['labels']), 1)        # a valid zlib stream of other bytes
+    for content in (damaged, good[:-10], b'not zlib', zlib.compress(bytes(masks.LAYER_BYTES['labels'] + 1)),
+                    b'\0' * (masks.LAYER_BYTES['labels'] * 2)):
+        path.write_bytes(content)
+        fresh = masks.MaskStore(target.folder)
+        with pytest.raises(masks.MaskError) as error:
+            fresh.read_tile(manifest, 'labels', 0, 0)
+        assert (error.value.code, error.value.field) == ('INVALID_BUFFER', 'tile')
+    data = layer_tiles(labels, 'labels')[(0, 0)]
+    masks.Staging(fresh, 's1', W, H, manifest).put('labels', 0, 0, sha, data)
+    assert masks.MaskStore(target.folder).read_tile(manifest, 'labels', 0, 0) == data
+
+
+def test_a_failed_manifest_write_leaves_every_earlier_version_readable(tmp_path, monkeypatch):
+    target, base, labels, _, _ = committed_version(tmp_path)
+    staging = masks.Staging(target, 's1', W, H, base)
+    data, sha = tile_with('labels', lambda t: t.__setitem__((0, 0), 5))
+    staging.put('labels', 1, 1, sha, data)
+    real_replace = os.replace
+
+    def failing_replace(source, destination):
+        if str(destination).endswith('.json'):
+            raise OSError('disk gone')
+        return real_replace(source, destination)
+    monkeypatch.setattr(masks.os, 'replace', failing_replace)
+    with pytest.raises(OSError):
+        staging.commit({})
+    monkeypatch.setattr(masks.os, 'replace', real_replace)
+    assert [path.name for path in (target.folder / 'manifests').iterdir()] == [f'{base}.json']     # no partial or temporary file
+    assert np.array_equal(read_back(masks.MaskStore(target.folder), base, 'labels'), labels)
+
+
+def test_a_full_disk_is_a_limit(tmp_path, monkeypatch):
+    staging = masks.Staging(store(tmp_path), 's1', W, H, None)
+
+    def full(*_arguments):
+        raise OSError(28, 'No space left on device')
+    monkeypatch.setattr(masks, '_write_durably', full)
+    data, sha = tile_with('labels', lambda t: t.__setitem__((0, 0), 5))
+    with pytest.raises(masks.MaskError) as error:
+        staging.put('labels', 0, 0, sha, data)
+    assert (error.value.code, error.value.field) == ('LIMIT_EXCEEDED', 'disk') and staging.tiles == {}

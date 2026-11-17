@@ -82,7 +82,7 @@ Updated 16 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.16 step 1** (store format and engine operations of mask tiles; **model: most capable, effort high**). The card's detailed steps and decisions A-E were written on 17 November 2026 and approved by the maintainer as written the same day (commit `b2b4cdc`, whose `tests` and *Desktop builds* passed on Windows, macOS and Linux). M8.4.15 was done on 17 November 2026 ([summary](validation/M8.4.15-summary.md)); its first-view target needed the identity record of the tile store, chosen by the maintainer (option 1). Card H7 (16-bit images above about 28 megapixels killed the page) was done on 17 November 2026 at the maintainer's request, between steps 4 and 5. **Checkpoint of 17 November 2026:** commit `ccffe7c`; on Windows `npm test` 402 passed, typecheck, standalone build, `tests/e2e/desktop.mjs` (engine off), `tests/e2e/tiled-sections.mjs` (public example and `rgb2g`) and `tests/e2e/large-16bit-desktop.mjs`; GitHub `tests` and *Desktop builds* passed on Windows, macOS and Linux (the macOS `web-app` job needed three attempts: GitHub had no macOS arm64 runner free, "not acquired by Runner"). The full session checks (pytest, ruff, smoke) were not repeated: no Python changed since the last full run. M8.4.14 was done on 17 November 2026 ([summary](validation/M8.4.14-summary.md)). The design session of part C was held on 16 November 2026: decisions in
+- **Next step: M8.4.16 step 2** (page mask cache and display; **model: most capable, effort medium**). The card's detailed steps and decisions A-E were written on 17 November 2026 and approved by the maintainer as written the same day (commit `b2b4cdc`, whose `tests` and *Desktop builds* passed on Windows, macOS and Linux). Step 1 (mask store format, contract §8.7, and the engine's mask operations) was done on 17 November 2026; its checks are in the last line of this block. M8.4.15 was done on 17 November 2026 ([summary](validation/M8.4.15-summary.md)); its first-view target needed the identity record of the tile store, chosen by the maintainer (option 1). Card H7 (16-bit images above about 28 megapixels killed the page) was done on 17 November 2026 at the maintainer's request, between steps 4 and 5. **Checkpoint of 17 November 2026:** commit `ccffe7c`; on Windows `npm test` 402 passed, typecheck, standalone build, `tests/e2e/desktop.mjs` (engine off), `tests/e2e/tiled-sections.mjs` (public example and `rgb2g`) and `tests/e2e/large-16bit-desktop.mjs`; GitHub `tests` and *Desktop builds* passed on Windows, macOS and Linux (the macOS `web-app` job needed three attempts: GitHub had no macOS arm64 runner free, "not acquired by Runner"). The full session checks (pytest, ruff, smoke) were not repeated: no Python changed since the last full run. M8.4.14 was done on 17 November 2026 ([summary](validation/M8.4.14-summary.md)). The design session of part C was held on 16 November 2026: decisions in
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -101,7 +101,11 @@ Updated 16 November 2026.
   from it (item above), which also answers the timing question of 14 November. Decided on 13 November 2026: acceptance levels (accepted),
   scope of 1.0 (below), publication of V0.149. Decided on 14 November 2026: a milestone gate on macOS and Linux closes every milestone; the
   five decisions of M8.4 (answers recorded there, among them **multi-gigabyte images are required for 1.0**).
-- **Last checks: passed** on 17 November 2026 on the state of the M8.4.15 closing commit (branch `work/2026-11-13`, maintainer's Windows computer, one after another): `pytest -q` 811 passed / 9 skipped (Python 3.12); `npm test` 402 passed; `npm run typecheck` (no new diagnostics); `sync_version.py --check`; `ruff check src tests tools` (ruff under Python 3.14); standalone build; bundled runtime rebuilt; `tests/e2e/desktop.mjs` with the engine experiment off and on; `tests/e2e/tiled-sections.mjs`; `tests/e2e/large-16bit-desktop.mjs`. Not run locally: `tests/e2e/smoke.mjs` (needs the local server; the `e2e` job of GitHub runs it on every push). The GitHub run of that commit is recorded in the next session's first line.
+- **Checks of M8.4.16 step 1 (17 November 2026, maintainer's Windows computer):** `pytest -q` 848 passed / 9 skipped (Python 3.12), including the new
+  `tests/test_store_masks.py` and `tests/test_engine_masks.py`; `ruff check src tests tools`; bundled runtime rebuilt; `tests/e2e/tiled-sections.mjs` and
+  `tests/e2e/desktop.mjs` with the engine experiment on. Not repeated: `npm test`, typecheck, the standalone build and the other end-to-end tests (no
+  JavaScript changed). The GitHub run of the M8.4.15 closing state (`b2b4cdc`) passed on Windows, macOS and Linux.
+- **Last full checks: passed** on 17 November 2026 on the state of the M8.4.15 closing commit (branch `work/2026-11-13`, maintainer's Windows computer, one after another): `pytest -q` 811 passed / 9 skipped (Python 3.12); `npm test` 402 passed; `npm run typecheck` (no new diagnostics); `sync_version.py --check`; `ruff check src tests tools` (ruff under Python 3.14); standalone build; bundled runtime rebuilt; `tests/e2e/desktop.mjs` with the engine experiment off and on; `tests/e2e/tiled-sections.mjs`; `tests/e2e/large-16bit-desktop.mjs`. Not run locally: `tests/e2e/smoke.mjs` (needs the local server; the `e2e` job of GitHub runs it on every push). The GitHub run of that commit is recorded in the next session's first line.
 - **Previous checks:** passed** on 14 November 2026 on commit `381f2cf` (review of M8.4, branch `work/2026-11-13`, maintainer's Windows computer):
   `pytest -q` 664 passed / 9 skipped (Python 3.12); `node --test tests/app/*.test.mjs` 343 passed; `npm run typecheck` (no new diagnostics);
   `sync_version.py --check`; `ruff check src tests tools` (ruff 0.17.5 under Python 3.14, the only interpreter on this computer that has it);
@@ -1055,7 +1059,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
 - **Done when:** the targets of step 7 are measured (a failure is recorded with numbers and the card stops for a decision); the flag is off by
   default and in the flag table.
 
-##### M8.4.16 - Masks of tiled sections: storage, editing and undo — state: In progress; decisions A-E approved by the maintainer on 17 Nov 2026 as written; next: step 1
+##### M8.4.16 - Masks of tiled sections: storage, editing and undo — state: In progress; decisions A-E approved by the maintainer on 17 Nov 2026 as written; step 1 done; next: step 2
 
 - **Goal:** labels and exclusion of a tiled section live as mask tiles in the store (decision 6); every editing tool works on loaded tiles; undo and
   redo are per tile and bounded; changed tiles are sent in the background and sent again after an engine failure.
@@ -1076,7 +1080,8 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
     has its own width, height and origin; coordinates are translated at its edges in one new module), and the changed tiles are cut out again.
   - **B. Editing needs enough zoom.** On a tiled section the editing tools work only when the visible tiles fit the window budget (default
     96 level-0 tiles, about 120 MiB with pixels; at 1,440 x 900 that is any zoom of at least one screen pixel per 3 source pixels); further out
-    they refuse with one message ("zoom in to edit"). An object operation whose box needs more tiles than the budget refuses visibly (outline step 1).
+    they refuse with one message ("zoom in to edit"). An object operation (split, merge, delete, reclassify) loads the tiles of the object's bounding box (`o.bbox`, kept today); one whose box
+    needs more tiles than the budget refuses visibly.
   - **C. Undo by tile copies.** Undo keeps, for each step, a copy of the tiles it changed as they were before (copy on first write), within its own
     budget of 64 MiB; beyond it the oldest steps are dropped with a message. Pixel logs of today's path are not used for tiled sections (a large
     brush at full resolution writes millions of pixels).
@@ -1088,12 +1093,18 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
     only by the engine. Until M8.4.18 the project record does not name them, so closing the program still loses a tiled section (as today); the
     store keeps the last acknowledged manifest, which M8.4.18 will name.
 - **Steps (each one a checkpoint with its own tests; the model of each step is in brackets):**
-  1. **Store format and engine operations** [most capable, high]: `store/masks.py` (a mask tile is `512 x 512` labels `i32` or exclusion `u8`, stored as
+  1. **Done 17 Nov 2026.** **Store format and engine operations** [most capable, high]: `store/masks.py` (a mask tile is `512 x 512` labels `i32` or exclusion `u8`, stored as
      `<root>/tiles/<sha256>` of its raw little-endian bytes, all-zero tiles not stored; a manifest `{format: "sedcoretool.masks", version: 1, section,
      width, height, tiles: {"<row>.<col>": {labels, exclude}}, tables: {objects, classes, stacks}}`, canonical JSON, named by its SHA-256);
      operations `mask.put {base, tiles, tables}` (tiles as verified binary frames), `mask.commit {staged}` -> `{manifest}`, `mask.read {manifest,
      positions}`; contract §8.7 written before the first file. Python tests: exactness, verification, a killed engine between put and commit leaves
      the last manifest readable, hostile manifests and tiles refused.
+     *As built* (contract §8.7 is the reference): `mask.begin` opens a staged version on a base, `mask.put` carries **one tile** per descriptor
+     and binary frame (a labels tile is exactly the 1 MiB frame limit), `mask.commit` takes the tables as committed buffers named like the §4
+     inputs (`objects`, `classes`, `stack_offsets`, `stack_members`), `mask.discard` closes a staged version; blobs (tiles and tables) are stored
+     zlib-compressed in `blobs/<aa>/<sha256>` under `<projects>/<project>/tiles/` (uncompressed, a densely labelled 8 GiB section would take
+     about 11 GiB per version). Project identifiers are lower case (one folder on every file system). The coordinator gets the folder with
+     `--projects-dir`; the desktop program passes it in step 4. Tests: `tests/test_store_masks.py` (29) and `tests/test_engine_masks.py` (7).
   2. **Page mask cache and display** [most capable, medium]: pure module `app/js/tiledmasks.js` (tile cache with dirty, pinned and acknowledged states;
      dirty tiles are never evicted), the reduced mask of decision D, and the overlay drawn per tile at fine zoom; read-only (masks start empty).
      Node tests; desktop test: an injected mask appears at known positions at every level.
@@ -1101,15 +1112,15 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
      writes cut back into tiles; objects' statistics from the window (pixels of level 0). Input-to-next-frame p95 <= 33 ms during strokes, measured on
      `rgb8g`.
   4. **Background send and recovery** [most capable, high]: dirty tiles go out with `mask.put` after the stroke (never blocking it; a newer edit of a
-     tile replaces a pending send); a tile is acknowledged only after `mask.commit` (outline step 5); after an engine failure the unacknowledged tiles
+     tile replaces a pending send); a tile is acknowledged only after `mask.commit`; after an engine failure the unacknowledged tiles
      are sent again once M8.4.7 has restarted it. Test: the engine killed during a send; the masks in the page and, after the resend, in the store
      are unchanged and complete.
   5. **Undo and redo** [most capable, high]: decision C, swapping tile copies; history per section; the budget and its message. Node tests and the
      desktop test of step 4 with undo across the failure.
-  6. **Wand, lasso, scissors and object operations** [most capable, medium]: on the window of the object boxes (outline step 1); stacks stay one
-     table per section (outline step 3); refusal when a box exceeds the budget.
+  6. **Wand, lasso, scissors and object operations** [most capable, medium]: on the window of the object boxes (decision B); brushes and fills that
+     cross a tile seam write each tile; stacks stay one table per section; refusal when a box exceeds the budget.
   7. **Metadata limits** [fast, medium]: measure the objects and stacks tables of a dense synthetic `rgb8g` annotation against 65,536 records and
-     4 MiB (outline step 4); change the contract only with that number.
+     4 MiB (contract §3); change the contract only with that number.
   8. **Exact equality and closing** [fast, medium]: a small image opened both ways (whole, and forced tiled with a section factor of 1) with the same
      scripted edit sequence gives identical labels, exclusion, objects and stacks; tool gating of M8.4.15 updated (the editing tools leave the refused
      list); documents.

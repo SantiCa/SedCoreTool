@@ -213,7 +213,7 @@ colour palette or a U-Net), `kernels/` (pure array primitives: intervals, counti
 `depth.py` (depth and age), `export.py` (CSV and Excel), `plotting.py` (matplotlib figure), `cli.py` (command line),
 `unet/` (U-Net dataset, training, evaluation, prediction, tiling and metrics), `engine/` (experimental desktop
 engine process: framing, staged buffers, coordinator and isolated worker; §26.2), `store/` (the tile store's pixel pyramids:
-`format.py`, `tiles.py`, `source.py`, `pyramid.py`, `identity.py`; §26.4).
+`format.py`, `tiles.py`, `source.py`, `pyramid.py`, `identity.py`; and its mask tiles: `masks.py`; §26.4).
 
 Desktop program (`desktop/`): `main.js` (window, `app://` protocol and IPC), `preload.js` (narrow
 `window.corantoolDesktop` bridge), `tile-ipc.js` and `tile-reader.js` (tiled sections, §26.4), `engine.js`, `engine-ipc.js`, `engine-protocol.js` and `engine-runtime.js` (engine process
@@ -3062,6 +3062,18 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   ([summary](validation/M8.4.14-summary.md)).
 - **Serving tiles** (`store/tiles.py`, in the coordinator): every tile is checked against the SHA-256 listed in `<level>/.tiles.sha256` before
   it is sent; verified tiles are kept in a 256 MiB least-recently-used cache. Up to 16 tiles per request, sent in binary frames of at most 1 MiB.
+- **Mask tiles** (`store/masks.py`, in the coordinator; card M8.4.16, not used by the interface yet): the labels (`i32`) and exclusion (`u8`) of a
+  tiled section at full resolution, in 512 x 512 tiles on the grid of level 0, plus its objects, classes and overlap-stack tables, stored in
+  `<user data>/projects/<project>/tiles/` (the main process passes `<user data>/projects` with `--projects-dir`; nothing there is deleted by a
+  budget). Every tile and table is a blob named by the SHA-256 of its bytes and stored zlib-compressed (level 1) in `blobs/<aa>/<sha256>`; a layer
+  whose samples are all 0 is not stored. One version of a section is a manifest, canonical JSON named by its own SHA-256 in `manifests/`, that
+  lists the blob of each stored layer and table ([contract §8.7](roadmap-engine-contract.md#87-mask-tiles-and-manifests-card-m8416)). A new
+  version starts as a copy of a base version (`mask.begin`), receives changed tiles one by one (`mask.put`: length, SHA-256, zeros outside the
+  section and exclusion values 0 or 1 checked; the blob is on disk before the answer) and becomes a manifest with `mask.commit`; until then it
+  exists only in the coordinator's memory, so a stopped engine leaves every earlier version readable. Blobs and manifests are written to a
+  temporary file, flushed to the disk and renamed; a blob or manifest is used only when its bytes match its name (a blob also must decompress
+  to exactly its length), and a damaged blob is written again by the next `mask.put` of the same content. Verified blobs are cached (64 MiB).
+  Unused blobs and manifests are not deleted yet (card M8.4.18).
 - **Tiled sections in the interface** (behind the same flag): an image added through the interface whose header says it has more pixels than the
   maximum size when adding images gets a pyramid (a dialog shows the progress and can cancel) and becomes a section whose working image is the
   finest pyramid level within that size. Such a section is not saved in the project yet, has no interval table yet, keeps the default filters, and

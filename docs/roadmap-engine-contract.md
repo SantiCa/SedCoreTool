@@ -332,7 +332,7 @@ gates are delivered; it does not certify M8.2 packaging or M8.3 numerical/perfor
 Specified on 16 November 2026, before any store file was written. Implemented in the engine on 17 November 2026 (card M8.4.14 steps 3-5:
 `src/sedcoretool/store/`, the three operations below); **the interface does not use it yet** (card M8.4.15).
 It realises [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84) and its "Design of part C" for
-the pixel pyramid. Mask tiles and manifests (decision 6) extend this section in card M8.4.16. The format is independent of the browser,
+the pixel pyramid. Mask tiles and manifests (decision 6) are §8.7 (card M8.4.16). The format is independent of the browser,
 IndexedDB and Electron (D12): a program that reads this section can read and write a store without SedCoreTool.
 
 ### 8.1 Roots and ownership
@@ -432,3 +432,77 @@ Exactness against the generator of card M8.4.13 (`tools/make_large_fixtures.py`)
 and levels 1-3 equal the same integer mean computed independently with NumPy; two builds of one source give identical tile bytes and hashes.
 Hostile sources (huge declared sizes, truncated files, offsets past the end) fail without large allocations. Interrupted builds, a full disk, a
 corrupted or missing tile file and a tile-hash file of the wrong length are handled as above.
+
+### 8.7 Mask tiles and manifests (card M8.4.16)
+
+Specified on 17 November 2026, before any mask file was written. It realises decision 6 of
+[ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84) and decision E of card M8.4.16. The masks of a
+tiled section are **project data**, not a cache: nothing here is deleted by a budget.
+
+**Root.** The main process passes the projects folder when it starts the coordinator (`--projects-dir`, an absolute folder under the
+program's user data, `projects/`). A project's mask store is `<projects>/<project>/tiles/`, where `<project>` is the project's identifier
+(1 to 64 characters `a-z 0-9 _ -`, lower case so that it names one folder on every file system, and never a Windows device name such
+as `con` or `lpt1`; the program's project identifiers are already of this form). A section identifier has 1 to 64 characters
+`A-Z a-z 0-9 _ -` and is never a path. The renderer names a project and a section only by these identifiers, never by a path; only the
+engine writes the folder. A coordinator started without `--projects-dir` answers the operations below with `UNSUPPORTED_METHOD`.
+
+**Layout of `<projects>/<project>/tiles/`.**
+
+| Path | Content |
+|---|---|
+| `blobs/<aa>/<sha256>` | One stored object: a mask tile or a table. `<sha256>` is the SHA-256 of its **uncompressed** bytes and `<aa>` its first two characters. The file is the zlib stream (RFC 1950, level 1) of those bytes. A blob is written to a temporary file in the same folder, flushed to disk and renamed; an existing blob is rewritten only if it does not decompress to bytes with its name's hash. |
+| `manifests/<sha256>.json` | One version of the masks of one section; `<sha256>` is the SHA-256 of the file's bytes, which are the manifest's canonical JSON (below). Written like a blob (temporary file, flushed, renamed); never changed afterwards. |
+
+**Mask tiles.** The grid of a section of `width x height` pixels has `rows = ceil(height / 512)` and `cols = ceil(width / 512)` positions;
+the tile at row `i`, column `j` covers pixels `x` in `[512 j, 512 j + 512)` and `y` in `[512 i, 512 i + 512)` of level 0 of the section's pixel
+pyramid (coordinates are full-resolution source pixels, ARCHITECTURE §6). A tile has two layers, each exactly 512 x 512 samples in C order (y, x):
+
+| Layer | Samples | Bytes | Values |
+|---|---|---|---|
+| `labels` | `i32le` | 1,048,576 | as `labels` in §4: 0 matrix, positive object ID, negative overlap-stack index |
+| `exclude` | `u8` | 262,144 | 0 or 1, as `exclude` in §4 |
+
+Samples outside the section (tiles on the right and bottom edges) are 0. A layer whose samples are all 0 is **not stored**: the manifest has
+no hash for it, and a reader returns zeros.
+
+**Tables.** The objects, classes and overlap-stack tables of §4, stored as blobs of their exact bytes: `objects` and `classes` `utf8json`
+(at most 4 MiB each, the metadata limits of §3), `stack_offsets` and `stack_members` `u32le`. `stack_members` is absent when there is no overlap.
+
+**Manifest.** A JSON object with exactly these members:
+
+```
+{"format": "sedcoretool.masks", "version": 1, "section": "<section id>", "width": W, "height": H, "tile": 512,
+ "tiles": {"<i>.<j>": {"labels": "<sha256>" | null, "exclude": "<sha256>" | null}, ...},
+ "tables": {"objects": T, "classes": T, "stack_offsets": T, "stack_members": T | null}}       T = {"sha256": "<sha256>", "byte_length": n}
+```
+
+- `section` is a section identifier; `W` from 1 to 262,144 and `H` from 1 to 16,777,216 (the source limits of §8.3), with
+  `rows x cols` at most 262,144 positions (68.7 gigapixels; the 8-GiB fixture `rgb8g` has 10,928).
+- `tiles` lists only positions with at least one stored layer. Keys are `<i>.<j>` in decimal without leading zeros, inside the grid.
+- `byte_length` of a table: `objects` and `classes` 1 to 4,194,304; `stack_offsets` a multiple of 4, from 8 to 16,777,216; `stack_members` a
+  positive multiple of 4 up to 16,777,216, or the table is `null`. Table content is checked by the method that uses it (§4), not by the store.
+- **Canonical JSON:** every key and string of a manifest is printable ASCII without `"` or `\`, so the canonical form is simply: keys
+  sorted by byte value at every level, no white space, integers in decimal (Python's
+  `json.dumps(value, sort_keys=True, separators=(",", ":"))`). A file whose bytes differ from the canonical form of its own content is not a manifest. At most 64 MiB.
+- The **identity of a version** is the manifest's SHA-256. Two sections, or two projects, may share blobs.
+
+**Reading.** A manifest is used only if its file's SHA-256 is its name and its content passes every rule above; a blob only if it
+decompresses (with a bound of its expected length plus one byte) to exactly its expected length and to bytes with its name's hash. Anything
+else is `INVALID_BUFFER` with `details.field = "manifest"` or `"tile"` / `"table"`, and nothing is sent.
+
+**Operations** (in the coordinator, standard library only; they never run in the method worker):
+
+| Operation | Request payload | Successful result |
+|---|---|---|
+| `mask.begin` | `{project, section, width, height, base}`: `base` `null` (no masks yet: every tile empty, no tables) or the SHA-256 of a manifest of that project with the same `section`, `width` and `height` | `{staged, rows, cols}`; `staged` a session-local UUID naming a new version in preparation, which starts as a copy of `base`. At most 16 per session. |
+| `mask.put` | `{staged, layer, row, col, sha256}` immediately followed by **one binary frame** of exactly the layer's byte length (the descriptor/binary pair of §3) | `{stored}`: `true` when the layer is now stored, `false` when it was all zeros and its entry was removed. The engine checks the length, the SHA-256, the zeros outside the section and, for `exclude`, that every sample is 0 or 1; any failure is `INVALID_BUFFER` (`details.field = "tile"`) and leaves the staged version unchanged. The blob is on disk before the answer. A later `mask.put` of the same layer and position replaces it. |
+| `mask.commit` | `{staged, tables}`: `tables` has any of `objects`, `classes`, `stack_offsets`, `stack_members`, each the handle of a committed buffer of §3 (`utf8json` 1-D, `utf8json` 1-D, `u32le` 1-D, `u32le` 1-D), or `null` for `stack_members` only (no overlap); a name left out keeps the base's table. With `base: null`, `objects`, `classes` and `stack_offsets` are required. | `{manifest}`: the new version's SHA-256, after every blob and the manifest file are on disk. The staged version is closed (also when the commit fails). Committing the same content twice gives the same manifest. |
+| `mask.discard` | `{staged}` | `{}`; closes a staged version without writing a manifest (blobs already written stay, unreferenced). Idempotent. |
+| `mask.read` | `{project, manifest, layer, positions}`, 1 to 16 `[row, col]` positions inside the grid | `{tiles: [{row, col, sha256, byte_length}, ...], frames: [n1, n2, ...]}` in request order; an empty layer has `sha256: null` and `byte_length: 0` and sends no bytes; the bytes of the other tiles follow, concatenated and cut into binary frames of at most 1,048,576 bytes, exactly as for `tile.read` (§8.5). Every blob is verified before anything is sent. |
+
+Identifiers are checked against the rules above (`INVALID_REQUEST` with the field's name); a staged version of another session does not
+exist. A staged version lives only in the coordinator's memory: if the engine stops before `mask.commit` answers, no manifest was written
+and the base, and every earlier manifest, stays readable; the client sends its unacknowledged tiles again to a new staged version (card
+M8.4.16 step 4). **Not yet specified:** which manifest is the current one of a section (the project record names it, card M8.4.18); deleting
+blobs and manifests that no saved version names (the save rule of ARCHITECTURE §3.4 rule 4, card M8.4.18); reading the tables back (with
+loading, card M8.4.18). Until then the folder only grows: a stroke adds the tiles it changed (compressed) and one manifest.

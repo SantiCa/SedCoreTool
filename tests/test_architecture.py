@@ -4,9 +4,9 @@ kernels  -> numpy and the standard library only; no IO-like modules.
 methods  -> kernels, numpy and the standard library; no pandas, Pillow, engine or IO-like modules.
 engine   -> the coordinator, transport and process wrappers (server, protocol, buffers, specs, lifetime, worker) use the
           standard library only; only the script method_worker.py may use numpy, kernels and methods, and nothing else imports it.
-store    -> the tile store (card M8.4.14): format.py and tiles.py use the standard library only (the coordinator imports them);
+store    -> the tile store (card M8.4.14): format.py, tiles.py and masks.py use the standard library only (the coordinator imports them);
           source.py and pyramid.py may also use numpy, pyvips and the method errors. The store never imports the engine or the public API.
-          The coordinator may import only store.format and store.tiles; the method worker may import the whole store.
+          The coordinator may import only store.format, store.tiles and store.masks; the method worker may import the whole store.
 public   -> pipeline, indices, depth, io, ... never start or import the engine process.
 """
 
@@ -22,8 +22,8 @@ IO_LIKE = {"os", "sys", "pathlib", "subprocess", "socket", "shutil", "tempfile",
            "ctypes", "multiprocessing", "threading", "importlib"}
 ENGINE_SIBLINGS = {"buffers", "lifetime", "protocol", "server", "specs", "worker"}   # imported by bare name when run with python -I
 PUBLIC = {"pipeline", "indices", "depth", "io", "segmentation", "export", "batch", "cli", "plotting"}
-STORE_FOR_THE_COORDINATOR = {"sedcoretool.store", "sedcoretool.store.format", "sedcoretool.store.tiles"}
-STORE_STANDARD_LIBRARY_ONLY = {"__init__.py", "format.py", "tiles.py"}
+STORE_FOR_THE_COORDINATOR = {"sedcoretool.store", "sedcoretool.store.format", "sedcoretool.store.tiles", "sedcoretool.store.masks"}
+STORE_STANDARD_LIBRARY_ONLY = {"__init__.py", "format.py", "tiles.py", "masks.py"}
 
 
 def imported_modules(relative_path: str, source: str) -> set[str]:
