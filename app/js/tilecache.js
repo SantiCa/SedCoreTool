@@ -56,6 +56,20 @@ export function tilesByDistance(range, center) {
 export const tileKey = (k, row, col) => `${k}/${row}/${col}`;
 
 /**
+ * Where tile (k, row, col) goes on screen. The view shows the working image (pyramid level `workingLevel`, so one working pixel is
+ * 2^workingLevel source pixels) from working pixel (vx, vy) at `zoom` screen pixels per working pixel. `w` and `h` are the tile's real
+ * pixels (edge tiles are padded with zeros beyond them, which must not be drawn); `dw`, `dh` the size of those pixels on screen.
+ * @param {Level[]} levels @param {number} k @param {number} row @param {number} col
+ * @param {{vx: number, vy: number, zoom: number, workingLevel: number}} view
+ */
+export function tilePlacement(levels, k, row, col, view) {
+  const level = levels[k], scale = 2 ** (k - view.workingLevel) * view.zoom;   // screen pixels per level-k pixel
+  const w = Math.min(TILE, level.width - col * TILE), h = Math.min(TILE, level.height - row * TILE);
+  const x = col * TILE * 2 ** (k - view.workingLevel), y = row * TILE * 2 ** (k - view.workingLevel);   // working pixels
+  return { dx: (x - view.vx) * view.zoom, dy: (y - view.vy) * view.zoom, dw: w * scale, dh: h * scale, w, h };
+}
+
+/**
  * Where to draw tile (k, row, col) from while it is missing: the nearest coarser level whose covering tile `has(key)`, and the part of that
  * tile (in its own pixels) that corresponds to the missing one. Null when no coarser tile is cached.
  * @param {Level[]} levels @param {number} k @param {number} row @param {number} col @param {(key: string) => boolean} has
@@ -118,10 +132,12 @@ export class TileCache {
 export class TileScheduler {
   /**
    * @param {{fetch: (k: number, positions: [number, number][]) => Promise<{row: number, col: number, value: any, bytes: number}[]>,
-   *   cache: TileCache, onLoaded?: (keys: string[]) => void, onError?: (error: any) => void, batch?: number, maxInFlight?: number}} options
+   *   cache: TileCache, onLoaded?: (keys: string[]) => void, onError?: (error: any) => void, batch?: number, maxInFlight?: number, prefix?: string}} options
+   *   `prefix` keeps the keys of several pyramids apart in one shared cache (the page has one budget).
    */
-  constructor({ fetch, cache, onLoaded = () => {}, onError = () => {}, batch = BATCH, maxInFlight = MAX_IN_FLIGHT }) {
+  constructor({ fetch, cache, onLoaded = () => {}, onError = () => {}, batch = BATCH, maxInFlight = MAX_IN_FLIGHT, prefix = '' }) {
     this.fetch = fetch; this.cache = cache; this.onLoaded = onLoaded; this.onError = onError; this.batch = batch; this.maxInFlight = maxInFlight;
+    this.prefix = prefix;
     /** @type {{k: number, row: number, col: number}[]} */
     this.queue = [];
     /** @type {Set<string>} */
@@ -133,7 +149,7 @@ export class TileScheduler {
   /** @param {number} k @param {[number, number][]} positions in order of priority @param {Set<string>} [protect] keys on screen */
   want(k, positions, protect = new Set()) {
     this.protect = protect;
-    this.queue = positions.filter(([row, col]) => { const key = tileKey(k, row, col); return !this.cache.has(key) && !this.inFlight.has(key); })
+    this.queue = positions.filter(([row, col]) => { const key = this.prefix + tileKey(k, row, col); return !this.cache.has(key) && !this.inFlight.has(key); })
       .map(([row, col]) => ({ k, row, col }));
     this.pump();
   }
@@ -142,13 +158,13 @@ export class TileScheduler {
     while (this.running < this.maxInFlight && this.queue.length) {
       const k = this.queue[0].k, batch = [];
       while (batch.length < this.batch && this.queue.length && this.queue[0].k === k) batch.push(/** @type {{k: number, row: number, col: number}} */ (this.queue.shift()));
-      const keys = batch.map((tile) => tileKey(tile.k, tile.row, tile.col));
+      const keys = batch.map((tile) => this.prefix + tileKey(tile.k, tile.row, tile.col));
       keys.forEach((key) => this.inFlight.add(key));
       this.running++;
       this.fetch(k, batch.map((tile) => [tile.row, tile.col])).then((tiles) => {
         const loaded = [];
         for (const tile of tiles) {
-          const key = tileKey(k, tile.row, tile.col);
+          const key = this.prefix + tileKey(k, tile.row, tile.col);
           for (const dropped of this.cache.set(key, tile.value, tile.bytes, this.protect)) dropped?.close?.();
           loaded.push(key);
         }

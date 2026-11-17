@@ -159,8 +159,8 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 |------|---------|:----:|
 | `core.js` | Intervals, indices, age model, CSV, RLE encoding, overlapping-trace stacks | ✓ |
 | `sectiondepth.js` | Pure ROI depth/row conversion and pixels per centimetre; independent of interface/state | Yes |
-| `tiledsection.js` | Tiled sections (card M8.4.15): image sizes read from TIFF, JPEG and PNG headers (`imageDimensions`), the pyramid level that serves as a tiled section's working image (`proxyLevel`) and a level assembled from its tiles into RGBA (`assembleLevel`) | Yes |
-| `tilecache.js` | Which tiles of a tiled section the viewer needs (card M8.4.15): the level for a zoom (`levelForZoom`: the coarsest with at least one level pixel per screen pixel), the visible tiles plus one ring, nearest the centre first, a coarser cached tile to draw while one is missing (`coarserCover`), a 256 MiB least-recently-used cache that keeps the tiles on screen (`TileCache`) and batched requests, 16 tiles each, two at a time, dropping tiles no longer wanted (`TileScheduler`) | Yes |
+| `tiledsection.js` | Tiled sections (card M8.4.15): image sizes read from TIFF, JPEG and PNG headers (`imageDimensions`), the pyramid level that serves as a tiled section's working image (`proxyLevel`) and a level assembled from its tiles into RGBA (`assembleLevel`) and one tile as 8-bit RGBA for display (`tileRgba`) | Yes |
+| `tilecache.js` | Which tiles of a tiled section the viewer needs (card M8.4.15): the level for a zoom (`levelForZoom`: the coarsest with at least one level pixel per screen pixel), the visible tiles plus one ring, nearest the centre first, a coarser cached tile to draw while one is missing (`coarserCover`), a 256 MiB least-recently-used cache that keeps the tiles on screen (`TileCache`) and batched requests, 16 tiles each, two at a time, dropping tiles no longer wanted (`TileScheduler`, keys prefixed per pyramid); where a tile goes on screen (`tilePlacement`) | Yes |
 | `maskchanges.js` | Which rows of each section's label and exclusion masks changed since the engine last received them: `createMaskChanges` (mark, take, restore, mark all) and `indexRangeOfPairs` (the pixels named by an edit-history list). A hint for the engine path, never a proof (§26.2) | Yes |
 | `sectionanalysis.js` | Analysis of one section without the DOM: effective class of each object, class-index table, row counts (cached per section), interval bins with no-data padding, ages and manual indices (§3.2), plus the builders of the engine method's input snapshot and reference result columns (`buildIntervalSnapshot`, `referenceColumns`), the revision key of a section's calculation (`analysisRevision`) and the conversion of engine result columns to `s.bins` (`resultToBins`). `app.js::analyze` passes the project state in | Yes |
 | `imageproc.js` | Enhancement, detection, connected components, magic wand, lasso, descriptors, rotation, downsampling | ✓ |
@@ -3058,8 +3058,18 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   it is sent; verified tiles are kept in a 256 MiB least-recently-used cache. Up to 16 tiles per request, sent in binary frames of at most 1 MiB.
 - **Tiled sections in the interface** (behind the same flag): an image added through the interface whose header says it has more pixels than the
   maximum size when adding images gets a pyramid (a dialog shows the progress and can cancel) and becomes a section whose working image is the
-  finest pyramid level within that size; full-resolution tiles are drawn over it when zooming in (in development). Such a section is not saved in
-  the project yet, has no interval table yet, and tools that would decode the source (crop, rotation, resolution) refuse with a message.
+  finest pyramid level within that size. Such a section is not saved in the project yet, has no interval table yet, keeps the default filters, and
+  tools that would decode the source (crop, rotation, resolution) refuse with a message.
+- **Drawing tiles** (`render` → `drawTiles` in `app.js`, `tilecache.js`): after the working image is drawn, when the zoom in screen pixels per source
+  pixel (`zoom / ds`) asks for a level `k = levelForZoom(levels, zoom / ds)` finer than the working image's level, the tiles of level `k` that cover
+  the visible part of the analysis area are drawn over it, clipped to that area, with nearest-pixel scaling and edges rounded to whole screen pixels
+  (no seams). Tile `(k, row, col)` covers working pixels from `col · 512 · 2^(k − level)`; padding beyond the level's size is not drawn. Each tile
+  becomes an 8-bit RGBA `ImageBitmap` (`tileRgba`: grey copied to R, G and B; 16-bit samples shown by their high byte, `v >>> 8`, as the working
+  image; alpha 255 unless the source has alpha). The visible tiles plus one ring are requested nearest the centre first; while a tile is missing,
+  the nearest coarser cached tile finer than the working image is drawn in its place, otherwise the working image stays visible (never blank).
+  One cache serves the page (256 MiB of bitmaps, least recently used dropped first, never a tile on screen; dropped bitmaps are closed); keys
+  carry the pyramid id. Tiles are drawn only while the working image under them shows source pixels too: no filter (or "show original"), no
+  objects and no exclusion in the working image (masks of tiled sections come with card M8.4.16).
 - **The page's bridge** (`desktop/tile-ipc.js`, only with `SEDCORETOOL_TILED_SECTIONS=1` and the engine experiment): `window.corantoolDesktop.tiles`
   registers a file the user chose (the page gets an opaque token, never the path), builds its pyramid with progress events, cancels, and reads the
   verified tiles of pyramids the page built, through the engine. `desktop/tile-reader.js` reads the store in the main process; it serves only the

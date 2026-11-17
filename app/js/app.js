@@ -26,7 +26,8 @@ import { VISION_MODEL, visionFeatureId, traceWindow, traceInput, pickEmbedding }
 import { coresFromLongTable, applyCatalogue, coreAges, intervalsOnAxis, intervalsFromTable, fitModel, buildMapSVG, mapBBox, predictProba, MAP_STYLE, MAP_SYMBOLS, fitBBoxAspect, validMapCoords } from './geo.js';
 import { $, APP, APP_NAMES, CLF_SCOPES, ML_DEFAULT, S, VERSION, clsById, defaultClasses, fetchAsset, fmt, hex, hideMissingExamples, keyOf, sec, uid } from './state.js';
 import { figTabsData, loadFigTabs, renderFigPanel, renderFigure, resetFigTabs, scheduleFigure, traceCanvas } from './figures.js';
-import { assembleLevel, imageDimensions, levelPositions, proxyLevel } from './tiledsection.js';
+import { assembleLevel, imageDimensions, levelPositions, proxyLevel, tileRgba, TILE } from './tiledsection.js';
+import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlacement, tileRange, tilesByDistance } from './tilecache.js';
 import { renderData } from './datatab.js';
 import { frameRatio, panelPrefs, savePanels } from './panels.js';
 import { addRecordFromTable, defaultLogView, lastLog, mode, renderLog, renderLogPanel, renderRecList, scheduleLog, sectionCanvas, navigationPreviewCanvas, clearNavigationPreviews, setMode } from './columns.js';
@@ -389,6 +390,75 @@ async function tiledWorkingImage(tiled) {
   return assembleLevel(tiles, level, tiled.channels, tiled.bits);
 }
 
+/* The viewer's full-resolution tiles (card M8.4.15 step 4): one page cache with one budget, one scheduler per pyramid. A tile becomes an
+   ImageBitmap (16-bit shown by its high byte, as the working image); evicted bitmaps are closed. */
+const tileCache = new TileCache();
+const tileSchedulers = new Map();
+
+/** @returns {TileScheduler} */
+function tileScheduler(s) {
+  const tiled = s.tiled;
+  let scheduler = tileSchedulers.get(tiled.pyramid);
+  if (scheduler) return scheduler;
+  const fetch = async (k, positions) => {
+    const read = await TILES.read(tiled.pyramid, k, positions);
+    if (read.error) throw new Error(t('tiles.err', { code: read.error.code, field: read.error.field || '' }));
+    const bytes = new Uint8Array(read.ok.bytes.buffer || read.ok.bytes, read.ok.bytes.byteOffset || 0, read.ok.bytes.byteLength);
+    const out = [];
+    let offset = 0;
+    for (let i = 0; i < read.ok.tiles.length; i++) {
+      const length = read.ok.tiles[i].byte_length, rgba = tileRgba(bytes.subarray(offset, offset + length), tiled.channels, tiled.bits);
+      offset += length;
+      out.push({ row: positions[i][0], col: positions[i][1], value: await createImageBitmap(new ImageData(rgba, TILE, TILE)), bytes: rgba.byteLength });
+    }
+    return out;
+  };
+  scheduler = new TileScheduler({ fetch, cache: tileCache, prefix: tiled.pyramid + '/',
+    onLoaded: () => { if (sec()?.tiled === tiled) requestRender(); },
+    onError: (error) => { if (!tiled.errorShown) { tiled.errorShown = true; toast(error.message || String(error), 9000); } } });
+  tileSchedulers.set(tiled.pyramid, scheduler);
+  return scheduler;
+}
+
+/** Tiles show the source's pixels: drawn only while the working image under them shows them too (no filter, no annotation; M8.4.16 adds masks). */
+function tilesShowSource(s) {
+  if (!S.showOrig && Object.keys(DEFAULT_FILTERS).some((key) => s.filters[key] !== DEFAULT_FILTERS[key])) return false;
+  if (s.objects.size) return false;
+  if (s.tiled.clearAt !== (s._mv || 0)) { s.tiled.clearAt = s._mv || 0; s.tiled.clear = !s.exclude || !s.exclude.some((v) => v !== 0); }
+  return s.tiled.clear;
+}
+
+/**
+ * Draw the full-resolution tiles of a tiled section over its working image, inside the analysis area, when the zoom needs a level finer than
+ * the working image. A tile not loaded yet is drawn from the nearest finer-than-working level already cached, else the working image shows.
+ */
+function drawTiles(s, cw, ch) {
+  const tiled = s.tiled, levels = tiled.levels, { x: vx, y: vy, zoom: z } = S.view, ds = s.ds, roi = s.roi, scheduler = tileScheduler(s);
+  const k = levelForZoom(levels, z / ds);
+  if (k >= tiled.level || !tilesShowSource(s)) { scheduler.want(k, []); return; }
+  const x0 = Math.max(vx, roi.x0), y0 = Math.max(vy, roi.y0), x1 = Math.min(vx + cw / z, roi.x1), y1 = Math.min(vy + ch / z, roi.y1);
+  if (x1 <= x0 || y1 <= y0) { scheduler.want(k, []); return; }
+  const rect = { x0: x0 * ds, y0: y0 * ds, x1: x1 * ds, y1: y1 * ds }, visible = tileRange(levels, k, rect, 0), prefix = tiled.pyramid + '/';
+  const protect = new Set();
+  for (let row = visible.row0; row <= visible.row1; row++) for (let col = visible.col0; col <= visible.col1; col++) protect.add(prefix + tileKey(k, row, col));
+  scheduler.want(k, tilesByDistance(tileRange(levels, k, rect, 1), { x: (rect.x0 + rect.x1) / 2, y: (rect.y0 + rect.y1) / 2 }), protect);
+  const placement = { vx, vy, zoom: z, workingLevel: tiled.level };
+  vctx.save();
+  vctx.beginPath(); vctx.rect((x0 - vx) * z, (y0 - vy) * z, (x1 - x0) * z, (y1 - y0) * z); vctx.clip();
+  vctx.imageSmoothingEnabled = false;                    // nearest pixel, as the working image is drawn
+  for (let row = visible.row0; row <= visible.row1; row++) {
+    for (let col = visible.col0; col <= visible.col1; col++) {
+      const at = tilePlacement(levels, k, row, col, placement);
+      const dx = Math.round(at.dx), dy = Math.round(at.dy), dw = Math.round(at.dx + at.dw) - dx, dh = Math.round(at.dy + at.dh) - dy;   // no seams
+      const bitmap = tileCache.get(prefix + tileKey(k, row, col));
+      if (bitmap) { vctx.drawImage(bitmap, 0, 0, at.w, at.h, dx, dy, dw, dh); continue; }
+      const cover = coarserCover(levels, k, row, col, (key) => tileCache.has(prefix + key));
+      if (cover && cover.k < tiled.level) vctx.drawImage(tileCache.get(prefix + cover.key), cover.sx, cover.sy, cover.sw * at.w / TILE, cover.sh * at.h / TILE, dx, dy, dw, dh);
+    }
+  }
+  vctx.restore();
+}
+
 /** A small modal with the pyramid's progress and a Cancel button. */
 function tileBuildDialog(name, onCancel) {
   const dlg = document.createElement('dialog');
@@ -431,7 +501,8 @@ async function addTiledSection(file) {
     orig: working.rgba, orig16: working.rgba16, ds: 2 ** level, full: { w: info.width, h: info.height } });
   s.tiled = tiled;
   const prev = sec();
-  if (prev) { s.units = prev.units; s.top = prev.bottom; s.bottom = prev.bottom + (prev.bottom - prev.top); s.filters = { ...prev.filters }; s.preset = prev.preset; s.detect = /** @type {any} */ ({ ...prev.detect }); enhance(s); }
+  // Filters stay at their defaults: they need the whole image (ARCHITECTURE §3.4 decision 8), and the tiles show the source's pixels.
+  if (prev) { s.units = prev.units; s.top = prev.bottom; s.bottom = prev.bottom + (prev.bottom - prev.top); s.detect = /** @type {any} */ ({ ...prev.detect }); }
   S.sections.push(s);
   selectSection(S.sections.length - 1, true); markDirty();
   toast(t('tiles.added', { w: info.width, h: info.height, k: 2 ** level }), 9000);
@@ -1283,6 +1354,7 @@ function render() {
     }
   }
   vctx.putImageData(imgData, 0, 0);
+  if (s.tiled && TILES) drawTiles(s, cw, ch);
   const toS = (x, y) => [(x - vx) * z, (y - vy) * z];
   // analysis area
   vctx.save();
@@ -4457,4 +4529,4 @@ initializeDiagnostics({
 const startupReady = startup();
 
 // Exposed for automated tests.
-window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, needPixels, saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, setTool, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };
+window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, needPixels, requestRender, tilesIdle: () => [...tileSchedulers.values()].every((q) => q.idle), saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, setTool, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };

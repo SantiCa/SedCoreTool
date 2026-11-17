@@ -69,6 +69,26 @@ export function levelPositions(level) {
 }
 
 /**
+ * One tile's samples as 8-bit RGBA for display (TILE x TILE, padding included): grey copied to R, G and B, 16-bit shown by its high byte
+ * (as `tiff.js` shows 16-bit images), alpha 255 unless the source has an alpha channel.
+ * @param {Uint8Array} bytes @param {number} channels 1, 3 or 4 @param {number} bits 8 or 16
+ */
+export function tileRgba(bytes, channels, bits) {
+  const pixels = TILE * TILE, wide = bits === 16;
+  if (![1, 3, 4].includes(channels) || ![8, 16].includes(bits) || bytes.byteLength !== pixels * channels * (bits / 8)) throw new Error('tile does not match its samples');
+  const samples = wide ? new Uint16Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)) : bytes, shift = wide ? 8 : 0;
+  const out = new Uint8ClampedArray(pixels * 4);
+  for (let p = 0, s = 0, o = 0; p < pixels; p++, s += channels, o += 4) {
+    const r = samples[s] >>> shift;
+    out[o] = r;
+    out[o + 1] = channels === 1 ? r : samples[s + 1] >>> shift;
+    out[o + 2] = channels === 1 ? r : samples[s + 2] >>> shift;
+    out[o + 3] = channels === 4 ? samples[s + 3] >>> shift : 255;
+  }
+  return out;
+}
+
+/**
  * One level of a pyramid as the RGBA working image of today's path: 8-bit RGBA for display, and, for a 16-bit source, the 16-bit RGBA
  * samples too (the 8-bit value is the 16-bit one shifted right by 8, as `tiff.js` does). Grey is copied to R, G and B; alpha is 255 (65535)
  * unless the source has an alpha channel.

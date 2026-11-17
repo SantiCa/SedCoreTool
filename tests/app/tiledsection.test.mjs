@@ -89,3 +89,13 @@ test('a missing, misplaced or wrongly sized tile is an error, never a partial im
   assert.throws(() => assembleLevel([{ row: 0, col: 0, bytes: new Uint8Array(10) }], level, 1, 8), /does not match/);
   assert.throws(() => assembleLevel([], level, 2, 8), /unsupported/);
 });
+
+test('a tile becomes 8-bit RGBA for display, padding included', async () => {
+  const { tileRgba } = await import('../../app/js/tiledsection.js');
+  const grey16 = tileRgba(tileOf(1, 16, (i) => (i === 0 ? 0xabcd : 0x0100)), 1, 16);
+  assert.equal(grey16.length, TILE * TILE * 4);
+  assert.deepEqual([...grey16.subarray(0, 8)], [0xab, 0xab, 0xab, 255, 1, 1, 1, 255]);
+  const rgba = tileRgba(tileOf(4, 8, (i) => i % 4 * 10), 4, 8);
+  assert.deepEqual([...rgba.subarray(0, 4)], [0, 10, 20, 30]);
+  assert.throws(() => tileRgba(new Uint8Array(10), 3, 8), /does not match/);
+});

@@ -104,3 +104,24 @@ test('a tile evicted by the cache is closed (its bitmap memory released)', async
   assert.equal(cache.bytes, 20);
   void answer;
 });
+
+test('a tile is placed on screen from the working image\'s view, and only its real pixels are drawn', async () => {
+  const { tilePlacement } = await import('../../app/js/tilecache.js');
+  // Working image = level 5 (one working pixel = 32 source pixels); view from working pixel (10, 3000) at zoom 8 (screen px per working px).
+  const view = { vx: 10, vy: 3000, zoom: 8, workingLevel: 5 };
+  // Level 2 tile (row 47, col 1): one level-2 pixel is 1/8 working pixel, so 512 pixels are 64 working pixels and 512 screen pixels.
+  assert.deepEqual(tilePlacement(levels, 2, 47, 1, view), { dx: (64 - 10) * 8, dy: (47 * 64 - 3000) * 8, dw: 512, dh: 512, w: 512, h: 512 });
+  // The last column of level 0 is a full tile (8,192 = 16 x 512); the last row is 349,526 - 682 x 512 = 342 pixels high.
+  const edge = tilePlacement(levels, 0, 682, 15, view);
+  assert.deepEqual([edge.w, edge.h], [512, 342]);
+  assert.equal(edge.dh, 342 * 8 / 32);
+});
+
+test('the scheduler keeps the keys of several pyramids apart in one shared cache', async () => {
+  const { calls, fetch, answer } = deferredFetch(), cache = new TileCache(1e6);
+  const a = new TileScheduler({ fetch, cache, prefix: 'a/' }), b = new TileScheduler({ fetch, cache, prefix: 'b/' });
+  a.want(0, [[0, 0]]); answer(calls[0]); await new Promise((r) => setTimeout(r, 0));
+  b.want(0, [[0, 0]]);                                       // same position, other pyramid: requested
+  assert.equal(calls.length, 2);
+  assert.ok(cache.has('a/0/0/0'));
+});

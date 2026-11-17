@@ -95,6 +95,41 @@ try {
     return s.orig ? [...s.orig.slice(0, 4000)].every((v, i) => v === before[i]) : null;
   });
   assert.equal(reloaded, true, 'the working image is read again from the pyramid');
+  // Zoomed to one screen pixel per source pixel, the viewer draws level-0 tiles: screen pixels equal the source's pixels at the same place.
+  await on.page.setViewport({ width: 1600, height: 1000 });
+  await on.page.evaluate(() => new Promise((r) => setTimeout(r, 300)));
+  const drawn = await on.page.evaluate(async () => {
+    const { S } = window.ichantool, s = S.sections.at(-1), canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('view'));
+    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    // Working pixel (vx, vy) at the top left, integer, so source pixel (vx * ds + sx, vy * ds + sy) is at screen (sx, sy).
+    const vx = Math.floor(s.w / 2 - canvas.width / s.ds / 2), vy = Math.floor(s.h / 3);
+    S.view = { x: vx, y: vy, zoom: s.ds };
+    window.ichantool.requestRender(); await frame();
+    for (let i = 0; i < 400 && !window.ichantool.tilesIdle(); i++) await new Promise((r) => setTimeout(r, 25));
+    window.ichantool.requestRender(); await frame();
+    // Probes: source pixels that differ from the working image at the same place, so only a drawn level-0 tile can show them.
+    const ctx = canvas.getContext('2d'), probes = [], left = 160;   // left of this: the strip and the ruler
+    const X0 = vx * s.ds + left, Y0 = vy * s.ds, X1 = Math.min(s.full.w, s.roi.x1 * s.ds, vx * s.ds + canvas.width), Y1 = Math.min(s.full.h, vy * s.ds + canvas.height);
+    const row = Math.floor((Y0 + Y1) / 2 / 512), tiles = {};
+    for (let col = Math.floor(X0 / 512); col * 512 < X1; col++) {
+      const read = await window.corantoolDesktop.tiles.read(s.tiled.pyramid, 0, [[row, col]]);
+      tiles[col] = new Uint8Array(read.ok.bytes.buffer || read.ok.bytes, read.ok.bytes.byteOffset || 0, read.ok.bytes.byteLength);
+    }
+    const sourceAt = (X, Y) => { const at = ((Y % 512) * 512 + (X % 512)) * s.tiled.channels, b = tiles[Math.floor(X / 512)]; return s.tiled.channels === 1 ? [b[at], b[at], b[at]] : [...b.subarray(at, at + 3)]; };
+    let differing = 0;
+    for (let Y = Math.max(Y0, row * 512); Y < Math.min(Y1, row * 512 + 512) && probes.length < 40; Y += 3) {
+      for (let X = X0; X < X1 && probes.length < 40; X += 7) {
+        const source = sourceAt(X, Y), w = ((Y >> s.tiled.level) * s.w + (X >> s.tiled.level)) * 4, working = [...s.orig.subarray(w, w + 3)];
+        if (source.every((v, i) => v === working[i])) continue;
+        differing++;
+        const sx = X - vx * s.ds, sy = Y - vy * s.ds;
+        probes.push({ sx, sy, screen: [...ctx.getImageData(sx, sy, 1, 1).data.subarray(0, 3)], source, working });
+      }
+    }
+    return { probes, level: s.tiled.level, canvas: [canvas.width, canvas.height], view: S.view, roi: s.roi, w: s.w };
+  });
+  assert.ok(drawn.probes.length >= 10, 'probes where full resolution differs from the working image: ' + JSON.stringify(drawn));
+  for (const probe of drawn.probes) assert.deepEqual(probe.screen, probe.source, 'drawn pixel = source pixel at ' + JSON.stringify(probe));
   // A tool that decodes the source refuses with a message instead of reading gigabytes.
   const refused = await on.page.evaluate(async () => {
     const { S } = window.ichantool, s = S.sections.at(-1);
@@ -104,7 +139,7 @@ try {
   });
   assert.equal(refused, section.ds, 'changing the resolution of a tiled section is refused');
   assert.deepEqual(on.errors, []);
-  console.log('Tiled sections: added through the interface, working image from the pyramid, not saved, reloaded, tools refused:', JSON.stringify(section));
+  console.log('Tiled sections: added through the interface, working image from the pyramid, not saved, reloaded, tools refused; full-resolution tiles drawn (' + drawn.probes.length + ' probes):', JSON.stringify(section));
 } finally { await on.close(); }
 
 const off = await program(false);
