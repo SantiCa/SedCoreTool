@@ -978,7 +978,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   memory and cancellation targets hold or are recorded as failed with numbers (then stop and ask); evidence committed.
 - **Result (17 November 2026):** [summary](validation/M8.4.14-summary.md). Contract §8 and technical manual §26.4 describe the format; libvips in the runtime (+19 MiB on Windows; CI green on Windows, macOS and Linux); all seven fixtures build and read back exactly (80 regions per TIFF at levels 0-3); about 100 MiB/s, 8 GiB in 81 s, memory below 320 MiB, disk 1.33 times the decoded image; **no compressor** by the rule (zlib: 39 % of the throughput). The cancellation target failed first (297-658 ms, the partial folder was deleted before answering) and was fixed in the card (7-15 ms). Two Windows faults found and fixed: libvips crashed while a thread read the worker's stdin pipe; replacing the progress file failed while the coordinator read it. Not measured: macOS/Linux timing, cold cache, a 16 GiB computer.
 
-##### M8.4.15 - Tiled sections in the viewer (behind a flag) — state: In progress (steps 1-5 done 17 Nov 2026: tiles through the engine; tiled sections added with a working image from the pyramid; tile cache and scheduler; tiles drawn; navigation strip, ruler and readouts)
+##### M8.4.15 - Tiled sections in the viewer (behind a flag) — state: In progress (steps 1-6 done 17 Nov 2026: tiles through the engine; tiled sections added with a working image from the pyramid; tile cache and scheduler; tiles drawn; navigation strip, ruler and readouts; tool gating)
 
 - **Goal:** with `SEDCORETOOL_TILED_SECTIONS=1` and the engine experiment on, importing an image above the threshold of decision 1 builds its pyramid
   (progress and cancel shown) and shows the section from tiles: pan, zoom, navigation strip, depth ruler and depth readout, with full-resolution
@@ -1023,6 +1023,13 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
      row, because the working image has `ceil(full height / factor)` rows; this tolerance was fixed before comparing) and that the strip shows
      the image: passes on the public example (factor 2) and on `rgb2g` (factor 16). The ruler's tick labels are the same function of the same
      rows; they were not read back by the test.
+  6. *Done (17 November 2026):* tools of the Section mode on a tiled section. **Available:** select, pan, mark (depth marks) and the analysis area
+     (none uses a full-size pixel or mask array). **Refused with the one message `tiles.unavailable`:** wand, brush, lasso, cut, erase, exclude,
+     include (mask editing, M8.4.16); detection, crop, rotation 90 degrees, the resolution of the section and all filter controls (whole-image
+     tools, M8.5; a filter change is undone and the controls return to their defaults). "Same resolution for all sections" skips tiled sections.
+     A blocked tool chosen on another section becomes Pan when a tiled section is shown. `tests/e2e/tiled-sections.mjs` clicks every tool and
+     action and checks the state and the message (public example and `rgb2g`). Not covered: keyboard shortcuts of the tools (they go through the
+     same `setTool` check), the U-Net loader and the batch actions of other tabs.
   5. Navigation strip and ruler from the coarsest level that fits; depth readout and ruler identical to today's for the same full-resolution row.
   6. Tool gating: list every tool of the Section mode and its state on a tiled section; disabled ones show one message key.
   7. Measure against §7 on `rgb2g`, `rgb8g`, `deflate8g`, `gray16_2g` (pyramids already built): first useful view <= 2 s; cached pan/zoom frame

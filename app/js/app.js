@@ -377,6 +377,12 @@ function pickCore(n) {
    Not saved yet and not editable yet (cards M8.4.16 and M8.4.18): the interface says so. */
 const TILES = /** @type {any} */ (window).corantoolDesktop?.tiles?.enabled === true ? /** @type {any} */ (window).corantoolDesktop.tiles : null;
 
+/* Tools that a tiled section does not have yet (ARCHITECTURE §3.4 decision 8). Each refusal shows the one message `tiles.unavailable`.
+   Available: select, pan, mark and the analysis area (they use no pixel or mask arrays of full size). Mask editing arrives with card M8.4.16;
+   detection, crop, rotation, resolution and filters need the whole image (M8.5). */
+const TILED_BLOCKED_TOOLS = new Set(['wand', 'brush', 'lasso', 'cut', 'erase', 'exclude', 'include']);
+function tiledRefused(s) { if (!s?.tiled) return false; toast(t('tiles.unavailable')); return true; }
+
 /** The working image of a tiled section: its proxy level of the pyramid, read through the engine in batches of 16 verified tiles. */
 async function tiledWorkingImage(tiled) {
   const level = tiled.levels[tiled.level], positions = levelPositions(level), tiles = [];
@@ -885,7 +891,7 @@ function mergeObjects(list, group = '') {
 /* ───────────── detection ───────────── */
 
 function runDetection() {
-  const s = sec(); if (!s) return;
+  const s = sec(); if (!s || tiledRefused(s)) return;
   if (s.detect.method !== 'unet') { busy(() => withPixels(s, detectSection), 'detect'); return; }
   if (!unetController.model) { $('detectStatus').textContent = t('u.noModel'); return; }
   busy(() => withPixels(s, async (x) => { await unetProb(x); await detectSection(x); }), 'detect');
@@ -1539,7 +1545,7 @@ function edgeHit(s, sx0, sy) {
   return near(ya) ? 'a' : near(yb) ? 'b' : null;
 }
 function startCrop() {
-  const s = sec(); if (!s?.orig) return;
+  const s = sec(); if (!s?.orig || tiledRefused(s)) return;
   cropState = { s, y0: 0, y1: s.h }; $('cropBar').hidden = false; updateCropInfo(); requestRender();
 }
 export function endCrop() { cropState = null; $('cropBar').hidden = true; requestRender(); }
@@ -2054,6 +2060,7 @@ function nextReview(back = false) {
 /* ───────────── UI: panels ───────────── */
 
 function setTool(tool) {
+  if (TILED_BLOCKED_TOOLS.has(tool) && tiledRefused(sec())) return;
   if (tool === 'roi') S.prevTool = S.tool === 'roi' ? S.prevTool : S.tool;
   S.tool = tool;
   document.querySelectorAll('.tool').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === tool)));
@@ -2327,6 +2334,7 @@ function renderSectionForm() {
   $('secSel').innerHTML = S.sections.map((x, k) => `<option value="${k}" ${k === S.cur ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
   for (const id of ['secName', 'secTop', 'secBottom', 'secUnits', 'secDel', 'roiBtn', 'roiReset', 'rotL', 'rotR', 'detectBtn', 'clearCand', 'secRes', 'resAll']) $(id).disabled = !s;
   if (!s) return;
+  if (s.tiled && TILED_BLOCKED_TOOLS.has(S.tool)) setTool('pan');   // a tool chosen on another section does not follow into a tiled one
   $('secName').value = s.name; $('secTop').value = s.top; $('secBottom').value = s.bottom; $('secUnits').value = s.units;
   const ppu = pxPerCm(s);
   $('roiInfo').textContent = `x ${s.roi.x0}–${s.roi.x1} · y ${s.roi.y0}–${s.roi.y1} px · ${fmt(ppu * UNIT_TO_CM[s.units], 2)} px/${s.units}`;
@@ -2388,11 +2396,11 @@ async function changeResolution(s, k2) {
   if (s === sec()) selectSection(S.cur, true);
   afterChange(s); renderSectionForm();
 }
-$('secRes').addEventListener('change', (e) => { const s = sec(), k = +e.target.value; if (s && k) busy(() => changeResolution(s, k)); });
+$('secRes').addEventListener('change', () => { const select = /** @type {HTMLSelectElement} */ ($('secRes')), s = sec(), k = +select.value; if (tiledRefused(s)) { select.value = String(s.ds); return; } if (s && k) busy(() => changeResolution(s, k)); });
 $('resAll').addEventListener('click', () => {
   const s = sec(); if (!s) return; const target = pxPerCm(s);
   busy(async () => {
-    for (const o of S.sections) if (o !== s) await changeResolution(o, Math.max(1, Math.round((pxPerCm(o) * o.ds) / target)));
+    for (const o of S.sections) if (o !== s && !o.tiled) await changeResolution(o, Math.max(1, Math.round((pxPerCm(o) * o.ds) / target)));
     toast(t('sec.resAllDone', { p: fmt(target, 3) }));
   });
 });
@@ -2449,6 +2457,7 @@ function renderBinNote() {
 let filterTimer = 0;
 function refilter() {
   const s = sec(); if (!s) return;
+  if (tiledRefused(s)) { Object.assign(s.filters, DEFAULT_FILTERS); s.preset = 'none'; renderFilterForm(); return; }   // the tiles show the source's pixels
   clearTimeout(filterTimer);
   filterTimer = setTimeout(() => enhanceAsync(s).then((last) => { if (!last) return; s.logVer++; markDirty(); scheduleLog(); requestRender(); }).catch((e) => toast(t('err.generic', { e: e.message || e }))), 90);   // V0.41: in the worker
 }
@@ -2632,7 +2641,7 @@ $('secDel').addEventListener('click', (e) => {
 $('roiBtn').addEventListener('click', () => setTool('roi'));
 $('roiReset').addEventListener('click', () => { const s = sec(); if (s) setRoi(s, { x0: 0, y0: 0, x1: s.w, y1: s.h }); });
 for (const [id, dir] of [['rotL', -1], ['rotR', 1]]) $(id).addEventListener('click', () => {
-  const s = sec(); if (!s?.orig) return;
+  const s = sec(); if (!s?.orig || tiledRefused(s)) return;
   busy(() => {
     s.orig = rotate90(s.orig, s.w, s.h, 4, dir); if (s.orig16) s.orig16 = rotate90(s.orig16, s.w, s.h, 4, dir); s.labels = rotate90(s.labels, s.w, s.h, 1, dir); s.exclude = rotate90(s.exclude, s.w, s.h, 1, dir);
     s.marks = (s.marks || []).map((m) => (dir > 0 ? { ...m, x: s.h - 1 - m.y, y: m.x } : { ...m, x: m.y, y: s.w - 1 - m.x }));
@@ -4531,4 +4540,4 @@ initializeDiagnostics({
 const startupReady = startup();
 
 // Exposed for automated tests.
-window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, needPixels, requestRender, tilesIdle: () => [...tileSchedulers.values()].every((q) => q.idle), saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, setTool, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };
+window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, needPixels, requestRender, setTool, renderSectionForm, t, tilesIdle: () => [...tileSchedulers.values()].every((q) => q.idle), saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };

@@ -158,6 +158,39 @@ try {
   const readDepth = parseFloat(nav.depth.replace(/^[^0-9-]*/, '')), expected = nav.top + (sourceRow / nav.full.h) * (nav.bottom - nav.top);
   assert.ok(Math.abs(readDepth - expected) <= (nav.bottom - nav.top) / nav.h + 0.0006, `depth of the source row ${sourceRow}: read ${readDepth}, expected ${expected}`);
   assert.ok(nav.stripColours >= 2, 'the navigation strip shows the section image: ' + nav.stripColours + ' colours');
+  // Step 6: every tool of the Section mode on a tiled section. Editing tools, detection, crop, rotation, resolution and filters refuse with the
+  // one message; select, pan, mark and the analysis area work. A blocked tool selected on another section does not follow into a tiled one.
+  const gating = await on.page.evaluate(async () => {
+    const { S } = window.ichantool, s = S.sections.at(-1), toastText = () => document.getElementById('toast').textContent, out = { tools: {}, actions: {} };
+    const pause = () => new Promise((r) => setTimeout(r, 120));
+    for (const tool of ['select', 'pan', 'mark', 'wand', 'brush', 'lasso', 'cut', 'erase', 'exclude', 'include']) {
+      window.ichantool.setTool('pan'); document.getElementById('toast').textContent = '';
+      document.querySelector(`.tool[data-tool="${tool}"]`).click(); await pause();
+      out.tools[tool] = { active: S.tool === tool, message: toastText() };
+    }
+    window.ichantool.setTool('pan');
+    const roi = document.getElementById('roiBtn'); roi.click(); await pause(); out.tools.roi = S.tool === 'roi'; window.ichantool.setTool('pan');
+    const before = { w: s.w, h: s.h, ds: s.ds, rot: s.rot, crop: s.crop, filters: JSON.stringify(s.filters) };
+    for (const id of ['detectBtn', 'cropBtn', 'rotL', 'rotR']) { document.getElementById('toast').textContent = ''; document.getElementById(id).click(); await pause(); out.actions[id] = toastText(); }
+    const select = document.getElementById('secRes'); select.value = String(s.ds * 2); select.dispatchEvent(new Event('change', { bubbles: true })); await pause(); out.actions.secRes = toastText(); out.resValue = select.value;
+    const gamma = document.getElementById('f-gamma'); document.getElementById('toast').textContent = '';
+    gamma.value = '1.8'; gamma.dispatchEvent(new Event('input', { bubbles: true })); await new Promise((r) => setTimeout(r, 300)); out.actions.filter = toastText();
+    out.unchanged = JSON.stringify(before) === JSON.stringify({ w: s.w, h: s.h, ds: s.ds, rot: s.rot, crop: s.crop, filters: JSON.stringify(s.filters) });
+    // A brush chosen on the first section does not follow into the tiled one.
+    S.cur = 0; window.ichantool.setTool('brush'); S.cur = S.sections.length - 1; window.ichantool.renderSectionForm?.(); out.carried = S.tool;
+    return out;
+  });
+  for (const tool of ['select', 'pan', 'mark']) assert.equal(gating.tools[tool].active, true, tool + ' is available on a tiled section');
+  assert.equal(gating.tools.roi, true, 'the analysis area is available');
+  const message = await on.page.evaluate(() => window.ichantool.t?.('tiles.unavailable'));
+  for (const tool of ['wand', 'brush', 'lasso', 'cut', 'erase', 'exclude', 'include']) {
+    assert.equal(gating.tools[tool].active, false, tool + ' is refused');
+    assert.ok(gating.tools[tool].message.length > 10 && (!message || gating.tools[tool].message === message), `${tool} shows the one message: ${gating.tools[tool].message}`);
+  }
+  for (const [action, text] of Object.entries(gating.actions)) assert.equal(text, gating.tools.wand.message, `${action} shows the same message`);
+  assert.equal(gating.carried, 'pan', 'a brush chosen on another section does not follow into a tiled one');
+  assert.equal(gating.unchanged, true, 'the refused tools changed nothing');
+  assert.equal(gating.resValue, String(section.ds), 'the resolution control returns to the current value');
   assert.deepEqual(on.errors, []);
   console.log('Tiled sections: added through the interface, working image from the pyramid, not saved, reloaded, tools refused; full-resolution tiles drawn (' + drawn.probes.length + ' probes):', JSON.stringify(section));
 } finally { await on.close(); }
