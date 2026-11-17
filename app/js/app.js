@@ -26,6 +26,7 @@ import { VISION_MODEL, visionFeatureId, traceWindow, traceInput, pickEmbedding }
 import { coresFromLongTable, applyCatalogue, coreAges, intervalsOnAxis, intervalsFromTable, fitModel, buildMapSVG, mapBBox, predictProba, MAP_STYLE, MAP_SYMBOLS, fitBBoxAspect, validMapCoords } from './geo.js';
 import { $, APP, APP_NAMES, CLF_SCOPES, ML_DEFAULT, S, VERSION, clsById, defaultClasses, fetchAsset, fmt, hex, hideMissingExamples, keyOf, sec, uid } from './state.js';
 import { figTabsData, loadFigTabs, renderFigPanel, renderFigure, resetFigTabs, scheduleFigure, traceCanvas } from './figures.js';
+import { assembleLevel, imageDimensions, levelPositions, proxyLevel } from './tiledsection.js';
 import { renderData } from './datatab.js';
 import { frameRatio, panelPrefs, savePanels } from './panels.js';
 import { addRecordFromTable, defaultLogView, lastLog, mode, renderLog, renderLogPanel, renderRecList, scheduleLog, sectionCanvas, navigationPreviewCanvas, clearNavigationPreviews, setMode } from './columns.js';
@@ -120,6 +121,7 @@ async function sectionBlob(s) {
 }
 /** Working image of a section at factor k (crop and rotation applied). */
 async function decodeWorking(s, k) {
+  if (s.tiled) throw new Error(t('tiles.unavailable'));   // its source may be gigabytes: never decoded whole (card M8.4.15)
   let { w, h, rgba, rgba16, fw, fh } = await decodeBytes(await sectionBlob(s), s.file.name, s.file.type, { k, crop: s.crop });
   for (let r = 0; r < ((s.rot % 4) + 4) % 4; r++) { rgba = rotate90(rgba, w, h, 4, 1); if (rgba16) rgba16 = rotate90(rgba16, w, h, 4, 1); [w, h] = [h, w]; }
   if (!s.full) s.full = { w: fw, h: fh };
@@ -130,7 +132,7 @@ function ensurePixels(s) {
   if (s.orig) { pxTouch(s); return Promise.resolve(s); }
   if (s._loading) return s._loading;
   s._loading = (async () => {
-    const r = await decodeWorking(s, s.ds);
+    const r = s.tiled ? await tiledWorkingImage(s.tiled) : await decodeWorking(s, s.ds);
     if (r.w !== s.w || r.h !== s.h) console.warn('image size differs from the stored masks', s.name, r.w, r.h, s.w, s.h);
     // V0.44: the enhancement of a section being opened is computed in the worker; orig and enh are set together
     const input = r.rgba16 || r.rgba;
@@ -368,6 +370,74 @@ function pickCore(n) {
     dlg.showModal();
   });
 }
+/* ───────────── M8.4.15: tiled sections (behind SEDCORETOOL_TILED_SECTIONS=1 and the engine experiment) ─────────────
+   An image larger than the maximum size when adding images gets a pixel pyramid in the engine's tile store. The section keeps a small working
+   image from one level of it (so the rest of the program works as on a reduced section) and the viewer draws full-resolution tiles over it.
+   Not saved yet and not editable yet (cards M8.4.16 and M8.4.18): the interface says so. */
+const TILES = /** @type {any} */ (window).corantoolDesktop?.tiles?.enabled === true ? /** @type {any} */ (window).corantoolDesktop.tiles : null;
+
+/** The working image of a tiled section: its proxy level of the pyramid, read through the engine in batches of 16 verified tiles. */
+async function tiledWorkingImage(tiled) {
+  const level = tiled.levels[tiled.level], positions = levelPositions(level), tiles = [];
+  for (let i = 0; i < positions.length; i += 16) {
+    const batch = positions.slice(i, i + 16), read = await TILES.read(tiled.pyramid, tiled.level, batch);
+    if (read.error) throw new Error(t('tiles.err', { code: read.error.code }));
+    const bytes = new Uint8Array(read.ok.bytes.buffer || read.ok.bytes, read.ok.bytes.byteOffset || 0, read.ok.bytes.byteLength);
+    let offset = 0;
+    read.ok.tiles.forEach((tile, k) => { tiles.push({ row: batch[k][0], col: batch[k][1], bytes: bytes.subarray(offset, offset + tile.byte_length) }); offset += tile.byte_length; });
+  }
+  return assembleLevel(tiles, level, tiled.channels, tiled.bits);
+}
+
+/** A small modal with the pyramid's progress and a Cancel button. */
+function tileBuildDialog(name, onCancel) {
+  const dlg = document.createElement('dialog');
+  dlg.innerHTML = `<div style="display:grid;gap:10px;min-width:340px"><h3 style="margin:0">${esc(t('tiles.building', { n: name }))}</h3>
+    <progress id="tbProgress" max="1" value="0" style="width:100%"></progress><span class="note" id="tbStage"></span>
+    <div class="row" style="justify-content:flex-end"><button class="btn" id="tbCancel">${esc(t('cl.cancel'))}</button></div></div>`;
+  document.body.appendChild(dlg);
+  dlg.addEventListener('cancel', (e) => { e.preventDefault(); onCancel(); });
+  dlg.querySelector('#tbCancel').addEventListener('click', () => { /** @type {HTMLButtonElement} */ (dlg.querySelector('#tbCancel')).disabled = true; onCancel(); });
+  dlg.showModal();
+  return {
+    update({ stage, completed, total }) {
+      const bar = /** @type {HTMLProgressElement} */ (dlg.querySelector('#tbProgress'));
+      bar.value = total ? completed / total : 0;
+      dlg.querySelector('#tbStage').textContent = t('tiles.stage.' + stage);
+    },
+    close() { dlg.close(); dlg.remove(); },
+  };
+}
+
+/** Add `file` as a tiled section when it is larger than the maximum size when adding images; false when it is not (today's path). */
+async function addTiledSection(file) {
+  const dims = await imageDimensions(file);
+  if (!dims || dims.w * dims.h <= (S.settings.maxMP || 8) * 1e6) return false;
+  const registered = await TILES.register(file);
+  if (registered.error) throw new Error(t('tiles.err', { code: registered.error.code }));
+  const key = crypto.randomUUID(), dialog = tileBuildDialog(registered.ok.name, () => { void TILES.cancel(key); });
+  const stop = TILES.onProgress((k, progress) => { if (k === key) dialog.update(progress); });
+  let built;
+  try { built = await TILES.build(registered.ok.token, key); } finally { stop(); dialog.close(); }
+  if (built.error) throw new Error(t('tiles.err', { code: built.error.code, field: built.error.field || '' }));
+  if (built.ok.cancelled) { toast(t('tiles.cancelled')); return true; }
+  const info = (await TILES.info(built.ok.pyramid)).ok;
+  // The working image: the finest level within the size limit whose memory also fits (card H6).
+  let level = proxyLevel(info.levels, (S.settings.maxMP || 8) * 1e6);
+  while (level < info.levels.length - 1 && workingBytes(info.levels[level].width, info.levels[level].height, info.bits === 16) > WORKING_MEMORY_LIMIT) level++;
+  const tiled = { pyramid: built.ok.pyramid, level, levels: info.levels, channels: info.channels, bits: info.bits };
+  const working = await tiledWorkingImage(tiled);
+  const s = newSection({ name: file.name.replace(/\.[^.]+$/, ''), file: { name: file.name, type: file.type, tiled: true }, w: working.w, h: working.h,
+    orig: working.rgba, orig16: working.rgba16, ds: 2 ** level, full: { w: info.width, h: info.height } });
+  s.tiled = tiled;
+  const prev = sec();
+  if (prev) { s.units = prev.units; s.top = prev.bottom; s.bottom = prev.bottom + (prev.bottom - prev.top); s.filters = { ...prev.filters }; s.preset = prev.preset; s.detect = /** @type {any} */ ({ ...prev.detect }); enhance(s); }
+  S.sections.push(s);
+  selectSection(S.sections.length - 1, true); markDirty();
+  toast(t('tiles.added', { w: info.width, h: info.height, k: 2 ** level }), 9000);
+  return true;
+}
+
 async function addFiles(files) {
   if (!files.length) return;
   if (blankStart) { toast(t('sec.needProject')); await showHome(); $('newProjOpen').click(); return; }   // V0.2: no images outside a project
@@ -376,6 +446,7 @@ async function addFiles(files) {
   for (const file of files) {
     await busy(async () => {
       try {
+        if (TILES && await addTiledSection(file)) return;
         const blob = file;
         const { w, h, rgba, rgba16, k, fw, fh } = await decodeBytes(blob, file.name, file.type, { maxMP: S.settings.maxMP });
         if (k > importFactor(fw, fh, S.settings.maxMP)) toast(t('sec.reducedToFit', { k, gb: fmt(workingBytes(fw, fh, !!rgba16) / 2 ** 30, 2) }));
@@ -1120,6 +1191,7 @@ export function analyzeSections(sections) {
 
 export function analyze(s) {
   if (!s) return;
+  if (s.tiled) { s.bins = []; return; }   // counting on full-resolution mask tiles is card M8.4.17; until then no table, never one from empty masks
   if (engineAnalysis) { void engineAnalysis.request(s); return; }   // asynchronous: the table shows a pending state until the engine answers
   const { bins, rowCache } = computeSectionBins(s, { classes: S.classes, settings: S.settings, ageModel: S.age.model });
   s.bins = bins;
@@ -2862,7 +2934,7 @@ function serialize() {
     cores: S.cores.map((c) => ({
       id: c.id, name: c.name, lat: c.lat, lon: c.lon, waterDepth: c.waterDepth ?? null, units: c.units, source: c.source || null, notes: c.notes || '', holdout: c.holdout || undefined,
       imp: c.imp, user: c.user || {}, edits: c.edits && Object.keys(c.edits).length ? c.edits : undefined, records: c.records, logView: c.logView, age: { text: c.ageModel.text, units: c.ageModel.units, bacon: c.ageModel.bacon || undefined, center: c.ageModel.center || undefined },
-      sections: c.sections.map((q) => serSection(q)),
+      sections: c.sections.filter((q) => !q.tiled).map((q) => serSection(q)),   // tiled sections are not saved yet (card M8.4.18)
     })),
   };
 }
@@ -4385,4 +4457,4 @@ initializeDiagnostics({
 const startupReady = startup();
 
 // Exposed for automated tests.
-window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, setTool, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };
+window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, needPixels, saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, setTool, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };

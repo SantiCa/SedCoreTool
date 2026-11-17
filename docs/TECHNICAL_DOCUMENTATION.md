@@ -159,6 +159,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 |------|---------|:----:|
 | `core.js` | Intervals, indices, age model, CSV, RLE encoding, overlapping-trace stacks | ✓ |
 | `sectiondepth.js` | Pure ROI depth/row conversion and pixels per centimetre; independent of interface/state | Yes |
+| `tiledsection.js` | Tiled sections (card M8.4.15): image sizes read from TIFF, JPEG and PNG headers (`imageDimensions`), the pyramid level that serves as a tiled section's working image (`proxyLevel`) and a level assembled from its tiles into RGBA (`assembleLevel`) | Yes |
 | `maskchanges.js` | Which rows of each section's label and exclusion masks changed since the engine last received them: `createMaskChanges` (mark, take, restore, mark all) and `indexRangeOfPairs` (the pixels named by an edit-history list). A hint for the engine path, never a proof (§26.2) | Yes |
 | `sectionanalysis.js` | Analysis of one section without the DOM: effective class of each object, class-index table, row counts (cached per section), interval bins with no-data padding, ages and manual indices (§3.2), plus the builders of the engine method's input snapshot and reference result columns (`buildIntervalSnapshot`, `referenceColumns`), the revision key of a section's calculation (`analysisRevision`) and the conversion of engine result columns to `s.bins` (`resultToBins`). `app.js::analyze` passes the project state in | Yes |
 | `imageproc.js` | Enhancement, detection, connected components, magic wand, lasso, descriptors, rotation, downsampling | ✓ |
@@ -3054,6 +3055,10 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   ([summary](validation/M8.4.14-summary.md)).
 - **Serving tiles** (`store/tiles.py`, in the coordinator): every tile is checked against the SHA-256 listed in `<level>/.tiles.sha256` before
   it is sent; verified tiles are kept in a 256 MiB least-recently-used cache. Up to 16 tiles per request, sent in binary frames of at most 1 MiB.
+- **Tiled sections in the interface** (behind the same flag): an image added through the interface whose header says it has more pixels than the
+  maximum size when adding images gets a pyramid (a dialog shows the progress and can cancel) and becomes a section whose working image is the
+  finest pyramid level within that size; full-resolution tiles are drawn over it when zooming in (in development). Such a section is not saved in
+  the project yet, has no interval table yet, and tools that would decode the source (crop, rotation, resolution) refuse with a message.
 - **The page's bridge** (`desktop/tile-ipc.js`, only with `SEDCORETOOL_TILED_SECTIONS=1` and the engine experiment): `window.corantoolDesktop.tiles`
   registers a file the user chose (the page gets an opaque token, never the path), builds its pyramid with progress events, cancels, and reads the
   verified tiles of pyramids the page built, through the engine. `desktop/tile-reader.js` reads the store in the main process; it serves only the

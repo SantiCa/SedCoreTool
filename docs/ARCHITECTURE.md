@@ -220,6 +220,12 @@ are proposals with a default that the maintainer confirms or changes before the 
    tables; its SHA-256 is the version identity.
 7. **Rule D11 = D:** the engine counts the rows of each tile (Python, the existing counting kernel) and returns the row counts of the
    section; the page turns row counts into the interval table with `core.js` as today. After an edit, only the touched tiles are counted.
+9. **A tiled section keeps a small working image** (decided while implementing M8.4.15, 17 November 2026): the finest pyramid level within the
+   maximum size when adding images, read through the engine. The rest of the program treats the section like a reduced section of today's path
+   (navigation, ruler, depth); the viewer draws full-resolution tiles over it when the zoom needs them. This replaces "no pixel or mask arrays in the
+   page" of the first design: about 130 places of the interface read a section's image or masks, and adapting all of them was not needed to show
+   tiles. Full-resolution masks (M8.4.16) and counting (M8.4.17) do not use the working image. Until M8.4.18 a tiled section is not saved, and
+   tools that would decode the source refuse with a message.
 8. **Tiled sections are a desktop feature.** The browser build and the standalone file show a visible message for them and never
    open them partially. Until M8.5, tools that need the whole image (detection, filters, U-Net, enhancement that changes pixels,
    rotation, cropping, change of working resolution) are disabled on tiled sections with a message; display contrast is allowed.

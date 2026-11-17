@@ -978,7 +978,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   memory and cancellation targets hold or are recorded as failed with numbers (then stop and ask); evidence committed.
 - **Result (17 November 2026):** [summary](validation/M8.4.14-summary.md). Contract §8 and technical manual §26.4 describe the format; libvips in the runtime (+19 MiB on Windows; CI green on Windows, macOS and Linux); all seven fixtures build and read back exactly (80 regions per TIFF at levels 0-3); about 100 MiB/s, 8 GiB in 81 s, memory below 320 MiB, disk 1.33 times the decoded image; **no compressor** by the rule (zlib: 39 % of the throughput). The cancellation target failed first (297-658 ms, the partial folder was deleted before answering) and was fixed in the card (7-15 ms). Two Windows faults found and fixed: libvips crashed while a thread read the worker's stdin pipe; replacing the progress file failed while the coordinator read it. Not measured: macOS/Linux timing, cold cache, a 16 GiB computer.
 
-##### M8.4.15 - Tiled sections in the viewer (behind a flag) — state: In progress (step 1 done 17 Nov 2026: delivery path (a), tiles through the engine)
+##### M8.4.15 - Tiled sections in the viewer (behind a flag) — state: In progress (steps 1-2 done 17 Nov 2026: tiles through the engine; tiled sections added with a working image from the pyramid)
 
 - **Goal:** with `SEDCORETOOL_TILED_SECTIONS=1` and the engine experiment on, importing an image above the threshold of decision 1 builds its pyramid
   (progress and cancel shown) and shows the section from tiles: pan, zoom, navigation strip, depth ruler and depth readout, with full-resolution
@@ -1000,6 +1000,11 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
      (`SEDCORETOOL_TILE_DELIVERY=direct`). Both delivered identical bytes. The page bridge is `desktop/tile-ipc.js` (a chosen file becomes a token; a page reads only
      the pyramids it built); `desktop/tile-reader.js` is reader (b). The disk cache was warm; not measured cold.
   2. The tiled section record in memory: full-resolution `w`, `h`, the source identity and the pyramid id; no `orig`, no `labels` arrays.
+     *Amended and done (17 November 2026):* the section keeps a small working image from one pyramid level (ARCHITECTURE §3.4 design item 9), so the rest
+     of the interface works unchanged; `s.tiled` holds the pyramid, the level and the level sizes; `app/js/tiledsection.js` (pure) reads image sizes from
+     headers, picks the level and assembles its tiles; the import asks the engine for the pyramid with a progress dialog and Cancel; the section is not
+     saved (`serialize` leaves it out), has no interval table, is read again from the pyramid when its pixels were released, and tools that decode the
+     source refuse with a message. Checked with `tests/e2e/tiled-sections.mjs` on the public example (10.4 MP) and on `rgb2g` (level 4, 512 x 5,462).
   3. `tilecache.js`: level = the finest level with at most 1 source pixel per screen pixel at the current zoom; visible tiles plus one ring;
      a request for tiles no longer visible is cancelled; a missing tile is drawn from the nearest cached coarser level, never left blank.
   4. Drawing with `drawImage` of `ImageBitmap`s created from tile bytes; 16-bit tiles mapped to 8 bits for display with the rule of today's 16-bit path.
