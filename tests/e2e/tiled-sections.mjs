@@ -473,6 +473,111 @@ try {
   const messages = await on.page.evaluate(() => [window.ichantool.t('tiles.masksUnsent'), window.ichantool.t('tiles.masksSent')]);
   assert.ok(toasts.includes(messages[0]) && toasts.indexOf(messages[1], toasts.indexOf(messages[0])) > 0,
     'the failure of the round was shown, then its recovery: ' + JSON.stringify(toasts.slice(-4)));
+  // Card M8.4.16 step 8: exact equality. The same image (620 x 16726, 10.4 Mpixel) is opened whole (maximum size raised to 12 Mpixel, section
+  // factor 1) and forced tiled at full resolution (factor 1), and the same scripted edits are made on both with the real mouse: brushes of two
+  // classes that overlap, erase, exclude, include, lasso, scissors, merge, a class change that merges, the wand, delete, undo and redo. Labels
+  // (overlap codes compared as sets of object ids), exclusion, objects and stacks must be identical; sums of luminance (`sL`, `sLL`, `rL`) are
+  // added in another order by tiles and are compared within a relative 1e-12, stated before comparing; every other field exactly.
+  // Two decoders (the browser's for the whole image, libvips for the pyramid) differ by up to 9 levels on about 1 % of the samples of a JPEG, so
+  // the equality is checked on a lossless copy of the same pixels, written once by the page itself.
+  const lossless = path.join(os.tmpdir(), `sedcoretool-equality-${process.pid}.png`);
+  fs.writeFileSync(lossless, Buffer.from(await on.page.evaluate(async (base64) => {
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)), bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height); canvas.getContext('2d').drawImage(bitmap, 0, 0);
+    const out = new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer()); let text = '';
+    for (let k = 0; k < out.length; k += 8192) text += String.fromCharCode(...out.subarray(k, k + 8192));
+    return btoa(text);
+  }, fs.readFileSync(image).toString('base64')), 'base64'));
+  const added = async (force) => {
+    await on.page.evaluate((force) => { window.ichantool.forceTiledSections(force); window.ichantool.S.settings.maxMP = 12; }, force);
+    const before = await on.page.evaluate(() => window.ichantool.S.sections.length);
+    await (await on.page.$('#addImg')).uploadFile(lossless);
+    await on.page.waitForSelector('#pcOk', { timeout: 30000 }); await on.page.click('#pcOk');
+    await on.page.waitForFunction((n) => window.ichantool.S.sections.length === n + 1, { timeout: 600000, polling: 200 }, before);
+    await on.page.waitForFunction(() => document.getElementById('busy').hidden, { timeout: 600000 });
+    await on.page.evaluate(() => window.ichantool.forceTiledSections(false));
+    return before;
+  };
+  const wholeAt = await added(false), tiledAt = await added(true);
+  const kinds = await on.page.evaluate(([a, b]) => [a, b].map((k) => { const q = window.ichantool.S.sections[k]; return { tiled: !!q.tiled, ds: q.ds, w: q.w, h: q.h }; }), [wholeAt, tiledAt]);
+  assert.deepEqual(kinds, [{ tiled: false, ds: 1, w: 620, h: 16726 }, { tiled: true, ds: 1, w: 620, h: 16726 }], 'the same image opened both ways, factor 1');
+  const script = async (index) => {
+    const page = on.page;
+    await page.evaluate((index) => {
+      const { S } = window.ichantool; S.cur = index; window.ichantool.selectSection?.(index);
+      S.view = { x: 0, y: 3000, zoom: 1 }; S.brushSize = 10; S.exShape = 'free'; S.overlap = true; S.wandTol = 20; S.selected = 0; S.multi.clear();
+      S.active = S.classes[0].id; S.sections[index].roi = { x0: 0, y0: 3000, x1: 620, y1: 4400 };   // bounds the wand and the lasso alike on both paths
+      window.ichantool.requestRender();
+    }, index);
+    const box = await page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
+    const idle = () => page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.masksSettled(), { polling: 50, timeout: 60000 });
+    const draw = async (tool, points) => {
+      await page.evaluate((tool) => window.ichantool.setTool(tool), tool);
+      await page.mouse.move(box.left + points[0][0], box.top + points[0][1]); await page.mouse.down();
+      for (let k = 1; k < points.length; k++) {
+        const [ax, ay] = points[k - 1], [bx, by] = points[k];
+        for (let q = 1; q <= 5; q++) await page.mouse.move(box.left + ax + ((bx - ax) * q) / 5, box.top + ay + ((by - ay) * q) / 5);
+      }
+      await page.mouse.up(); await idle();
+    };
+    const objects = () => page.evaluate(() => [...window.ichantool.S.sections[window.ichantool.S.cur].objects.keys()]);
+    await draw('brush', [[100, 200], [300, 200]]);
+    await page.evaluate(() => { const { S } = window.ichantool; S.active = S.classes[1].id; S.selected = 0; });
+    await draw('brush', [[200, 215], [400, 230]]);                     // overlaps the first stroke: stacks
+    await page.evaluate(() => { const { S } = window.ichantool; S.active = S.classes[0].id; S.selected = 0; });
+    await draw('erase', [[250, 200], [300, 200]]);
+    await draw('exclude', [[100, 400], [200, 400]]);
+    await draw('include', [[120, 400], [160, 400]]);
+    await draw('lasso', [[100, 500], [260, 500], [260, 560], [100, 560]]);
+    await draw('cut', [[180, 480], [180, 580]]);
+    const ids = await objects();
+    await page.evaluate((ids) => window.ichantool.mergeObjects(ids.slice(-2)), ids); await idle();
+    await page.evaluate(() => { const { S } = window.ichantool; S.selected = 0; });
+    await page.evaluate(() => window.ichantool.setTool('wand'));
+    await page.mouse.click(box.left + 500, box.top + 700); await idle();
+    await page.evaluate((id) => window.ichantool.assignClass(id, window.ichantool.S.classes[1].id), ids[0]); await idle();
+    await page.evaluate((id) => window.ichantool.deleteObjects([id]), ids[1]); await idle();
+    await page.click('#undoBtn'); await idle();
+    await page.click('#redoBtn'); await idle();
+    await page.click('#undoBtn'); await idle();
+  };
+  const dump = (index) => on.page.evaluate((index) => {
+    const s = window.ichantool.S.sections[index], width = s.tiled ? s.maskTiles.width : s.w, height = s.tiled ? s.maskTiles.height : s.h;
+    const at = s.tiled ? (x, y) => s.maskTiles.labelAt(x, y) : (x, y) => s.labels[y * s.w + x];
+    const exAt = s.tiled ? (x, y) => { const e = s.maskTiles.get(Math.floor(y / 512), Math.floor(x / 512)); return e?.exclude ? e.exclude[(y % 512) * 512 + (x % 512)] : 0; } : (x, y) => s.exclude[y * s.w + x];
+    const names = (v) => (v === 0 ? '' : v > 0 ? String(v) : s.stacks[-v].slice().sort((a, b) => a - b).join('+'));
+    const runs = [], exRuns = [];
+    for (let y = 0; y < height; y++) {
+      let last = '', start = 0, exLast = 0, exStart = 0;
+      for (let x = 0; x <= width; x++) {
+        const key = x < width ? names(at(x, y)) : null, ex = x < width ? exAt(x, y) : null;
+        if (key !== last) { if (last !== '') runs.push([y, start, x, last]); last = key ?? ''; start = x; }
+        if (ex !== exLast) { if (exLast) exRuns.push([y, exStart, x]); exLast = ex ?? 0; exStart = x; }
+      }
+    }
+    const objects = [...s.objects.values()].map((o) => ({ id: o.id, cls: o.cls, pred: o.pred, conf: o.conf, area: o.area, bbox: o.bbox, stats: o.stats }));
+    const stacks = s.stacks.map((m) => (m ? m.slice().sort((a, b) => a - b) : null));
+    return { runs, exRuns, objects, usedStacks: [...new Set(runs.map((r) => r[3]).filter((n) => n.includes('+')))].sort(), stackCount: stacks.length, nextId: s.nextId };
+  }, index);
+  await script(wholeAt); await script(tiledAt);
+  const whole = await dump(wholeAt), tiledDump = await dump(tiledAt);
+  assert.ok(whole.runs.length > 50 && whole.exRuns.length > 0 && whole.usedStacks.length > 0 && whole.objects.length >= 2, 'the script made labels, exclusion and overlaps: ' + JSON.stringify({ r: whole.runs.length, e: whole.exRuns.length, s: whole.usedStacks, o: whole.objects.length }));
+  assert.deepEqual(tiledDump.runs, whole.runs, 'labels are identical (overlap codes compared as sets of object ids)');
+  assert.deepEqual(tiledDump.exRuns, whole.exRuns, 'exclusion is identical');
+  assert.deepEqual(tiledDump.usedStacks, whole.usedStacks, 'the overlapping sets are identical');
+  assert.equal(tiledDump.nextId, whole.nextId);
+  assert.deepEqual(tiledDump.objects.map((o) => o.id), whole.objects.map((o) => o.id));
+  const near = (a, b, what) => assert.ok(Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(a), Math.abs(b)), `${what}: ${a} vs ${b}`);
+  for (const [i, o] of whole.objects.entries()) {
+    const t2 = tiledDump.objects[i];
+    for (const key of ['cls', 'pred', 'conf', 'area', 'bbox']) assert.deepEqual(t2[key], o[key], `object ${o.id} ${key}`);
+    assert.deepEqual(!!t2.stats, !!o.stats, `object ${o.id} has statistics`);
+    for (const key of Object.keys(o.stats || {})) {
+      if (['sL', 'sLL', 'rL'].includes(key)) near(t2.stats[key], o.stats[key], `object ${o.id} ${key}`); else assert.deepEqual(t2.stats[key], o.stats[key], `object ${o.id} stats.${key}`);
+    }
+  }
+  fs.rmSync(lossless, { force: true });
+  console.log('Exact equality, whole against tiled at factor 1:', whole.runs.length, 'label runs,', whole.exRuns.length, 'exclusion runs,', whole.objects.length, 'objects,', whole.usedStacks.length, 'overlap sets');
   assert.deepEqual(on.errors, []);
   console.log('Tiled sections: added through the interface, working image from the pyramid, not saved, reloaded, whole-image actions refused, every editing tool works; full-resolution tiles drawn (' + drawn.probes.length + ' probes):', JSON.stringify(section));
 } finally { await on.close(); }

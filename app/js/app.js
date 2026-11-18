@@ -910,10 +910,13 @@ function tileBuildDialog(name, onCancel) {
   };
 }
 
+/** Test hook (card M8.4.16 step 8): add every image as a tiled section at full resolution, to compare it with the same image opened whole. */
+let forceTiled = false;
+
 /** Add `file` as a tiled section when it is larger than the maximum size when adding images; false when it is not (today's path). */
 async function addTiledSection(file) {
   const dims = await imageDimensions(file);
-  if (!dims || dims.w * dims.h <= (S.settings.maxMP || 8) * 1e6) return false;
+  if (!dims || (!forceTiled && dims.w * dims.h <= (S.settings.maxMP || 8) * 1e6)) return false;
   const registered = await TILES.register(file);
   if (registered.error) throw new Error(t('tiles.err', { code: registered.error.code }));
   const key = crypto.randomUUID(), dialog = tileBuildDialog(registered.ok.name, () => { void TILES.cancel(key); });
@@ -924,8 +927,8 @@ async function addTiledSection(file) {
   if (built.ok.cancelled) { toast(t('tiles.cancelled')); return true; }
   const info = (await TILES.info(built.ok.pyramid)).ok;
   // The working image: the finest level within the size limit whose memory also fits (card H6).
-  let level = proxyLevel(info.levels, (S.settings.maxMP || 8) * 1e6);
-  while (level < info.levels.length - 1 && workingBytes(info.levels[level].width, info.levels[level].height, info.bits === 16) > WORKING_MEMORY_LIMIT) level++;
+  let level = forceTiled ? 0 : proxyLevel(info.levels, (S.settings.maxMP || 8) * 1e6);
+  while (!forceTiled && level < info.levels.length - 1 && workingBytes(info.levels[level].width, info.levels[level].height, info.bits === 16) > WORKING_MEMORY_LIMIT) level++;
   const tiled = { pyramid: built.ok.pyramid, level, levels: info.levels, channels: info.channels, bits: info.bits };
   const working = await tiledWorkingImage(tiled);
   const s = newSection({ name: file.name.replace(/\.[^.]+$/, ''), file: { name: file.name, type: file.type, tiled: true }, w: working.w, h: working.h,
@@ -4997,5 +5000,5 @@ const startupReady = startup();
 window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, needPixels, requestRender, setTool, renderSectionForm, t, tilesIdle: () => [...tileSchedulers.values()].every((q) => q.idle),
   putMaskTile: (row, col, labels, exclude) => putMaskTile(sec(), row, col, labels, exclude),   // end-to-end tests of tiled masks (card M8.4.16)
   tiledStatsIdle: () => S.sections.every((q) => !q._statsRunner || q._statsRunner.idle),
-  masksSettled: () => S.sections.every((q) => !q.maskTiles || !q._maskSync || q._maskSync.settled), mergeObjects, deleteObjects,
+  masksSettled: () => S.sections.every((q) => !q.maskTiles || !q._maskSync || q._maskSync.settled), mergeObjects, deleteObjects, selectSection, forceTiledSections: (on) => { forceTiled = !!on; },
   saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };

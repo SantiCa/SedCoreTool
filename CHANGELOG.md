@@ -20,6 +20,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.16, step 8: `tests/e2e/tiled-sections.mjs` opens the same image whole and as a tiled section at factor 1 and makes the same scripted edits on both with the real mouse: labels, exclusion, objects, overlapping sets and statistics are identical (sums of luminance within a relative 1e-12). The test found that the browser's JPEG decoder and libvips differ slightly, so it compares a lossless copy; the program has a test hook `forceTiledSections`. Card M8.4.16 is closed at the development gate.
 - Roadmap: card M8.4.22 (objects table of tiled sections beyond 4 MiB, as binary columns, up to 1,048,576 objects) added before M8.4.18.
 - Card M8.4.16, step 7: the metadata limits measured with the page's own table builders (`tools/measure_mask_tables.mjs`): the 4 MiB cap of the objects table binds at about 51,000-56,000 objects, before the 65,536-record cap ([evidence](docs/validation/M8.4.16-step7-mask-tables.json)); the contract is unchanged.
 - Card M8.4.16, step 6: wand, lasso, scissors, delete, clear candidates, merge and the merge of overlapping objects of one ichnotaxon after a
