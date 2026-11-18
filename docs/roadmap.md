@@ -117,8 +117,31 @@ Updated 18 November 2026.
      reduces them).
   8. **Can we move to the next phases?** No. M8.5 needs the milestone gates of part C (M8.4.19) and part B (M8.4.11). Order recommended:
      M8.4.28 (finishing) → **M8.4.30** → M8.4.29 (needs decision G) → M8.4.18c → M8.4.18d → M8.4.19 (with decision I) → M8.4.20 → part B as
-     decided by I → M8.5. Decisions G, H, I and J are the maintainer's.
-- **Decisions of the audit of 19 November 2026, waiting for the maintainer** (the design session's recommendation first):
+     decided by I → M8.5. Decisions G, H, I and J were approved the same day (below); J publishes V0.152 after M8.4.28.
+- **Council audit of 19 November 2026** (at the maintainer's request: three independent reviewers, a software engineer, a sedimentologist
+  with data-science training and an interface designer, read the repository without running anything, then critiqued each other's reports
+  anonymised; the design session checked the disputed points in the code). It replaces the single-view "deep audit" written earlier the same
+  day. Agreed by all three: the arithmetic and the architecture on paper are sound; the risks are (1) **user data**: a store clean-up can delete
+  a version committed a moment earlier, saves can overlap, backups and packages leave tiled sections out without a word; (2) **evidence**:
+  nothing is validated on real cores and the tiled path is not tested on GitHub; (3) **defaults that bias results**: unreviewed candidates
+  count as bioturbation, detection sizes are in pixels so results depend on the resolution and on the storage path; (4) **feedback**: progress
+  and errors are invisible outside one mode and destructive actions are confirmed in four inconsistent ways. Checked by the design session:
+  the retain race (`retainStore` in `app.js` and `MaskStore.retain` delete every manifest not named, protecting only open staged versions),
+  the overlapping saves (`saveToDB`: a second waiter starts a save while the first one's is running), the silent omission in
+  `projectForExport` (no message), and the missing highlight of the start-screen and model-dialog tabs (`.htabs .btn` set `aria-selected`,
+  styled only through `aria-pressed`). Not confirmed: the general tab regression (`.tabs` tabs are styled). Measured the same day: the first
+  delete after reopening a 3 % `rgb8g` section had not finished after 18 min (M8.4.28, being fixed).
+  - *Cards written from it* (order below): M8.4.31 (store and saves keep every committed version), M8.4.32 (the tiled tests run on GitHub),
+    M8.4.33 (backups and packages say what they leave out), M8.4.34 (desktop hardening); in a new section *Council cards*: S1-S6 (science),
+    U1-U5 (interface), D2 (documents). Modified: M8.5 (acceptance of slices c and d), M6.5 in roadmap-future.md, M5.2 (dated protocol, S6).
+  - *Order recommended:* M8.4.28 → **M8.4.31** → **M8.4.32** → **M8.4.33** → M8.4.30 → M8.4.29 → **M8.4.34** → M8.4.18c → M8.4.18d → M8.4.19;
+    S6 (validation protocol) can start at once in parallel, since it is mostly the maintainer's data work; S1 and S2 need decisions K and L
+    and then go before M8.4.19, because the tiled path changes the resolution of analyses; U1-U3 after M8.4.30 (they touch the messages and
+    dialogs that card moves); U4, U5 and D2 at any time on the fast tier.
+  - **Decisions waiting for the maintainer:** **K** (card S1): count only reviewed traces by default, with the unreviewed share shown next to
+    every result (*recommended*; it changes the default results of new projects, existing projects keep their stored setting); **L** (card S2):
+    detection sizes in millimetres (*recommended*; a project keeps its pixel values until the user converts it).
+- **Decisions of the audit of 19 November 2026: G, H, I and J approved by the maintainer the same day** ("apruebo G, H, I y J"), as recommended:
   - **G** (card M8.4.29): the reopening cache in the engine's store. *Recommended: approve as proposed;* without it a reopened 10 % section needs
     133 s before every object is current.
   - **H** (M8.6 against D11 and the per-tile statistics): *recommended:* M8.6 accepts, for tiled sections only, the page's interval table and
@@ -1780,7 +1803,59 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   (about 18 pixel tiles read); if missed, record it and ask.
 - **Done when:** the tests pass, the measurement is recorded against the target; development gate.
 
-##### M8.4.30 - The tiled-section controller leaves `app.js` — state: after M8.4.28 (written by the audit of 19 Nov 2026, finding 1)
+##### M8.4.31 - The store and the saves keep every committed version — state: after M8.4.28 (council audit of 19 Nov 2026)
+
+- **Goal:** a clean-up of the mask store can never delete a version the page committed, whatever the timing, and two saves never run at once.
+- **Why (checked in the code):** `saveToDB` starts `retainStore()` without waiting; `retainStore` names the saved version and
+  `MaskSync.manifest` as they are at that moment, and `MaskStore.retain` deletes every other manifest, protecting only open staged versions.
+  A commit the engine has already processed, whose answer the page has not received yet, is therefore deleted; the next save names it and
+  the reopened section is locked without its last edits (ARCHITECTURE §3.4: "the last good save stays readable"). Separately, `saveToDB`
+  lets a second waiter start a save while the first waiter's save is running (`if (!dirty && !savePromise)` after `await savePromise`), and
+  `settleTiledSections` sets `_tiledRecord = null` under the other save.
+- **Read first:** `saveToDB`, `settleTiledSections`, `retainStore` in `app.js`; `tiledsync.js` (`MaskSync`); `store/masks.py` (`retain`,
+  `commit`); `engine/server.py` (mask operations); contract §8.7.
+- **Change:** engine: `mask.retain` also keeps every manifest committed by this engine process after the newest version the request names
+  (the coordinator keeps, per project, the manifests it committed in order; a retain keeps those after the most recent one named in `keep`),
+  documented in contract §8.7; page: `saveToDB` as a single-flight loop (one save at a time; a request during a save makes exactly one more
+  save afterwards). Tests and documents.
+- **Do not touch:** the store format; what a save writes; the retention of M8.4.18a otherwise (older versions are still deleted).
+- **Model:** most capable, effort high (saving and recovery; a mistake loses user work).
+- **Tests:** Python: a commit processed before a retain that names only its parent: the new manifest and its blobs survive; a retain naming
+  the newest one deletes the older ones as before; an engine restart (no session record) keeps today's behaviour. Node: concurrent calls of
+  the single-flight save run one after another and end with the last state saved (a stub store that records overlapping calls). Desktop
+  (`tiled-sections.mjs`): continuous edits with a save every 200 ms for 20 s, then reopen: identical to the last saved state, the store
+  holds only the saved versions after a final save.
+- **Done when:** the tests pass; development gate.
+
+##### M8.4.32 - The tiled tests run on GitHub on three systems — state: after M8.4.31 (council audit of 19 Nov 2026)
+
+- **Goal:** the milestone gate covers the tile store: `tests/e2e/tiled-sections.mjs` and `tests/e2e/interrupted-saves.mjs` run in the
+  *Desktop builds* workflow on Windows, macOS and Linux, on a fixture generated in the job, and the Python tests of the store cannot skip
+  silently there.
+- **Why:** both tests run only on the maintainer's computer today; the "milestone gate passed on three systems" says nothing about saving
+  and reopening tiled sections, the riskiest code of part C. The Python store tests use `importorskip('pyvips')`.
+- **Read first:** `.github/workflows/desktop*.yml`, `tests.yml`; the start of `tests/e2e/tiled-sections.mjs` (its image and fixtures);
+  DEVELOPMENT §3 and §8.
+- **Change:** a small generator of the test image (a few thousand pixels on a side, written by the test itself or a script in `tools/`);
+  the two tests in *Desktop builds*; `SEDCORETOOL_REQUIRE_PYVIPS=1` in CI turns the skip into a failure; DEVELOPMENT.
+- **Model:** most capable, effort medium (CI on three systems; a broken workflow blocks every gate).
+- **Tests:** the workflows themselves: one green run on three systems, and one deliberately failing run (a broken assertion on a scratch
+  branch) that shows red.
+- **Done when:** both workflows pass on three systems with the two tests in them; development gate (it changes what the milestone gate means).
+
+##### M8.4.33 - Backups and packages say what they leave out — state: after M8.4.32 (council audit of 19 Nov 2026)
+
+- **Goal:** until M8.4.18c and M8.4.18d carry tiled sections, a folder backup, a full backup or an exported package of a project with tiled
+  sections tells the user, before writing, which sections it leaves out, and records them in the package.
+- **Why (checked):** `projectForExport` drops tiled sections with no message; the backup state then reads as done.
+- **Change:** `app.js` wiring (or the module of M8.4.30 if it is done first), `i18n.js` (Spanish and English), a `left_out` list in the
+  package's project record (documented in TECHNICAL_DOCUMENTATION §23-24; readers ignore unknown fields), tests.
+- **Model:** fast tier, effort medium (bounded; checked by exact tests).
+- **Tests:** desktop: a project with one tiled and one ordinary section: the backup and the package show the message, contain the ordinary
+  section and name the tiled one in `left_out`; a project without tiled sections is byte-for-byte as today.
+- **Done when:** the tests pass; development gate.
+
+##### M8.4.30 - The tiled-section controller leaves `app.js` — state: after M8.4.33 (written by the audit of 19 Nov 2026, finding 1)
 
 - **Goal:** the tiled-section workflow lives in its own controller modules, `app.js` only wires them, and `app.js` is back below its size of
   13 November 2026 (4,344 lines); no behaviour changes.
@@ -1803,14 +1878,14 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   the engine off and on; the new size check.
 - **Done when:** `app.js` has fewer than 4,344 lines, every test passes unchanged, the standalone build works; development gate.
 
-##### M8.4.29 - Reopening without reading every stored tile — state: after M8.4.30; decision G below waits for the maintainer (written 18 Nov 2026 for finding 3 of M8.4.18a)
+##### M8.4.29 - Reopening without reading every stored tile — state: after M8.4.30; decision G approved by the maintainer on 19 Nov 2026 (written 18 Nov 2026 for finding 3 of M8.4.18a)
 
 - **Goal:** reopening a saved tiled section does not read its stored tiles to rebuild what the page derived from them: the row histograms of
   M8.4.17, the reduced copy of the masks and the per-tile object statistics come back from a cache saved with the stored version, and are rebuilt
   from the tiles only when that cache is missing, stale or does not pass its checks.
 - **Why:** M8.4.18a reads every stored tile once on reopening; that is most of the 4.6 s (3 %) and 10.8 s (10 %) to open the `rgb8g` section, and the
   object statistics then need 41-133 s more (M8.4.28 makes that wait local; this card removes it in the common case).
-- **Decision G (proposed by the design session, for the maintainer):** the cache is an extra file per stored version in the engine's mask store
+- **Decision G (proposed by the design session; approved by the maintainer on 19 Nov 2026):** the cache is an extra file per stored version in the engine's mask store
   (`derived/<manifest>.<kind>`), written by the page through two new operations (`mask.derived.put`, `mask.derived.get`, contract §8.7) and removed
   by `mask.retain` together with its manifest. It is a cache, not part of the project: its absence or rejection only costs time. *Alternatives:* in the
   IndexedDB record of the project (tens of MiB per section in the record, read on every library listing that loads the project, and outside the store
@@ -1843,7 +1918,29 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 - **Done when:** decision G is answered, the round trip is identical with and without the cache, the rejections are tested, and the times are recorded
   against the targets; development gate.
 
-##### M8.4.18c - Folder backup and restore of tiled sections — state: after M8.4.29
+##### M8.4.34 - Desktop hardening — state: after M8.4.29 (council audit of 19 Nov 2026)
+
+- **Goal:** a script injected into the page could not load remote code, open arbitrary programs or delete another project's store, and a
+  slow disk does not kill the engine in the middle of a commit.
+- **Why:** the page's content security policy allows any script from `cdn.jsdelivr.net` and `cdn.sheetjs.com` (the desktop build already
+  carries its libraries); `setWindowOpenHandler` passes any non-app URL to `shell.openExternal` whatever its scheme (`desktop/main.js`); there
+  is no `will-navigate` guard; `deleteProjectStore` and `copyProjectStore` accept any well-formed project identifier; every store operation
+  has the 5 s default deadline, after which the engine is stopped (`desktop/engine.js`). About 120 `innerHTML` sites make an injection
+  plausible enough to close these doors.
+- **Read first:** `desktop/main.js`, `desktop/tile-ipc.js`, `desktop/engine.js` (deadlines), `app/index.html` (policy), SECURITY.md,
+  TECHNICAL_DOCUMENTATION §28.
+- **Change:** a desktop policy without remote script origins (the browser build keeps its own, with SRI); `openExternal` for `https:`,
+  `http:` and `mailto:` only; `will-navigate` and `will-redirect` denied outside the app origin; the project-wide store operations accept
+  only identifiers of projects the main process has seen in this session's library listing or that the page created, and ask the user before
+  deleting a store the page did not open; per-operation deadlines for store operations (measured, stated in the contract) instead of the
+  general 5 s; SECURITY.md and §28.
+- **Do not touch:** compatibility identifiers (AGENTS §3 item 4); the engine protocol's messages.
+- **Model:** most capable, effort high (security against hostile input).
+- **Tests:** Node tests of the scheme filter, the navigation guard and the identifier check; the desktop test opens a `file:` and a
+  `javascript:` link and nothing happens; a store operation slowed by a test hook past 5 s completes without an engine restart.
+- **Done when:** the tests pass; development gate.
+
+##### M8.4.18c - Folder backup and restore of tiled sections — state: after M8.4.34
 
 - **Goal:** the folder backup (`writeProjectFolder`) carries tiled sections incrementally, and a project restored from it on another computer opens
   with identical masks.
@@ -1979,6 +2076,10 @@ method works on regions of the tile store, never on a whole decoded raster.
   - Lessons of M8.3, for every slice: the inputs are resident in the engine from the start (M8.4 services); the
     second card measures the matched timing of the first end-to-end path with the M8.4 tool, before any interface
     card (M8.3 found its 30-60 times slowdown only at its last card); each slice ends with a milestone gate.
+  - Council audit of 19 November 2026 (card S5): slice (c) uses an established library (scikit-learn) as the implementation or as the
+    reference (AGENTS §3 item 9), standardises inside each fold, groups by core by default and selects the method with nested cross-validation;
+    slice (d) averages over intervals when the grid step is coarser than a record's spacing, reports the effective sample size and adds
+    event-level and boundary-position errors to the multiproxy evaluation. Decision H applies to the JavaScript exceptions of tiled sections.
   - Acceptance per slice: independent reference fixtures, explicit provenance, unchanged public contracts; exact
     counts/masks/labels and predeclared tolerances elsewhere; figures and exports unchanged.
 - [ ] **M8.6 - Promote desktop and retire duplicate computation.** After the release checklist passes: the engine
@@ -1988,6 +2089,64 @@ method works on regions of the tile store, never on a whole decoded raster.
   - Acceptance: one implementation per method; identical API, CLI and desktop results; complete desktop and
     interrupted-save regressions; storage identifiers and old project readers retained; documents and CI updated
     in the same delivery; engine errors stay visible; every earlier milestone gate passed.
+
+## Council cards (audit of 19 November 2026)
+
+Written from the council audit (status block). Each card names its model; the science cards change results only where a decision says so.
+
+- [ ] **S1 - Unreviewed traces and the published numbers** (decision K). Default `countCandidates` and `includePred` off for new projects
+      (existing projects keep their stored settings); the results table, the core column and every export show the share of the counted
+      area that nobody reviewed, per interval and in total; the provenance lines of the CSV say both settings. *Model:* most capable, effort
+      medium (changes default results). *Tests:* Node: a project with reviewed and unreviewed traces gives the unreviewed share exactly; an
+      old project's stored settings are kept; Python parity of the counting with both settings.
+- [ ] **S2 - Detection in physical units and resolution in the provenance** (decision L). `minArea`, the adaptive window radius and the
+      contrast ring of the descriptors in millimetres (converted with each section's px/cm); the smallest resolvable trace diameter shown per
+      section; a warning when it exceeds a user-set target; each section's working resolution (px/cm) and factor `k` in the exported provenance.
+      First a measurement: bioturbation percentage against px/cm (k = 1-6) on the public U1385 images and on a tiled section, reported before
+      the change. *Model:* most capable, effort high (scientific defaults; results change). Before M8.4.19.
+- [ ] **S3 - The adaptive threshold at high coverage.** Synthetic images with known coverage 0-100 % (burrows of several sizes, fills of
+      several contrasts) measure the bias of the default detection; the result goes into TECHNICAL_DOCUMENTATION §8 and §32; a manual flag
+      "homogenised interval" gives ii 6 and BI 6 regardless of the percentage, stored with the manual indices. *Model:* most capable, effort
+      medium. *Tests:* the synthetic series as a fixed fixture with its measured bias recorded.
+- [ ] **S4 - Uncertainty of a percentage.** A per-interval uncertainty for the bioturbation percentage (block resampling of columns of the
+      core face, with the Delesse principle stated), written once in Python (engine) and shown and exported by the page; advice on interval
+      thickness for large ichnotaxa. Belongs to M6 (M6.2) but may be brought forward. *Model:* most capable, effort high (new method).
+- [ ] **S5 - Evaluation and resampling when the methods move to Python** (recorded in the M8.5 summary): classifier evaluation without
+      leakage (fold-internal standardisation, grouping by core, nested selection), multiproxy resampling by interval averaging, effective n,
+      event-level metrics; age-model ensembles in M6.5. No separate implementation before then; until then TECHNICAL_DOCUMENTATION §12.4 and
+      §18 state the optimism.
+- [ ] **S6 - Validation protocol on real cores** (M5.2, dated now). A design session with the maintainer writes the protocol: public cores
+      (IODP U1385 first), two or more observers making expert masks, automatic against manual against visual BI/ii (error in percentage
+      points, weighted kappa per interval), sensitivity to detection parameters and resolution, the classifier on reserved cores; and the U-Net
+      training data rule (unannotated areas marked "ignore", to be checked in the export code). The measurements follow when the masks exist.
+      *Model:* most capable, effort high (design). Can start at once; independent of M8.
+- [ ] **U1 - One status layer in every mode.** One busy and progress region (`role=status`, above the start screen), visible in every mode,
+      with Cancel where the operation allows it, the starting button disabled while it runs, and a list of notices that keeps warnings and
+      errors until read (today one toast, replaced by the next, 3-12 s). *Model:* most capable, effort medium (error visibility of saving and
+      backups). After M8.4.30.
+- [ ] **U2 - Destructive actions.** One accessible confirmation dialog that names what is lost (with counts) and defaults to the safe button,
+      used for: deleting a project (which also deletes its masks on disk), records, manual data columns, "Apply to all sections"; the import of
+      a project that already exists offers Replace, Keep both and Cancel (today OK replaces and Cancel imports a copy); a recoverable deletion
+      (a trash or "undo the last deletion") for projects, records and columns. *Model:* most capable, effort high (editing that could lose user
+      work). After M8.4.30.
+- [ ] **U3 - Keyboard, focus and the accessibility claim.** The start screen as a real modal layer (workspace inert, focus moved and
+      restored); the selected tab highlighted in the start-screen and model-dialog tab bars (`.htabs .btn[aria-selected=true]`, checked
+      missing); control borders and the dark error colour at their contrast targets; a name for the image canvas; tab roles in multiproxy and
+      figures; the guided tour as a dialog; an automated accessibility check (axe) in the browser test; TECHNICAL_DOCUMENTATION §29 rewritten
+      to state only what is measured; a colour-blind-safe default palette for classes or patterns. *Model:* fast tier, effort medium.
+- [ ] **U4 - One definition per interface text.** `i18n.js` built from 192 layers has 85 keys defined twice (the last wins): one definition
+      per key; a Node test that fails on a duplicate key or on a key missing in Spanish or English; stale texts corrected ("Pixels per bin",
+      ".corantool.json", the brand tooltip, the Spanish-only backup file name); the shortcut list generated from the table that maps keys to
+      tools. *Model:* fast tier, effort medium.
+- [ ] **U5 - Styles out of the page.** The 680-line stylesheet of `index.html` into its own file with named colour tokens, without the
+      duplicate declarations, `!important` utility classes `u1`-`u29` and literal colours; no visual change (screenshots compared in the browser
+      test). Then a task-based usability test with three to five sedimentologists (import, detect, edit, classify, export; time and errors),
+      run by the maintainer, before any redesign. *Model:* fast tier, effort low for the move.
+- [ ] **D2 - Documents agree with the code.** TECHNICAL_DOCUMENTATION §3.2 says the no-data rule uses `N · width`; the code uses the
+      interval's actual rows (`(r1 − r0) · width`): correct the text; a last interval of fewer than half `N` rows is flagged in the results and
+      exports; §4 labels the BI 0 and ii 5-6 limits as operational conventions; ARCHITECTURE no longer calls the tile store "planned" where it is
+      built (with M8.4.30, which updates the `app.js` size). *Model:* fast tier, effort low (the flag of the last interval is a small code change
+      with a test).
 
 ## Small maintenance cards
 
