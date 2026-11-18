@@ -14,6 +14,20 @@ const SOURCES_FILE = 'sources.json', MAX_REMEMBERED_SOURCES = 4096, MAX_RETAINED
 // Card M8.4.18b: copies of sources inside the project, named by their SHA-256 and the original extension; the disk keeps 1 GiB free.
 const SOURCES_DIR = 'sources', COPY_NAME = /^[0-9a-f]{64}(\.[a-z0-9]{1,8})?$/, COPY_RESERVE = 2 ** 30;
 const copyName = (sha256, name) => sha256 + ((/\.[A-Za-z0-9]{1,8}$/.exec(name)?.[0] || '').toLowerCase());
+// Card M8.4.27: a deleted project's folder is first renamed to this prefix (never a store identifier), then removed; leftovers go at start.
+const DELETING = '.deleting-', MAX_COPIED_SOURCES = 1024;
+
+/** Remove the folders a delete renamed but did not finish removing (the program stopped half-way). */
+function sweepDeleted(projectsRoot) {
+  let names = [];
+  try { names = fs.readdirSync(projectsRoot); } catch { return; }
+  for (const name of names) if (name.startsWith(DELETING)) fs.rmSync(path.join(projectsRoot, name), { recursive: true, force: true });
+}
+/** A new name for a copy of a source: a hard link when the file system allows it, otherwise a verified copy. */
+async function linkOrCopy(from, to, sha256, size, signal) {
+  try { fs.linkSync(from, to); return { copied: true }; } catch { /* another disk, or no hard links */ }
+  return copyVerified({ from, to, sha256, size, signal });
+}
 // Mask tiles and tables (contract §8.7, card M8.4.16 step 4); the engine checks all of this again.
 const LAYER_BYTES = { labels: 1048576, exclude: 262144 };
 const PROJECT = /^[a-z0-9_-]{1,64}$/, SECTION = /^[A-Za-z0-9_-]{1,64}$/;
@@ -74,6 +88,7 @@ function writeAtomically(file, text) {
 function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delivery = 'engine' }) {
   if (!['engine', 'direct'].includes(delivery)) throw new Error('unknown tile delivery');
   const reader = delivery === 'direct' ? new TileReader(pyramidRoot) : null;
+  if (projectsRoot) sweepDeleted(projectsRoot);
   const sources = new Map();            // token -> {owner, path, name, size}
   const pyramids = new Map();           // owner -> Set of pyramid identifiers built by that page
   const builds = new Map();             // `${owner}/${key}` -> engine request id
@@ -343,6 +358,72 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
       } finally { copies.delete(`${owner}/${key}`); }
       updateSource(project, pyramid, { path: from.path, size: from.size, name: entry?.name || displayName(from.path), copy: name });
       return { copied: true };
+    },
+    /**
+     * Card M8.4.27: the folder of a deleted project (masks, `sources.json`, copies of sources) goes too. The engine first forgets the store
+     * (refused with BUSY while one of its versions is being sent); the folder is renamed to `.deleting-<uuid>` and then removed, so a stop half-way
+     * leaves a folder nothing opens, removed at the next start. `{deleted: false}` when there is no folder.
+     */
+    async deleteProjectStore(owner, project) {
+      checkProject(project);
+      if (!projectsRoot) reject('UNSUPPORTED_METHOD');
+      const folder = path.join(projectsRoot, project);
+      try { fs.lstatSync(folder); } catch { return { deleted: false }; }
+      try { await engine.request('mask.forget', { project }); } catch (error) {
+        if (error?.code === 'BUSY' || error?.code === 'INVALID_REQUEST') throw error;
+        // the engine is not running: it holds nothing of this project
+      }
+      const away = path.join(projectsRoot, DELETING + randomUUID());
+      fs.renameSync(folder, away);
+      fs.rmSync(away, { recursive: true, force: true });
+      return { deleted: true };
+    },
+    /**
+     * Card M8.4.27: a project saved under a new identifier gets the stored versions its tiled sections name (`manifests`, copied by the engine
+     * page by page, verified, manifest last) and its record of their sources (`sources`: their SHA-256), with the project's copies of those
+     * sources (hard links when possible). Events `{stage: 'copy', completed, total}` count tiles. `{copied: true}` or `{cancelled: true}`.
+     */
+    async copyProjectStore(owner, from, to, manifests, pyramidList, key, onProgress = () => {}) {
+      checkProject(from); checkProject(to);
+      if (from === to) reject('INVALID_REQUEST', 'to');
+      if (!Array.isArray(manifests) || manifests.length > MAX_RETAINED || !manifests.every((name) => typeof name === 'string' && SHA256.test(name))) reject('INVALID_REQUEST', 'manifests');
+      if (!Array.isArray(pyramidList) || pyramidList.length > MAX_COPIED_SOURCES || !pyramidList.every((name) => typeof name === 'string' && SHA256.test(name))) reject('INVALID_REQUEST', 'sources');
+      checkKey(owner, key);
+      if (!projectsRoot) reject('UNSUPPORTED_METHOD');
+      const controller = new AbortController();
+      copies.set(`${owner}/${key}`, controller);
+      try {
+        let completed = 0, total = 0;
+        for (const manifest of new Set(manifests)) {
+          for (let start = 0; start !== null;) {
+            if (controller.signal.aborted) return { cancelled: true };
+            const page = await engine.request('mask.copy', { from, to, manifest, start });
+            if (!Number.isSafeInteger(page?.tiles) || !(page.next === null || (Number.isSafeInteger(page.next) && page.next > start))) reject('INTERNAL', 'copy');
+            if (start === 0) total += page.tiles;
+            completed += (page.next ?? page.tiles) - start;
+            onProgress({ stage: 'copy', completed, total });
+            start = page.next;
+          }
+        }
+        const record = readSources(sourcesFile(from)).sources;
+        for (const pyramid of new Set(pyramidList)) {
+          const entry = record[pyramid];
+          if (!entry) continue;
+          const fields = { path: entry.path, size: entry.size, ...(entry.name ? { name: entry.name } : {}) };
+          const own = copyOf(from, entry);
+          if (own) {
+            fs.mkdirSync(path.join(projectsRoot, to, SOURCES_DIR), { recursive: true });
+            const target = path.join(projectsRoot, to, SOURCES_DIR, entry.copy);
+            if (!sameSize(target, entry.size)) {
+              const result = await linkOrCopy(own, target, pyramid, entry.size, controller.signal);
+              if (result.cancelled) return { cancelled: true };
+            }
+            fields.copy = entry.copy;
+          }
+          updateSource(to, pyramid, fields);
+        }
+        return { copied: true };
+      } finally { copies.delete(`${owner}/${key}`); }
     },
     async maskRead(owner, project, manifest, layer, positions) {
       checkProject(project);

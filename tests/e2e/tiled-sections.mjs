@@ -777,6 +777,63 @@ try {
   // D2: the same project in a program without tiled sections: a placeholder whose record is saved back byte for byte.
   projectRecord = await on.page.evaluate(async () => { const { getProject } = await import(new URL('js/storage.js', location.href).href); return JSON.parse(JSON.stringify(await getProject(window.ichantool.S.id))); });
   console.log('Saving and reopening: identical masks, objects and table after a reopen, a rebuilt pyramid and a missing source (grey, locked); the moved image located (another file refused), copied into the project and reopened from the copy; D1 keeps the saved version');
+  // Card M8.4.27: the store folder follows its project. (1) A missing stored version: the project opens, the section is locked and says so, its
+  // record is saved back unchanged, the rest is edited and saved; with the version back it opens as before.
+  const storeFolder = async (id = null) => path.join(on.profile, 'projects', await on.page.evaluate((id) => window.ichantool.storeProject(id), id));
+  const tiledId = await on.page.evaluate(() => window.__tiledId);
+  const savedTiled = JSON.stringify(projectRecord.cores.flatMap((c) => c.sections).find((q) => q.id === tiledId));
+  const manifestFile = path.join(await storeFolder(), 'tiles', 'manifests', JSON.parse(savedTiled).tiled.manifest + '.json');
+  fs.renameSync(manifestFile, manifestFile + '.away');
+  await on.page.evaluate(() => window.corantoolDesktop.engine.restart());   // the engine keeps recent versions in memory: as after a new start
+  const toastsBeforeLock = toasts.length;
+  assert.deepEqual(await reopen(), { frozen: 'store', missing: false, grey: false }, 'a missing stored version locks the section');
+  assert.ok(toasts.slice(toastsBeforeLock).some((text) => /faltan o están dañadas|missing or damaged/i.test(text)), 'the user is told: ' + JSON.stringify(toasts.slice(toastsBeforeLock)));
+  const lockedSave = await on.page.evaluate(async () => {
+    const { S } = window.ichantool, all = S.cores.flatMap((c) => c.sections), s = all.find((q) => q.id === window.__tiledId), other = all.find((q) => !q.tiled);
+    other.name += ' (edited)';
+    await window.ichantool.saveNow();
+    const stored = (await (await import(new URL('js/storage.js', location.href).href)).getProject(S.id)).cores.flatMap((c) => c.sections);
+    return { bins: s.bins.length, other: stored.find((q) => q.id === other.id).name, tiled: JSON.stringify(stored.find((q) => q.id === window.__tiledId)) };
+  });
+  assert.equal(lockedSave.bins, 0, 'no table without masks');
+  assert.ok(lockedSave.other.endsWith('(edited)'), 'the rest of the project is edited and saved');
+  assert.equal(lockedSave.tiled, savedTiled, 'the locked section is saved back as it was read');
+  fs.renameSync(manifestFile + '.away', manifestFile);
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  await sameAsSaved('stored version back');
+  // (2) The same project imported again (a file without its tiled section) and both versions kept: the local version becomes a copy under a new
+  // identifier that has its own stored versions, opens identical, and a save of the imported one does not remove them.
+  const projectsBefore = await on.page.evaluate(async () => (await (await import(new URL('js/storage.js', location.href).href)).listProjects()).map((m) => m.id));
+  const sameProject = path.join(os.tmpdir(), `sedcoretool-same-project-${process.pid}.json`);
+  fs.writeFileSync(sameProject, await on.page.evaluate(async () => {
+    const record = await (await import(new URL('js/storage.js', location.href).href)).getProject(window.ichantool.S.id);
+    return JSON.stringify({ ...record, cores: record.cores.map((c) => ({ ...c, sections: c.sections.filter((q) => !q.tiled) })) });
+  }));
+  await (await on.page.$('#impProj')).uploadFile(sameProject);
+  await on.page.waitForFunction(async (n) => (await (await import(new URL('js/storage.js', location.href).href)).listProjects()).length > n && document.getElementById('busy').hidden,
+    { timeout: 240000, polling: 200 }, projectsBefore.length);
+  fs.rmSync(sameProject);
+  const keptId = (await on.page.evaluate(async () => (await (await import(new URL('js/storage.js', location.href).href)).listProjects()).map((m) => m.id))).find((id) => !projectsBefore.includes(id));
+  const keptFolder = await storeFolder(keptId);
+  assert.ok(fs.existsSync(manifestFile.replace(await storeFolder(), keptFolder)), 'the kept copy has its own stored version');
+  await on.page.evaluate(() => window.ichantool.saveNow());                // the imported project (no tiled section) is saved
+  await on.page.evaluate(async (id) => window.ichantool.loadProject(await (await import(new URL('js/storage.js', location.href).href)).getProject(id)), keptId);
+  for (let i = 0; i < 2400 && !(await on.page.evaluate(() => window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle())); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(await on.page.evaluate(() => { const s = window.ichantool.S.sections.find((q) => q.id === window.__tiledId); return s ? s.frozen ?? null : 'absent'; }), null, 'the kept copy opens unlocked');
+  await sameAsSaved('kept copy');
+  // (3) Deleting a project from the library deletes its folder, and only that one.
+  const originalFolder = manifestFile.slice(0, manifestFile.indexOf(path.sep + 'tiles' + path.sep));
+  await on.page.evaluate(async (id) => {
+    await window.ichantool.showHome();
+    for (let i = 0; i < 100 && !document.querySelector(`.pcard[data-id="${id}"] [data-act=del]`); i++) await new Promise((r) => setTimeout(r, 50));
+    const button = /** @type {HTMLElement} */ (document.querySelector(`.pcard[data-id="${id}"] [data-act=del]`));
+    button.click(); button.click();                                       // armed, then confirmed
+  }, keptId);
+  for (let i = 0; i < 200 && fs.existsSync(keptFolder); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(!fs.existsSync(keptFolder), 'the deleted project\'s folder is gone');
+  assert.ok(fs.existsSync(originalFolder), 'the other project\'s folder stays');
+  assert.ok(!fs.readdirSync(path.join(on.profile, 'projects')).some((name) => name.startsWith('.deleting-')), 'nothing left half-deleted');
+  console.log('Store folder: a missing stored version locks its section (record kept, the rest saved); a copy kept on import has its own versions; a deleted project takes its folder');
   fs.rmSync(lossless, { force: true });
   console.log('Exact equality, whole against tiled at factor 1:', whole.runs.length, 'label runs,', whole.exRuns.length, 'exclusion runs,', whole.objects.length, 'objects,', whole.usedStacks.length, 'overlap sets');
   assert.deepEqual(on.errors, []);

@@ -382,3 +382,57 @@ def test_a_retain_stopped_half_way_leaves_every_kept_version_readable(engine, mo
     assert fresh.read_tile(kept, 'labels', 0, 0) == kept_tile[0]
     assert stored_names(value)[0] == {kept}
     assert value.ok('mask.retain', {'project': 'p1', 'keep': [kept]})[0]['removed']['blobs'] >= 1, 'a later retain removes what was left'
+
+
+def test_copy_puts_a_version_into_another_project_in_pages_and_its_manifest_last(engine, monkeypatch):
+    """Card M8.4.27: a project saved under a new identifier gets the versions its tiled sections name, verified, manifest last."""
+    monkeypatch.setattr(masks, 'COPY_PAGE', 2)
+    value = engine()
+    staged = begin(value)['staged']
+    tiles = {(row, col): labels_tile(row * 3 + col + 1) for row, col in [(0, 0), (0, 1), (1, 1)]}
+    for (row, col), tile in tiles.items():
+        put(value, staged, *tile, row, col)
+    version = value.ok('mask.commit', {'staged': staged, 'tables': value.tables()})[0]['manifest']
+    first = value.ok('mask.copy', {'from': 'p1', 'to': 'p2', 'manifest': version, 'start': 0})[0]
+    assert first == {'next': 2, 'tiles': 3}
+    assert stored_names(value, 'p2')[0] == set(), 'no manifest before every page is copied'
+    assert value.error('mask.copy', {'from': 'p1', 'to': 'p2', 'manifest': version, 'start': 4}) == ('INVALID_REQUEST', 'start')
+    assert value.ok('mask.copy', {'from': 'p1', 'to': 'p2', 'manifest': version, 'start': 2})[0] == {'next': None, 'tiles': 3}
+    assert stored_names(value, 'p2') == stored_names(value, 'p1')
+    for (row, col), tile in tiles.items():
+        assert b''.join(value.ok('mask.read', {'project': 'p2', 'manifest': version, 'layer': 'labels', 'positions': [[row, col]]})[1]) == tile[0]
+    # a retain of the first project does not touch the copy
+    value.ok('mask.retain', {'project': 'p1', 'keep': []})
+    assert stored_names(value, 'p1')[0] == set() and stored_names(value, 'p2')[0] == {version}
+    assert value.error('mask.copy', {'from': 'p2', 'to': 'p2', 'manifest': version, 'start': 0}) == ('INVALID_REQUEST', 'to')
+    assert value.error('mask.copy', {'from': 'p1', 'to': 'p3', 'manifest': version, 'start': 0}) == ('INVALID_REQUEST', 'manifest')
+
+
+def test_copy_refuses_a_damaged_tile_and_a_skipped_page(engine, monkeypatch):
+    monkeypatch.setattr(masks, 'COPY_PAGE', 1)
+    value = engine()
+    staged = begin(value)['staged']
+    for col in (0, 1):
+        put(value, staged, *labels_tile(col + 5), 0, col)
+    version = value.ok('mask.commit', {'staged': staged, 'tables': value.tables()})[0]['manifest']
+    assert value.error('mask.copy', {'from': 'p1', 'to': 'p2', 'manifest': version, 'start': 1}) == ('INVALID_REQUEST', 'start'), 'page 0 skipped'
+    assert stored_names(value, 'p2')[0] == set()
+    blob = Path(value.coordinator.projects_root) / 'p1' / 'tiles' / 'blobs' / labels_tile(5)[1][:2] / labels_tile(5)[1]
+    blob.write_bytes(b'not a tile')
+    value.coordinator.mask_cache.items.clear()
+    assert value.error('mask.copy', {'from': 'p1', 'to': 'p3', 'manifest': version, 'start': 0}) == ('INVALID_BUFFER', 'tile')
+    assert stored_names(value, 'p3')[0] == set()
+
+
+def test_forget_drops_a_project_from_memory_and_waits_for_its_open_versions(engine):
+    value = engine()
+    staged = begin(value)['staged']
+    put(value, staged, *labels_tile(6))
+    assert value.error('mask.forget', {'project': 'p1'})[0] == 'BUSY', 'a staged version of the project is open'
+    version = value.ok('mask.commit', {'staged': staged, 'tables': value.tables()})[0]['manifest']
+    value.ok('mask.read', {'project': 'p1', 'manifest': version, 'layer': 'labels', 'positions': [[0, 0]]})
+    assert any(key[0].parent.name == 'p1' for key in value.coordinator.mask_cache.items)
+    assert value.ok('mask.forget', {'project': 'p1'})[0] == {}
+    assert 'p1' not in value.coordinator.mask_stores
+    assert not any(key[0].parent.name == 'p1' for key in value.coordinator.mask_cache.items)
+    assert value.error('mask.forget', {'project': '../p1'}) == ('INVALID_REQUEST', 'project')

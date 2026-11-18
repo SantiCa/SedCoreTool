@@ -3134,6 +3134,15 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   found…"). Without the engine (browser, standalone file, engine experiment off) a tiled section is a grey placeholder without masks or table, nothing
   in it can be changed, and its record is saved back exactly as it was read (decision D2). Folder backups and packages leave tiled sections out
   until cards M8.4.18c and M8.4.18d.
+- **The store folder follows its project** (`deleteStoreOf`, `copyTiledStore`, `storeLocked` in `app.js`; `desktop/tile-ipc.js`; card M8.4.27;
+  contract §8.7). Deleting a project from the library also deletes its folder on this computer (`<user data>/projects/<id>/`: masks, the record
+  of sources, copies of sources), after the sends of its open sections stopped; if that is not possible the project is still deleted and the page
+  says that its folder was not ("The project was deleted, but not the folder…"). When a project is imported over a local version and the local
+  version is kept as a copy under a new identifier, the stored versions its tiled sections name and their sources are copied to the copy's folder
+  first; if that fails (or the engine is not there), nothing of that project is imported and the local version stays as it was. A tiled section
+  whose stored version is missing or damaged when the project is opened (for example a folder removed by hand) opens without masks, with no
+  interval table, locked ("The stored masks of the section «…» are missing or damaged…"); its record is saved back as it was read and the store
+  removes nothing (`mask.retain` is not called) while such a section is open.
 - **The original image of a tiled section** (`tiledsource.js`; `desktop/tile-ipc.js` and `desktop/source-copy.js`; card M8.4.18b; contract §8.7).
   The section form shows, for a tiled section, whether the project holds its own copy of the original image, whether the original is still where it
   was added, or that it is missing (with its size). *Locate the image…* (shown when neither the copy nor the original is there) takes a file the user
@@ -3232,7 +3241,8 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   measurement option `SEDCORETOOL_TILE_DELIVERY=direct`.
 - **Tests:** `tests/test_store_source.py`, `tests/test_store_pyramid.py`, `tests/test_engine_store.py` (Python), the tile-store tests of
   `tests/app/engine.test.mjs` (the desktop client and the real engine), `tests/app/tile-ipc.test.mjs` (the bridge and the reader) and
-  `tests/app/source-copy.test.mjs` (locating a moved source, the verified copy into the project).
+  `tests/app/source-copy.test.mjs` (locating a moved source, the verified copy into the project), `tests/app/project-store.test.mjs` (the
+  project's folder deleted and copied with it).
 
 ## 27. Offline single file
 

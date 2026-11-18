@@ -64,7 +64,7 @@ RUNNER_IDLE_SECONDS = 30         # an idle method worker holds memory (NumPy, th
 PROGRESS_EVENT_SECONDS = 0.1     # at most ten progress events per second (§3)
 PYRAMID_NAME = re.compile(r'[^/\\:\x00-\x1f]{1,255}')   # a file name for display: no folder separators or control characters
 MAX_PATH = 4096
-MASK_OPERATIONS = ('mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info')
+MASK_OPERATIONS = ('mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.forget')
 MAX_STAGINGS = 16                # staged mask versions per session (contract §8.7)
 
 
@@ -342,6 +342,20 @@ class Coordinator:
         if operation == 'mask.info':
             require_fields(payload, ('project', 'manifest', 'start'))
             return self.mask_store(payload['project']).info(payload['manifest'], payload['start'])
+        if operation == 'mask.copy':                                            # card M8.4.27: a project saved under a new identifier
+            require_fields(payload, ('from', 'to', 'manifest', 'start'))
+            if payload['from'] == payload['to']:
+                raise RequestError('INVALID_REQUEST', 'to')
+            source, target = self.mask_store(payload['from']), self.mask_store(payload['to'])
+            return self.masks.write_or_disk_error(target.copy_from, source, payload['manifest'], payload['start'])
+        if operation == 'mask.forget':                                          # card M8.4.27: the project's folder is about to be deleted
+            require_fields(payload, ('project',))
+            store = self.mask_store(payload['project'])
+            if any(staging.store is store for staging in self.stagings.values()):
+                raise RequestError('BUSY')
+            store.forget()
+            self.mask_stores.pop(payload['project'], None)
+            return {}
         require_fields(payload, ('project', 'manifest', 'layer', 'positions'))      # mask.read
         store, layer, positions = self.mask_store(payload['project']), payload['layer'], payload['positions']
         manifest, _ = store.read_manifest(payload['manifest'])

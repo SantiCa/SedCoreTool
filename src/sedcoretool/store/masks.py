@@ -48,6 +48,7 @@ MAX_POSITIONS = 262_144
 MAX_MANIFEST_BYTES = 64 * 2**20
 MAX_RETAINED = 1024                             # manifests one `mask.retain` may keep (card M8.4.18a)
 INFO_PAGE = 2048                                # tile positions per `mask.info` answer (the JSON of an answer stays far below 64 KiB)
+COPY_PAGE = 32                                  # tiles per `mask.copy` answer (card M8.4.27): at most 40 MiB read, verified and written
 COMPRESSION_LEVEL = 1
 BLOB_CACHE_BYTES = 64 * 2**20
 HEX64 = re.compile('[0-9a-f]{64}')
@@ -386,6 +387,41 @@ class MaskStore:
                 removed['blobs'] += 1
         self.cache.size = sum(len(data) for data in self.cache.items.values())
         return removed
+
+    def copy_from(self, source: 'MaskStore', sha256: str, start: int) -> dict:
+        """Copy a stored manifest of ``source`` into this store, ``COPY_PAGE`` tiles per call, in the manifest's order (card M8.4.27): each blob
+        is read and verified from ``source`` and written here unless a valid one is already here; the tables go with the first page. The
+        manifest is written last, and only when every blob it names is here, so a copy stopped half-way leaves only blobs no manifest names
+        (``retain`` removes them). Returns ``{'next': start of the next page or None, 'tiles': number of tiles}``."""
+        if source.folder == self.folder:
+            raise MaskError('INVALID_REQUEST', 'to')
+        manifest, tiles = source.read_manifest(sha256)
+        if type(start) is not int or not 0 <= start <= len(tiles):
+            raise MaskError('INVALID_REQUEST', 'start')
+        if start == 0:
+            for name, table in manifest['tables'].items():
+                if table:
+                    self.write_blob(source.read_blob(table['sha256'], table['byte_length'], f'tables.{name}'), table['sha256'], f'tables.{name}')
+        entries = list(tiles.values())[start:start + COPY_PAGE]
+        for entry in entries:
+            for layer, length in LAYER_BYTES.items():
+                if entry[layer]:
+                    self.write_blob(source.read_blob(entry[layer], length, 'tile'), entry[layer], 'tile')
+        end = start + len(entries)
+        if end < len(tiles):
+            return {'next': end, 'tiles': len(tiles)}
+        if not all(self.blob_path(name).is_file() for name in source.blobs_of(sha256)):
+            raise MaskError('INVALID_REQUEST', 'start')                # a page was skipped: the copy is not complete
+        if self.write_manifest(manifest) != sha256:
+            raise MaskError('INTERNAL', 'manifest')
+        return {'next': None, 'tiles': len(tiles)}
+
+    def forget(self) -> None:
+        """Drop what this store keeps in memory (card M8.4.27: its folder is about to be deleted)."""
+        self.manifests.clear()
+        for key in [key for key in self.cache.items if key[0] == self.folder]:
+            self.cache.items.pop(key)
+        self.cache.size = sum(len(data) for data in self.cache.items.values())
 
     def info(self, sha256: str, start: int) -> dict:
         """One page of the tile positions of a stored manifest, in its order: ``[row, col, layers, ...]`` with layers 1 = labels, 2 =

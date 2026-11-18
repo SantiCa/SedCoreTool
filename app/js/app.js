@@ -1797,8 +1797,9 @@ const engineAnalysis = engineBridge?.enabled === true ? createEngineAnalysis({ c
 } }) : null;
 /** Brings the bins of the sections up to date. Resolves when every section has a final state (always, without the engine). */
 export function analyzeSections(sections) {
-  for (const s of sections) if (s.frozen === 'engine') s.bins = [];   // a placeholder has no masks in this program (D2 of card M8.4.18)
-  sections = sections.filter((s) => s.frozen !== 'engine');
+  const maskless = (s) => s.frozen === 'engine' || s.frozen === 'store';   // no masks here: D2 of card M8.4.18; a missing stored version (M8.4.27)
+  for (const s of sections) if (maskless(s)) s.bins = [];
+  sections = sections.filter((s) => !maskless(s));
   const tiled = sections.filter((s) => s.tiled);
   for (const s of tiled) analyzeTiled(s);         // counted in the page from the full-resolution mask tiles (card M8.4.17), never from the reduced copy
   sections = sections.filter((s) => !s.tiled);
@@ -1808,7 +1809,7 @@ export function analyzeSections(sections) {
 
 export function analyze(s) {
   if (!s) return;
-  if (s.frozen === 'engine') { s.bins = []; return; }
+  if (s.frozen === 'engine' || s.frozen === 'store') { s.bins = []; return; }
   if (s.tiled) { analyzeTiled(s); return; }
   if (engineAnalysis) { void engineAnalysis.request(s); return; }   // asynchronous: the table shows a pending state until the engine answers
   const { bins, rowCache } = computeSectionBins(s, { classes: S.classes, settings: S.settings, ageModel: S.age.model });
@@ -3691,10 +3692,12 @@ async function loadTiledSection(q) {
         sbox: st ? [st.x0, st.y0, st.x1, st.y1] : null, stats: st, feat: st ? features(st, ppu) : null, ...(o.th ? { _thumb: o.th } : {}), ...(o.em ? { emb: o.em } : {}) });
     }
     // The tiles of the stored version, then every one read back once: the reduced copy for the overview and the row counts (card M8.4.17).
+    // Card M8.4.27: a stored version that is missing or damaged locks the section (no masks, no table, record saved back as read).
     const positions = /** @type {[number, number][]} */ ([]);
+    try {
     for (let start = 0; start !== null;) {
       const page = await TILES.maskInfo(project, rec.manifest, start);
-      if (page.error) throw new Error(t('tiles.err', { code: page.error.code, field: page.error.field || '' }));
+      if (page.error) throw Object.assign(new Error(t('tiles.err', { code: page.error.code, field: page.error.field || '' })), page.error);
       if (page.ok.section !== q.id || page.ok.width !== rec.width || page.ok.height !== rec.height) throw new Error(t('load.badMask', { s: q.name || '?', k: 'tiled' }));
       for (let k = 0; k < page.ok.positions.length; k += 3) { const [row, col] = page.ok.positions.slice(k, k + 2); positions.push([row, col]); s.maskTiles.stored.add(s.maskTiles.index(row, col)); }
       start = page.ok.next;
@@ -3713,9 +3716,51 @@ async function loadTiledSection(q) {
         counts.commit(s.maskTiles.index(row, col), tileHistogram(entry, row, col, rec.width, rec.height, area.x0, area.x1));
       }
     }
+    } catch (error) {
+      if (!['INVALID_REQUEST', 'INVALID_BUFFER'].includes(/** @type {any} */ (error)?.code)) throw error;
+      return storeLocked(s, q);
+    }
     if (!tiled.missing && positions.length) void tiledStatsRunner(s).queue(positions);   // only the tiles: an object without pixels is kept, as saved
     return s;
   } finally { stop(); dialog.close(); }
+}
+
+/** Card M8.4.27: the store folder of a deleted project goes too, once the sends of its sections that were open have stopped. */
+async function deleteStoreOf(id, sections) {
+  if (!TILES) return;
+  for (const q of sections) q._maskSync?.stop();
+  await Promise.race([Promise.all(sections.map((q) => q._maskSync?.running?.catch(() => {}))), new Promise((r) => setTimeout(r, 3000))]);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const result = await TILES.deleteProjectStore(storeProject(id));
+    if (!result.error) return;
+    if (result.error.code !== 'BUSY') break;
+    await new Promise((r) => setTimeout(r, 1000));                   // a version still being sent: the engine closes it shortly
+  }
+  toast(t('tiles.deleteFailed'), 9000);
+}
+/** Card M8.4.27: before a project is kept under a new identifier, its tiled sections' stored versions and sources are copied to it; throws
+ *  (and nothing is kept) when that is not possible. */
+async function copyTiledStore(record, to) {
+  const tiled = (record.cores || []).flatMap((c) => c.sections || []).filter((q) => q.tiled?.manifest);
+  if (!tiled.length) return;
+  if (!TILES) throw new Error(t('tiles.copyNeedsEngine'));
+  const key = crypto.randomUUID(), dialog = tileBuildDialog('', () => { void TILES.cancel(key); }, t('tiles.copyingProject', { n: record.name || APP }));
+  const stop = TILES.onProgress((k, progress) => { if (k === key) dialog.update(progress); });
+  try {
+    const result = await TILES.copyProjectStore(storeProject(record.id), storeProject(to), tiled.map((q) => q.tiled.manifest), tiled.map((q) => q.tiled.source.sha256), key);
+    if (result.error) throw new Error(t('tiles.err', { code: result.error.code, field: result.error.field || '' }));
+    if (result.ok.cancelled) throw new Error(t('tiles.cancelled'));
+  } finally { stop(); dialog.close(); }
+}
+
+/** Card M8.4.27: the section without its masks, locked; its saved record is what a save writes, and the store keeps everything (`retainStore`). */
+function storeLocked(s, q) {
+  s._maskSync?.stop(); s._maskSync = null; s._maskLoader = null; s._counts = null;
+  s.maskTiles = new MaskTiles({ width: q.tiled.width, height: q.tiled.height });
+  s.labels?.fill(0); s.exclude?.fill(0);                   // the reduced copy of tiles read before the failure
+  s.frozen = 'store'; s._savedRecord = q; s.bins = [];
+  toast(t('tiles.storeMissing', { s: q.name || '?' }), 12000);
+  return s;
 }
 
 /* V0.36: version 5 = trace overlaps (stacks, V0.20), cell edits (V0.35). A newer file opens read-only. Card M8.4.18a: version 6 = a project with tiled
@@ -3873,14 +3918,14 @@ async function settleTiledSections(deadlineMs = settleDeadlineMs) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
   }));
-  for (const q of S.cores.flatMap((c) => c.sections)) if (q.frozen === 'source') q._tiledRecord = q._savedRecord;   // nothing can change without pixels
+  for (const q of S.cores.flatMap((c) => c.sections)) if (q.frozen === 'source' || q.frozen === 'store') q._tiledRecord = q._savedRecord;   // locked: saved back as it was read
   return unsaved;
 }
 /** After a save: the store keeps only the versions the saved records name and the current ones (rule 4: the last good save stays until a newer one). */
 async function retainStore() {
   if (!TILES) return;
   const sections = S.cores.flatMap((c) => c.sections).filter((q) => q.tiled && q.maskTiles);
-  if (!sections.length) return;
+  if (!sections.length || sections.some((q) => q.frozen === 'store')) return;   // card M8.4.27: nothing is deleted while a stored version is missing
   const keep = new Set();
   for (const q of sections) {
     if (q._savedRecord?.tiled?.manifest) keep.add(q._savedRecord.tiled.manifest);
@@ -4035,7 +4080,9 @@ async function onProjectListClick(e) {
   } else if (act === 'del') {
     if (btn.dataset.armed !== '1') { btn.dataset.armed = '1'; btn.textContent = t('proj.delConfirm'); btn.classList.add('danger'); return; }
     await deleteProject(id);
+    const open = id === S.id ? S.cores.flatMap((c) => c.sections) : [];
     if (id === S.id) { resetState(); dirty = false; syncSettingsForm(); updateProjHeader(); setSaveState('saved'); }
+    await deleteStoreOf(id, open);
     renderProjects(); renderAllProjects();
   } else if (act === 'rename') {
     const b = row.querySelector('h3'), inp = document.createElement('input');
@@ -4409,6 +4456,7 @@ async function restoreFiles(files) {
         const old = await getProject(p.id).catch(() => null);
         if (old && storageOK) {   // V0.36: the local version is kept as a copy before it is replaced
           const id2 = uid(), name2 = `${old.name || APP} (${t('bk.previous')} ${new Date(m?.updated || Date.now()).toLocaleDateString()})`;
+          await copyTiledStore(old, id2);                               // card M8.4.27: its tiled sections keep their masks, or nothing is replaced
           await putProject({ ...(m || {}), id: id2, name: name2, updated: Date.now() }, { ...old, id: id2, name: name2 });
         }
         const mine = p.id === S.id ? S.comments : old?.comments;
@@ -5244,7 +5292,7 @@ window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, read
   clearTiles: () => { for (const bitmap of tileCache.clear()) bitmap?.close?.(); requestRender(); },   // repeated viewer probes (card M8.4.24)
   tileState: (k, row, col) => { const s = sec(), scheduler = s?.tiled && tileSchedulers.get(s.tiled.pyramid), key = s?.tiled ? s.tiled.pyramid + '/' + tileKey(k, row, col) : '';   // evidence when a probe fails (card M8.4.24)
     return { cached: tileCache.has(key), inFlight: !!scheduler?.inFlight.has(key), idle: !!scheduler?.idle, failures: scheduler?.failures ?? 0, lastError: s?.tiled?.lastError ?? null }; },
-  saveNow: () => saveToDB(), storeProject: () => storeProject(S.id), settleDeadline: (ms) => { settleDeadlineMs = ms; },   // card M8.4.18a tests
+  saveNow: () => saveToDB(), storeProject: (id = null) => storeProject(id ?? S.id), settleDeadline: (ms) => { settleDeadlineMs = ms; },   // card M8.4.18a tests
   stopMaskSync: () => sec()?._maskSync?.stop(), tiledSaved: () => S.cores.flatMap((c) => c.sections).filter((q) => q.tiled).map((q) => q._savedRecord?.tiled?.manifest ?? null),
   tiledCountsIdle: () => S.sections.every((q) => !q._counts || (!q._counts.runner.running && q._counts.counts.ready)),
   tiledCountsStats: () => { const q = sec()?._counts; return q ? { tiles: q.counts.hists.size, bytes: q.counts.bytes } : null; },

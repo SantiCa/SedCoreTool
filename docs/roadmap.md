@@ -82,7 +82,7 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.27** (the store folder follows its project: delete, copy under a new identifier, a missing stored version; **model: most capable tier (Opus), effort high**). M8.4.18b is done (a moved image is located by its SHA-256 and can be copied into the project; development gate). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate). Its three findings have cards, in this order after M8.4.18b: M8.4.27 (the store folder follows its project: delete, copy under a new identifier, a missing stored version; Opus, high), M8.4.28 (object operations right after reopening; Opus, medium), M8.4.29 (reopening from a cache instead of every tile; Opus, high; decision G waits for the maintainer); then M8.4.18c, M8.4.18d, M8.4.19. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
+- **Next step: M8.4.28** (object operations right after reopening a tiled section; **model: most capable tier (Opus), effort medium**). M8.4.27 is done (the store folder is deleted and copied with its project; a missing stored version locks its section; development gate). M8.4.18b is done (a moved image is located by its SHA-256 and can be copied into the project; development gate). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate). Its three findings have cards, in this order after M8.4.18b: M8.4.27 (the store folder follows its project: delete, copy under a new identifier, a missing stored version; Opus, high), M8.4.28 (object operations right after reopening; Opus, medium), M8.4.29 (reopening from a cache instead of every tile; Opus, high; decision G waits for the maintainer); then M8.4.18c, M8.4.18d, M8.4.19. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1651,7 +1651,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   saves its saved record, so the deleted class's id stays in that record until the section is opened with its image and saved again.
   Checks on Windows (18 Nov 2026): `pytest` 878 passed, 9 skipped; `npm test` 457 passed (the packaging test first failed: the new module was missing from the installer's file list and the package check, both fixed); typecheck, `sync_version --check` and Ruff passed; `tests/e2e/desktop.mjs` with the engine experiment off and on and `tests/e2e/tiled-sections.mjs` passed.
 
-##### M8.4.27 - The store folder follows its project — state: after M8.4.18b (written 18 Nov 2026 for finding 2 of M8.4.18a)
+##### M8.4.27 - The store folder follows its project — state: Done (18 Nov 2026, development gate; written the same day for finding 2 of M8.4.18a)
 
 - **Goal:** the folder `<user data>/projects/<store id>/` (mask tiles and manifests, `sources.json`, the copies of M8.4.18b) lives and dies with its
   project: deleting the project removes it; a project copied under a new identifier gets the stored versions its tiled sections name; and a tiled
@@ -1689,6 +1689,29 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   that exists locally with a tiled section and keep both: the "previous version" opens with identical masks, and saving the other one does not
   remove them; delete one manifest by hand: the project opens, that section is locked and says so, the rest edits and saves.
 - **Done when:** the three cases work as above in the desktop with their failure cases; development gate.
+- *As built (18 Nov 2026):* engine `mask.copy` (`MaskStore.copy_from`: pages of 32 tiles, so that no request comes near the client's 5 s
+  deadline; blobs read verified and written durably; the manifest last, only when every blob is there) and `mask.forget` (contract §8.7);
+  `desktop/tile-ipc.js`: `deleteProjectStore` (forget, rename to `.deleting-<uuid>`, remove; leftovers removed when the bridge starts) and
+  `copyProjectStore` (the manifests page by page, then the `sources.json` entries of the sections' sources with the project's copies, hard-linked
+  when possible); `app.js`: `deleteStoreOf` (stops the sends of the open project's sections, waits up to 3 s, retries a `BUSY` answer for 5 s, tells
+  the user if the folder stayed), `copyTiledStore` before the "previous version" copy of the import (a failure throws, so that project is not
+  imported and the local version is untouched; without the engine too), and `storeLocked` (`frozen: 'store'`: no masks, no table, the saved
+  record written back, `retainStore` skipped while such a section is open). Differences from the text above: (1) step 2's "later save as" does not
+  exist in the program today; the import copy is the only place a project gets a new identifier with its sections; (2) the engine keeps the eight
+  most recent manifests and 64 MiB of blobs in memory, so a version removed from the disk is noticed only after the engine restarts (the usual case:
+  a new start or another computer); the desktop test restarts it. Tests: Python 3 (`mask.copy` in pages with the manifest last, the copy untouched
+  by a retain of the first project, a skipped page and a damaged blob refused with nothing written; `mask.forget` drops the store and its cached
+  blobs and answers `BUSY` while a version is open); Node 5 (`tests/app/project-store.test.mjs`: delete removes only that folder and refuses
+  `..`, absolute names, device names and other shapes; `BUSY` keeps the folder, a stopped engine does not; a delete stopped after the rename is
+  finished at the next start; copy pages each version once, copies the sources record and the project's copy of the source, which survives the
+  first project's deletion; a failed copy writes no record); desktop (`tests/e2e/tiled-sections.mjs`): a manifest moved away and the engine
+  restarted: the section opens locked with the message, no table, its record saved back byte for byte while another section's rename is saved;
+  with the manifest back it is identical to the saved one; the same project imported as a file and both versions kept: the kept copy has its own
+  stored version and opens unlocked and identical after a save of the imported one; deleting that copy from the library removes its folder,
+  leaves the other project's folder and no `.deleting-*` folder. Not done: a delete or copy interrupted by killing the program (the rename-then-
+  remove order and the manifest-last order are tested in Node and Python, not by a kill); the time to copy the versions of an `rgb8g`-sized
+  section; macOS and Linux.
+  Checks on Windows (18 Nov 2026): `pytest` 881 passed, 9 skipped; `npm test` 462 passed; typecheck, `sync_version --check` and Ruff passed; `tests/e2e/desktop.mjs` with the engine experiment off and on and `tests/e2e/tiled-sections.mjs` passed. GitHub, earlier commits: `b3a80f2` (M8.4.18b) passed `tests` and *Desktop builds* on Windows, macOS and Linux; two runs of 18 Nov were cancelled because no macOS runner was available (nothing ran), and the rerun of `efc1ac4` passed.
 
 ##### M8.4.28 - Object operations right after reopening a tiled section — state: after M8.4.27 (written 18 Nov 2026 for finding 1 of M8.4.18a)
 
