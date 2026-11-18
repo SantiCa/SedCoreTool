@@ -1405,6 +1405,9 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   the GitHub incident: a slow Python start on a busy runner against the 5 s deadline of the first request. Also under load, the test "a
   buffer.read answer that does not match its request…" failed in 9 of 12 runs, because it starts its fixture engines with its own 1.5 s
   deadline. Neither deadline is changed (AGENTS §3.7): **question for the maintainer** below.
+  **On GitHub (commit `0fdd7bb`):** *engine start repetitions* on `windows-latest`: 20 runs of the file, 220 starts, none failed, 82-867 ms
+  (median 88, 95th percentile 109); `tests` passed; *Desktop builds* passed on Windows, macOS and Linux with the download cache cold (not
+  found, then saved). The run with the cache warm is the next push.
 - **Question for the maintainer (M8.4.26):** the engine start in the tests uses the client's 5 s request deadline for the handshake (1.5 s
   in the `buffer.read` fixture test); under full CPU load starts took up to 4.7 s and one exceeded 5 s. Options: (a) keep the deadlines and
   accept a rare rerun; (b) give the handshake its own, longer deadline in `desktop/engine.js` (also in the program, where a slow first start
