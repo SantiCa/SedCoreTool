@@ -1189,6 +1189,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
      exists yet to justify a larger cap, and the same 4 MiB cap protects the analysis path. **Open (maintainer):** a tiled section with more than
      about 51,000-56,000 objects cannot commit its tables; the page would show "did not reach the store" and retry every 30 s without end. A
      later card must either raise the cap for `objects` in §8.7 or make the page say that the limit was reached; the number to decide with is above.
+     Card M8.4.22 (added 18 November 2026 at the maintainer's request) does both.
   8. **Exact equality and closing** [fast, medium]: a small image opened both ways (whole, and forced tiled with a section factor of 1) with the same
      scripted edit sequence gives identical labels, exclusion, objects and stacks; tool gating of M8.4.15 updated (the editing tools leave the refused
      list); documents.
@@ -1210,6 +1211,36 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   overlaps crossing tile seams, exclusion, a ROI not aligned with tiles and fractional intervals; interval table after an edit touching at most
   4 tiles p95 <= 150 ms; interval-size change for all sections p95 <= 300 ms (re-binning only); a settings change that changes effective
   classes recounts every tile: measured on `rgb8g`, shown with progress and cancellable (no target yet: report it).
+
+##### M8.4.22 - Objects table of tiled sections beyond 4 MiB — state: Ready after M8.4.16; before M8.4.18 (added 18 Nov 2026 at the maintainer's request)
+
+- **Goal:** a tiled section keeps up to 1,048,576 objects in the store (today about 51,000-56,000: the 4 MiB cap of `utf8json` metadata binds
+  first, measured in M8.4.16 step 7, [evidence](validation/M8.4.16-step7-mask-tables.json)); when a limit is reached anyway the page says so once
+  and stops retrying, instead of "did not reach the store" every 30 s.
+- **Read first:** contract §3 (metadata limits) and §8.7 (mask tiles and tables); `src/sedcoretool/store/masks.py` (`TABLES`, `TABLE_DTYPES`,
+  `table_length_ok`); `app/js/tiledsync.js` (`maskTables`, `MaskSync.round`); `app/js/sectionanalysis.js` (`objectRecords`, `classRecords`); the
+  step 7 record of M8.4.16.
+- **Change:** contract §8.7 written first; `store/masks.py`; `src/sedcoretool/engine/server.py` (`mask.commit` table names); `app/js/tiledsync.js`;
+  `desktop/tile-ipc.js` (table names it uploads); `app/js/i18n.js` (one message); tests.
+- **Do not touch:** the `utf8json` cap of §3 and the objects input of `section.intervals/1` (§4; the analysis of tiled sections is M8.4.17, which
+  reads the same columns if this card is done first); `legacy/`; whole-image sections.
+- **Model:** most capable, effort high (a permanent file format, written before M8.4.18 makes it part of saved projects).
+- **Decision proposed (the maintainer approves or changes it before step 1):** the store keeps the objects as **binary columns** instead of JSON:
+  `object_ids` `u32le[N]`, `object_class` and `object_predicted` `i32le[N]` (index into the `classes` table, -1 for none), `object_confidence`
+  `f64le[N]`; 20 bytes per object, each column within the 16 MiB cap of the stack tables, so 1,048,576 objects (2^20) is the stated limit.
+  `classes` stays `utf8json` (a few hundred bytes). The manifest becomes **version 2**; version 1 manifests are refused with a clear code (none is
+  named by any project yet, because saving tiled sections is M8.4.18, so no user data is lost). Alternative considered: raise the `utf8json`
+  cap for store tables only to 64 MiB; rejected because a JSON table of a million records costs about ten times its bytes in parser memory in
+  the coordinator (§3 asks to bound that) and stays slower to hash and read.
+- **Steps:**
+  1. Contract §8.7 v2: table names, dtypes, shapes, the 2^20 limit, the refusal of v1; Python store and `mask.commit` with tests (exact round
+     trip, hostile columns: wrong length, unknown class index, duplicate or zero ids, more than 2^20 rows).
+  2. Page: `maskTables` builds the columns; before a round the page checks every limit; beyond one it shows "This large section has more
+     objects than the store accepts (limit …)" once, keeps the masks in the page and stops the rounds until the count drops. Node tests at the
+     limits (2^20 objects pass, 2^20 + 1 refuse without a request to the engine).
+  3. Measure again with `tools/measure_mask_tables.mjs` (columns) and run the step-4 desktop test of M8.4.16 unchanged.
+- **Tests and acceptance:** Python and Node tests above; `tests/e2e/tiled-sections.mjs` passes; contract, technical manual and changelog
+  updated in the same commit; development gate on Windows.
 
 ##### M8.4.18 - Saving, reopening, backup and export of tiled sections — state: after M8.4.17
 
