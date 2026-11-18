@@ -71,13 +71,25 @@ export function manualRangeAt(section, d) { let hit = null; for (const m of sect
  * @returns {{bins: SectionBin[], rowCache: RowCache | undefined}}
  */
 export function computeSectionBins(s, project) {
-  const { classes, settings, ageModel } = project;
+  const { classes, settings } = project;
   if (s.loadWarnings) return { bins: [], rowCache: s._rc };
   const eff = effectiveClassIndex(s, classes, settings);
   let h = 2166136261; for (let i = 0; i < eff.length; i++) h = Math.imul(h ^ (eff[i] + 2), 16777619);   // signature of the class of each object
   const key = `${s._mv || 0}|${s.w}x${s.h}|${s.roi.x0},${s.roi.y0},${s.roi.x1},${s.roi.y1}|${classes.length}|${eff.length}|${h}`;
   const rowCache = s._rc?.key !== key ? { key, counts: rowCounts({ labels: s.labels, width: s.w, roi: s.roi, exclude: s.exclude, effClass: eff, nClasses: classes.length, stacks: s.stacks }) } : s._rc;   // V0.2: cached
-  const bins = /** @type {any[]} */ (binRows(rowCache.counts, { top: s.top, bottom: s.bottom, binPx: binRowsOfSection(s, settings), minValid: (settings.minValid ?? 20) / 100 }));
+  return { bins: binsFromRowCounts(s, rowCache.counts, project, binRowsOfSection(s, settings)), rowCache };
+}
+
+/**
+ * Interval bins from the row counts of a section's analysis area: the half of `computeSectionBins` that does not depend on how the rows were
+ * counted, so that a tiled section (card M8.4.17, counted tile by tile) and a section held whole give the same table. `binPx` is the rows per
+ * interval of the rows that were counted (`binRowsOfSection` of the section, or of its analysis area in source pixels for a tiled one).
+ * @param {any} s section: top, bottom, units, manual @param {import("./core.js").RowCounts} counts @param {AnalysisProject} project @param {number} binPx
+ * @returns {SectionBin[]}
+ */
+export function binsFromRowCounts(s, counts, project, binPx) {
+  const { settings, ageModel } = project;
+  const bins = /** @type {any[]} */ (binRows(counts, { top: s.top, bottom: s.bottom, binPx, minValid: (settings.minValid ?? 20) / 100 }));
   const pad = (settings.noDataPad || 0) / UNIT_TO_CM[/** @type {import('./core.js').DepthUnit} */ (s.units)];   // V0.3: widen the no-data zones by this length (cm) on each side
   if (pad > 0) {
     const gaps = bins.filter((b) => b.noData).map((b) => [b.dTop - pad, b.dBottom + pad]);
@@ -89,7 +101,7 @@ export function computeSectionBins(s, project) {
     const ar = interpAgeRange(ageModel, b.depth); b.ageMin = ar?.min ?? null; b.ageMax = ar?.max ?? null;   // V0.28
     const m = manualRangeAt(s, b.depth); b.BIm = m?.BI ?? null; b.iim = m?.ii ?? null;
   }
-  return { bins, rowCache };
+  return bins;
 }
 
 /** @param {ArrayBuffer} digest @returns {string} */

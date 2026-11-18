@@ -1,6 +1,6 @@
 # Reference fixtures for `section.intervals/1`
 
-Forty-four synthetic cases (about 1.2 MB) with the **inputs** of engine method `section.intervals/1` and the **result** of
+Forty-seven synthetic cases (about 1.3 MB) with the **inputs** of engine method `section.intervals/1` and the **result** of
 the current JavaScript calculation (`app/js/sectionanalysis.js`). The Python method (roadmap card M8.3.4) must
 reproduce them. Contract: [roadmap-engine-contract.md](../../../docs/roadmap-engine-contract.md) §4 (inputs) and §5
 (results). Do not edit these files by hand.

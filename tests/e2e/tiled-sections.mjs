@@ -72,7 +72,7 @@ try {
   const section = await on.page.evaluate(() => {
     const { S } = window.ichantool, s = S.sections.at(-1);
     return { tiled: s.tiled && { level: s.tiled.level, levels: s.tiled.levels.length, pyramid: s.tiled.pyramid.length }, w: s.w, h: s.h, ds: s.ds, full: s.full,
-      orig: s.orig?.length, maxMP: S.settings.maxMP, bins: s.bins.length };
+      orig: s.orig?.length, maxMP: S.settings.maxMP, bins: s.bins.length, bioturbated: s.bins.some((b) => b.pct > 0) };
   });
   assert.ok(section.tiled, 'the image became a tiled section');
   assert.equal(section.tiled.pyramid, 64);
@@ -81,7 +81,7 @@ try {
   assert.equal(section.orig, section.w * section.h * 4);
   if (!process.argv[2]) assert.deepEqual(section.full, { w: 620, h: 16726 });
   assert.ok(section.full.w * section.full.h > section.maxMP * 1e6, 'only images above the size limit are tiled');
-  assert.equal(section.bins, 0, 'no interval table from empty masks');
+  assert.ok(section.bins > 0 && !section.bioturbated, 'card M8.4.17: the interval table is counted from the full-resolution masks, which are empty: bins without any bioturbation');
   assert.ok(toasts.some((text) => text.includes(String(section.full.h))), 'the user is told what a tiled section is: ' + JSON.stringify(toasts));
   const saved = await on.page.evaluate(() => {
     const project = window.ichantool.serialize();
@@ -630,6 +630,26 @@ try {
       if (['sL', 'sLL', 'rL'].includes(key)) near(t2.stats[key], o.stats[key], `object ${o.id} ${key}`); else assert.deepEqual(t2.stats[key], o.stats[key], `object ${o.id} stats.${key}`);
     }
   }
+  // Card M8.4.17: the interval table. The tiled section counts its full-resolution tiles in the page; the whole section counts its labels. Same image,
+  // same edits, same analysis area and classes, so every column of every bin is identical (the floating-point columns come from the same integers).
+  const table = (index) => on.page.evaluate(async (index) => {
+    const { S } = window.ichantool, s = S.sections[index];
+    S.settings.binCm = 0.5; S.settings.minValid = 20;
+    await window.ichantool.analyzeSections([s]);
+    // The whole section is compared through the JavaScript calculation itself (`referenceBins`), not the engine's: with the engine experiment on, the
+    // engine refuses this script's overlap table (INVALID_BUFFER, stack_members), which is noted in the roadmap under card M8.4.17.
+    return { bins: JSON.parse(JSON.stringify(s.tiled ? s.bins : window.ichantool.referenceBins(s))), tiled: !!s.tiled, roi: s.roi };
+  }, index);
+  await on.page.evaluate(([a, b]) => { const { S } = window.ichantool, q = S.sections[a]; Object.assign(S.sections[b], { top: q.top, bottom: q.bottom, units: q.units }); }, [wholeAt, tiledAt]);   // the second section continues the core's depth: compare on the same depths
+  const wholeTable = await table(wholeAt), tiledTable = await table(tiledAt);
+  assert.ok(wholeTable.bins.length > 10 && wholeTable.bins.some((b) => b.pct > 0), 'the whole section has an interval table with bioturbation: ' + wholeTable.bins.length);
+  assert.deepEqual(tiledTable.bins, wholeTable.bins, 'interval table: every column of every bin is identical');
+  // a class change reaches the table with no tile read, an exclusion across tile seams too
+  await on.page.evaluate((a, b) => { const { S } = window.ichantool; for (const k of [a, b]) { const s = S.sections[k]; for (const o of s.objects.values()) o.cls = S.classes[2].id; } }, wholeAt, tiledAt);
+  const wholeClass = await table(wholeAt), tiledClass = await table(tiledAt);
+  assert.deepEqual(tiledClass.bins, wholeClass.bins, 'interval table after a class change');
+  assert.notDeepEqual(tiledClass.bins, tiledTable.bins, 'the class change changed the table');
+  console.log('Interval table, whole against tiled:', tiledTable.bins.length, 'bins identical; after a class change identical too');
   fs.rmSync(lossless, { force: true });
   console.log('Exact equality, whole against tiled at factor 1:', whole.runs.length, 'label runs,', whole.exRuns.length, 'exclusion runs,', whole.objects.length, 'objects,', whole.usedStacks.length, 'overlap sets');
   assert.deepEqual(on.errors, []);

@@ -14,6 +14,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### For users
 
+- A large image opened as a "tiled" section now has its interval table: bioturbation, class percentages and the indices are counted on the full-resolution masks, tile by tile, and equal what the same masks give on an image held whole. In the measurements an edit updates the table in under 10 ms and changing the interval size in about 20 ms, on an image as tall as 349,526 rows; changing a class or the interval size reads no tile. Before, such a section showed no table.
 - **Fixed:** a 16-bit TIFF image larger than about 28 megapixels (for example 2,249 × 14,020 at full resolution) made the window stop answering as soon as it was decoded: when it was added, or when the Core log or another view needed it again. Such images now open, and 16-bit images of any size decode several times faster (126 million samples converted in 0.09 s instead of about 6 s).
 - **Fixed:** choosing full resolution for a very large image (or adding it with "No reduction") could make the window go blank because it needed more memory than the program has. Sizes that do not fit are now disabled in "Resolution of this section" and refused with a message, and a new image is reduced just enough to fit, with a message that says so. The two resolution controls have clearer names: **Maximum size when adding images** (Settings) and **Resolution of this section**, and each note points to the other.
 - Opening the Multiproxy log of a long core is much faster: with 100,000 rows the first opening took 3 minutes 15 seconds and now takes about 0.6 seconds (7.7 seconds became 0.16 s at 20,000 rows). Results are identical.
@@ -24,6 +25,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
   match the lock still stops the build at once), and *Desktop builds* keeps the verified downloads between runs. An engine test whose engine
   does not start now says why (time against the deadline, exit code, last error lines), and a new manual workflow repeats the engine tests
   on GitHub's Windows runner.
+- Card M8.4.17 (decision F of ARCHITECTURE §3.4, approved on 18 November 2026): the interval table of tiled sections is counted in the page (`app/js/tiledcounts.js`), not by the engine, because the engine would count the stored version and an edit is stored 300 ms after it. The binning half of `computeSectionBins` is now `binsFromRowCounts`, shared by both paths. Three new fixtures cross the tile borders, and a test counts every fixture case tile by tile. `tools/measure_tiled_counts.mjs` measures it ([sparse](docs/validation/M8.4.17-tiled-counts.json), [dense](docs/validation/M8.4.17-tiled-counts-dense.json)).
 - **Fixed (card M8.4.26):** on a very busy computer the engine experiment could be marked unavailable at start, and spend its one
   automatic restart, because starting Python took longer than the 5 s allowed for an ordinary request; the first contact with the engine now
   has its own limit of 20 s.

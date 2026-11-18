@@ -82,7 +82,7 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.17** (interval table of tiled sections), rewritten by the design session of 18 November 2026 around **decision F** (the page counts tiled sections tile by tile into class-independent row histograms; the engine does not count), approved by the maintainer on 18 November 2026; **model: fast tier (Sonnet), effort medium**. The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
+- **Next step: M8.4.18** (saving, reopening, backup and export of tiled sections; **model: most capable tier (Opus), effort high**: saving, backup and recovery). Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1208,7 +1208,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   applied twice across an engine failure); **exact equality**: a small image opened both ways (whole and forced tiled) with the same scripted edit
   sequence gives identical labels, exclusion, objects and stacks.
 
-##### M8.4.17 - Interval table of tiled sections — state: Ready (card rewritten by the design session of 18 Nov 2026; decision F approved by the maintainer on 18 Nov 2026)
+##### M8.4.17 - Interval table of tiled sections — state: Done (18 Nov 2026, development gate; card rewritten by the design session of the same day, decision F approved by the maintainer)
 
 - **Goal:** a tiled section has its interval table, counted on the full-resolution mask tiles, equal to what `section.intervals/1` gives on the
   same masks assembled whole, and fast enough for the targets of contract §7.
@@ -1297,6 +1297,34 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
 - **Done when:** the tiled table equals the whole one on every new fixture and in the desktop
   block; the two targets of step 8 are met and recorded with the reported numbers; development gate on Windows, and `tests` and *Desktop builds*
   passed on the pushed commit.
+- *As built (18 Nov 2026):* `app/js/tiledcounts.js` (`tileHistogram`, `TiledRowCounts`, `TiledCountsRunner`), `binsFromRowCounts` split out of
+  `computeSectionBins`, `analyzeTiled` and the queue of changed tiles in `app.js` (`commitTiledOp`, `swapTiledStep`, the test hook `putMaskTile`),
+  `compactSectionStacks` does nothing for a tiled section (step 1: no tiled path reached it except that guard's case, and the stack table of a tiled
+  section only grows), two new strings in `i18n.js`. Differences from the text above, each for a reason found while building:
+  - *Rows are not clipped when counting a tile; only columns are.* A change of the area's rows then counts no tile; a change of its columns counts the
+    non-empty tiles of the tile columns whose span changed (reading back the dropped ones). A tile with nothing in it has no histogram (it is empty),
+    so only tiles with a label or an exclusion cost memory.
+  - *Excluded pixels are stored per row, valid pixels are derived* (area columns minus excluded), which keeps empty tiles free.
+  - *The old effective classes are kept with the totals.* A new object (a stroke) only appends to the classes array, so the totals are updated by the
+    edited tiles alone; a change of the class of an object that existed re-aggregates every histogram (measured below), reading nothing.
+  Tests: `tests/app/tiledcounts.test.mjs` (7: seams, 12 random masks with stacks and exclusion on random areas, edits with growing classes, class changes
+  and area moves with exact equality at every step, dropped tiles read back only when the area's columns change, stack codes keep their members, and every
+  one of the 47 fixture cases counted tile by tile equals `computeSectionBins`); three new fixtures that cross the tile borders (the Python test of
+  `section.intervals/1` passes on them); `tests/e2e/tiled-sections.mjs` compares the 300 bins of the whole and the tiled section after the 17-step script
+  of M8.4.16 and again after a class change. The assertion "no interval table from empty masks" became "bins without any bioturbation": the table now
+  comes from the full-resolution masks, which are empty. **Measured** (`tools/measure_tiled_counts.mjs`, Windows, Ryzen 7 7700X, Node 22; a section of
+  the size of `rgb8g`, 8,192 x 349,526 = 10,928 tiles): [3 % of the tiles with content](validation/M8.4.17-tiled-counts.json) and
+  [10 %](validation/M8.4.17-tiled-counts-dense.json) (13,272 objects): an edit of 4 tiles p95 8.0-8.5 ms (target 150), an interval-size change p95
+  15.6-29.6 ms over 10 changes (target 300; one section), first count of all tiles 0.19-0.64 s, a reclassification (re-aggregation) median 9.8-11.0 ms,
+  a move of the area's columns median 11-16 ms and at most 105 ms; histograms 2.2-5.8 MiB of the 64 MiB budget; the incremental totals equal a fresh
+  count at the end of each run. Not measured: more than one section together for scenario (a), the interface's 100 ms grouping delay (outside the
+  target by contract), the desktop chain with real tile reads from the engine for an area change, macOS and Linux.
+  **Findings:** (1) *Cancellation:* `TiledCountsRunner.cancel()` exists and is tested by construction, but no button calls it; reading back many tiles
+  after a change of the area's columns can only be waited for (progress is not shown either, only the empty table until it is ready); decide whether
+  that needs an interface control. (2) *Engine path, whole section:* with the engine experiment on, `section.intervals/1` answered `INVALID_BUFFER`
+  (`stack_members`) for a whole section after the M8.4.16 step 8 edit script (overlaps, a deleted object, undo and redo); the e2e therefore compares the
+  tiled table with `referenceBins` (the JavaScript calculation), and the cause was not investigated. (3) The second section of a core continues the
+  first one's depths, so the comparison aligns `top`, `bottom` and `units` first.
 
 ##### M8.4.22 - Objects table of tiled sections beyond 4 MiB — state: Done (18 Nov 2026, development gate); decision approved by the maintainer on 18 Nov 2026 as written
 

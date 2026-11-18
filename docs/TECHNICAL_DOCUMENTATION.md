@@ -164,6 +164,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `tiledmasks.js` | Masks of tiled sections in the page (card M8.4.16): the cache of level-0 mask tiles (`MaskTiles`: all-zero layers kept as nothing, tiles changed and not acknowledged by the engine never dropped, pinned tiles kept, clean tiles dropped least recently used first beyond 128 MiB), the reduced copy in the working image (`reduceTile`), and the mask layer painted over pixel tiles (`overlayLayout`, `axisMap`, `paintOverlay`) | Yes |
 | `tiledit.js` | Editing the masks of tiled sections (card M8.4.16): the edit window (`EditWindow`: whole level-0 mask tiles as flat arrays, written back tile by tile; `windowRange`, `WINDOW_TILES`) and object statistics kept per tile and summed per object (`tileStats`, `TiledObjectStats`, `affectedTiles`, `TiledStatsRunner`) | Yes |
 | `tiledundo.js` | Undo and redo of tiled edits (card M8.4.16 step 5): copies of the mask tiles an edit changed, taken before its first write and swapped with the page's tiles (`TileChanges`); the 64 MiB budget of those copies (`trimTileHistory`) | Yes |
+| `tiledcounts.js` | Row counts of tiled sections (card M8.4.17): the histogram of each tile (`tileHistogram`), their sum under the current classes (`TiledRowCounts`) and the queue that counts changed tiles between frames (`TiledCountsRunner`); no DOM |
 | `tiledsync.js` | Sending the masks of tiled sections to the engine's store (card M8.4.16): rounds of staged version, dirty tiles and tables, commit and acknowledgement, retried after a failure (`MaskSync`); reading back tiles the page dropped (`MaskLoader`); the tables as bytes (`maskTables`) | Yes |
 | `maskchanges.js` | Which rows of each section's label and exclusion masks changed since the engine last received them: `createMaskChanges` (mark, take, restore, mark all) and `indexRangeOfPairs` (the pixels named by an edit-history list). A hint for the engine path, never a proof (§26.2) | Yes |
 | `sectionanalysis.js` | Analysis of one section without the DOM: effective class of each object, class-index table, row counts (cached per section), interval bins with no-data padding, ages and manual indices (§3.2), plus the builders of the engine method's input snapshot and reference result columns (`buildIntervalSnapshot`, `referenceColumns`), the revision key of a section's calculation (`analysisRevision`) and the conversion of engine result columns to `s.bins` (`resultToBins`). `app.js::analyze` passes the project state in | Yes |
@@ -3127,6 +3128,22 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   sent is built in slices of about 8 ms between which the page runs (`buildMaskTables`, `SLICE_MS`), and built again if it changes meanwhile;
   the build takes about 31 ms of the page's thread for 1,048,576 objects, longest task 8.2 ms
   ([measurement](validation/M8.4.25-mask-rounds.json)).
+- **Interval table of tiled sections** (`tiledcounts.js`, `binsFromRowCounts` in `sectionanalysis.js`, `analyzeTiled` in `app.js`; card M8.4.17,
+  ARCHITECTURE §3.4 decision 7): the page counts a tiled section's full-resolution mask tiles itself, tile by tile; the engine does not. *Analysis area*:
+  `sourceRoi` (the region of interest in source pixels: `x0 * ds`, `y0 * ds`, `min(x1 * ds, width)`, `min(y1 * ds, height)`, half-open). *Histogram of a tile*
+  (`tileHistogram`): for each row of the tile, the number of excluded pixels and the `(label, pixels)` pairs of the valid (not excluded) pixels with a non-zero
+  label, inside the tile's columns that lie in the area's columns `[x0, x1)`; a tile with no label and no exclusion there has none (a tile without a histogram
+  is empty). Rows are not clipped when counting, so a change of the area's rows counts no tile. *Row counts* (`TiledRowCounts.rowCounts`): for each row `r`
+  of the area, `valid[r]` = columns of the area minus the excluded pixels; `bio[r]` adds the pixels of every object whose effective class counts
+  (`effectiveClassIndex`) and of every overlap stack with at least one counted member; `cls[r][c]` adds the pixels of objects of class `c` and, for a stack,
+  once for each distinct counted class among its members (the rule of `rowCounts`, V0.20). All quantities are integers, so the result equals `rowCounts` of
+  the masks assembled whole; `binRows` and the rest of the table are the shared code (`binsFromRowCounts`), with `top`, `bottom` and the rows per centimetre
+  taken over the source rows of the area. The totals are kept: a changed tile (an edit, an undo, a redo) takes its old histogram out and puts its new one in;
+  they are rebuilt from all the histograms when the class of an object that existed changes, the number of classes changes or the area's rows change; a
+  change of the area's columns counts again the non-empty tiles of the tile columns whose columns inside the area differ, reading back those the page dropped.
+  A stack code of a tiled section keeps its members for the life of the section (`compactSectionStacks` does nothing for it). The histograms may hold 64 MiB
+  per section (`COUNT_HISTOGRAM_BYTES`); beyond it no table is computed and the page says so. Until every tile that has to be counted is, the table is empty,
+  never partial. Measured on the size of the `rgb8g` fixture: [sparse](validation/M8.4.17-tiled-counts.json), [dense](validation/M8.4.17-tiled-counts-dense.json).
 - **Wand, lasso, scissors and object operations on tiled sections** (`planWindows`, `pinRanges`, `toWindowRect`, `windowRgba` in `tiledit.js`;
   `tiledPlan` and the following functions in `app.js`; card M8.4.16 step 6): each runs today's function (`regionGrow`, `polygonPixels`,
   `splitPieces`, `subPx`, `renameId`, `sameTaxonGroups`) on edit windows of whole level-0 tiles and copies back what it wrote, at full

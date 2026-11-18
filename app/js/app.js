@@ -1,7 +1,7 @@
 // SedCoreTool web (antes CorAnTool e IchAnTool) — application (UI, state, tools, rendering, files).
 import { rleValid, baconToAgeText, BI, II, UNIT_TO_CM, idsAt, topAt, hasId, stackIndex, codeFor, withoutId, renameId, compactStacks, parseAgeModel, parseAgeModelDetailed, interpAge, toCSV, rleEncode, rleDecode } from './core.js';
 import { pxPerCm, depthAtRow, rowAtDepth } from './sectiondepth.js';
-import { effectiveClassId, effectiveClassIndex, computeSectionBins, binRowsOfSection } from './sectionanalysis.js';
+import { effectiveClassId, effectiveClassIndex, computeSectionBins, binsFromRowCounts, binRowsOfSection } from './sectionanalysis.js';
 import { createEngineClient } from './engineclient.js';
 import { createEngineAnalysis } from './engineanalysis.js';
 import { createMaskChanges, indexRangeOfPairs } from './maskchanges.js';
@@ -31,6 +31,7 @@ import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlac
 import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks.js';
 import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, windowRange, planWindows, pinRanges, toWindowRect, windowRgba } from './tiledit.js';
 import { MaskLoader, MaskSync, buildMaskTables, classesText } from './tiledsync.js';
+import { TiledRowCounts, TiledCountsRunner } from './tiledcounts.js';
 import { TileChanges, trimTileHistory } from './tiledundo.js';
 import { renderData } from './datatab.js';
 import { frameRatio, panelPrefs, savePanels } from './panels.js';
@@ -445,6 +446,7 @@ function putMaskTile(s, row, col, labels, exclude) {
   s.maskTiles.set(row, col, labels, exclude);
   const entry = s.maskTiles.get(row, col);
   reduceTile(s, s.ds, row, col, entry.labels, entry.exclude);
+  queueTileCounts(s, [[row, col]]);
   s._mv = (s._mv || 0) + 1;
   requestRender();
 }
@@ -555,6 +557,7 @@ function finishTiledStroke(op) {
    steps are dropped. The objects' records are kept as for other edits (`objs`); their statistics are recomputed from the swapped tiles. */
 function commitTiledOp(op) {
   const s = op.section, step = { s, group: '', lm: [], ex: [], objs: op.objs, nextId: op.nextId, sel: op.sel, tiles: op.tiles.seal() };
+  queueTileCounts(s, op.tiles.positions());
   for (const id of op.touched) rememberTrace(step, id);
   for (const [id, previous] of step.objs) if (!previous && !s.objects.has(id)) step.objs.delete(id);
   if (step.tiles.empty && !step.objs.size) return;
@@ -573,6 +576,7 @@ function swapTiledStep(op) {
     for (const [r, c] of affectedTiles(s.maskTiles, { x0: col * TILE, y0: row * TILE, x1: (col + 1) * TILE - 1, y1: (row + 1) * TILE - 1 })) around.set(r * s.maskTiles.cols + c, [r, c]);
   }
   void tiledStatsRunner(s).queue([...around.values()], op.objs.keys());
+  queueTileCounts(s, op.tiles.positions());
 }
 
 /* Wand, lasso, scissors and object operations on a tiled section (card M8.4.16 step 6, decisions A-B): today's code runs on edit windows, one
@@ -792,6 +796,43 @@ function tiledStatsRunner(s) {
   s._statsRunner = new TiledStatsRunner({ tiles: s.maskTiles, stats, stacks: () => s.stacks, fetchRgba, onUpdate,
     loadMasks: (positions) => maskLoader(s).want(positions), onError: (error) => toast(error.message || String(error), 9000) });
   return s._statsRunner;
+}
+
+/* The interval table of a tiled section (card M8.4.17, decision F of ARCHITECTURE §3.4): the page counts each tile it holds into a row histogram
+   (`tiledcounts.js`) when an edit, an undo or a redo changes it, and the table is the aggregation of the histograms under the current classes and
+   settings, binned as for any section (`binsFromRowCounts`). A change of classes, predictions or settings reads no tile; a change of the analysis
+   area's columns reads back the tiles the page dropped. Until every tile is counted the table is empty, never partial. */
+function tiledCounts(s) {
+  if (s._counts) return s._counts;
+  const tiles = s.maskTiles;
+  const counts = new TiledRowCounts({ width: tiles.width, height: tiles.height, rows: tiles.rows, cols: tiles.cols }, { nonEmpty: () => {
+    const out = new Set(tiles.stored);
+    for (const [i, entry] of tiles.entries) if (entry.labels || entry.exclude) out.add(i);
+    return out;
+  } });
+  const runner = new TiledCountsRunner({ tiles, counts, loadMasks: (positions) => maskLoader(s).want(positions),
+    onReady: () => { if (S.sections.includes(s)) { analyze(s); if (sec() === s) { renderResults(); requestRender(); } } },
+    onError: (error) => toast(t('tiles.countErr', { m: error.message || String(error) }), 9000) });
+  s._counts = { counts, runner, limitShown: false };
+  return s._counts;
+}
+/** The tiles at these positions changed: count them again with the next analysis. @param {any} s @param {[number, number][]} positions */
+function queueTileCounts(s, positions) { if (s?.maskTiles) tiledCounts(s).counts.markChanged(positions); }
+
+function analyzeTiled(s) {
+  const { counts, runner } = tiledCounts(s), area = sourceRoi(s);
+  s.bins = [];
+  if (!(area.x1 > area.x0 && area.y1 > area.y0)) return;
+  counts.setArea(area);
+  if (runner.flush().length) { void runner.start(); return; }         // tiles to read back: the table appears when they are counted
+  if (counts.overBudget) {
+    if (!s._counts.limitShown) { s._counts.limitShown = true; toast(t('tiles.countLimit'), 12000); }
+    return;
+  }
+  s._counts.limitShown = false;
+  const rowCounts = counts.rowCounts({ effClass: effClassArray(s), nClasses: S.classes.length, stacks: s.stacks, area });
+  const counted = { top: s.top, bottom: s.bottom, units: s.units, roi: { y0: area.y0, y1: area.y1 } };   // rows per cm of the source rows that were counted
+  s.bins = binsFromRowCounts(s, rowCounts, analysisProject(), binRowsOfSection(counted, S.settings));
 }
 
 /** After a failed engine request: ask for the one automatic restart of the engine (card M8.4.7) when it is not ready. Used by the mask sends
@@ -1109,7 +1150,7 @@ function setLabel(op, i, v) {
 const six = (s) => s._six || (s._six = stackIndex(s.stacks));
 /** Reclaim unused stacks between edits, without scanning the mask on every stroke. */
 function compactSectionStacks(s, force = false) {
-  if (s.stacks.length < 2) return;
+  if (s.stacks.length < 2 || s.maskTiles) return;   // a tiled section keeps its stack codes for life: its row histograms are keyed by them (card M8.4.17)
   s._stackEdits = (s._stackEdits || 0) + 1;
   if (!force && s._stackEdits < 32 && s.stacks.length < (s._stackLimit || 64)) return;
   s.stacks = compactStacks(s.labels, s.stacks);
@@ -1736,16 +1777,16 @@ const engineAnalysis = engineBridge?.enabled === true ? createEngineAnalysis({ c
 } }) : null;
 /** Brings the bins of the sections up to date. Resolves when every section has a final state (always, without the engine). */
 export function analyzeSections(sections) {
-  for (const s of sections) if (s.tiled) s.bins = [];   // counting on full-resolution mask tiles is card M8.4.17; never from the reduced copy
+  const tiled = sections.filter((s) => s.tiled);
+  for (const s of tiled) analyzeTiled(s);         // counted in the page from the full-resolution mask tiles (card M8.4.17), never from the reduced copy
   sections = sections.filter((s) => !s.tiled);
-  if (engineAnalysis) return engineAnalysis.all(sections);
-  for (const s of sections) analyze(s);
-  return Promise.resolve();
+  const rest = engineAnalysis ? engineAnalysis.all(sections) : (sections.forEach(analyze), Promise.resolve());
+  return Promise.all([rest, ...tiled.map(async (s) => { await s._counts?.runner.running; if (s._counts?.counts.ready) analyzeTiled(s); })]).then(() => undefined);
 }
 
 export function analyze(s) {
   if (!s) return;
-  if (s.tiled) { s.bins = []; return; }   // counting on full-resolution mask tiles is card M8.4.17; until then no table, never one from empty masks
+  if (s.tiled) { analyzeTiled(s); return; }
   if (engineAnalysis) { void engineAnalysis.request(s); return; }   // asynchronous: the table shows a pending state until the engine answers
   const { bins, rowCache } = computeSectionBins(s, { classes: S.classes, settings: S.settings, ageModel: S.age.model });
   s.bins = bins;
@@ -5031,6 +5072,8 @@ window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, read
   clearTiles: () => { for (const bitmap of tileCache.clear()) bitmap?.close?.(); requestRender(); },   // repeated viewer probes (card M8.4.24)
   tileState: (k, row, col) => { const s = sec(), scheduler = s?.tiled && tileSchedulers.get(s.tiled.pyramid), key = s?.tiled ? s.tiled.pyramid + '/' + tileKey(k, row, col) : '';   // evidence when a probe fails (card M8.4.24)
     return { cached: tileCache.has(key), inFlight: !!scheduler?.inFlight.has(key), idle: !!scheduler?.idle, failures: scheduler?.failures ?? 0, lastError: s?.tiled?.lastError ?? null }; },
+  tiledCountsIdle: () => S.sections.every((q) => !q._counts || (!q._counts.runner.running && q._counts.counts.ready)),
+  tiledCountsStats: () => { const q = sec()?._counts; return q ? { tiles: q.counts.hists.size, bytes: q.counts.bytes } : null; },
   tiledStatsIdle: () => S.sections.every((q) => !q._statsRunner || q._statsRunner.idle),
   masksSettled: () => S.sections.every((q) => !q.maskTiles || !q._maskSync || q._maskSync.settled), mergeObjects, deleteObjects, selectSection, forceTiledSections: (on) => { forceTiled = !!on; },
   saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };
