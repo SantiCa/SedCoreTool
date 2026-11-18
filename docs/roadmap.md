@@ -13,7 +13,7 @@ file and leave one line here.
 
 ## Status and handoff
 
-Updated 16 November 2026.
+Updated 18 November 2026.
 
 - **Released version:** V0.151 (16 November 2026), integrated into `master` on the maintainer's instruction ("haz push de todo y luego publica en
   master"), which overrides the decision of 14 November 2026 that nothing goes to `master` until M8.4 is finished (part A is done; parts C and B are not). It is `master` commit `e59fff4` (pushed; no tag), whose tree is identical to commit `7aca549` of the work branch, on which `tests` and *Desktop builds* passed on Windows, macOS and Linux. It contains the
@@ -82,7 +82,7 @@ Updated 16 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.26** (in progress: the download retries and the start evidence are in; waiting for the GitHub runs and for the maintainer's answer on the start-up deadline, see the card; **model: most capable, effort medium**), the last of the four cards added on 18 November 2026 at the maintainer's request to fix the warnings of M8.4.22 before going on; then M8.4.17 (interval table of tiled sections). Cards M8.4.16 (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux) and M8.4.22 (development gate) are done.
+- **Next step: M8.4.26** (in progress: the download retries and the start evidence are in and passed on GitHub on `0fdd7bb`; waiting for the maintainer's answer on the start-up deadline, see the card; **model: most capable, effort medium**), the last of the four cards added on 18 November 2026 at the maintainer's request to fix the warnings of M8.4.22 before going on; then M8.4.17 (interval table of tiled sections; fast tier, effort medium). Cards M8.4.16 (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux), M8.4.22, M8.4.23, M8.4.24 and M8.4.25 (development gate; `tests` and *Desktop builds* passed on each commit) are done.
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1093,7 +1093,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
 - **Done when:** the targets of step 7 are measured (a failure is recorded with numbers and the card stops for a decision); the flag is off by
   default and in the flag table.
 
-##### M8.4.16 - Masks of tiled sections: storage, editing and undo — state: In progress; decisions A-E approved by the maintainer on 17 Nov 2026 as written; steps 1-8 done; closed at the development gate on 18 Nov 2026
+##### M8.4.16 - Masks of tiled sections: storage, editing and undo — state: Done; decisions A-E approved by the maintainer on 17 Nov 2026 as written; steps 1-8 done; closed at the development gate on 18 Nov 2026, milestone gate passed on `4654ce0`
 
 - **Goal:** labels and exclusion of a tiled section live as mask tiles in the store (decision 6); every editing tool works on loaded tiles; undo and
   redo are per tile and bounded; changed tiles are sent in the background and sent again after an engine failure.
