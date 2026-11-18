@@ -88,7 +88,9 @@ Never do any of these without an explicit request from the maintainer in the cur
 - **Structure.** Follow the layers and import rules of [docs/ARCHITECTURE.md §3](docs/ARCHITECTURE.md#3-layers-and-dependency-rules).
   New scientific methods are written once, in Python; the interface requests and displays their results. Existing
   JavaScript calculations change only to fix or preserve current behaviour until their M8 slice replaces them.
-  `app.js` only shrinks. Keep the engine protocol, method contracts and result formats free of Electron and
+  `app.js` only shrinks: a card that needs more than wiring in `app.js` puts the logic in a module (a pure module, or a controller module
+  for DOM and state work) and, if its card does not say so, stops and asks; every card's *As built* records the lines of `app.js` before and
+  after (audit of 19 November 2026: part C had added 991 lines). Keep the engine protocol, method contracts and result formats free of Electron and
   renderer details; Electron-specific code stays in `desktop/`. Data that may outlive the interface (the planned
   tile store of large images, method inputs and results) uses documented formats that do not depend on the browser,
   IndexedDB or Electron, so that the interface or the language of a kernel can be replaced later

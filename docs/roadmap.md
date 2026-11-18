@@ -94,6 +94,42 @@ Updated 18 November 2026.
   macOS and Linux, clean Windows machine, cold-cache first launch, saturated CPUs, package sizes, and the
   numerical/timing/memory/recovery gates). Remind him when a milestone of M8 finishes and before any flag is
   switched on by default or a version with the engine is announced.
+- **Audit of 19 November 2026 (design session, at the maintainer's request; only this file and AGENTS.md edited).** Findings and what follows:
+  1. **The rule "`app.js` only shrinks" was broken by part C.** `app.js` grew from 4,344 lines (13 Nov 2026) to 5,335 (worktree of M8.4.28):
+     +991 lines, about 40 functions of the tiled-section workflow (strokes, wand/lasso/scissors, object operations, statistics runner wiring,
+     mask sends and reads, reopening, store copy and delete), 151 lines longer than 200 characters. The pure modules (`tiledit.js`,
+     `tiledmasks.js`, `tiledcounts.js`, `tiledsync.js`, `tiledundo.js`) are sound and DOM-free; what is in `app.js` is controller code that no
+     card extracted. Cards M8.4.27 and M8.4.28 of this session added to it as well. Answer: card **M8.4.30** (below, before M8.4.29, which would
+     add a cache path to `loadTiledSection`) and an enforcement rule in AGENTS §4.
+  2. **Scientific code in JavaScript for tiled sections.** Two exceptions exist and are decided: the interval table (rule D11 = D) and the
+     per-tile object statistics (`tileStats` reuses today's `objectStats`, card M8.4.16). They conflict with the acceptance of M8.6 ("one
+     implementation per method"): decision **H** below.
+  3. **Two editing paths.** Every edit, analysis and save exists twice (whole sections in page memory, tiled sections in the store), and part B
+     (M8.4.9) would add a third way to hold small sections. Proposal for the design review of M8.4.19, decision **I** below.
+  4. **Unreleased user fixes.** The work branch holds 116 commits since V0.151 (16 Nov 2026); among them fixes users need without any flag:
+     H6 (blank window at full resolution), H7 (16-bit images above about 28 Mpixel crash), M2.1.5 (multiproxy opening). Decision **J** below.
+  5. **This file has grown to about 2,000 lines;** the status block keeps every check of every step since 16 November. Card **H8** (below).
+  6. **H5 can close:** the `web-app` job (which runs `tests/e2e/smoke.mjs`) passed on the last 27 pushes of the work branch; the one failed
+     run in the last 30 (`b845727`) is a macOS Python job cancelled for want of a runner. Marked done below.
+  7. **What is good and stays:** the layer rules hold outside `app.js` (no DOM in pure modules); contracts and file formats are documented
+     before the code; failures are visible (no silent fallback); saves are atomic; scientific checks use exact equality or tolerances stated
+     first; CI is green on Windows, macOS and Linux. The typecheck baseline still has 870 old diagnostics, almost all in `app.js` (M8.4.30
+     reduces them).
+  8. **Can we move to the next phases?** No. M8.5 needs the milestone gates of part C (M8.4.19) and part B (M8.4.11). Order recommended:
+     M8.4.28 (finishing) → **M8.4.30** → M8.4.29 (needs decision G) → M8.4.18c → M8.4.18d → M8.4.19 (with decision I) → M8.4.20 → part B as
+     decided by I → M8.5. Decisions G, H, I and J are the maintainer's.
+- **Decisions of the audit of 19 November 2026, waiting for the maintainer** (the design session's recommendation first):
+  - **G** (card M8.4.29): the reopening cache in the engine's store. *Recommended: approve as proposed;* without it a reopened 10 % section needs
+    133 s before every object is current.
+  - **H** (M8.6 against D11 and the per-tile statistics): *recommended:* M8.6 accepts, for tiled sections only, the page's interval table and
+    per-tile object statistics as the one interactive implementation, with the Python method as the reference checked by parity tests in CI;
+    slice (b) of M8.5 moves the object features to Python for every other use. Otherwise M8.6 cannot pass as written.
+  - **I** (at the design review of M8.4.19): *recommended:* study whether every new section can use the tile store (a small image is a store of
+    few tiles), so that part B's M8.4.9 is replaced and the whole-section editing path is only kept to open old projects; decided with a
+    measurement of small-section editing through the tiled path against the targets of contract §7.
+  - **J** (version): *recommended:* publish V0.152 now from the work branch with every flag off, so that the H6, H7 and M2.1.5 fixes reach
+    users, instead of waiting for the end of M8.4 (decision of 16 November 2026). Needs the full checks and the GitHub checks on the version
+    commit, as always.
 - **Decisions waiting for the maintainer:** (1) the flags in the table below that need a promote/remove decision. **Decided on 16 November 2026: the visible-row table
   (M2.1.3) is the default** (17 times faster at 100,000 rows; M2.1.4: scrolling passes the 33 ms target where the native table fails); it is in the branch, not in a published
   version, and **the release gate (every platform) is still required before a version with it is published**;
@@ -1744,7 +1780,30 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   (about 18 pixel tiles read); if missed, record it and ask.
 - **Done when:** the tests pass, the measurement is recorded against the target; development gate.
 
-##### M8.4.29 - Reopening without reading every stored tile — state: after M8.4.28; decision G below waits for the maintainer (written 18 Nov 2026 for finding 3 of M8.4.18a)
+##### M8.4.30 - The tiled-section controller leaves `app.js` — state: after M8.4.28 (written by the audit of 19 Nov 2026, finding 1)
+
+- **Goal:** the tiled-section workflow lives in its own controller modules, `app.js` only wires them, and `app.js` is back below its size of
+  13 November 2026 (4,344 lines); no behaviour changes.
+- **Why:** part C added about 40 functions and 991 lines to `app.js` against AGENTS §4 ("`app.js` only shrinks"); M8.4.29, M8.4.18c and
+  M8.4.18d would add more. A reviewer must find the tiled behaviour without reading 5,000 lines.
+- **Read first:** ARCHITECTURE §3.2 and §5.2 (moving a workflow out of `app.js`); in `app.js` every function from `startTiledStroke` to
+  `level0Rgba`, `tiledStatsRunner`, `tiledCounts`, `analyzeTiled`, `maskSync`, `maskLoader`, `loadTiledSection`, `storeLocked`,
+  `deleteStoreOf`, `copyTiledStore`, `reopenLocated`, `objectsReady`, `prioritiseObjects`; `tools/build_standalone.py` (`ORDER`).
+- **Change:** new controller modules (proposed split: `tiledtools.js` strokes, wand, lasso, scissors and object operations; `tiledstate.js`
+  runners, sends, reads and analysis of one section; `tiledproject.js` reopening, locks, store copy and delete), each receiving what it needs
+  from `app.js` through one explicit context object (state, `toast`, `afterChange`, `requestRender`, the bridge); `app.js` wiring;
+  `ORDER`; ARCHITECTURE §3.2 (the controller table and the stale "about 4,200 lines") and the source map; a check that fails when `app.js`
+  grows beyond a recorded ceiling (`tests/app/app-size.test.mjs`, ceiling lowered by each card that shrinks it).
+- **Do not touch:** any behaviour, message, saved field or test expectation; the pure modules; the whole-section path.
+- **Model:** most capable, effort medium (a large move through editing and saving code, where a wiring mistake could lose user work; checked
+  by the existing exact tests).
+- **Steps:** one module per commit, each with the full desktop test passing: (1) `tiledproject.js`; (2) `tiledstate.js`; (3) `tiledtools.js`;
+  (4) the size check and the documents. Names are moved, not rewritten; a function that needs a change to move stops the card (ask).
+- **Tests:** unchanged `npm test`, `npm run typecheck` (no new diagnostics), `tests/e2e/tiled-sections.mjs`, `tests/e2e/desktop.mjs` with
+  the engine off and on; the new size check.
+- **Done when:** `app.js` has fewer than 4,344 lines, every test passes unchanged, the standalone build works; development gate.
+
+##### M8.4.29 - Reopening without reading every stored tile — state: after M8.4.30; decision G below waits for the maintainer (written 18 Nov 2026 for finding 3 of M8.4.18a)
 
 - **Goal:** reopening a saved tiled section does not read its stored tiles to rebuild what the page derived from them: the row histograms of
   M8.4.17, the reduced copy of the masks and the per-tile object statistics come back from a cache saved with the stored version, and are rebuilt
@@ -1954,7 +2013,8 @@ Independent of M8; each can be done in under an hour when the maintainer asks.
     a stale folder, a fresh folder of another live session and a look-alike name that must survive.
   - Done when: the test passes and the desktop end-to-end test leaves no `sedcoretool-engine-*` folder behind.
     The end-to-end test's own `sedcoretool-desktop-test-*` profiles should be removed by the test as well.
-- [~] **H5 - The `e2e` job of the GitHub workflow was red from 10 November 2026 to 14 November 2026; fixed on the work branch, watching.** Findings of 13-14 November 2026
+- [x] **H5 - The `e2e` job of the GitHub workflow was red from 10 November 2026 to 14 November 2026; fixed on the work branch.** Closed by the audit of
+      19 November 2026: the `web-app` job (smoke test) passed on the last 27 pushes of `work/2026-11-13`. Record kept below. Findings of 13-14 November 2026
       (the CI result and its failure message are readable without logs through the public API: the smoke test now emits `::error::`
       annotations, `GET /repos/SantiCa/SedCoreTool/check-runs/<job id>/annotations`; the unauthenticated API allows 60 requests an hour):
       (1) **Fixed:** the five Python jobs failed because `psutil` (imported by `tools/benchmark.py` through the benchmark tests) was not in
@@ -2003,6 +2063,10 @@ Independent of M8; each can be done in under an hour when the maintainer asks.
       (three Core log openings, each decoding again in 1.2-1.5 s), a Node test at 120 million samples, and on a copy of the maintainer's project
       four rounds of six mode switches without a failure (Windows). Not changed: `Array.from(lab)` in the save path of sections with overlapping
       traces is slow at the largest sizes (2.1 s and about 1 GB for 123 million pixels in Node) but does not fail.
+- [ ] **H8 - Shorten the roadmap** (audit of 19 November 2026, finding 5; documents only; fast tier, effort low). The status block keeps only
+      what a new session needs (branch, last verified commit, checks due, next card, open decisions); the per-step check records of M8.4.14-M8.4.28
+      and the long *As built* texts of done cards move to `roadmap-history.md`, leaving one line each with a link. Done when no fact is lost
+      (every moved paragraph is findable from its card line) and this file is under about 1,000 lines.
 - [ ] **H3 - Move raw benchmark reports out of the repository.** `docs/benchmarks/*.json` weighs about 10 MB.
       Needs the maintainer's decision on where the raw files go; the `.md` summaries stay.
 
