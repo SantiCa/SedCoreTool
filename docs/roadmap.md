@@ -82,7 +82,7 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.18a** (save and reopen tiled sections on the same computer; **model: most capable tier (Opus), effort high**), after the maintainer answers decisions D1-D4 written above the four cards M8.4.18a-d (design session of 18 November 2026). Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
+- **Next step: M8.4.18a** (save and reopen tiled sections on the same computer; **model: most capable tier (Opus), effort high**); decisions D1-D4 of the four cards M8.4.18a-d were answered by the maintainer on 18 November 2026 as proposed. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1533,7 +1533,8 @@ deliveries, each with its own failure tests. Facts from the code that shape them
 background round of `MaskSync` writes a manifest, and old manifests and tiles stay forever (`store/masks.py` has no removal); (2) the renderer never
 sees a path (contract §8.1), so the source's path must be remembered by the main process, not by the project record; (3) `zip.js` has no ZIP64 and
 refuses packages above 4 GiB, while the masks of one `rgb8g`-sized section can exceed that; (4) after reopening, the interval table of M8.4.17 needs
-every non-empty tile counted once, which means reading them back. Decisions D1-D4 below are proposals the maintainer answers before M8.4.18a starts.
+every non-empty tile counted once, which means reading them back. **Decisions D1-D4 below were answered by the maintainer on 18 November 2026: each as
+  proposed (the first option).**
 
 - **D1, saving while the engine cannot take the edits:** the save writes everything else and keeps, for that section, the last manifest the store
   acknowledged *with all its edits* (never a newer one that misses some); the section shows "unsaved changes" and the save is retried; closing the
@@ -1547,7 +1548,7 @@ every non-empty tile counted once, which means reading them back. Decisions D1-D
   itself only when the user ticks it; this needs ZIP64 in `zip.js` (own code, no dependency). *Alternative:* packages refuse tiled sections and only
   the folder backup carries them.
 
-##### M8.4.18a - Save and reopen tiled sections on the same computer — state: after D1-D2 are answered
+##### M8.4.18a - Save and reopen tiled sections on the same computer — state: Ready (D1-D2 answered on 18 Nov 2026)
 
 - **Goal:** a tiled section survives closing and reopening the program, with exactly the masks, objects and interval table it had, and the store
   does not grow without bound; no failure loses the last good save.
@@ -1588,7 +1589,7 @@ every non-empty tile counted once, which means reading them back. Decisions D1-D
 - **Done when:** the desktop round trip is exact; every failure case keeps the last good save; the store holds only retained manifests after a save;
   the reopening times are recorded; development gate.
 
-##### M8.4.18b - A missing or moved source; copying the source into the project — state: after M8.4.18a and D3
+##### M8.4.18b - A missing or moved source; copying the source into the project — state: after M8.4.18a (D3 answered: copy only on request)
 
 - **Goal:** a tiled section whose source moved can be pointed at the file again, accepted only when its SHA-256 matches; and the user can copy the
   source into the project so it no longer depends on the original.
@@ -1623,7 +1624,7 @@ every non-empty tile counted once, which means reading them back. Decisions D1-D
   computer, simulated by another user-data folder) opens identically; an interrupted backup leaves the previous backup openable.
 - **Done when:** backup and restore round trip exactly on the desktop, with the failure cases above; development gate.
 
-##### M8.4.18d - Packages with tiled sections — state: after M8.4.18c and D4
+##### M8.4.18d - Packages with tiled sections — state: after M8.4.18c (D4 answered: packages carry tiled sections, with ZIP64)
 
 - **Goal:** a `.sedcoretool` package can carry tiled sections as D4 decides, streamed, without loading a whole image or mask into memory.
 - **Read first:** `app/js/zip.js`; `projectForExport`, the package import path in `app.js`; M8.4.18c as built.
