@@ -162,7 +162,7 @@ For each tiled section, the engine keeps on disk:
 - **mask tiles**: labels (`i32`) and exclusion (`u8`) at full resolution on the same tile grid, each stored under the SHA-256 of its
   bytes, and one **manifest** per saved version that lists the hashes for every tile position (no entry = an empty tile). The identity
   of a version is the SHA-256 of its manifest;
-- **row counts per tile**, if the engine computes the interval table (rule D11), so that an edit recounts only the tiles it touched.
+No row counts are stored: the page counts tiled sections itself (decision 7).
 
 Rules:
 
@@ -219,8 +219,13 @@ are proposals with a default that the maintainer confirms or changes before the 
 6. **Mask tiles** are stored under the SHA-256 of their uncompressed little-endian bytes (the file itself may be zlib-compressed);
    all-zero tiles have no entry. A manifest (canonical JSON) lists the tile hashes and the hashes of the objects, classes and overlap
    tables; its SHA-256 is the version identity.
-7. **Rule D11 = D:** the engine counts the rows of each tile (Python, the existing counting kernel) and returns the row counts of the
-   section; the page turns row counts into the interval table with `core.js` as today. After an edit, only the touched tiles are counted.
+7. **Rule D11 = D, counted in the page (decision F of card M8.4.17, approved by the maintainer on 18 November 2026; it replaces "the engine
+   counts the rows of each tile"):** the page counts each tile it holds into a row histogram of `(label, pixels)` pairs and valid pixels, which does
+   not depend on classes; the interval table is the aggregation of the histograms under the current effective classes, binned with `core.js` as
+   today. An edit counts only the tiles it touched (they are in the page); a change of classes, predictions or settings only aggregates again; tiles
+   the page dropped keep their histograms and are read back only when the analysis area's columns change. The engine does not count tiled
+   sections: from the stored version it could not meet the 150 ms edit target of contract §7, because the page stores an edit in a round that starts
+   300 ms after it. The Python method `section.intervals/1` stays the reference through tiled parity fixtures.
 9. **A tiled section keeps a small working image** (decided while implementing M8.4.15, 17 November 2026): the finest pyramid level within the
    maximum size when adding images, read through the engine. The rest of the program treats the section like a reduced section of today's path
    (navigation, ruler, depth); the viewer draws full-resolution tiles over it when the zoom needs them. This replaces "no pixel or mask arrays in the

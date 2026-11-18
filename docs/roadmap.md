@@ -82,7 +82,7 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.17** (interval table of tiled sections), rewritten by the design session of 18 November 2026 around **decision F** (the page counts tiled sections tile by tile into class-independent row histograms; the engine does not count), **which waits for the maintainer's approval**; then **model: fast tier (Sonnet), effort medium**. The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
+- **Next step: M8.4.17** (interval table of tiled sections), rewritten by the design session of 18 November 2026 around **decision F** (the page counts tiled sections tile by tile into class-independent row histograms; the engine does not count), approved by the maintainer on 18 November 2026; **model: fast tier (Sonnet), effort medium**. The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1208,11 +1208,11 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   applied twice across an engine failure); **exact equality**: a small image opened both ways (whole and forced tiled) with the same scripted edit
   sequence gives identical labels, exclusion, objects and stacks.
 
-##### M8.4.17 - Interval table of tiled sections — state: Ready once the maintainer approves decision F (card rewritten by the design session of 18 Nov 2026)
+##### M8.4.17 - Interval table of tiled sections — state: Ready (card rewritten by the design session of 18 Nov 2026; decision F approved by the maintainer on 18 Nov 2026)
 
 - **Goal:** a tiled section has its interval table, counted on the full-resolution mask tiles, equal to what `section.intervals/1` gives on the
   same masks assembled whole, and fast enough for the targets of contract §7.
-- **Decision F (design session of 18 Nov 2026; proposal, the maintainer approves or changes it before this card starts).** *The page counts
+- **Decision F (design session of 18 Nov 2026; approved by the maintainer the same day, written into ARCHITECTURE §3.4).** *The page counts
   tiled sections, tile by tile, into row histograms that do not depend on classes; the engine does not count.* This revises ARCHITECTURE §3.4
   decision 7 ("the engine counts the rows of each tile") and the line "row counts per tile" of the store's contents; rule D11 = D and rule 8
   (the interval table may stay in JavaScript, with the Python method as the reference) are kept. Why, from the code as it is after M8.4.16-M8.4.26:
@@ -1252,7 +1252,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
 - **Change:** new pure module `app/js/tiledcounts.js` (no DOM; added to `ORDER` in `tools/build_standalone.py` after `tiledit.js`);
   `app/js/sectionanalysis.js` (the binning half of `computeSectionBins` as a function of row counts, shared by both paths); the small part of
   `app/js/app.js` that queues tiles and publishes the table; `app/js/i18n.js` (ES/EN) for the messages; `tools/make_interval_fixtures.mjs` and the new
-  fixtures; new `tools/measure_tiled_counts.mjs`; tests; ARCHITECTURE §3.4 (decision 7 and the store's contents line, rewritten as decision F);
+  fixtures; new `tools/measure_tiled_counts.mjs`; tests;
   TECHNICAL_DOCUMENTATION (the definitions above, and §1.4 for the new file); CHANGELOG.
 - **Do not touch:** the engine, the IPC files and contract §3-§8; `core.js rowCounts`/`binRows` and the whole-image path (the 44 committed fixtures
   must regenerate unchanged with `--check`); the stored format; the undo, sending and loading of mask tiles; `legacy/`.
@@ -1294,7 +1294,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
 - **Tests:** `tests/app/tiledcounts.test.mjs` (steps 2, 5, 6), the stack test of step 1, `node tools/make_interval_fixtures.mjs --check`, the Python
   test of `section.intervals/1` on the new fixtures, `npm test`, typecheck, pytest, `tests/e2e/tiled-sections.mjs`, `tests/e2e/desktop.mjs` with the
   engine experiment off and on.
-- **Done when:** decision F is approved and written into ARCHITECTURE; the tiled table equals the whole one on every new fixture and in the desktop
+- **Done when:** the tiled table equals the whole one on every new fixture and in the desktop
   block; the two targets of step 8 are met and recorded with the reported numbers; development gate on Windows, and `tests` and *Desktop builds*
   passed on the pushed commit.
 
