@@ -82,7 +82,7 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.17** (interval table of tiled sections; **model: fast tier (Sonnet), effort medium**). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
+- **Next step: complete the card M8.4.17** (interval table of tiled sections), which is **blocked** until a design session answers the seven points written under it; **model for that: most capable tier (Opus), effort high**; the implementation afterwards is the fast tier (Sonnet), effort medium. The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1208,7 +1208,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   applied twice across an engine failure); **exact equality**: a small image opened both ways (whole and forced tiled) with the same scripted edit
   sequence gives identical labels, exclusion, objects and stacks.
 
-##### M8.4.17 - Interval table of tiled sections — state: after M8.4.16
+##### M8.4.17 - Interval table of tiled sections — state: Blocked (incomplete card, 18 Nov 2026)
 
 - **Goal:** the interval table of a tiled section, by decision 7: the engine counts each tile's rows, the page bins them as today.
 - **Read first:** `src/sedcoretool/methods/section_intervals.py` (`parse`, `_counts`) and `kernels/counting.py` (`object_row_counts`);
@@ -1222,6 +1222,26 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   overlaps crossing tile seams, exclusion, a ROI not aligned with tiles and fractional intervals; interval table after an edit touching at most
   4 tiles p95 <= 150 ms; interval-size change for all sections p95 <= 300 ms (re-binning only); a settings change that changes effective
   classes recounts every tile: measured on `rgb8g`, shown with progress and cancellable (no target yet: report it).
+- **Blocked (18 Nov 2026, found by an implementing session on the fast tier before writing code; AGENTS §6 "does not redesign"):** the card has
+  no *Steps*, *Tests*, *Do not touch* or *Done when*, and it was written before M8.4.16 and M8.4.22 changed what it assumes. Decisions the
+  design session must take (most capable tier, effort high), each checked against the code:
+  1. **Inputs.** Since M8.4.22 the objects, classes and stack tables are stored *in the manifest* (contract §8.7), so "inputs: the manifest hash,
+     the objects, classes and stack tables" would send twice what the store already holds. Decide: the method reads everything from the manifest.
+     Then the worker must read the store, which it cannot do today: a job (`method_worker.py`) holds only paths of committed buffers.
+  2. **The 150 ms target against the background send.** The engine counts from the *stored* version, but the page stores edits in rounds that begin
+     `MaskSync.delayMs` = 300 ms after the change. As written, "interval table after an edit touching at most 4 tiles p95 <= 150 ms" cannot be met
+     from the store; decide whether the page sends the touched tiles with the request, or what the target measures.
+  3. **Where the per-tile cache lives.** The worker is replaced after any crash and serves one job at a time (`section.analyze` queues four);
+     a cache in its memory is lost then, and an edit waits behind a running full recount. Decide the owner, the budget and the key.
+  4. **Protocol surface outside the card's *Change* list.** A new method touches `ADVERTISED_METHODS` and `OPERATIONS` in `desktop/engine.js`,
+     `desktop/engine-ipc.js`, `desktop/tile-ipc.js`/`preload.js` (if main-process only) and contract §4, §5 and §8; `tests/app/engine.test.mjs`
+     asserts the advertised list exactly. Decide the name, whether it is a `section.analyze` method or a store operation, and the result format
+     ("only the rows of the touched tiles").
+  5. **Progress and cancel.** The card asks for both on a full recount, but the contract says progress events of analyses "are not sent yet".
+  6. **The page.** `computeSectionBins` is synchronous and reads `s.labels`, which a tiled section does not have; decide how an asynchronous
+     result enters `s.bins` and `_rc`, and what happens to a result that arrives after a newer edit.
+  7. **Tests and fixtures.** Name the oracle for "exact equality with `section.intervals/1` and today's JavaScript path" (the `forceTiledSections`
+     hook of step 8 gives tiled sections of images that fit in memory) and the `rgb8g` fixture for the timings.
 
 ##### M8.4.22 - Objects table of tiled sections beyond 4 MiB — state: Done (18 Nov 2026, development gate); decision approved by the maintainer on 18 Nov 2026 as written
 
