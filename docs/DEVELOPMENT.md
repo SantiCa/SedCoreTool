@@ -57,6 +57,7 @@ node tests/e2e/smoke.mjs                            # when the interface changed
 node tests/e2e/large-16bit-desktop.mjs              # when image decoding or the memory of sections changed (card H7)
 ```
 
+The end-to-end tests that start the desktop program (`desktop.mjs`, `large-16bit-desktop.mjs`, `tiled-sections.mjs`, `working-memory-desktop.mjs`) first check, in under a second (`tests/e2e/preflight.mjs`), that `desktop/web` and `desktop/python` hold the current `app/` and `src/` and that the engine runtime's recorded sources match `src/`; if not, they stop and print the command that fixes it (`node desktop/scripts/prepare.js --with-examples`, `npm run prepare-runtime -- --offline` in `desktop/`).
 The end-to-end tests need `npm i --no-save puppeteer-core@23` at the repository root. Record the result and the
 commit in the [roadmap status](roadmap.md#status-and-handoff). Do not repeat the full run on an unchanged,
 already verified commit.
@@ -109,7 +110,7 @@ packaged resources. macOS and Linux packages are built by the *Desktop builds* G
 | Symptom | Cause and fix |
 |---|---|
 | `tests/e2e/desktop.mjs` waits 90 s and fails after clicking `openTest` | `npm run dist` rebuilt `desktop/web` **without** sample data. Run `node desktop/scripts/prepare.js --with-examples` (what `npm start` does), then repeat the test |
-| Engine state `unavailable` right after editing Python or changing the version | The runtime manifest no longer matches. Run `npm run prepare-runtime -- --offline` in `desktop/` |
+| Engine state `unavailable` right after editing Python or changing the version | The runtime manifest no longer matches. Run `npm run prepare-runtime -- --offline` in `desktop/` (the desktop tests now say this before starting) |
 | `No module named pytest` | The shell picked another Python. Use the full path in §1 |
 | `npm` is blocked by the PowerShell execution policy | Use `npm.cmd` |
 | Engine tests time out when several suites run at once | CPU contention, measured in M8.2.3. Run suites one after another |

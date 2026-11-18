@@ -7,10 +7,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { requireFresh } from './preflight.mjs';
 import { verifyInterruptedSaves } from './interrupted-saves.mjs';
 import { startDesktopDiagnosticCheck, crashDesktopDiagnosticCheck, finishDesktopDiagnosticCheck } from './desktop-diagnostics.mjs';
 const { default: puppeteer } = await import(process.env.PUPPETEER_MODULE || 'puppeteer-core');
 const root = fileURLToPath(new URL('../../', import.meta.url));
+requireFresh(root);                                   // card M8.4.23: an old program copy or engine runtime stops the test here
 const requireDesktop = createRequire(path.join(root, 'desktop/package.json'));
 const executable = requireDesktop('electron');
 const profile = mkdtempSync(path.join(tmpdir(), 'sedcoretool-desktop-test-'));

@@ -12,9 +12,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { requireFresh } from './preflight.mjs';
 
 const { default: puppeteer } = await import(process.env.PUPPETEER_MODULE || 'puppeteer-core');
 const root = fileURLToPath(new URL('../../', import.meta.url));
+requireFresh(root);                                   // card M8.4.23: an old program copy or engine runtime stops the test here
 const electron = createRequire(path.join(root, 'desktop/package.json'))('electron');
 const file = process.argv[2];
 assert.ok(file && fs.existsSync(file), 'give the path of a large TIFF (tools/make_large_fixtures.py)');

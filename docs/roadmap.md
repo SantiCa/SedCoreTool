@@ -82,7 +82,7 @@ Updated 16 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.23** (desktop tests refuse a stale program copy or runtime; **model: fast, effort low**), then M8.4.24 (the intermittent viewer probe; most capable, medium) and M8.4.25 (sending the tables without a pause; most capable, medium) and M8.4.26 (two intermittent GitHub failures: runtime downloads and an engine start on Windows; most capable, medium), all four added on 18 November 2026 at the maintainer's request to fix the warnings of M8.4.22 before going on; then M8.4.17 (interval table of tiled sections). Cards M8.4.16 (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux) and M8.4.22 (development gate) are done.
+- **Next step: M8.4.24** (the intermittent viewer probe; **model: most capable, effort medium**), then M8.4.25 (sending the tables without a pause; most capable, medium) and M8.4.26 (two intermittent GitHub failures: runtime downloads and an engine start on Windows; most capable, medium), all four added on 18 November 2026 at the maintainer's request to fix the warnings of M8.4.22 before going on; then M8.4.17 (interval table of tiled sections). Cards M8.4.16 (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux) and M8.4.22 (development gate) are done.
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1261,7 +1261,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
 - **Tests and acceptance:** Python and Node tests above; `tests/e2e/tiled-sections.mjs` passes; contract, technical manual and changelog
   updated in the same commit; development gate on Windows.
 
-##### M8.4.23 - Desktop tests refuse a stale program copy or engine runtime — state: Ready (added 18 Nov 2026 at the maintainer's request)
+##### M8.4.23 - Desktop tests refuse a stale program copy or engine runtime — state: Done (18 Nov 2026, development gate; added at the maintainer's request)
 
 - **Goal:** a desktop end-to-end test run after editing `app/` or the engine's Python fails within seconds with the command that fixes it,
   instead of testing an old copy (`desktop/web`, seen in M8.4.16 step 5) or waiting 90 s for an engine that stays `unavailable` because the
@@ -1282,6 +1282,11 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   when both are current.
 - **Done when:** editing one file of `app/js` or `src/sedcoretool/engine` and running a desktop test fails in under 10 s with the right
   command; development gate on Windows.
+- *As built:* `tests/e2e/preflight.mjs` (`stale`, `requireFresh`) compares byte by byte `app/` with `desktop/web/app` (ignoring `README.md` and
+  the ONNX files `prepare.js` adds), `src/` with `desktop/python/src`, and `src/` with the sources recorded in the runtime manifest of this
+  platform (including new `.py` files); it is called at the top of the four tests that start the desktop program. Proof: appending one line
+  to `app/js/i18n.js` stops `tiled-sections.mjs` in 0.4 s with `differs js/i18n.js` and the `prepare.js` command. `tests/app/preflight.test.mjs`
+  (4 tests on temporary folders). It does not replace the program's own runtime check, which is unchanged.
 
 ##### M8.4.24 - The intermittent viewer probe of the tiled-sections test — state: Ready (added 18 Nov 2026 at the maintainer's request)
 

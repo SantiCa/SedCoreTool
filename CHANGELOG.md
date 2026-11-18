@@ -20,6 +20,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.23: the desktop end-to-end tests stop within a second, with the fixing command, when `desktop/web`, `desktop/python` or the engine runtime are older than `app/` and `src/` (`tests/e2e/preflight.mjs`, `tests/app/preflight.test.mjs`).
 - Roadmap: cards M8.4.23 (desktop tests refuse a stale program copy or engine runtime), M8.4.24 (the intermittent viewer probe of the tiled-sections test) and M8.4.25 (sending the tables of a tiled section without a pause) added before M8.4.17, and M8.4.26 (retries for the runtime downloads of the desktop build, and a diagnosis of the engine start-up failure seen once on Windows).
 - Card M8.4.22: the store keeps the objects of a tiled section as four binary columns (contract §8.7, manifest version 2), so a tiled section
   can hold up to 1,048,576 objects instead of about 51,000-56,000; the engine checks the columns against each other and the classes before
