@@ -82,7 +82,7 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.18b** (a missing or moved source; copying the source into the project; **model: most capable tier (Opus), effort medium**). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate; three findings under the card). Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
+- **Next step: M8.4.18b** (a missing or moved source; copying the source into the project; **model: most capable tier (Opus), effort medium**). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate). Its three findings have cards, in this order after M8.4.18b: M8.4.27 (the store folder follows its project: delete, copy under a new identifier, a missing stored version; Opus, high), M8.4.28 (object operations right after reopening; Opus, medium), M8.4.29 (reopening from a cache instead of every tile; Opus, high; decision G waits for the maintainer); then M8.4.18c, M8.4.18d, M8.4.19. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1608,9 +1608,9 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   Not done or not measured: the engine process killed during a save (D1 was tested by stopping the sync, the store's own crash safety by the Python tests
   of M8.4.16); reopening with the pyramid rebuilt from an 8 GiB source (about 95 s to build, measured when the section was added); macOS and Linux.
   **Findings:** (1) while the statistics are recomputed after a reopening (41-133 s above), object operations that read boxes say "try again in a
-  moment", and a stroke updates an object spanning several tiles correctly only once all its tiles are done; (2) a project deleted from the library leaves
-  its folder in the store (`<user data>/projects/<id>/`), to be removed with M8.4.18b's copies; (3) the reopening reads every stored tile through the
-  engine once, which is most of the 4.6-10.8 s; saving the row histograms and the reduced copy with the record would avoid it if that time matters.
+  moment", and a stroke updates an object spanning several tiles correctly only once all its tiles are done (card M8.4.28); (2) a project deleted from
+  the library leaves its folder in the store (`<user data>/projects/<id>/`) (card M8.4.27); (3) the reopening reads every stored tile through the
+  engine once, which is most of the 4.6-10.8 s (card M8.4.29).
 
 ##### M8.4.18b - A missing or moved source; copying the source into the project — state: after M8.4.18a (D3 answered: copy only on request)
 
@@ -1624,13 +1624,123 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 - **Steps:** (1) "Locate the image": a file dialog in the main process; the engine hashes the chosen file (progress, cancel); a different SHA-256 is
   refused with a message that shows both sizes; a match updates `sources.json` and rebuilds the pyramid if needed. (2) "Copy the image into the project":
   shows the size and the free space first; copies to `sources/<sha256>` through a temporary file, verifies the SHA-256, then renames; a full disk
-  leaves no partial file. The copy is preferred to the original when both exist. (3) Deleting a project deletes its copies; a copy shared by two
-  projects is kept until the last one goes.
+  leaves no partial file. The copy is preferred to the original when both exist. (Deleting a project's copies is part of M8.4.27, which owns the
+  whole project folder.)
 - **Tests:** a moved file is accepted; another file of the same size is refused; a copy interrupted by a full disk (simulated) leaves nothing; the
   copy is used when the original is deleted; desktop end-to-end of both actions.
 - **Done when:** both actions work in the desktop with verified identity, and every failure leaves the previous state; development gate.
 
-##### M8.4.18c - Folder backup and restore of tiled sections — state: after M8.4.18a
+##### M8.4.27 - The store folder follows its project — state: after M8.4.18b (written 18 Nov 2026 for finding 2 of M8.4.18a)
+
+- **Goal:** the folder `<user data>/projects/<store id>/` (mask tiles and manifests, `sources.json`, the copies of M8.4.18b) lives and dies with its
+  project: deleting the project removes it; a project copied under a new identifier gets the stored versions its tiled sections name; and a tiled
+  section whose stored version is missing opens locked instead of making the whole project fail to open.
+- **Why, from the code (18 Nov 2026):** (1) the library's delete (`deleteProject` in the projects list of `app.js`) removes only the IndexedDB records,
+  so the folder stays forever (finding 2); (2) importing a package or backup of a project that already exists keeps the local version as a copy under a
+  new identifier (`id2` in the import path, "previous version"); a tiled section of that copy names manifests that are in the old identifier's folder,
+  so the copy fails to open (`mask.info` answers that the manifest is missing and `loadTiledSection` throws, which stops `loadProject`), and the next
+  save of the original with a tiled section lets `mask.retain` delete those manifests for good; (3) the same throw happens for any missing manifest.
+- **Read first:** this card; M8.4.18a as built; contract §8.7 (`mask.retain`, `sources.json`); in `app.js`: the `del` action of the projects list,
+  the import path that creates `id2`, `loadTiledSection`, `retainStore`, `storeProject`; `desktop/tile-ipc.js` (`projectsRoot`, `readSources`);
+  `src/sedcoretool/store/masks.py`.
+- **Change:** contract §8.7 first (two operations); `desktop/tile-ipc.js`, `preload.js` (`deleteProjectStore`, `copyProjectStore`); `engine/server.py`
+  and `store/masks.py` if the copy goes through the engine (it must, if the engine keeps the store open: close or forget its `MaskStore` first);
+  `app.js` (the delete action, the import copy, a third lock `frozen: 'store'` in `loadTiledSection`); `i18n.js`; TECHNICAL_DOCUMENTATION; tests.
+- **Do not touch:** the record and format version of M8.4.18a; the store format; projects without tiled sections (their delete and import stay as
+  they are); `legacy/`.
+- **Model:** most capable, effort high (deletes user data; a wrong copy loses masks).
+- **Steps:**
+  1. *Delete.* After the IndexedDB delete succeeds, the page asks the main process to delete the project's folder. The main process refuses any
+     identifier that is not exactly a store identifier (`storeProject` rules, contract §8.7) and resolves the path inside `projectsRoot` only; the
+     engine forgets the project's open store and cached blobs first. The folder is renamed to a `.deleting-<random>` name, then removed, so a crash
+     half-way leaves a folder nothing opens, removed at the next start. A project that is open is reset first (as today).
+  2. *Copy under a new identifier.* Where the page saves a project under a new identifier that keeps tiled sections (the `id2` copy today, and any
+     later "save as"), it first asks for a copy of the named manifests and their tiles into the new identifier's folder (hard links where the file
+     system allows them, otherwise copies, verified by SHA-256), plus `sources.json`; the IndexedDB record is written only after the copy succeeded.
+     If it fails, the copy is not made and the user is told; the original is untouched.
+  3. *Missing stored version.* `loadTiledSection` catches a missing manifest or tile: the section opens grey (or with its image if the pyramid is
+     there), with no masks and an empty table, locked as `frozen: 'store'` with a message that names the section; its record is saved back byte
+     for byte (as D2), and `mask.retain` never runs for a project with such a section, so nothing else is deleted while it is broken.
+- **Tests:** Node (`tile-ipc.js`): delete removes the folder and refuses `..`, absolute paths, device names and identifiers of another shape; an
+  interrupted delete leaves a `.deleting-*` folder that the next start removes; copy duplicates the named manifests and tiles and verifies them; a
+  failed copy writes nothing. Python if the engine takes part (forgetting a project's store and cache). Desktop (`tests/e2e/tiled-sections.mjs`):
+  delete a project with a tiled section from the library: its folder is gone and other projects' folders are untouched; import a package of a project
+  that exists locally with a tiled section and keep both: the "previous version" opens with identical masks, and saving the other one does not
+  remove them; delete one manifest by hand: the project opens, that section is locked and says so, the rest edits and saves.
+- **Done when:** the three cases work as above in the desktop with their failure cases; development gate.
+
+##### M8.4.28 - Object operations right after reopening a tiled section — state: after M8.4.27 (written 18 Nov 2026 for finding 1 of M8.4.18a)
+
+- **Goal:** after a tiled section is reopened, an object operation (delete, merge, scissors, same-ichnotaxon groups) on an object waits only for
+  that object's tiles instead of every tile of the section, and the statistics shown for an object are never a partial sum of its tiles.
+- **Why, from the code (18 Nov 2026):** `tiledPlan` refuses with "try again in a moment" while the section's `TiledStatsRunner` has anything pending,
+  and after a reopening every stored tile is pending (41 s at 3 %, 133 s at 10 % of the `rgb8g` tiles, about 0.11 s per tile: nine level-0 pixel tiles
+  are read per tile). Meanwhile `onUpdate` publishes `TiledObjectStats.total(id)` as soon as one tile of the object is computed, so an object that spans
+  several tiles shows (and a save would write) the sum of the computed tiles only. The saved statistics are correct; only the per-tile parts are missing.
+- **Read first:** this card; `app/js/tiledit.js` (`TiledObjectStats`, `TiledStatsRunner`); in `app.js`: `tiledStatsRunner`, `tiledPlan`,
+  `eachObjectWindow`, `splitTiled`, `tiledSameTaxonGroups`, `finishTiledStroke`, `loadTiledSection`; M8.4.16 step 3 (decision of per-tile statistics).
+- **Change:** `tiledit.js` (`TiledStatsRunner.prioritise(positions)` and `pendingIn(positions)`), `app.js` (readiness per object; the operations
+  wait for their objects' tiles), `i18n.js` if a message changes, TECHNICAL_DOCUMENTATION (the statistics paragraph), tests.
+- **Do not touch:** `tileStats` and `objectStats` (the numbers); the saved record; the order-independence of `total` (it sums in tile order).
+- **Model:** most capable, effort medium (editing that could leave wrong statistics; checked by exact tests).
+- **Steps:**
+  1. *An object is current when none of the tiles under its source box (`o.sbox`, the saved one until it is recomputed, joined with every box it had
+     since) is pending in the runner.* `onUpdate` writes `o.stats`, `o.area`, the boxes and `o.feat` only for current objects; the others keep their
+     saved values and are reported again when their last tile is done.
+  2. *Priority.* `prioritise(positions)` moves those tiles to the front of the pending set. An operation that reads boxes asks for its objects'
+     tiles first and, instead of refusing, waits for them with the busy indicator (cancellable with Escape; a failed tile still refuses with today's
+     message); then it runs as it would have. A stroke prioritises the tiles of the objects it touched.
+  3. *Saving* writes, for an object that is not current, its last current statistics (the saved ones after a reopening), never a partial sum.
+- **Tests:** Node (`tests/app/tiledit.test.mjs`): with a queue of many tiles, an object spanning 4 tiles is current right after its 4 tiles, whatever
+  their place in the queue; `onUpdate` never publishes a total that differs from the total over all of the object's tiles (property test over random
+  queues and objects spanning 1-9 tiles, exact equality); a prioritised operation runs after its tiles and before the rest. Desktop
+  (`tests/e2e/tiled-sections.mjs`): reopen, at once delete an object spanning two tiles: it is deleted, without "try again", and the table and
+  objects then equal those of a section where the deletion happened before saving. Measure with `tools/measure_tiled_reopen.mjs` (new field): time from
+  the reopening to a finished delete of one object spanning 2-4 tiles, at 3 % and 10 %. **Target, stated before measuring:** under 2 s in both cases
+  (about 18 pixel tiles read); if missed, record it and ask.
+- **Done when:** the tests pass, the measurement is recorded against the target; development gate.
+
+##### M8.4.29 - Reopening without reading every stored tile — state: after M8.4.28; decision G below waits for the maintainer (written 18 Nov 2026 for finding 3 of M8.4.18a)
+
+- **Goal:** reopening a saved tiled section does not read its stored tiles to rebuild what the page derived from them: the row histograms of
+  M8.4.17, the reduced copy of the masks and the per-tile object statistics come back from a cache saved with the stored version, and are rebuilt
+  from the tiles only when that cache is missing, stale or does not pass its checks.
+- **Why:** M8.4.18a reads every stored tile once on reopening; that is most of the 4.6 s (3 %) and 10.8 s (10 %) to open the `rgb8g` section, and the
+  object statistics then need 41-133 s more (M8.4.28 makes that wait local; this card removes it in the common case).
+- **Decision G (proposed by the design session, for the maintainer):** the cache is an extra file per stored version in the engine's mask store
+  (`derived/<manifest>.<kind>`), written by the page through two new operations (`mask.derived.put`, `mask.derived.get`, contract §8.7) and removed
+  by `mask.retain` together with its manifest. It is a cache, not part of the project: its absence or rejection only costs time. *Alternatives:* in the
+  IndexedDB record of the project (tens of MiB per section in the record, read on every library listing that loads the project, and outside the store
+  that the backups of M8.4.18c copy); in a separate IndexedDB store (bound to the browser, ARCHITECTURE §3.4, and not removed by `mask.retain`).
+- **Read first:** this card and G; M8.4.18a as built (`loadTiledSection`); `app/js/tiledcounts.js` (`TiledRowCounts` histograms); `app/js/tiledmasks.js`
+  (`reduceTile`); `app/js/tiledit.js` (`TiledObjectStats`); contract §3 (buffers) and §8.7; `store/masks.py`.
+- **Change:** contract §8.7 first; `store/masks.py`, `engine/server.py` (the two operations; `retain` and the size limits); `desktop/engine.js`,
+  `tile-ipc.js`, `preload.js`; a new pure module `app/js/tiledcache.js` (encode and decode, no DOM, in `ORDER` of `tools/build_standalone.py`);
+  `app.js` (write the cache when a save has settled, read it in `loadTiledSection`); TECHNICAL_DOCUMENTATION (the cache format); tests.
+- **Do not touch:** the record of M8.4.18a; the tile and manifest format; the numbers (histograms, statistics, reduced masks must be identical to
+  the ones rebuilt from the tiles).
+- **Model:** most capable, effort high (new stored data read back as untrusted input; an engine contract change).
+- **Steps:**
+  1. *Format* (documented, versioned, little-endian): a header with the format version, the manifest's SHA-256, the source's SHA-256, the working
+     factor `ds`, the analysis area's columns the histograms were clipped to, and the SHA-256 of the body; then three parts: histograms by tile,
+     reduced copy (labels and exclusion at the working size), per-tile statistics by tile and id. Any mismatch with the section being opened (manifest,
+     source, `ds`, sizes, version, hash, a count or offset outside the body) rejects the whole cache, never part of it.
+  2. *Writing:* after `settleTiledSections` has settled a section and the record names its manifest, the page writes the cache for that manifest
+     unless one exists; a failure is logged and ignored (the save itself already succeeded).
+  3. *Reading:* `loadTiledSection` asks for the cache first; if accepted, it fills the reduced copy, `TiledRowCounts` and `TiledObjectStats` from it
+     and lists the stored tiles without reading them; if the analysis area's columns differ, only the tiles of the changed columns are read (as
+     `setArea` does today). If rejected or missing: today's path, and the cache is written after the next save.
+  4. *Limits:* `mask.derived.put` refuses a body above a stated size (from the measured size of the 10 % case, with margin) and unknown kinds.
+- **Tests:** Node: encode and decode round trip; every rejection case (wrong manifest, source, `ds`, version, hash, truncated, an offset past the end,
+  counts that do not add up) falls back to the tiles with identical results; a property test that histograms, reduced copy and statistics from the cache
+  equal those rebuilt from the tiles over random masks. Python: put, get, retain removes the cache with its manifest, size limit. Desktop: reopen with
+  the cache equals reopen without it (masks, objects with statistics, table), and a corrupted cache file falls back. **Measure** with
+  `tools/measure_tiled_reopen.mjs` at 3 % and 10 %: the time to open with the table and the cache's size. **Targets, stated before measuring:** open
+  with the table under 3 s at 10 %, and object statistics current when the project opens; if missed, record and ask.
+- **Done when:** decision G is answered, the round trip is identical with and without the cache, the rejections are tested, and the times are recorded
+  against the targets; development gate.
+
+##### M8.4.18c - Folder backup and restore of tiled sections — state: after M8.4.29
 
 - **Goal:** the folder backup (`writeProjectFolder`) carries tiled sections incrementally, and a project restored from it on another computer opens
   with identical masks.
