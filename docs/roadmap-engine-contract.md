@@ -506,3 +506,13 @@ and the base, and every earlier manifest, stays readable; the client sends its u
 M8.4.16 step 4). **Not yet specified:** which manifest is the current one of a section (the project record names it, card M8.4.18); deleting
 blobs and manifests that no saved version names (the save rule of ARCHITECTURE §3.4 rule 4, card M8.4.18); reading the tables back (with
 loading, card M8.4.18). Until then the folder only grows: a stroke adds the tiles it changed (compressed) and one manifest.
+
+**From the page (card M8.4.16 step 4).** The main process passes `--projects-dir <user data>/projects`. The page reaches the five operations
+only through `desktop/tile-ipc.js` (`window.corantoolDesktop.tiles.maskBegin`, `maskPut`, `maskCommit`, `maskDiscard`, `maskRead`), which checks
+every argument again, lets a page use only the staged versions it began (at most 8 at a time), and for `maskCommit` takes the tables as bytes,
+uploads each as a committed buffer (§3), names them in `mask.commit` and releases them. The page sends with `app/js/tiledsync.js` (`MaskSync`):
+after a change, a round begins a staged version on the last acknowledged manifest, sends each dirty tile (both layers, copied just before they
+are sent) and the four tables, and commits; a tile is acknowledged only if it did not change after its copy was taken. A failed round
+acknowledges nothing, discards its staged version and is tried again (pauses of 1, 2, 5, 15, then 30 s), after asking for the one automatic
+restart of the engine (card M8.4.7) when the engine is not ready. Clean tiles the page dropped are read back with `mask.read`
+(`MaskLoader`).

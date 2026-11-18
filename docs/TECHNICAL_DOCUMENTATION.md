@@ -163,6 +163,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `tilecache.js` | Which tiles of a tiled section the viewer needs (card M8.4.15): the level for a zoom (`levelForZoom`: the coarsest with at least one level pixel per screen pixel), the visible tiles plus one ring, nearest the centre first, a coarser cached tile to draw while one is missing (`coarserCover`), a 256 MiB least-recently-used cache that keeps the tiles on screen (`TileCache`) and batched requests, 16 tiles each, two at a time, dropping tiles no longer wanted (`TileScheduler`, keys prefixed per pyramid); where a tile goes on screen (`tilePlacement`) | Yes |
 | `tiledmasks.js` | Masks of tiled sections in the page (card M8.4.16): the cache of level-0 mask tiles (`MaskTiles`: all-zero layers kept as nothing, tiles changed and not acknowledged by the engine never dropped, pinned tiles kept, clean tiles dropped least recently used first beyond 128 MiB), the reduced copy in the working image (`reduceTile`), and the mask layer painted over pixel tiles (`overlayLayout`, `axisMap`, `paintOverlay`) | Yes |
 | `tiledit.js` | Editing the masks of tiled sections (card M8.4.16): the edit window (`EditWindow`: whole level-0 mask tiles as flat arrays, written back tile by tile; `windowRange`, `WINDOW_TILES`) and object statistics kept per tile and summed per object (`tileStats`, `TiledObjectStats`, `affectedTiles`, `TiledStatsRunner`) | Yes |
+| `tiledsync.js` | Sending the masks of tiled sections to the engine's store (card M8.4.16): rounds of staged version, dirty tiles and tables, commit and acknowledgement, retried after a failure (`MaskSync`); reading back tiles the page dropped (`MaskLoader`); the tables as bytes (`maskTables`) | Yes |
 | `maskchanges.js` | Which rows of each section's label and exclusion masks changed since the engine last received them: `createMaskChanges` (mark, take, restore, mark all) and `indexRangeOfPairs` (the pixels named by an edit-history list). A hint for the engine path, never a proof (§26.2) | Yes |
 | `sectionanalysis.js` | Analysis of one section without the DOM: effective class of each object, class-index table, row counts (cached per section), interval bins with no-data padding, ages and manual indices (§3.2), plus the builders of the engine method's input snapshot and reference result columns (`buildIntervalSnapshot`, `referenceColumns`), the revision key of a section's calculation (`analysisRevision`) and the conversion of engine result columns to `s.bins` (`resultToBins`). `app.js::analyze` passes the project state in | Yes |
 | `imageproc.js` | Enhancement, detection, connected components, magic wand, lasso, descriptors, rotation, downsampling | ✓ |
@@ -3101,6 +3102,15 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   engine, 48 tiles cached) and the labels as they are at that moment (`TiledStatsRunner`). An object keeps `area` and `stats` in source pixels,
   `sbox` (source bounding box) and `bbox` in working pixels (`floor(source / ds)`); `feat` uses `pxPerCm(s) · ds` source pixels per centimetre.
   An object left with no pixel is removed.
+- **Masks reach the engine's store in the background** (`tiledsync.js`, `desktop/tile-ipc.js`; card M8.4.16 step 4; contract §8.7): 300 ms after
+  a change (a stroke, an exclusion rectangle, new statistics, a class), a round sends the dirty tiles and the objects, classes and stack tables as
+  a new version on the last acknowledged one; the tiles become clean only after the commit, and only if they did not change meanwhile. If the
+  engine fails, the page keeps every tile, shows "The latest masks of the large section did not reach the engine's store…", asks once for the
+  automatic restart of card M8.4.7, and tries again (1, 2, 5, 15, then every 30 s) until the store has them ("…are now in the engine's
+  store"). Clean tiles beyond 128 MiB may be dropped from the page; they are read back from the store when the viewer, a stroke or the
+  statistics need them (a stroke over a tile not read back yet asks to try again in a moment). The edit window pins its tiles, and writes a layer
+  the tile does not hold as a whole. Until card M8.4.18 the project record does not name the stored version, so closing the program still loses
+  a tiled section.
 - **Measured on Windows (card M8.4.16 step 3,** [evidence](validation/M8.4.16-step3-viewer-rgb8g-windows.json)**,** `rgb8g`, `ds` 32, canvas
   710 x 757, real mouse): input to the next frame during a stroke, p95, 23.9 ms (1 screen pixel per source pixel, brush size 10 = radius 320
   source pixels), 18.4 ms (size 3) and 31.8 ms (1 screen pixel per 3 source pixels, size 10, painting over dense masks), against 33 ms; the first

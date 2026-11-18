@@ -26,6 +26,7 @@
  *   tiled?: {pyramid: string, level: number, levels: {level: number, width: number, height: number, rows: number, cols: number}[], channels: number, bits: number},
  *   maskTiles?: import('./tiledmasks.js').MaskTiles,
  *   _statsRunner?: import('./tiledit.js').TiledStatsRunner,
+ *   _maskSync?: import('./tiledsync.js').MaskSync, _maskLoader?: import('./tiledsync.js').MaskLoader,
  *   logVer: number, view: SectionView | null, crop: import('./core.js').Roi | null,
  *   filters: import('./imageproc.js').FilterSettings, _lc?: SectionCanvasCache | null,
  *   _lb?: SectionCanvasCache | null, file: SectionFile, objects: Map<number, TraceObject>, nextId: number, nextTraceOrder: number,

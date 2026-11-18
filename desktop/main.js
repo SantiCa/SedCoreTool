@@ -65,7 +65,8 @@ if (process.versions.electron) {
     runtimeDirectory: app.isPackaged ? path.join(process.resourcesPath, 'engine-runtime') : path.join(__dirname, 'runtime'),
     lockPath: path.join(__dirname, 'runtime-lock.json'),
     cacheFile: () => path.join(app.getPath('userData'), 'engine-runtime-verified.json'), version: app.isPackaged ? app.getVersion() : require('./package.json').version,
-    pyramidDirectory: () => path.join(app.getPath('userData'), 'pyramids') });   // the tile store's pyramid cache (contract §8.1)
+    pyramidDirectory: () => path.join(app.getPath('userData'), 'pyramids'),     // the tile store's pyramid cache (contract §8.1)
+    projectsDirectory: () => path.join(app.getPath('userData'), 'projects') });  // project data of the tile store: mask tiles (contract §8.7)
 
   const heapMB = Math.max(2048, Math.min(32768, Math.floor((os.totalmem() / 2 ** 20) * 0.75)));
   app.commandLine.appendSwitch('js-flags', `--max-old-space-size=${heapMB}`);

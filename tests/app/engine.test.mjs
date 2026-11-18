@@ -386,3 +386,39 @@ test('without a pyramid folder the engine refuses the tile-store operations, and
   const ipc = createEngineIpc({ engine: { request: async () => ({}), session: () => null, status: () => ({}) } });
   for (const op of ['pyramid.build', 'pyramid.info', 'tile.read']) assert.ok(!ipc.OPERATIONS.includes(op), op);
 });
+
+test('mask tiles through the real client and the page bridge: a version written, read back, and refused requests (card M8.4.16 step 4)', { skip: !python, timeout: 60000 }, async (t) => {
+  const projectsDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'sedcoretool-projects-test-'));
+  t.after(() => fs.rm(projectsDirectory, { recursive: true, force: true }));
+  const client = await clientFixture(t, { projectsDirectory });
+  const { createTileIpc } = require('../../desktop/tile-ipc.js');
+  const bridge = createTileIpc({ engine: { request: (op, payload, binary, options) => client.request(op, payload, binary, options) } });
+  const page = 7, other = 8;
+  const begun = await bridge.call(page, 'maskBegin', 'p1', 's1', 1300, 1100, null);
+  assert.deepEqual([begun.ok.rows, begun.ok.cols], [3, 3]);
+  const labels = new Int32Array(512 * 512); labels[5] = 42;
+  const labelBytes = new Uint8Array(labels.buffer), excludeBytes = new Uint8Array(512 * 512); excludeBytes[6] = 1;
+  assert.deepEqual(await bridge.call(page, 'maskPut', begun.ok.staged, 'labels', 1, 2, digest(labelBytes), labelBytes), { ok: { stored: true } });
+  assert.deepEqual(await bridge.call(page, 'maskPut', begun.ok.staged, 'exclude', 1, 2, digest(excludeBytes), excludeBytes), { ok: { stored: true } });
+  assert.equal((await bridge.call(other, 'maskPut', begun.ok.staged, 'labels', 1, 2, digest(labelBytes), labelBytes)).error.field, 'staged', 'another page cannot use it');
+  const objects = new TextEncoder().encode(JSON.stringify([{ id: 42, class_id: null, predicted_class_id: null, confidence: 0 }]));
+  const committed = await bridge.call(page, 'maskCommit', begun.ok.staged,
+    { objects, classes: new TextEncoder().encode('[]'), stack_offsets: new Uint8Array(new Uint32Array([0, 0]).buffer), stack_members: null });
+  assert.match(committed.ok.manifest, /^[0-9a-f]{64}$/);
+  const read = await bridge.call(page, 'maskRead', 'p1', committed.ok.manifest, 'labels', [[1, 2], [0, 0]]);
+  assert.deepEqual(read.ok.tiles, [{ row: 1, col: 2, byte_length: 1048576 }, { row: 0, col: 0, byte_length: 0 }]);
+  assert.equal(Buffer.compare(Buffer.from(read.ok.bytes), Buffer.from(labelBytes)), 0);
+  const empty = await bridge.call(page, 'maskRead', 'p1', committed.ok.manifest, 'exclude', [[0, 0]]);
+  assert.deepEqual(empty.ok.tiles, [{ row: 0, col: 0, byte_length: 0 }]); assert.equal(empty.ok.bytes.length, 0);
+  // Refused before reaching the engine, or by it; the session stays usable.
+  for (const [args, field] of [[['maskBegin', 'P1', 's1', 10, 10, null], 'project'], [['maskBegin', 'con', 's1', 10, 10, null], 'project'],
+    [['maskBegin', 'p1', 's/1', 10, 10, null], 'section'], [['maskPut', begun.ok.staged, 'labels', 0, 0, digest(labelBytes), labelBytes], 'staged'],
+    [['maskRead', 'p1', 'f'.repeat(64), 'labels', [[0, 0]]], 'manifest'], [['maskCommit', 'x', {}], 'staged']]) {
+    const answer = await bridge.call(page, ...args);
+    assert.equal(answer.error?.field, field, JSON.stringify(args.slice(0, 2)));
+  }
+  const again = await bridge.call(page, 'maskBegin', 'p1', 's1', 1300, 1100, committed.ok.manifest);
+  assert.deepEqual(await bridge.call(page, 'maskPut', again.ok.staged, 'labels', 1, 2, digest(labelBytes), labelBytes.subarray(1)), { error: { code: 'INVALID_REQUEST', field: 'bytes' } });
+  assert.deepEqual(await bridge.call(page, 'maskDiscard', again.ok.staged), { ok: {} });
+  assert.equal(client.status().state, 'ready');
+});

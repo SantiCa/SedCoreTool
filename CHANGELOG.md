@@ -20,6 +20,13 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.16, step 4: the masks of tiled sections are sent to the engine's store in the background after each change and kept in the page
+  until the store acknowledges them; if the engine dies on the way they are sent again after its automatic restart (`app/js/tiledsync.js`; the
+  page reaches the store through `desktop/tile-ipc.js`; the program starts the engine with `--projects-dir`). Tiles the page dropped to save
+  memory are read back from the store. `tests/e2e/tiled-sections.mjs` kills the engine while a stroke's tiles are on their way and checks that
+  the page's masks are unchanged and that the store then holds exactly them; Node tests for the rounds, failures at each step and reading back,
+  and one through the real engine and bridge. Strokes on the 8 GiB fixture with sending running: input to next frame p95 18.2-32.4 ms against
+  33 ms ([evidence](docs/validation/M8.4.16-step4-viewer-rgb8g-windows.json)).
 - Card M8.4.16, step 3: on tiled sections (behind the flag) brush, erase, exclude and include now edit the masks at full resolution, on an edit
   window of whole mask tiles around the visible area (`app/js/tiledit.js`); zoomed out beyond 96 tiles they ask to zoom in. Object statistics are
   kept per tile and summed, exactly equal to those of the whole image (`objectStats` takes the image's edges as an optional argument; default

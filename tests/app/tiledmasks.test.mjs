@@ -13,7 +13,7 @@ test('mask tiles: layers that are all zero take no memory and empty positions ne
   assert.equal(tiles.state(2, 2), 'empty');
   tiles.set(0, 0, new Int32Array(N), new Uint8Array(N));
   assert.equal(tiles.bytes, 0);
-  assert.deepEqual(tiles.get(0, 0), { labels: null, exclude: null, dirty: true, pins: 0, bytes: 0 });
+  assert.deepEqual(tiles.get(0, 0), { labels: null, exclude: null, dirty: true, pins: 0, bytes: 0, edit: 1 });
   assert.equal(tiles.hasContent(), false);
   const exclude = new Uint8Array(N); exclude[9] = 1;
   tiles.set(0, 1, labelsWith(3), exclude);

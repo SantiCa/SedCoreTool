@@ -30,6 +30,7 @@ import { assembleLevel, imageDimensions, levelPositions, proxyLevel, tileRgba, T
 import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlacement, tileRange, tilesByDistance } from './tilecache.js';
 import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks.js';
 import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, windowRange } from './tiledit.js';
+import { MaskLoader, MaskSync, maskTables } from './tiledsync.js';
 import { renderData } from './datatab.js';
 import { frameRatio, panelPrefs, savePanels } from './panels.js';
 import { addRecordFromTable, defaultLogView, lastLog, mode, renderLog, renderLogPanel, renderRecList, scheduleLog, sectionCanvas, navigationPreviewCanvas, clearNavigationPreviews, setMode } from './columns.js';
@@ -454,7 +455,11 @@ let editWindow = null;                                   // one window for the p
 function tiledEditWindow(s, rect, ring) {
   const range = windowRange(s.maskTiles, rect, ring);
   if (range.count > WINDOW_TILES) { toast(t('tiles.zoomIn')); return null; }
+  const missing = [];
+  for (let row = range.row0; row <= range.row1; row++) for (let col = range.col0; col <= range.col1; col++) if (s.maskTiles.state(row, col) === 'missing') missing.push([row, col]);
+  if (missing.length) { void maskLoader(s).want(missing).catch(() => {}); toast(t('tiles.loadingMasks')); return null; }
   if (!editWindow?.matches(s.maskTiles, range)) {
+    editWindow?.release();
     editWindow = null;
     try { editWindow = new EditWindow(s.maskTiles, range); } catch (error) { toast(t('tiles.err', { code: 'MASKS', field: error.message })); return null; }
   }
@@ -557,14 +562,67 @@ function tiledStatsRunner(s) {
     afterChange(s);
   };
   s._statsRunner = new TiledStatsRunner({ tiles: s.maskTiles, stats, stacks: () => s.stacks, fetchRgba, onUpdate,
-    onError: (error) => toast(error.message || String(error), 9000) });
+    loadMasks: (positions) => maskLoader(s).want(positions), onError: (error) => toast(error.message || String(error), 9000) });
   return s._statsRunner;
+}
+
+/* Sending the masks of a tiled section to the engine's store (card M8.4.16 step 4): `MaskSync` sends the dirty tiles and the tables after
+   each change and acknowledges them only after `mask.commit`; after a failure it keeps them and tries again, first asking for the one
+   automatic restart of the engine (card M8.4.7). `MaskLoader` reads back the tiles the page dropped. */
+const hexDigest = async (bytes) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
+/** The project's identifier as the store accepts it (contract §8.7: lower case, never a Windows device name). */
+const storeProject = (id) => { const key = String(id || 'project').toLowerCase().replace(/[^a-z0-9_-]/g, '_').slice(0, 60) || 'project'; return /^(con|prn|aux|nul|com\d|lpt\d)$/.test(key) ? 'p-' + key : key; };
+async function bridgeResult(promise) {
+  const result = await promise;
+  if (result.error) throw Object.assign(new Error(result.error.code), result.error);
+  return result.ok;
+}
+
+function maskLoader(s) {
+  if (s._maskLoader) return s._maskLoader;
+  const project = storeProject(S.id);
+  const read = async (manifest, layer, positions) => {
+    const result = await bridgeResult(TILES.maskRead(project, manifest, layer, positions));
+    const bytes = new Uint8Array(result.bytes.buffer || result.bytes, result.bytes.byteOffset || 0, result.bytes.byteLength);
+    let offset = 0;
+    return result.tiles.map((tile) => { const part = tile.byte_length ? bytes.subarray(offset, offset + tile.byte_length) : null; offset += tile.byte_length; return part; });
+  };
+  s._maskLoader = new MaskLoader({ tiles: s.maskTiles, manifest: () => s._maskSync?.manifest ?? null, read,
+    onLoaded: () => { if (sec() === s) requestRender(); }, onError: (error) => toast(t('tiles.err', { code: error.code || 'MASKS', field: error.field || '' }), 9000) });
+  return s._maskLoader;
+}
+
+function maskSync(s) {
+  if (s._maskSync) return s._maskSync;
+  const project = storeProject(S.id), section = s.id, { width, height } = s.maskTiles;
+  const api = {
+    begin: async (base) => (await bridgeResult(TILES.maskBegin(project, section, width, height, base))).staged,
+    put: (staged, layer, row, col, sha256, bytes) => bridgeResult(TILES.maskPut(staged, layer, row, col, sha256, bytes)),
+    commit: async (staged, tables) => (await bridgeResult(TILES.maskCommit(staged, tables))).manifest,
+    discard: (staged) => bridgeResult(TILES.maskDiscard(staged)),
+  };
+  let failing = false;
+  const recover = async () => {
+    const desktopEngine = /** @type {any} */ (window).corantoolDesktop.engine;
+    if ((await desktopEngine.status()).state !== 'ready') await desktopEngine.restart({ automatic: true });
+  };
+  s._maskSync = new MaskSync({ tiles: s.maskTiles, api, tables: () => maskTables(s, S.classes), sha256: hexDigest, recover,
+    onState: ({ state }) => {
+      if (state === 'failed' && !failing) { failing = true; toast(t('tiles.masksUnsent'), 9000); }
+      if (state === 'stored' && failing) { failing = false; toast(t('tiles.masksSent')); void s._statsRunner?.retry(); }
+    } });
+  return s._maskSync;
 }
 
 /* The masks of a tiled section over its pixel tiles (card M8.4.16 step 2): one RGBA layer (`overlayLayout`, `paintOverlay`) drawn over them. */
 const maskLayer = { canvas: /** @type {HTMLCanvasElement | null} */ (null), data: /** @type {ImageData | null} */ (null) };
 
 function drawMaskOverlay(s, k, rect, viewWidth, viewHeight) {
+  if (k === 0 && s.maskTiles.stored.size) {
+    const range = windowRange(s.maskTiles, { x0: rect.x0 * s.ds, y0: rect.y0 * s.ds, x1: rect.x1 * s.ds, y1: rect.y1 * s.ds }, 1), missing = [];
+    for (let row = range.row0; row <= range.row1; row++) for (let col = range.col0; col <= range.col1; col++) if (s.maskTiles.state(row, col) === 'missing') missing.push([row, col]);
+    if (missing.length && TILES) void maskLoader(s).want(missing).catch(() => {});   // drawn as empty until they arrive
+  }
   const layout = overlayLayout(s, S.view, k, rect, viewWidth, viewHeight);
   if (!layout) return;
   const { sx0, sy0, cw, ch } = layout, canvas = maskLayer.canvas ||= document.createElement('canvas');
@@ -928,7 +986,7 @@ function swapEditStep(op, forward) {
   [S.selected, op.sel] = [op.sel, S.selected];
 }
 
-function afterChange(s) { s._mv = (s._mv || 0) + 1; s.logVer = (s.logVer || 0) + 1; markDirty(); scheduleLog(); rebuildLUT(s); scheduleLearn(); scheduleAnalysis(); renderClasses(); renderObject(); requestRender(); scheduleEmbed(s); }
+function afterChange(s) { if (s.maskTiles && TILES) void maskSync(s).request(); s._mv = (s._mv || 0) + 1; s.logVer = (s.logVer || 0) + 1; markDirty(); scheduleLog(); rebuildLUT(s); scheduleLearn(); scheduleAnalysis(); renderClasses(); renderObject(); requestRender(); scheduleEmbed(s); }
 
 /* pixel-set edits from wand and lasso */
 function applyPixels(pixels, mode) {
@@ -2789,7 +2847,7 @@ for (const id of ['secTop', 'secBottom', 'secUnits']) $(id).addEventListener('ch
 $('secDel').addEventListener('click', (e) => {
   if (!sec()) return;
   if (!armed(e.currentTarget, t('confirm.secDel', { n: [...sec().objects.values()].filter((o) => o.cls).length }))) return;
-  const [removed] = S.sections.splice(S.cur, 1); discardEditHistory(removed);
+  const [removed] = S.sections.splice(S.cur, 1); discardEditHistory(removed); removed._maskSync?.stop();
   selectSection(Math.min(S.cur, S.sections.length - 1)); scheduleLearn();
 });
 $('roiBtn').addEventListener('click', () => setTool('roi'));
@@ -4697,4 +4755,5 @@ const startupReady = startup();
 window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, needPixels, requestRender, setTool, renderSectionForm, t, tilesIdle: () => [...tileSchedulers.values()].every((q) => q.idle),
   putMaskTile: (row, col, labels, exclude) => putMaskTile(sec(), row, col, labels, exclude),   // end-to-end tests of tiled masks (card M8.4.16)
   tiledStatsIdle: () => S.sections.every((q) => !q._statsRunner || q._statsRunner.idle),
+  masksSettled: () => S.sections.every((q) => !q.maskTiles || !q._maskSync || q._maskSync.settled),
   saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };

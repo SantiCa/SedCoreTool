@@ -23,8 +23,8 @@ export function isEmptyLayer(array) {
 }
 
 /**
- * @typedef {{labels: Int32Array | null, exclude: Uint8Array | null, dirty: boolean, pins: number, bytes: number}} MaskTile
- * `null` layers are all zeros.
+ * @typedef {{labels: Int32Array | null, exclude: Uint8Array | null, dirty: boolean, pins: number, bytes: number, edit: number}} MaskTile
+ * `null` layers are all zeros. `edit` counts the times the tile was set, so a send knows whether the tile changed after it was copied.
  */
 
 /** The mask tiles of one tiled section that the page holds. Positions are `row * cols + col` on the level-0 grid. */
@@ -71,7 +71,7 @@ export class MaskTiles {
     const kept = { labels: isEmptyLayer(labels) ? null : labels, exclude: isEmptyLayer(exclude) ? null : exclude };
     const bytes = (kept.labels ? LABEL_BYTES : 0) + (kept.exclude ? EXCLUDE_BYTES : 0);
     if (old) { this.bytes -= old.bytes; this.entries.delete(i); }
-    this.entries.set(i, { ...kept, dirty, pins: old?.pins || 0, bytes });
+    this.entries.set(i, { ...kept, dirty, pins: old?.pins || 0, bytes, edit: (old?.edit || 0) + 1 });
     this.bytes += bytes;
     this.version++;
     return this.evict();

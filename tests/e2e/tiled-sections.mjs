@@ -8,7 +8,7 @@
 // read again from the pyramid after it was released, and tools that would decode the source refuse visibly. With the flag off, the same image
 // takes today's path.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -41,7 +41,7 @@ async function program(tiled) {
   page.on('dialog', (dialog) => dialog.accept().catch(() => {}));
   await page.waitForFunction(() => !!window.ichantool, { timeout: 60000 });
   await page.waitForFunction(async () => (await window.corantoolDesktop.engine.status()).state === 'ready', { timeout: 90000 });
-  return { page, errors, async close() {
+  return { page, errors, pid: child.pid, async close() {
     try { browser.disconnect(); } catch { /* ignore */ }
     if (child.exitCode === null) child.kill();
     await Promise.race([exited, sleep(15000)]);
@@ -292,6 +292,80 @@ try {
   assert.equal(excluded.excluded, 1); assert.equal(excluded.excludedOut, 0); assert.equal(excluded.reducedExclude, 1);
   assert.equal(excluded.area, erased.area, 'exclusion does not change the object');
   assert.equal(included.excluded, 0); assert.equal(included.reducedExclude, 0);
+  // Card M8.4.16 step 4: the strokes reach the engine's store in the background. Then a stroke over six tiles, and the engine's coordinator
+  // killed while they are on their way: the page's masks do not change, the program restarts the engine (once, automatically) and sends them
+  // again, and the store then holds exactly what the page holds.
+  const storeMatchesPage = () => on.page.evaluate(async () => {
+    const { S } = window.ichantool, s = S.sections.at(-1), tiles = s.maskTiles, tilesApi = window.corantoolDesktop.tiles;
+    const hex = async (bytes) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
+    const manifest = s._maskSync.manifest, project = window.ichantool.S.id.toLowerCase(), positions = [], page = {};
+    for (let row = 0; row < tiles.rows; row++) for (let col = 0; col < tiles.cols; col++) {
+      const entry = tiles.get(row, col);
+      if (!entry) continue;
+      positions.push([row, col]);
+      page[`${row}.${col}`] = [entry.labels ? await hex(new Uint8Array(entry.labels.buffer)) : null, entry.exclude ? await hex(entry.exclude) : null];
+    }
+    const stored = {};
+    for (let i = 0; i < positions.length; i += 16) {
+      const batch = positions.slice(i, i + 16);
+      for (const [k, layer] of [[0, 'labels'], [1, 'exclude']]) {
+        const read = await tilesApi.maskRead(project, manifest, layer, batch);
+        if (read.error) return { error: read.error };
+        const bytes = new Uint8Array(read.ok.bytes.buffer || read.ok.bytes, read.ok.bytes.byteOffset || 0, read.ok.bytes.byteLength);
+        let offset = 0;
+        for (const tile of read.ok.tiles) {
+          const key = `${tile.row}.${tile.col}`; stored[key] ||= [null, null];
+          stored[key][k] = tile.byte_length ? await hex(bytes.subarray(offset, offset + tile.byte_length)) : null; offset += tile.byte_length;
+        }
+      }
+    }
+    return { manifest, page, stored, dirty: tiles.dirtyPositions().length, withContent: Object.values(page).filter(([a, b]) => a || b).length };
+  });
+  await on.page.waitForFunction(() => window.ichantool.masksSettled(), { polling: 100, timeout: 60000 });
+  const settled = await storeMatchesPage();
+  assert.ok(settled.manifest && settled.dirty === 0 && settled.withContent >= 1, 'the strokes reached the store: ' + JSON.stringify({ ...settled, page: undefined, stored: undefined }));
+  assert.deepEqual(settled.stored, settled.page, 'the store holds exactly the page\'s masks');
+  await on.page.evaluate(() => { window.ichantool.setTool('brush'); window.ichantool.S.brushSize = 10; });
+  const box = await on.page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
+  // Found before the stroke: looking it up takes about a second, longer than a round.
+  const coordinator = Number(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    `(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*server.py*' -and $_.CommandLine -like '*projects-dir*' } | Where-Object { $p = $_; $chain = $p.ParentProcessId; $hit = $false; for ($k = 0; $k -lt 6 -and $chain; $k++) { if ($chain -eq ${on.pid}) { $hit = $true; break }; $chain = (Get-CimInstance Win32_Process -Filter "ProcessId=$chain").ParentProcessId }; $hit } | Select-Object -First 1).ProcessId`],
+    { encoding: 'utf8', windowsHide: true }).trim());
+  assert.ok(coordinator > 0, 'the engine coordinator of this program was found');
+  const putsBefore = await on.page.evaluate(() => window.ichantool.S.sections.at(-1)._maskSync.puts);
+  await on.page.mouse.move(box.left + 500, box.top + 40); await on.page.mouse.down();
+  for (let y = 40; y <= 900; y += 20) await on.page.mouse.move(box.left + 500 + (y % 40), box.top + y);
+  await on.page.mouse.up();
+  const before = await on.page.evaluate(async () => {
+    const s = window.ichantool.S.sections.at(-1), tiles = s.maskTiles, out = {};
+    for (const [row, col] of tiles.dirtyPositions()) out[`${row}.${col}`] = Array.from(tiles.get(row, col).labels || []).reduce((a, v, i) => (a + v * (i % 9973 + 1)) % 1e9, 0);
+    return out;
+  });
+  assert.ok(Object.keys(before).length >= 4, 'the stroke changed several tiles: ' + Object.keys(before));
+  // Wait until the round is on its way (its first tile sent, not committed), then kill the coordinator.
+  await on.page.waitForFunction((base) => { const sync = window.ichantool.S.sections.at(-1)._maskSync; return !!sync.running && sync.puts > base; },
+    { polling: 'raf', timeout: 30000 }, putsBefore);
+  const manifestAtKill = await on.page.evaluate(() => window.ichantool.S.sections.at(-1)._maskSync.manifest);
+  process.kill(coordinator, 'SIGKILL');
+  const kept = await on.page.evaluate(async (expected) => {
+    const s = window.ichantool.S.sections.at(-1), tiles = s.maskTiles;
+    return Object.entries(expected).every(([key, sum]) => { const [row, col] = key.split('.').map(Number);
+      return Array.from(tiles.get(row, col).labels || []).reduce((a, v, i) => (a + v * (i % 9973 + 1)) % 1e9, 0) === sum; });
+  }, before);
+  assert.equal(kept, true, 'the page keeps its masks when the engine dies');
+  await on.page.waitForFunction(() => window.ichantool.masksSettled(), { polling: 200, timeout: 120000 });
+  const midway = await on.page.evaluate(() => { const sync = window.ichantool.S.sections.at(-1)._maskSync; return { running: !!sync.running, manifest: sync.manifest }; });
+  const resent = await storeMatchesPage();
+  assert.ok(!resent.error, 'the restarted engine answers: ' + JSON.stringify(resent.error));
+  assert.equal(resent.dirty, 0);
+  assert.notEqual(resent.manifest, settled.manifest);
+  assert.equal(manifestAtKill, settled.manifest, 'the engine was killed before the round committed');
+  assert.equal(midway.running, false);
+  assert.deepEqual(resent.stored, resent.page, 'after the restart the store holds exactly the page\'s masks, the stroke included');
+  for (const key of Object.keys(before)) assert.ok(resent.page[key]?.[0], `tile ${key} of the stroke is stored`);
+  const messages = await on.page.evaluate(() => [window.ichantool.t('tiles.masksUnsent'), window.ichantool.t('tiles.masksSent')]);
+  assert.ok(toasts.includes(messages[0]) && toasts.indexOf(messages[1], toasts.indexOf(messages[0])) > 0,
+    'the failure of the round was shown, then its recovery: ' + JSON.stringify(toasts.slice(-4)));
   assert.deepEqual(on.errors, []);
   console.log('Tiled sections: added through the interface, working image from the pyramid, not saved, reloaded, tools refused; full-resolution tiles drawn (' + drawn.probes.length + ' probes):', JSON.stringify(section));
 } finally { await on.close(); }

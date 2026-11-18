@@ -45,9 +45,12 @@ export class EditWindow {
     this.h = Math.min((range.row1 + 1) * TILE, tiles.height) - this.oy;
     this.labels = new Int32Array(this.w * this.h);
     this.exclude = new Uint8Array(this.w * this.h);
+    /** Tiles pinned while the window lives, so that the page never drops a tile the window copies back into. @type {Set<number>} */
+    this.pinned = new Set();
     for (let row = range.row0; row <= range.row1; row++) {
       for (let col = range.col0; col <= range.col1; col++) {
         const entry = tiles.get(row, col);
+        this.pin(row, col);
         if (!entry || (!entry.labels && !entry.exclude)) continue;
         const x0 = col * TILE - this.ox, y0 = row * TILE - this.oy, cols = Math.min(TILE, this.w - x0), rows = Math.min(TILE, this.h - y0);
         for (let y = 0; y < rows; y++) {
@@ -57,6 +60,17 @@ export class EditWindow {
       }
     }
     this.version = tiles.version;
+  }
+  /** @param {number} row @param {number} col */
+  pin(row, col) {
+    const i = this.tiles.index(row, col);
+    if (this.pinned.has(i) || !this.tiles.entries.has(i)) return;
+    this.tiles.pin(row, col); this.pinned.add(i);
+  }
+  /** Unpin the window's tiles (the window is no longer used). */
+  release() {
+    for (const i of this.pinned) this.tiles.unpin(Math.floor(i / this.tiles.cols), i % this.tiles.cols);
+    this.pinned.clear();
   }
   /** Whether this window is the given range of these tiles and nothing else wrote them since. @param {MaskTiles} tiles @param {TileRange} range */
   matches(tiles, range) {
@@ -82,19 +96,26 @@ export class EditWindow {
     for (let row = Math.floor((y0 + this.oy) / TILE); row <= Math.floor((y1 + this.oy) / TILE); row++) {
       for (let col = Math.floor((x0 + this.ox) / TILE); col <= Math.floor((x1 + this.ox) / TILE); col++) {
         const entry = tiles.get(row, col), tx = col * TILE - this.ox, ty = row * TILE - this.oy;
+        const part = { x0: Math.max(x0, tx), x1: Math.min(x1, tx + TILE - 1, this.w - 1), y0: Math.max(y0, ty), y1: Math.min(y1, ty + TILE - 1, this.h - 1) };
+        // A layer the tile does not hold (all zeros, or a tile no longer in the page) is copied whole: the window is the truth for its tiles.
+        const whole = { x0: Math.max(0, tx), x1: Math.min(tx + TILE - 1, this.w - 1), y0: Math.max(0, ty), y1: Math.min(ty + TILE - 1, this.h - 1) };
         const labels = entry?.labels || new Int32Array(TILE_PIXELS), exclude = entry?.exclude || new Uint8Array(TILE_PIXELS);
-        const ax = Math.max(x0, tx), bx = Math.min(x1, tx + TILE - 1), ay = Math.max(y0, ty), by = Math.min(y1, ty + TILE - 1);
-        for (let y = ay; y <= by; y++) {
-          const from = y * this.w, to = (y - ty) * TILE - tx;
-          labels.set(this.labels.subarray(from + ax, from + bx + 1), to + ax);
-          exclude.set(this.exclude.subarray(from + ax, from + bx + 1), to + ax);
-        }
+        this.copyInto(labels, this.labels, entry?.labels ? part : whole, tx, ty);
+        this.copyInto(exclude, this.exclude, entry?.exclude ? part : whole, tx, ty);
         tiles.set(row, col, labels, exclude);
+        this.pin(row, col);
         written.push([row, col]);
       }
     }
     this.version = tiles.version;
     return written;
+  }
+  /** @param {Int32Array | Uint8Array} tile @param {Int32Array | Uint8Array} window @param {{x0: number, x1: number, y0: number, y1: number}} r @param {number} tx @param {number} ty */
+  copyInto(tile, window, r, tx, ty) {
+    for (let y = r.y0; y <= r.y1; y++) {
+      const from = y * this.w, to = (y - ty) * TILE - tx;
+      tile.set(window.subarray(from + r.x0, from + r.x1 + 1), to + r.x0);
+    }
   }
 }
 
@@ -201,15 +222,20 @@ export class TiledStatsRunner {
   /**
    * @param {{tiles: MaskTiles, stats: TiledObjectStats, stacks: () => number[][],
    *   fetchRgba: (positions: [number, number][]) => Promise<(Uint8ClampedArray | Uint8Array)[]>,
-   *   onUpdate: (ids: Set<number>) => void, onError?: (error: any) => void, cacheTiles?: number}} options
+   *   onUpdate: (ids: Set<number>) => void, onError?: (error: any) => void, cacheTiles?: number,
+   *   loadMasks?: (positions: [number, number][]) => Promise<void>}} options `loadMasks` brings back mask tiles the page dropped
+   *   (`MaskLoader.want`); a tile is never computed while it or a neighbour is not in the page.
    */
-  constructor({ tiles, stats, stacks, fetchRgba, onUpdate, onError = () => {}, cacheTiles = 48 }) {
+  constructor({ tiles, stats, stacks, fetchRgba, onUpdate, onError = () => {}, cacheTiles = 48, loadMasks = async () => {} }) {
     this.tiles = tiles; this.stats = stats; this.stacks = stacks; this.fetchRgba = fetchRgba; this.onUpdate = onUpdate; this.onError = onError;
+    this.loadMasks = loadMasks;
     this.cacheTiles = cacheTiles;
     /** @type {Map<number, Uint8ClampedArray | Uint8Array>} */
     this.rgba = new Map();
     /** @type {Set<number>} */
     this.pending = new Set();
+    /** Tiles whose computation failed (a tile or pixels could not be read): queued again with the next request. @type {Set<number>} */
+    this.failed = new Set();
     /** @type {Set<number>} ids to report even when no tile holds them any more (a new object never painted) */
     this.ids = new Set();
     /** @type {Promise<void> | null} */
@@ -218,11 +244,14 @@ export class TiledStatsRunner {
   /** @param {[number, number][]} positions @param {Iterable<number>} [ids] */
   queue(positions, ids = []) {
     for (const [row, col] of positions) this.pending.add(this.tiles.index(row, col));
+    if (positions.length) { for (const tile of this.failed) this.pending.add(tile); this.failed.clear(); }
     for (const id of ids) this.ids.add(id);
     if (!this.running) this.running = this.run().finally(() => { this.running = null; if (this.pending.size || this.ids.size) this.queue([]); });
     return this.running;
   }
   get idle() { return !this.running && !this.pending.size; }
+  /** Compute again the tiles whose computation failed (for example once the engine is back). */
+  retry() { return this.failed.size ? this.queue([...this.failed].map((i) => [Math.floor(i / this.tiles.cols), i % this.tiles.cols])) : Promise.resolve(); }
   async run() {
     const cols = this.tiles.cols;
     while (this.pending.size) {
@@ -230,11 +259,15 @@ export class TiledStatsRunner {
       this.pending.delete(tile);
       const row = Math.floor(tile / cols), col = tile % cols;
       try {
+        const around = /** @type {[number, number][]} */ ([]);
+        for (let r = row - 1; r <= row + 1; r++) for (let c = col - 1; c <= col + 1; c++) if (r >= 0 && c >= 0 && r < this.tiles.rows && c < cols) around.push([r, c]);
+        await this.loadMasks(around);
+        if (around.some(([r, c]) => this.tiles.state(r, c) === 'missing')) throw new Error('mask tile not loaded');
         if (this.tiles.get(row, col)?.labels) await this.loadPixels(row, col);
         const changed = this.stats.replaceTile(tile, tileStats({ width: this.tiles.width, height: this.tiles.height, stacks: this.stacks(),
           labelsAt: (r, c) => this.tiles.get(r, c)?.labels || null, rgbaAt: (r, c) => this.rgba.get(r * cols + c) || null }, row, col));
         for (const id of changed) this.ids.add(id);
-      } catch (error) { this.onError(error); }
+      } catch (error) { this.failed.add(tile); this.onError(error); }
       if (!this.pending.size || this.ids.size > 256) { const ids = this.ids; this.ids = new Set(); if (ids.size) this.onUpdate(ids); }
       await new Promise((resolve) => setTimeout(resolve, 0));         // let the page draw and take input between tiles
     }

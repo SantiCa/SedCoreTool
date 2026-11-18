@@ -10,7 +10,9 @@ const { controlFrame, frame, ControlReader } = require('./engine-protocol');
 const ADVERTISED_METHODS = new Set(['buffer.digest/1', 'section.intervals/1']);
 // The tile-store operations (contract §8) are main-process only: engine-ipc.js never forwards them, and `pyramid.build` carries a path.
 const OPERATIONS = new Set(['hello', 'buffer.begin', 'buffer.derive', 'buffer.chunk', 'buffer.commit', 'buffer.release', 'buffer.read', 'buffer.digest', 'section.analyze', 'job.cancel', 'shutdown',
-  'pyramid.build', 'pyramid.info', 'tile.read']);
+  'pyramid.build', 'pyramid.info', 'tile.read', 'mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read']);
+// Requests followed by one binary frame (a descriptor/binary pair of contract §3); at most two of them wait for an answer at a time.
+const WITH_BINARY = new Set(['buffer.chunk', 'mask.put']);
 // A pyramid build has no fixed length: the engine stops a build whose progress stalls for 60 s. The client fails the session only
 // when nothing at all (no progress event, no answer) arrives for this long.
 const PYRAMID_IDLE_TIMEOUT_MS = 90 * 1000;
@@ -47,10 +49,12 @@ function terminateTree(child) {
 }
 
 class EngineClient {
-  constructor({ executable, script, version, runtimeId, timeoutMs = 5000, captureDiagnostics = false, pyramidDirectory = null, pyramidBudgetBytes = PYRAMID_BUDGET_BYTES }) {
+  constructor({ executable, script, version, runtimeId, timeoutMs = 5000, captureDiagnostics = false, pyramidDirectory = null, pyramidBudgetBytes = PYRAMID_BUDGET_BYTES,
+    projectsDirectory = null }) {
     if (!path.isAbsolute(executable || '') || !path.isAbsolute(script || '') || !/^[0-9a-f]{64}$/.test(runtimeId || '')) throw unavailable();
     if (pyramidDirectory !== null && !path.isAbsolute(pyramidDirectory)) throw unavailable();
-    this.options = { executable, script, version, runtimeId, timeoutMs, captureDiagnostics, pyramidDirectory, pyramidBudgetBytes };
+    if (projectsDirectory !== null && !path.isAbsolute(projectsDirectory)) throw unavailable();
+    this.options = { executable, script, version, runtimeId, timeoutMs, captureDiagnostics, pyramidDirectory, pyramidBudgetBytes, projectsDirectory };
     this.child = null; this.state = 'stopped'; this.pending = new Map(); this.queue = []; this.writing = false;
     this.stderr = Buffer.alloc(0); this.handshake = null; this.session = null; this.partial = null;
   }
@@ -60,8 +64,9 @@ class EngineClient {
     if (this.state === 'starting') return this.starting;
     if (this.child) { terminateTree(this.child); await this.exited; }
     this.state = 'starting'; this.session = randomUUID(); this.stderr = Buffer.alloc(0); this.handshake = null;
-    const { executable, script, version, runtimeId, pyramidDirectory, pyramidBudgetBytes } = this.options;
-    const storeArguments = pyramidDirectory ? ['--pyramid-dir', pyramidDirectory, '--pyramid-budget-bytes', String(pyramidBudgetBytes)] : [];
+    const { executable, script, version, runtimeId, pyramidDirectory, pyramidBudgetBytes, projectsDirectory } = this.options;
+    const storeArguments = [...(pyramidDirectory ? ['--pyramid-dir', pyramidDirectory, '--pyramid-budget-bytes', String(pyramidBudgetBytes)] : []),
+      ...(projectsDirectory ? ['--projects-dir', projectsDirectory] : [])];
     let scratch;
     try { scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'sedcoretool-engine-')); }
     catch { this.state = 'unavailable'; throw unavailable(); }
@@ -103,12 +108,12 @@ class EngineClient {
   request(op, payload, binary = null, { timeoutMs = op === 'section.analyze' ? ANALYSIS_TIMEOUT_MS : op === 'pyramid.build' ? PYRAMID_IDLE_TIMEOUT_MS : this.options.timeoutMs, onEvent = null } = {}) {
     if (!OPERATIONS.has(op) || !this.child || !['starting', 'ready', 'stopping'].includes(this.state)) return Promise.reject(unavailable());
     if (this.pending.size >= 32) return Promise.reject(Object.assign(new Error('BUSY'), { code: 'BUSY' }));
-    if (op === 'buffer.chunk' && [...this.pending.values()].filter((item) => item.op === op).length >= 2) return Promise.reject(Object.assign(new Error('BUSY'), { code: 'BUSY' }));
+    if (WITH_BINARY.has(op) && [...this.pending.values()].filter((item) => WITH_BINARY.has(item.op)).length >= 2) return Promise.reject(Object.assign(new Error('BUSY'), { code: 'BUSY' }));
     const id = randomUUID(), request = { v: 1, kind: 'request', session: this.session, id, op, payload };
     let parts;
     try {
       parts = controlFrame(request);
-      if (op === 'buffer.chunk') parts.push(...frame(2, binary));
+      if (WITH_BINARY.has(op)) parts.push(...frame(2, binary));
       else if (binary !== null) throw unavailable();
     } catch { return Promise.reject(Object.assign(new Error('INVALID_REQUEST'), { code: 'INVALID_REQUEST' })); }
     const promise = new Promise((resolve, reject) => {
@@ -163,6 +168,22 @@ class EngineClient {
       this.partial = { pending, id: value.id, result: read, parts: [], remaining: frames.length };
       return { binaryFrames: frames };
     }
+    if (value.status === 'ok' && pending.op === 'mask.read') {
+      // As tile.read, except that an empty layer has sha256 null and no bytes (contract §8.7); with no bytes at all no frame follows.
+      const read = value.result, asked = pending.payload, tiles = read?.tiles, frames = read?.frames;
+      if (!read || Object.keys(read).sort().join() !== 'frames,tiles' || !Array.isArray(tiles) || tiles.length !== asked.positions.length
+          || tiles.some((tile, index) => !tile || Object.keys(tile).sort().join() !== 'byte_length,col,row,sha256' || tile.row !== asked.positions[index][0]
+            || tile.col !== asked.positions[index][1] || !(tile.sha256 === null ? tile.byte_length === 0 : /^[0-9a-f]{64}$/.test(tile.sha256)
+              && (tile.byte_length === 1048576 || tile.byte_length === 262144)))
+          || !Array.isArray(frames) || frames.reduce((sum, size) => sum + size, 0) !== tiles.reduce((sum, tile) => sum + tile.byte_length, 0)) throw unavailable();
+      if (frames.length) {
+        this.partial = { pending, id: value.id, result: read, parts: [], remaining: frames.length };
+        return { binaryFrames: frames };
+      }
+      clearTimeout(pending.timer); this.pending.delete(value.id);
+      pending.resolve({ ...read, bytes: Buffer.alloc(0) });
+      return undefined;
+    }
     clearTimeout(pending.timer); this.pending.delete(value.id);
     if (value.status === 'ok') pending.resolve(value.result);
     else if (value.status === 'cancelled') pending.resolve({ cancelled: true });
@@ -181,6 +202,7 @@ class EngineClient {
       const joined = Buffer.concat(partial.parts);
       let offset = 0;
       for (const tile of partial.result.tiles) {          // the engine verified every tile; this checks the transport kept them apart
+        if (!tile.byte_length) continue;                   // an empty mask layer (mask.read) has no bytes
         if (createHash('sha256').update(joined.subarray(offset, offset + tile.byte_length)).digest('hex') !== tile.sha256) throw unavailable();
         offset += tile.byte_length;
       }
@@ -227,7 +249,8 @@ class EngineClient {
 }
 
 /** `cacheFile` (optional path or function returning one) holds the record of the last full runtime verification. */
-function createEngineService({ enabled, packaged, executable, sourceDirectory, runtimeDirectory, lockPath, version, cacheFile = null, pyramidDirectory = null }) {
+function createEngineService({ enabled, packaged, executable, sourceDirectory, runtimeDirectory, lockPath, version, cacheFile = null, pyramidDirectory = null,
+  projectsDirectory = null }) {
   let client, runtime = null, state = enabled ? 'stopped' : 'disabled', stopped = false;
   /** The restart that is running, if any: a second request while it runs waits for the same one. */
   let restarting = null;
@@ -273,7 +296,8 @@ function createEngineService({ enabled, packaged, executable, sourceDirectory, r
         }
         if (stopped) return;
         runtime = options.runtime;
-        client = new EngineClient({ ...options, version, pyramidDirectory: typeof pyramidDirectory === 'function' ? pyramidDirectory() : pyramidDirectory });
+        const folder = (value) => (typeof value === 'function' ? value() : value);
+        client = new EngineClient({ ...options, version, pyramidDirectory: folder(pyramidDirectory), projectsDirectory: folder(projectsDirectory) });
         await client.start();
       } catch { if (client) await client.stop(); client = null; state = stopped ? 'stopped' : 'unavailable'; }
     },

@@ -26,6 +26,12 @@ contextBridge.exposeInMainWorld('corantoolDesktop', {
     cancel: (key) => ipcRenderer.invoke('tiles:cancel', key),
     info: (pyramid) => ipcRenderer.invoke('tiles:info', pyramid),
     read: (pyramid, level, positions) => ipcRenderer.invoke('tiles:read', pyramid, level, positions),
+    // Masks of tiled sections (contract §8.7, card M8.4.16): identifiers and tile bytes only, never a path.
+    maskBegin: (project, section, width, height, base) => ipcRenderer.invoke('tiles:maskBegin', project, section, width, height, base),
+    maskPut: (staged, layer, row, col, sha256, bytes) => ipcRenderer.invoke('tiles:maskPut', staged, layer, row, col, sha256, bytes),
+    maskCommit: (staged, tables) => ipcRenderer.invoke('tiles:maskCommit', staged, tables),
+    maskDiscard: (staged) => ipcRenderer.invoke('tiles:maskDiscard', staged),
+    maskRead: (project, manifest, layer, positions) => ipcRenderer.invoke('tiles:maskRead', project, manifest, layer, positions),
   },
   diagnostics: {
     status: () => ipcRenderer.invoke('diagnostics:status'),

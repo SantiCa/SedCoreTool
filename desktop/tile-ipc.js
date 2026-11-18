@@ -4,10 +4,23 @@
 // pyramids that it built itself in this session.
 const fs = require('node:fs');
 const path = require('node:path');
-const { randomUUID } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const { TileReader } = require('./tile-reader');
 
-const MAX_SOURCES_PER_PAGE = 64, MAX_BUILDS_PER_PAGE = 4;
+const MAX_SOURCES_PER_PAGE = 64, MAX_BUILDS_PER_PAGE = 4, MAX_STAGED_PER_PAGE = 8, MAX_CHUNK = 1048576;
+// Mask tiles and tables (contract §8.7, card M8.4.16 step 4); the engine checks all of this again.
+const LAYER_BYTES = { labels: 1048576, exclude: 262144 };
+const PROJECT = /^[a-z0-9_-]{1,64}$/, SECTION = /^[A-Za-z0-9_-]{1,64}$/;
+const WINDOWS_DEVICES = new Set(['con', 'prn', 'aux', 'nul', ...[...'0123456789'].flatMap((d) => [`com${d}`, `lpt${d}`])]);
+const TABLES = { objects: { dtype: 'utf8json', item: 1, limit: 4 * 2 ** 20 }, classes: { dtype: 'utf8json', item: 1, limit: 4 * 2 ** 20 },
+  stack_offsets: { dtype: 'u32le', item: 4, limit: 16 * 2 ** 20 }, stack_members: { dtype: 'u32le', item: 4, limit: 16 * 2 ** 20 } };
+const isPosition = (value) => Number.isSafeInteger(value) && value >= 0;
+function bytesOf(value) {
+  if (Buffer.isBuffer(value)) return value;
+  if (ArrayBuffer.isView(value)) return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  if (value instanceof ArrayBuffer) return Buffer.from(value);
+  return null;
+}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 // The engine's own display-name rule (server.py PYRAMID_NAME): no folder separators or control characters, 1-255 characters.
@@ -35,6 +48,28 @@ function createTileIpc({ engine, pyramidRoot = null, delivery = 'engine' }) {
   const sources = new Map();            // token -> {owner, path, name, size}
   const pyramids = new Map();           // owner -> Set of pyramid identifiers built by that page
   const builds = new Map();             // `${owner}/${key}` -> engine request id
+  const staged = new Map();             // staged mask version (engine UUID) -> owner page
+
+  const ownedStaging = (owner, id) => {
+    if (typeof id !== 'string' || !UUID.test(id) || staged.get(id) !== owner) reject('INVALID_REQUEST', 'staged');
+  };
+  const checkProject = (project) => {
+    if (typeof project !== 'string' || !PROJECT.test(project) || WINDOWS_DEVICES.has(project)) reject('INVALID_REQUEST', 'project');
+  };
+  /** One table as a committed engine buffer; returns its handle. The caller releases it. */
+  async function uploadTable(name, data) {
+    const spec = TABLES[name], bytes = bytesOf(data);
+    if (!bytes || bytes.length < spec.item || bytes.length % spec.item) reject('INVALID_REQUEST', `tables.${name}`);
+    if (bytes.length > spec.limit) reject('LIMIT_EXCEEDED', `tables.${name}`);
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const { handle } = await engine.request('buffer.begin', { dtype: spec.dtype, shape: [bytes.length / spec.item], byte_length: bytes.length, sha256 });
+    for (let offset = 0; offset < bytes.length; offset += MAX_CHUNK) {
+      const part = bytes.subarray(offset, offset + MAX_CHUNK);
+      await engine.request('buffer.chunk', { handle, offset, byte_length: part.length }, Buffer.from(part));
+    }
+    await engine.request('buffer.commit', { handle });
+    return handle;
+  }
 
   const owned = (owner, pyramid) => {
     if (typeof pyramid !== 'string' || !SHA256.test(pyramid) || !pyramids.get(owner)?.has(pyramid)) reject('INVALID_REQUEST', 'pyramid');
@@ -88,6 +123,64 @@ function createTileIpc({ engine, pyramidRoot = null, delivery = 'engine' }) {
       const result = await engine.request('tile.read', { pyramid, level, positions });
       return { tiles: result.tiles.map(({ row, col, byte_length }) => ({ row, col, byte_length })), bytes: result.bytes };
     },
+    /* Masks of tiled sections (contract §8.7). A page names a project and a section by identifier, never by path; it may use only the
+       staged versions it began. A staged version dies with the engine session: the page then begins a new one and sends its tiles again. */
+    async maskBegin(owner, project, section, width, height, base) {
+      checkProject(project);
+      if (typeof section !== 'string' || !SECTION.test(section)) reject('INVALID_REQUEST', 'section');
+      if (!Number.isSafeInteger(width) || width < 1 || !Number.isSafeInteger(height) || height < 1) reject('INVALID_REQUEST', 'size');
+      if (base !== null && (typeof base !== 'string' || !SHA256.test(base))) reject('INVALID_REQUEST', 'base');
+      if ([...staged.values()].filter((page) => page === owner).length >= MAX_STAGED_PER_PAGE) reject('LIMIT_EXCEEDED', 'staged');
+      const result = await engine.request('mask.begin', { project, section, width, height, base });
+      if (typeof result?.staged !== 'string' || !UUID.test(result.staged)) reject('INTERNAL', 'staged');
+      staged.set(result.staged, owner);
+      return { staged: result.staged, rows: result.rows, cols: result.cols };
+    },
+    async maskPut(owner, id, layer, row, col, sha256, data) {
+      ownedStaging(owner, id);
+      if (!Object.hasOwn(LAYER_BYTES, layer)) reject('INVALID_REQUEST', 'layer');
+      if (!isPosition(row) || !isPosition(col)) reject('INVALID_REQUEST', 'position');
+      if (typeof sha256 !== 'string' || !SHA256.test(sha256)) reject('INVALID_REQUEST', 'sha256');
+      const bytes = bytesOf(data);
+      if (!bytes || bytes.length !== LAYER_BYTES[layer]) reject('INVALID_REQUEST', 'bytes');
+      const result = await engine.request('mask.put', { staged: id, layer, row, col, sha256 }, Buffer.from(bytes));
+      return { stored: result.stored === true };
+    },
+    /** `tables`: any of objects, classes, stack_offsets, stack_members as bytes (stack_members may be null: no overlap); left out = the base's. */
+    async maskCommit(owner, id, tables) {
+      ownedStaging(owner, id);
+      if (!tables || typeof tables !== 'object' || Array.isArray(tables) || !Object.keys(tables).every((name) => Object.hasOwn(TABLES, name))) reject('INVALID_REQUEST', 'tables');
+      const handles = {}, uploaded = [];
+      try {
+        for (const [name, data] of Object.entries(tables)) {
+          if (data === null && name === 'stack_members') { handles[name] = null; continue; }
+          handles[name] = await uploadTable(name, data);
+          uploaded.push(handles[name]);
+        }
+        const result = await engine.request('mask.commit', { staged: id, tables: handles });
+        if (typeof result?.manifest !== 'string' || !SHA256.test(result.manifest)) reject('INTERNAL', 'manifest');
+        return { manifest: result.manifest };
+      } finally {
+        staged.delete(id);                                         // the engine closes a staged version on commit, also when it fails
+        if (uploaded.length) engine.request('buffer.release', { handles: uploaded }).catch(() => {});
+      }
+    },
+    async maskDiscard(owner, id) {
+      ownedStaging(owner, id);
+      staged.delete(id);
+      await engine.request('mask.discard', { staged: id });
+      return {};
+    },
+    /** Verified mask tiles of a stored version: `{tiles: [{row, col, byte_length}], bytes}`; an empty layer has byte_length 0. */
+    async maskRead(owner, project, manifest, layer, positions) {
+      checkProject(project);
+      if (typeof manifest !== 'string' || !SHA256.test(manifest)) reject('INVALID_REQUEST', 'manifest');
+      if (!Object.hasOwn(LAYER_BYTES, layer)) reject('INVALID_REQUEST', 'layer');
+      if (!Array.isArray(positions) || positions.length < 1 || positions.length > 16
+          || !positions.every((p) => Array.isArray(p) && p.length === 2 && isPosition(p[0]) && isPosition(p[1]))) reject('INVALID_REQUEST', 'positions');
+      const result = await engine.request('mask.read', { project, manifest, layer, positions });
+      return { tiles: result.tiles.map(({ row, col, byte_length }) => ({ row, col, byte_length })), bytes: result.bytes };
+    },
   };
 
   return {
@@ -99,6 +192,7 @@ function createTileIpc({ engine, pyramidRoot = null, delivery = 'engine' }) {
       for (const [token, source] of sources) if (source.owner === owner) sources.delete(token);
       pyramids.delete(owner);
       for (const name of [...builds.keys()]) if (name.startsWith(`${owner}/`)) builds.delete(name);
+      for (const [id, page] of staged) if (page === owner) { staged.delete(id); engine.request('mask.discard', { staged: id }).catch(() => {}); }
     },
     OPERATIONS: Object.keys(operations),
   };

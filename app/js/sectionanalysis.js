@@ -124,6 +124,28 @@ function finiteNumber(name, value) {
 /** @param {EngineDtype} dtype @param {number[]} shape @param {ArrayLike<number>} data @returns {EngineBuffer} */
 const engineBuffer = (dtype, shape, data) => ({ dtype, shape, data });
 
+/** The `objects` table of contract §4 (also stored with the masks of tiled sections, §8.7). @param {any} s */
+export const objectRecords = (s) => [...s.objects.values()].map((/** @type {AnalysisObject} */ o) => ({
+  id: o.id, class_id: o.cls || null, predicted_class_id: o.pred || null, confidence: Number.isFinite(o.conf) ? o.conf : 0 }));
+
+/** The `classes` table of contract §4. @param {readonly {id: string, name?: string, counts?: boolean}[]} classes */
+export const classRecords = (classes) => classes.map((c) => ({ id: c.id, name: c.name ?? c.id, counts: !!c.counts }));
+
+/**
+ * The overlap stacks as the CSR tables `stack_offsets` and `stack_members` of contract §4.
+ * @param {(number[] | null)[]} stacks @returns {{offsets: Uint32Array, members: Uint32Array, total: number}}
+ */
+export function stackTables(stacks) {
+  const offsets = new Uint32Array(stacks.length + 1);
+  let total = 0;
+  for (let k = 0; k < stacks.length; k++) { offsets[k] = total; total += stacks[k]?.length ?? 0; }
+  offsets[stacks.length] = total;
+  const members = new Uint32Array(total);
+  let at = 0;
+  for (const row of stacks) for (const id of row ?? []) members[at++] = id;
+  return { offsets, members, total };
+}
+
 /**
  * The scientific inputs of engine method `section.intervals/1` (docs/roadmap-engine-contract.md §4) taken from a
  * section as the interface keeps it. Data is copied; nothing is computed about classes or counts here. Missing or
@@ -145,27 +167,15 @@ export function buildIntervalSnapshot(s, project, { masks = true, change = null 
   const derived = masks === 'derive' && change ? deriveMasks(s, change) : null;
   const withMasks = !!masks;      // true for the full and the derived forms: both carry the stack tables
   const stacks = /** @type {(number[] | null)[]} */ (s.stacks || [null]);
-  /** @type {{offsets: Uint32Array, members: Uint32Array, total: number} | null} */
-  let stackBuffers = null;
-  if (withMasks) {
-    const offsets = new Uint32Array(stacks.length + 1);
-    let total = 0;
-    for (let k = 0; k < stacks.length; k++) { offsets[k] = total; total += stacks[k]?.length ?? 0; }
-    offsets[stacks.length] = total;
-    const members = new Uint32Array(total);
-    let at = 0;
-    for (const row of stacks) for (const id of row ?? []) members[at++] = id;
-    stackBuffers = { offsets, members, total };
-  }
+  const stackBuffers = withMasks ? stackTables(stacks) : null;
   const exclude = new Uint8Array(withMasks && !derived ? pixels : 0);
   if (withMasks && !derived && s.exclude) for (let i = 0; i < pixels; i++) exclude[i] = s.exclude[i] ? 1 : 0;
   const ranged = !!(ageModel && ageModel.min && ageModel.max);
   return {
     labels: derived ? derived.labels : withMasks ? engineBuffer('i32le', [s.h, s.w], Int32Array.from(s.labels)) : null,
     exclude: derived ? derived.exclude : withMasks ? engineBuffer('u8', [s.h, s.w], exclude) : null,
-    objects: [...s.objects.values()].map((/** @type {AnalysisObject} */ o) => ({
-      id: o.id, class_id: o.cls || null, predicted_class_id: o.pred || null, confidence: Number.isFinite(o.conf) ? o.conf : 0 })),
-    classes: classes.map((c) => ({ id: c.id, name: c.name ?? c.id, counts: !!c.counts })),
+    objects: objectRecords(s),
+    classes: classRecords(classes),
     stack_offsets: stackBuffers ? engineBuffer('u32le', [stackBuffers.offsets.length], stackBuffers.offsets) : null,
     stack_members: stackBuffers?.total ? engineBuffer('u32le', [stackBuffers.total], stackBuffers.members) : null,
     settings: {
