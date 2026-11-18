@@ -10,7 +10,7 @@ const { controlFrame, frame, ControlReader } = require('./engine-protocol');
 const ADVERTISED_METHODS = new Set(['buffer.digest/1', 'section.intervals/1']);
 // The tile-store operations (contract §8) are main-process only: engine-ipc.js never forwards them, and `pyramid.build` carries a path.
 const OPERATIONS = new Set(['hello', 'buffer.begin', 'buffer.derive', 'buffer.chunk', 'buffer.commit', 'buffer.release', 'buffer.read', 'buffer.digest', 'section.analyze', 'job.cancel', 'shutdown',
-  'pyramid.build', 'pyramid.info', 'tile.read', 'mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read']);
+  'pyramid.build', 'pyramid.info', 'tile.read', 'mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info']);
 // Requests followed by one binary frame (a descriptor/binary pair of contract §3); at most two of them wait for an answer at a time.
 const WITH_BINARY = new Set(['buffer.chunk', 'mask.put']);
 // A pyramid build has no fixed length: the engine stops a build whose progress stalls for 60 s. The client fails the session only

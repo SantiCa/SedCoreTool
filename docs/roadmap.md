@@ -82,7 +82,7 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.18a** (save and reopen tiled sections on the same computer; **model: most capable tier (Opus), effort high**); decisions D1-D4 of the four cards M8.4.18a-d were answered by the maintainer on 18 November 2026 as proposed. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
+- **Next step: M8.4.18a, continued** (save and reopen tiled sections on the same computer: the engine and bridge parts are done, the page is next, see the card's *Progress*; **model: most capable tier (Opus), effort high**); decisions D1-D4 of the four cards M8.4.18a-d were answered by the maintainer on 18 November 2026 as proposed. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1548,7 +1548,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   itself only when the user ticks it; this needs ZIP64 in `zip.js` (own code, no dependency). *Alternative:* packages refuse tiled sections and only
   the folder backup carries them.
 
-##### M8.4.18a - Save and reopen tiled sections on the same computer — state: Ready (D1-D2 answered on 18 Nov 2026)
+##### M8.4.18a - Save and reopen tiled sections on the same computer — state: In progress (18 Nov 2026: steps 3-4 and the bridge done; steps 1, 2, 5, 6 next)
 
 - **Goal:** a tiled section survives closing and reopening the program, with exactly the masks, objects and interval table it had, and the store
   does not grow without bound; no failure loses the last good save.
@@ -1588,6 +1588,14 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   10 % of its tiles holding masks (time to the first frame and to the table).
 - **Done when:** the desktop round trip is exact; every failure case keeps the last good save; the store holds only retained manifests after a save;
   the reopening times are recorded; development gate.
+- *Progress (18 Nov 2026, checkpoint):* engine operations `mask.retain` and `mask.info` (`store/masks.py`, `engine/server.py`; contract §8.7)
+  with 4 Python tests (keeps listed versions and an open staging's tiles, a missing kept version removes nothing, a removed blob that a later version
+  needs is written again rather than taken from the engine's cache, positions in pages); the main process remembers each project's sources in
+  `sources.json` and reopens a saved section's pyramid from the cache or from the remembered file only when the SHA-256 matches (`tile-ipc.js`
+  `rememberSource`, `reopen`, `maskRetain`, `maskInfo`; `preload.js`, `main.js`, `engine.js`; 2 Node tests). Not built yet: the page (record, save
+  with D1, reopening with the read-back of masks, counts and statistics, the placeholder of D2) and the desktop tests. Found while designing the page:
+  the statistics of each object per tile (`TiledObjectStats`) are not saved, so a reopened section must recompute them from its tiles and pixels before
+  an edit can update an object correctly; and a project deleted from the library leaves its store folder on disk (to be handled with M8.4.18b's copies).
 
 ##### M8.4.18b - A missing or moved source; copying the source into the project — state: after M8.4.18a (D3 answered: copy only on request)
 

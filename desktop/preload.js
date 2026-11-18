@@ -32,6 +32,11 @@ contextBridge.exposeInMainWorld('corantoolDesktop', {
     maskCommit: (staged, tables) => ipcRenderer.invoke('tiles:maskCommit', staged, tables),
     maskDiscard: (staged) => ipcRenderer.invoke('tiles:maskDiscard', staged),
     maskRead: (project, manifest, layer, positions) => ipcRenderer.invoke('tiles:maskRead', project, manifest, layer, positions),
+    // Saving and reopening tiled sections (card M8.4.18a): identifiers only; the main process keeps the source's path.
+    maskRetain: (project, keep) => ipcRenderer.invoke('tiles:maskRetain', project, keep),
+    maskInfo: (project, manifest, start) => ipcRenderer.invoke('tiles:maskInfo', project, manifest, start),
+    rememberSource: (project, pyramid) => ipcRenderer.invoke('tiles:rememberSource', project, pyramid),
+    reopen: (project, pyramid, key) => ipcRenderer.invoke('tiles:reopen', project, pyramid, key),
   },
   diagnostics: {
     status: () => ipcRenderer.invoke('diagnostics:status'),

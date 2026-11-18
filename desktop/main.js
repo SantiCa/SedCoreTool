@@ -204,14 +204,14 @@ if (process.versions.electron) {
     const enabled = process.env.SEDCORETOOL_TILED_SECTIONS === '1' && engine.status().enabled === true;
     ipcMain.on('tiles:enabled', (event) => { event.returnValue = fromApp(event) && enabled; });
     if (!enabled) return;
-    const bridge = createTileIpc({ engine, pyramidRoot: path.join(app.getPath('userData'), 'pyramids'),
+    const bridge = createTileIpc({ engine, pyramidRoot: path.join(app.getPath('userData'), 'pyramids'), projectsRoot: path.join(app.getPath('userData'), 'projects'),
       delivery: process.env.SEDCORETOOL_TILE_DELIVERY === 'direct' ? 'direct' : 'engine' });
     for (const name of bridge.OPERATIONS) {
       ipcMain.handle(`tiles:${name}`, (event, ...args) => {
         if (!fromApp(event) || event.senderFrame !== event.sender.mainFrame) throw new Error('forbidden');
-        if (name === 'build') {
-          const [token, key] = args, sender = event.sender;
-          return bridge.call(sender.id, 'build', token, key, (progress) => { if (!sender.isDestroyed()) sender.send('tiles:progress', key, progress); });
+        if (name === 'build' || name === 'reopen') {
+          const sender = event.sender, key = name === 'build' ? args[1] : args[2];
+          return bridge.call(sender.id, name, ...args.slice(0, name === 'build' ? 2 : 3), (progress) => { if (!sender.isDestroyed()) sender.send('tiles:progress', key, progress); });
         }
         return bridge.call(event.sender.id, name, ...args);
       });

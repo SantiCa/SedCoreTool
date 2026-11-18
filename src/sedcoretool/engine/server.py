@@ -64,7 +64,7 @@ RUNNER_IDLE_SECONDS = 30         # an idle method worker holds memory (NumPy, th
 PROGRESS_EVENT_SECONDS = 0.1     # at most ten progress events per second (§3)
 PYRAMID_NAME = re.compile(r'[^/\\:\x00-\x1f]{1,255}')   # a file name for display: no folder separators or control characters
 MAX_PATH = 4096
-MASK_OPERATIONS = ('mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read')
+MASK_OPERATIONS = ('mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info')
 MAX_STAGINGS = 16                # staged mask versions per session (contract §8.7)
 
 
@@ -327,6 +327,18 @@ class Coordinator:
                 raise RequestError('INVALID_REQUEST', 'staged')
             self.stagings.pop(payload['staged'], None)
             return {}
+        if operation == 'mask.retain':
+            require_fields(payload, ('project', 'keep'))
+            store = self.mask_store(payload['project'])
+            protected = set()
+            for staging in self.stagings.values():                              # an open staged version keeps every blob it holds
+                if staging.store is store:
+                    protected |= {name for entry in staging.tiles.values() for name in (entry['labels'], entry['exclude']) if name}
+                    protected |= {table['sha256'] for table in (staging.tables or {}).values() if table}
+            return {'removed': self.masks.write_or_disk_error(store.retain, payload['keep'], protected)}
+        if operation == 'mask.info':
+            require_fields(payload, ('project', 'manifest', 'start'))
+            return self.mask_store(payload['project']).info(payload['manifest'], payload['start'])
         require_fields(payload, ('project', 'manifest', 'layer', 'positions'))      # mask.read
         store, layer, positions = self.mask_store(payload['project']), payload['layer'], payload['positions']
         manifest, _ = store.read_manifest(payload['manifest'])

@@ -156,3 +156,60 @@ test('cancelling a build sends job.cancel for its engine request; the direct del
   const read = await direct.call(1, 'read', pyramid, 0, [[0, 1]]);
   assert.ok(read.ok.bytes.equals(tiles['0/0/1']));
 });
+
+test('card M8.4.18a: the source of a saved section is remembered per project, and reopening rebuilds a pyramid only from the same file', async (t) => {
+  const root = temporary(t), projects = path.join(root, 'projects'), file = path.join(root, 'core.tif');
+  fs.writeFileSync(file, 'pixels');
+  const pyramid = 'b'.repeat(64);
+  let cached = false;
+  const engine = fakeEngine(pyramid), request = engine.request.bind(engine);
+  engine.request = (op, payload, binary, options) => {
+    if (op === 'pyramid.info' && !cached) { const p = Promise.reject(Object.assign(new Error('INVALID_REQUEST'), { code: 'INVALID_REQUEST' })); p.requestId = randomUUID(); return p; }
+    return request(op, payload, binary, options);
+  };
+  const ipc = createTileIpc({ engine, projectsRoot: projects });
+  const token = (await ipc.call(1, 'register', file)).ok.token;
+  await ipc.call(1, 'build', token, randomUUID());
+  assert.deepEqual(await ipc.call(1, 'rememberSource', 'p1', pyramid), { ok: { remembered: true } });
+  const record = JSON.parse(fs.readFileSync(path.join(projects, 'p1', 'sources.json'), 'utf8'));
+  assert.deepEqual(record, { format: 'sedcoretool.sources', version: 1, sources: { [pyramid]: { path: file, size: 6 } } });
+  assert.deepEqual(await ipc.call(3, 'rememberSource', 'p1', pyramid), { error: { code: 'INVALID_REQUEST', field: 'pyramid' } }, 'only a page that built it');
+  // a new page (the program reopened): the pyramid is not cached any more, so it is built again from the remembered file
+  const progress = [];
+  const reopened = await ipc.call(2, 'reopen', 'p1', pyramid, randomUUID(), (event) => progress.push(event));
+  assert.deepEqual(reopened, { ok: { available: true, rebuilt: true } });
+  assert.equal(progress.length, 1);
+  assert.ok((await ipc.call(2, 'read', pyramid, 0, [[0, 0]])).ok, 'the reopening page may read it');
+  cached = true;
+  assert.deepEqual(await ipc.call(4, 'reopen', 'p1', pyramid, randomUUID()), { ok: { available: true, rebuilt: false } }, 'cached: nothing is built');
+  cached = false;
+  fs.writeFileSync(file, 'other pixels');                                   // another size at the remembered path
+  assert.deepEqual(await ipc.call(5, 'reopen', 'p1', pyramid, randomUUID()), { ok: { available: false, rebuilt: false } });
+  fs.writeFileSync(file, 'pixelz');                                          // same size, other bytes: the engine's hash decides
+  const changedEngine = fakeEngine('c'.repeat(64)), changedRequest = changedEngine.request.bind(changedEngine);
+  changedEngine.request = (op, payload, binary, options) => {
+    if (op === 'pyramid.info') { const p = Promise.reject(new Error('missing')); p.requestId = randomUUID(); return p; }
+    return changedRequest(op, payload, binary, options);
+  };
+  const other = createTileIpc({ engine: changedEngine, projectsRoot: projects });
+  assert.deepEqual(await other.call(6, 'reopen', 'p1', pyramid, randomUUID()), { ok: { available: false, rebuilt: false, changed: true } });
+  assert.deepEqual(await ipc.call(7, 'reopen', 'p2', pyramid, randomUUID()), { ok: { available: false, rebuilt: false } }, 'another project remembers nothing');
+  assert.deepEqual(await ipc.call(7, 'reopen', 'P2', pyramid, randomUUID()), { error: { code: 'INVALID_REQUEST', field: 'project' } });
+});
+
+test('card M8.4.18a: retain and info are checked before they reach the engine', async (t) => {
+  const engine = fakeEngine('a'.repeat(64)), request = engine.request.bind(engine);
+  engine.request = (op, payload, binary, options) => {
+    if (op === 'mask.retain' || op === 'mask.info') engine.calls.push({ op, payload });
+    if (op === 'mask.retain') { const p = Promise.resolve({ removed: { manifests: 2, blobs: 5 } }); p.requestId = randomUUID(); return p; }
+    if (op === 'mask.info') { const p = Promise.resolve({ section: 's1', width: 600, height: 300, tiles: 1, positions: [0, 1, 3], next: null }); p.requestId = randomUUID(); return p; }
+    return request(op, payload, binary, options);
+  };
+  const ipc = createTileIpc({ engine }), m = 'd'.repeat(64);
+  assert.deepEqual(await ipc.call(1, 'maskRetain', 'p1', [m]), { ok: { removed: { manifests: 2, blobs: 5 } } });
+  assert.deepEqual(engine.calls.at(-1), { op: 'mask.retain', payload: { project: 'p1', keep: [m] } });
+  for (const keep of ['all', [m, 'x'], Array(1025).fill(m)]) assert.deepEqual(await ipc.call(1, 'maskRetain', 'p1', keep), { error: { code: 'INVALID_REQUEST', field: 'keep' } });
+  assert.deepEqual(await ipc.call(1, 'maskInfo', 'p1', m, 0), { ok: { section: 's1', width: 600, height: 300, tiles: 1, positions: [0, 1, 3], next: null } });
+  assert.deepEqual(await ipc.call(1, 'maskInfo', 'p1', m, -1), { error: { code: 'INVALID_REQUEST', field: 'start' } });
+  assert.deepEqual(await ipc.call(1, 'maskInfo', 'p1', 'x', 0), { error: { code: 'INVALID_REQUEST', field: 'manifest' } });
+});

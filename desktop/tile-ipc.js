@@ -8,6 +8,8 @@ const { createHash, randomUUID } = require('node:crypto');
 const { TileReader } = require('./tile-reader');
 
 const MAX_SOURCES_PER_PAGE = 64, MAX_BUILDS_PER_PAGE = 4, MAX_STAGED_PER_PAGE = 8, MAX_CHUNK = 1048576;
+// Card M8.4.18a: the main process remembers where the source of each tiled section was, per project; the page never sees it.
+const SOURCES_FILE = 'sources.json', MAX_REMEMBERED_SOURCES = 4096, MAX_RETAINED = 1024;
 // Mask tiles and tables (contract §8.7, card M8.4.16 step 4); the engine checks all of this again.
 const LAYER_BYTES = { labels: 1048576, exclude: 262144 };
 const PROJECT = /^[a-z0-9_-]{1,64}$/, SECTION = /^[A-Za-z0-9_-]{1,64}$/;
@@ -46,13 +48,33 @@ function failure(error) {
  * @param pyramidRoot the folder the engine was started with (`--pyramid-dir`), for delivery path (b).
  * @param delivery 'engine' (tile.read through the engine) or 'direct' (the main process reads the store itself; card M8.4.15 step 1).
  */
-function createTileIpc({ engine, pyramidRoot = null, delivery = 'engine' }) {
+/** The remembered sources of a project's tiled sections (`{format, version, sources: {sha256: {path, size}}}`), or an empty record. */
+function readSources(file) {
+  try {
+    const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (value?.format !== 'sedcoretool.sources' || value.version !== 1 || typeof value.sources !== 'object' || !value.sources) throw new Error('format');
+    return value;
+  } catch { return { format: 'sedcoretool.sources', version: 1, sources: {} }; }
+}
+/** Temporary file in the same folder, flushed, then renamed over `file`. */
+function writeAtomically(file, text) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  try {
+    const fd = fs.openSync(temporary, 'wx');
+    try { fs.writeSync(fd, text); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    fs.renameSync(temporary, file);
+  } catch (error) { fs.rmSync(temporary, { force: true }); throw error; }
+}
+
+function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delivery = 'engine' }) {
   if (!['engine', 'direct'].includes(delivery)) throw new Error('unknown tile delivery');
   const reader = delivery === 'direct' ? new TileReader(pyramidRoot) : null;
   const sources = new Map();            // token -> {owner, path, name, size}
   const pyramids = new Map();           // owner -> Set of pyramid identifiers built by that page
   const builds = new Map();             // `${owner}/${key}` -> engine request id
   const staged = new Map();             // staged mask version (engine UUID) -> owner page
+  const builtFrom = new Map();          // pyramid (source SHA-256) -> {path, size} of the file it was built from in this session
 
   const ownedStaging = (owner, id) => {
     if (typeof id !== 'string' || !UUID.test(id) || staged.get(id) !== owner) reject('INVALID_REQUEST', 'staged');
@@ -108,6 +130,7 @@ function createTileIpc({ engine, pyramidRoot = null, delivery = 'engine' }) {
             || ![1, 3, 4].includes(clean.channels) || ![8, 16].includes(clean.bits) || typeof clean.reused !== 'boolean') reject('INTERNAL', 'build');
         if (!pyramids.has(owner)) pyramids.set(owner, new Set());
         pyramids.get(owner).add(clean.pyramid);
+        builtFrom.set(clean.pyramid, { path: source.path, size: source.size });
         return clean;
       } finally { builds.delete(`${owner}/${key}`); }
     },
@@ -177,6 +200,62 @@ function createTileIpc({ engine, pyramidRoot = null, delivery = 'engine' }) {
       return {};
     },
     /** Verified mask tiles of a stored version: `{tiles: [{row, col, byte_length}], bytes}`; an empty layer has byte_length 0. */
+    /** Card M8.4.18a: after a save, the store keeps only these manifests of the project (and what open staged versions hold). */
+    async maskRetain(owner, project, keep) {
+      checkProject(project);
+      if (!Array.isArray(keep) || keep.length > MAX_RETAINED || !keep.every((name) => typeof name === 'string' && SHA256.test(name))) reject('INVALID_REQUEST', 'keep');
+      const result = await engine.request('mask.retain', { project, keep });
+      return { removed: { manifests: Number(result?.removed?.manifests) || 0, blobs: Number(result?.removed?.blobs) || 0 } };
+    },
+    /** One page of the tile positions of a stored version: `[row, col, layers, ...]` (1 labels, 2 exclusion) and the start of the next page. */
+    async maskInfo(owner, project, manifest, start) {
+      checkProject(project);
+      if (typeof manifest !== 'string' || !SHA256.test(manifest)) reject('INVALID_REQUEST', 'manifest');
+      if (!Number.isSafeInteger(start) || start < 0) reject('INVALID_REQUEST', 'start');
+      const r = await engine.request('mask.info', { project, manifest, start });
+      if (!Array.isArray(r?.positions) || r.positions.length % 3 || !r.positions.every((v) => Number.isSafeInteger(v) && v >= 0)
+          || !(r.next === null || Number.isSafeInteger(r.next))) reject('INTERNAL', 'info');
+      return { section: r.section, width: r.width, height: r.height, tiles: r.tiles, positions: r.positions, next: r.next };
+    },
+    /** Remember, for this project, the file a pyramid this page built came from (its path stays in the main process). */
+    async rememberSource(owner, project, pyramid) {
+      checkProject(project);
+      owned(owner, pyramid);
+      if (!projectsRoot) reject('UNSUPPORTED_METHOD');
+      const from = builtFrom.get(pyramid);
+      if (!from) return { remembered: false };
+      const file = path.join(projectsRoot, project, SOURCES_FILE), record = readSources(file);
+      delete record.sources[pyramid];
+      record.sources[pyramid] = { path: from.path, size: from.size };
+      const names = Object.keys(record.sources);
+      for (const name of names.slice(0, Math.max(0, names.length - MAX_REMEMBERED_SOURCES))) delete record.sources[name];
+      writeAtomically(file, JSON.stringify(record));
+      return { remembered: true };
+    },
+    /**
+     * Make a saved section's pyramid readable by this page: the cached pyramid if the engine still has it; otherwise built again from the
+     * file remembered for this project, accepted only if its SHA-256 is the saved one. `{available: false}` when neither is possible.
+     */
+    async reopen(owner, project, pyramid, key, onProgress = () => {}) {
+      checkProject(project);
+      if (typeof pyramid !== 'string' || !SHA256.test(pyramid)) reject('INVALID_REQUEST', 'pyramid');
+      if (typeof key !== 'string' || !UUID.test(key) || builds.has(`${owner}/${key}`)) reject('INVALID_REQUEST', 'key');
+      const own = () => { if (!pyramids.has(owner)) pyramids.set(owner, new Set()); pyramids.get(owner).add(pyramid); };
+      try { await (reader ? reader.describe(pyramid) : engine.request('pyramid.info', { pyramid })); own(); return { available: true, rebuilt: false }; } catch { /* not in the cache */ }
+      const from = projectsRoot ? readSources(path.join(projectsRoot, project, SOURCES_FILE)).sources[pyramid] : null;
+      let stat = null;
+      try { stat = from && typeof from.path === 'string' && path.isAbsolute(from.path) ? fs.statSync(from.path) : null; } catch { stat = null; }
+      if (!stat?.isFile() || stat.size !== from.size) return { available: false, rebuilt: false };
+      const promise = engine.request('pyramid.build', { path: from.path, name: displayName(from.path) }, null, { onEvent: onProgress });
+      builds.set(`${owner}/${key}`, promise.requestId);
+      try {
+        const result = await promise;
+        if (result?.cancelled) return { available: false, rebuilt: false, cancelled: true };
+        if (result?.pyramid !== pyramid) return { available: false, rebuilt: false, changed: true };   // the file at that path is another image now
+        own(); builtFrom.set(pyramid, { path: from.path, size: from.size });
+        return { available: true, rebuilt: true };
+      } finally { builds.delete(`${owner}/${key}`); }
+    },
     async maskRead(owner, project, manifest, layer, positions) {
       checkProject(project);
       if (typeof manifest !== 'string' || !SHA256.test(manifest)) reject('INVALID_REQUEST', 'manifest');

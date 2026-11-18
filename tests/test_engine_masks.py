@@ -278,3 +278,83 @@ def test_an_engine_killed_between_put_and_commit_leaves_the_last_version_readabl
         assert again.call('mask.commit', {'staged': staged, 'tables': {}})['status'] == 'ok'                                   # sent again
     finally:
         again.kill()
+
+
+def stored_names(value, project='p1'):
+    folder = Path(value.coordinator.projects_root) / project / 'tiles'
+    return ({path.name[:-5] for path in (folder / 'manifests').glob('*.json')}, {path.name for path in (folder / 'blobs').glob('*/*')})
+
+
+def test_retain_keeps_the_listed_versions_and_their_blobs_and_removes_the_rest(engine):
+    """Card M8.4.18a: after a save, only the manifests the project names (and the current ones) stay; a staged version's blobs are never removed."""
+    value = engine()
+    versions, data = [], {}
+    base = None
+    for k in range(3):                                                    # three versions, each changing tile (0, 0)
+        staged = begin(value, base)['staged']
+        data[k] = labels_tile(10 + k)
+        put(value, staged, *data[k])
+        base = value.ok('mask.commit', {'staged': staged, 'tables': value.tables() if k == 0 else {}})[0]['manifest']
+        versions.append(base)
+    open_staging = begin(value, versions[2])['staged']                    # an edit on its way: its new tile must survive
+    pending = labels_tile(99)
+    put(value, open_staging, *pending, 1, 1)
+    removed = value.ok('mask.retain', {'project': 'p1', 'keep': [versions[0], versions[2]]})[0]['removed']
+    manifests, blobs = stored_names(value)
+    assert manifests == {versions[0], versions[2]} and removed['manifests'] == 1
+    assert data[1][1] not in blobs and removed['blobs'] == 1, 'the tile only version 1 used is gone'
+    assert {data[0][1], data[2][1], pending[1]} <= blobs, 'kept versions and the open staging keep their tiles'
+    for name in (versions[0], versions[2]):                               # every kept version still reads whole
+        assert b''.join(value.ok('mask.read', {'project': 'p1', 'manifest': name, 'layer': 'labels', 'positions': [[0, 0]]})[1])
+    final = value.ok('mask.commit', {'staged': open_staging, 'tables': {}})[0]['manifest']
+    assert b''.join(value.ok('mask.read', {'project': 'p1', 'manifest': final, 'layer': 'labels', 'positions': [[1, 1]]})[1]) == pending[0]
+    assert value.error('mask.read', {'project': 'p1', 'manifest': versions[1], 'layer': 'labels', 'positions': [[0, 0]]})[0] == 'INVALID_REQUEST'
+
+
+def test_retain_with_a_missing_kept_version_removes_nothing(engine):
+    value = engine()
+    staged = begin(value)['staged']
+    put(value, staged, *labels_tile(5))
+    version = value.ok('mask.commit', {'staged': staged, 'tables': value.tables()})[0]['manifest']
+    before = stored_names(value)
+    assert value.error('mask.retain', {'project': 'p1', 'keep': ['0' * 64]}) == ('INVALID_REQUEST', 'keep')
+    assert value.error('mask.retain', {'project': 'p1', 'keep': 'all'}) == ('INVALID_REQUEST', 'keep')
+    assert value.error('mask.retain', {'project': 'p1', 'keep': [version], 'extra': 1})[0] == 'INVALID_REQUEST'
+    assert stored_names(value) == before
+
+
+def test_a_cached_blob_that_retain_removed_is_written_again(engine):
+    """A blob removed by retain and then needed by a new version must be on disk again, not only in the engine's cache."""
+    value = engine()
+    staged = begin(value)['staged']
+    tile = labels_tile(7)
+    put(value, staged, *tile)
+    first = value.ok('mask.commit', {'staged': staged, 'tables': value.tables()})[0]['manifest']
+    staged = begin(value, first)['staged']
+    put(value, staged, *labels_tile(8))
+    second = value.ok('mask.commit', {'staged': staged, 'tables': {}})[0]['manifest']
+    value.ok('mask.retain', {'project': 'p1', 'keep': [second]})
+    assert tile[1] not in stored_names(value)[1]
+    staged = begin(value, second)['staged']
+    put(value, staged, *tile)                                             # the same bytes as the removed blob
+    third = value.ok('mask.commit', {'staged': staged, 'tables': {}})[0]['manifest']
+    assert tile[1] in stored_names(value)[1]
+    fresh = masks.MaskStore(Path(value.coordinator.projects_root) / 'p1' / 'tiles')
+    assert fresh.read_tile(third, 'labels', 0, 0) == tile[0]
+
+
+def test_info_lists_the_tiles_of_a_version_in_pages(engine, monkeypatch):
+    monkeypatch.setattr(masks, 'INFO_PAGE', 2)
+    value = engine()
+    staged = begin(value)['staged']
+    for row, col in [(0, 0), (1, 2), (2, 1)]:
+        put(value, staged, *labels_tile(row * 3 + col + 1, rows=H - 1024 if row == 2 else 512, cols=W - 1024 if col == 2 else 512), row, col)   # padding stays zero
+    exclusion = np.zeros(512 * 512, dtype=np.uint8); exclusion[5] = 1
+    put(value, staged, exclusion.tobytes(), hashlib.sha256(exclusion.tobytes()).hexdigest(), 1, 2, 'exclude')
+    version = value.ok('mask.commit', {'staged': staged, 'tables': value.tables()})[0]['manifest']
+    first = value.ok('mask.info', {'project': 'p1', 'manifest': version, 'start': 0})[0]
+    assert (first['section'], first['width'], first['height'], first['tiles'], first['positions'], first['next']) == ('s1', W, H, 3, [0, 0, 1, 1, 2, 3], 2)
+    second = value.ok('mask.info', {'project': 'p1', 'manifest': version, 'start': 2})[0]
+    assert (second['positions'], second['next']) == ([2, 1, 1], None)
+    assert value.error('mask.info', {'project': 'p1', 'manifest': version, 'start': -1}) == ('INVALID_REQUEST', 'start')
+    assert value.error('mask.info', {'project': 'p1', 'manifest': '1' * 64, 'start': 0}) == ('INVALID_REQUEST', 'manifest')

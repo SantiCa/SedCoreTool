@@ -46,6 +46,8 @@ MAX_WIDTH = 262_144
 MAX_HEIGHT = 16_777_216
 MAX_POSITIONS = 262_144
 MAX_MANIFEST_BYTES = 64 * 2**20
+MAX_RETAINED = 1024                             # manifests one `mask.retain` may keep (card M8.4.18a)
+INFO_PAGE = 2048                                # tile positions per `mask.info` answer (the JSON of an answer stays far below 64 KiB)
 COMPRESSION_LEVEL = 1
 BLOB_CACHE_BYTES = 64 * 2**20
 HEX64 = re.compile('[0-9a-f]{64}')
@@ -349,6 +351,53 @@ class MaskStore:
             pass
         _write_durably(path, data)
         return name
+
+    def blobs_of(self, sha256: str) -> set[str]:
+        """Every blob a stored manifest names: its tiles' layers and its tables."""
+        manifest, tiles = self.read_manifest(sha256)
+        used = {name for entry in tiles.values() for name in (entry['labels'], entry['exclude']) if name}
+        used.update(table['sha256'] for table in manifest['tables'].values() if table)
+        return used
+
+    def retain(self, keep, protected: set[str]) -> dict:
+        """Delete every manifest not in ``keep`` and then every blob that no kept manifest names and ``protected`` (the blobs of open
+        staged versions) does not hold (card M8.4.18a). Every kept manifest must be readable, or nothing is deleted. Manifests go first, so a
+        stop half-way leaves only unreferenced blobs behind, never a manifest without its blobs. Returns the counts removed."""
+        if not isinstance(keep, list) or len(keep) > MAX_RETAINED or not all(isinstance(name, str) and HEX64.fullmatch(name) for name in keep):
+            raise MaskError('INVALID_REQUEST', 'keep')
+        used = set(protected)
+        for name in keep:
+            try:
+                used |= self.blobs_of(name)
+            except MaskError as error:
+                raise MaskError(error.code, 'keep') from None
+        kept, removed = set(keep), {'manifests': 0, 'blobs': 0}
+        for path in sorted((self.folder / 'manifests').glob('*.json')):
+            name = path.name[:-len('.json')]
+            if HEX64.fullmatch(name) and name not in kept and not path.is_symlink():
+                path.unlink(missing_ok=True)
+                self.manifests.pop(name, None)
+                removed['manifests'] += 1
+        for path in sorted((self.folder / 'blobs').glob('*/*')):
+            name = path.name
+            if HEX64.fullmatch(name) and path.parent.name == name[:2] and name not in used and not path.is_symlink():
+                path.unlink(missing_ok=True)
+                self.cache.items.pop((self.folder, name), None)          # a cached copy would make `write_blob` skip a file that is gone
+                removed['blobs'] += 1
+        self.cache.size = sum(len(data) for data in self.cache.items.values())
+        return removed
+
+    def info(self, sha256: str, start: int) -> dict:
+        """One page of the tile positions of a stored manifest, in its order: ``[row, col, layers, ...]`` with layers 1 = labels, 2 =
+        exclusion (card M8.4.18a: a reopened section learns which tiles it must read back)."""
+        manifest, tiles = self.read_manifest(sha256)
+        if type(start) is not int or start < 0:
+            raise MaskError('INVALID_REQUEST', 'start')
+        entries = list(tiles.items())[start:start + INFO_PAGE]
+        positions = [value for (row, col), entry in entries for value in (row, col, (1 if entry['labels'] else 0) | (2 if entry['exclude'] else 0))]
+        end = start + len(entries)
+        return {'section': manifest['section'], 'width': manifest['width'], 'height': manifest['height'], 'tiles': len(tiles),
+                'positions': positions, 'next': end if end < len(tiles) else None}
 
     def read_tile(self, manifest: str, layer: str, row: int, col: int) -> bytes | None:
         """The verified bytes of one layer of one tile of a stored version, or None when that layer is empty there."""
