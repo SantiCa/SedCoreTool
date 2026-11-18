@@ -82,7 +82,7 @@ Updated 16 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.23** (desktop tests refuse a stale program copy or runtime; **model: fast, effort low**), then M8.4.24 (the intermittent viewer probe; most capable, medium) and M8.4.25 (sending the tables without a pause; most capable, medium), all three added on 18 November 2026 at the maintainer's request to fix the warnings of M8.4.22 before going on; then M8.4.17 (interval table of tiled sections). Cards M8.4.16 (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux) and M8.4.22 (development gate) are done.
+- **Next step: M8.4.23** (desktop tests refuse a stale program copy or runtime; **model: fast, effort low**), then M8.4.24 (the intermittent viewer probe; most capable, medium) and M8.4.25 (sending the tables without a pause; most capable, medium) and M8.4.26 (two intermittent GitHub failures: runtime downloads and an engine start on Windows; most capable, medium), all four added on 18 November 2026 at the maintainer's request to fix the warnings of M8.4.22 before going on; then M8.4.17 (interval table of tiled sections). Cards M8.4.16 (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux) and M8.4.22 (development gate) are done.
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1320,6 +1320,39 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   stack tables; after a failed round everything that was not acknowledged is sent again (tables included); the M8.4.16 tests unchanged.
   Desktop: `tests/e2e/tiled-sections.mjs` unchanged.
 - **Done when:** the measurements of step 3 are met and recorded; development gate on Windows.
+
+##### M8.4.26 - Two intermittent GitHub failures: runtime downloads and an engine start on Windows — state: Ready (added 18 Nov 2026 at the maintainer's request)
+
+- **Goal:** the two failures seen once each on GitHub stop costing reruns, without weakening any check: (a) *Desktop builds* on macOS,
+  commit `d407763`: `npm run dist` failed because `tools/prepare_engine_runtime.py` lost a download of a pinned wheel (`TimeoutError: The read
+  operation timed out` in `response.read`, timeout 30 s, no retry); the rerun passed. (b) `tests` on Windows, commit `26cb1fc`:
+  `tests/app/engine.test.mjs` "actual isolated Python transfers multiple bounded chunks and runs the diagnostic" got `ENGINE_UNAVAILABLE` at
+  start-up; the rerun passed and it was not reproduced.
+- **Read first:** `tools/prepare_engine_runtime.py` (`download_artifact`); the workflow files under `.github/workflows/` (how the runtime is
+  prepared and whether its download cache is kept between runs); `tests/app/engine.test.mjs` (the test and its start-up deadline);
+  `desktop/engine.js` (what `ENGINE_UNAVAILABLE` at start means: the handshake, the runtime check, the deadline); the roadmap records of both
+  incidents.
+- **Change:** (a) `tools/prepare_engine_runtime.py` and, if useful, the workflows; (b) `tests/app/engine.test.mjs` and, only if the cause is
+  there, `desktop/engine.js`; tests of both; DEVELOPMENT where the behaviour is described.
+- **Do not touch:** the pinned artifacts, their sizes, hashes and trusted origins (every download is still verified before use); the program
+  never downloads anything at run time (hard limit 6 of AGENTS §3: this card is about building the runtime, not running it); the engine's
+  start-up deadline and every tolerance (hard limit 7: if the measurements show the deadline itself is too short on GitHub's Windows machines,
+  record them and ask the maintainer).
+- **Model:** most capable, effort medium (packaging on three systems and a diagnosis of a rare start-up failure).
+- **Steps:**
+  1. (a) Downloads: retry a failed or timed-out download a bounded number of times (for example 4) with growing pauses, always into a new
+     temporary file and always verifying size and SHA-256 before keeping it; a verification failure is never retried silently (it stops with
+     its message). If the workflows do not keep the download cache between runs, keep it (keyed by the lock file), so most runs download
+     nothing. Python test with a fake server: a dropped connection then a good answer succeeds; a wrong hash stops at once; four failures stop
+     with a clear message.
+  2. (b) Engine start: make the test record, when the engine is unavailable at start, the reason the client knows (handshake not received,
+     runtime check, process exit code and the last lines of the engine's standard error) and the time from spawn to failure, so the next
+     occurrence explains itself. Run the test repeatedly on GitHub's Windows runner (a manual workflow run of the test file alone, at least
+     20 times) and locally under load; record the counts and times.
+  3. Fix what the evidence of step 2 shows, or, if it never fails again, leave the recording in place and say so in the roadmap.
+- **Tests:** the Python tests of step 1; `npm test`; one *Desktop builds* run on three systems with the cache cold and one with it warm.
+- **Done when:** step 1 is in place and tested; step 2 has run with its counts recorded; any fix of step 3 has its own test; development gate,
+  plus the GitHub runs of the last test line.
 
 ##### M8.4.18 - Saving, reopening, backup and export of tiled sections — state: after M8.4.17
 
