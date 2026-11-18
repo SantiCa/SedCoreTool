@@ -82,7 +82,7 @@ Updated 16 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.17** (interval table of tiled sections; it reads the object columns of M8.4.22). Cards M8.4.16 (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux) and M8.4.22 (development gate) are done.
+- **Next step: M8.4.23** (desktop tests refuse a stale program copy or runtime; **model: fast, effort low**), then M8.4.24 (the intermittent viewer probe; most capable, medium) and M8.4.25 (sending the tables without a pause; most capable, medium), all three added on 18 November 2026 at the maintainer's request to fix the warnings of M8.4.22 before going on; then M8.4.17 (interval table of tiled sections). Cards M8.4.16 (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux) and M8.4.22 (development gate) are done.
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1260,6 +1260,66 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   (7), `tests/app/engine.test.mjs`.
 - **Tests and acceptance:** Python and Node tests above; `tests/e2e/tiled-sections.mjs` passes; contract, technical manual and changelog
   updated in the same commit; development gate on Windows.
+
+##### M8.4.23 - Desktop tests refuse a stale program copy or engine runtime — state: Ready (added 18 Nov 2026 at the maintainer's request)
+
+- **Goal:** a desktop end-to-end test run after editing `app/` or the engine's Python fails within seconds with the command that fixes it,
+  instead of testing an old copy (`desktop/web`, seen in M8.4.16 step 5) or waiting 90 s for an engine that stays `unavailable` because the
+  runtime manifest no longer matches its files (seen in M8.4.22).
+- **Read first:** `desktop/scripts/prepare.js`; `desktop/scripts/prepare-runtime.js` and how the runtime manifest records the engine files;
+  `desktop/engine.js` (the state `unavailable` and its reason); `tests/e2e/desktop-bootstrap.cjs`; DEVELOPMENT §3 and the troubleshooting table.
+- **Change:** one small shared module for the desktop tests (for example `tests/e2e/preflight.mjs`) called at the start of every test that
+  starts the desktop program (`desktop.mjs`, `tiled-sections.mjs`, `large-16bit-desktop.mjs`, `working-memory-desktop.mjs` and the others that
+  use `desktop-bootstrap.cjs`); DEVELOPMENT §3.
+- **Do not touch:** what the program does at run time (the engine still refuses a runtime that does not match: hard limit 6 of AGENTS §3); the
+  GitHub workflows' order of steps (they prepare both before testing).
+- **Model:** fast, effort low (test tooling, checked by exact comparisons).
+- **Steps:** (1) `desktop/web` is current: every file `prepare.js` copies has the same bytes as its source (or a stamp written by `prepare.js`
+  with a hash of the sources matches); otherwise stop with "desktop/web is older than app/: run `node desktop/scripts/prepare.js
+  --with-examples`". (2) The runtime matches: the same check the program makes on start, run directly; otherwise stop with "the engine runtime
+  does not match src/: run `npm run prepare-runtime -- --offline` in desktop/". (3) DEVELOPMENT §3 says it.
+- **Tests:** Node test of the preflight on a temporary folder (current, one file changed, one file missing); each desktop test still passes
+  when both are current.
+- **Done when:** editing one file of `app/js` or `src/sedcoretool/engine` and running a desktop test fails in under 10 s with the right
+  command; development gate on Windows.
+
+##### M8.4.24 - The intermittent viewer probe of the tiled-sections test — state: Ready (added 18 Nov 2026 at the maintainer's request)
+
+- **Goal:** the failure seen once on 18 November 2026 in `tests/e2e/tiled-sections.mjs` ("drawn pixel = source pixel" at screen 230, 570:
+  drawn 106, 79, 35 against source 14, 14, 14, just after the runtime was rebuilt; the next two runs passed) is explained and fixed, in the
+  test or in the program, or shown to be harmless with evidence.
+- **Read first:** the probe block of `tests/e2e/tiled-sections.mjs` (card M8.4.15); `drawTiles` and `drawMaskOverlay` in `app/js/app.js`;
+  `app/js/tilecache.js`; the roadmap record of the incident (checks of M8.4.22).
+- **Change:** `tests/e2e/tiled-sections.mjs` (on failure: a screenshot and the tile cache state, level, view and the mask tiles at the probe);
+  the program only if the cause is there.
+- **Do not touch:** the tolerances of the probe (hard limit 7 of AGENTS §3).
+- **Model:** most capable, effort medium (a diagnosis of a rare failure; a wrong guess hides a real drawing fault).
+- **Steps:** (1) add the evidence capture; (2) run the probe block repeatedly (at least 30 times, also right after a cold start of the
+  engine and with the machine loaded) and record how often it fails; (3) from the captured state, find the cause (for example a tile of
+  another position or level drawn while the cache fills, a mask overlay left from an earlier probe, a frame read before the tiles were drawn);
+  (4) fix it and run the block again as many times with no failure.
+- **Tests:** the repeated runs of step 2 and 4, recorded with their counts; `npm test`.
+- **Done when:** the cause is named in the roadmap and the block passes every repeated run after the fix; development gate on Windows.
+
+##### M8.4.25 - Sending the tables of a tiled section without a pause — state: Ready (added 18 Nov 2026 at the maintainer's request)
+
+- **Goal:** the masks of a tiled section with many objects are sent without a visible pause: today every round builds all tables on the page's
+  thread (9 ms for 65,536 objects, 0.24 s for 1,048,576; [measurement](validation/M8.4.22-mask-tables.json)), even when only tiles changed.
+- **Read first:** `app/js/tiledsync.js` (`maskTables`, `tableLimit`, `MaskSync.round`); contract §8.7 (`mask.commit`: a table left out keeps
+  the base's); `afterChange` and the stats runner's `onUpdate` in `app/js/app.js`; the M8.4.22 card.
+- **Change:** `app/js/tiledsync.js`, the small part of `app/js/app.js` that tells the sync what changed; tests; `tools/measure_mask_tables.mjs`.
+- **Do not touch:** the stored format (contract §8.7 version 2); the rule that a tile is acknowledged only after `mask.commit`.
+- **Model:** most capable, effort medium (sending path of user edits; a table left out by mistake would store stale objects).
+- **Steps:** (1) the sync keeps a version of each table group (object columns with classes; stack tables) that changes only when their content
+  can have changed (objects added, removed, reclassified, predicted; classes edited; stacks changed), and leaves unchanged groups out of
+  `mask.commit` (the base's are kept); statistics alone do not touch the object columns. (2) When a group did change, build it without
+  blocking the page for more than one frame: either in steps between frames or in a worker (choose by measurement; a worker must not copy the
+  whole object map each time). (3) Measure on 2^20 synthetic objects: a round after a stroke that changed no object adds under 5 ms to the
+  page's thread; a round after a class change keeps every page task under 16 ms.
+- **Tests:** Node: a round with only tile changes sends no table; a class change sends the object columns and classes; a stack change sends the
+  stack tables; after a failed round everything that was not acknowledged is sent again (tables included); the M8.4.16 tests unchanged.
+  Desktop: `tests/e2e/tiled-sections.mjs` unchanged.
+- **Done when:** the measurements of step 3 are met and recorded; development gate on Windows.
 
 ##### M8.4.18 - Saving, reopening, backup and export of tiled sections — state: after M8.4.17
 
