@@ -20,6 +20,14 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.16, step 3: on tiled sections (behind the flag) brush, erase, exclude and include now edit the masks at full resolution, on an edit
+  window of whole mask tiles around the visible area (`app/js/tiledit.js`); zoomed out beyond 96 tiles they ask to zoom in. Object statistics are
+  kept per tile and summed, exactly equal to those of the whole image (`objectStats` takes the image's edges as an optional argument; default
+  unchanged). No undo for these strokes yet (step 5). Measured on the 8 GiB fixture: input to next frame p95 18.4-31.8 ms against 33 ms
+  ([evidence](docs/validation/M8.4.16-step3-viewer-rgb8g-windows.json); `tools/measure_tiled_viewer.mjs` measures strokes with the real mouse).
+  `tests/e2e/tiled-sections.mjs` paints, erases, excludes and includes with the mouse and checks the tiles, the reduced copy and the object's
+  area and bounding box. Fixed: with the engine experiment on, analysing all sections (exports) sent tiled sections to the engine with the
+  working image's masks; tiled sections now get no table until card M8.4.17.
 - Card M8.4.16, step 2: `app/js/tiledmasks.js` (pure, tested in Node) keeps the page's full-resolution mask tiles of a tiled section (tiles not yet
   acknowledged by the engine are never dropped), writes their reduced copy into the working image for the overview, and paints the masks over the
   pixel tiles at fine zoom with the viewer's colours, edges and exclusion hatching (checked against a copy of `render()`'s formulas over tile seams).

@@ -29,6 +29,7 @@ import { figTabsData, loadFigTabs, renderFigPanel, renderFigure, resetFigTabs, s
 import { assembleLevel, imageDimensions, levelPositions, proxyLevel, tileRgba, TILE } from './tiledsection.js';
 import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlacement, tileRange, tilesByDistance } from './tilecache.js';
 import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks.js';
+import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, windowRange } from './tiledit.js';
 import { renderData } from './datatab.js';
 import { frameRatio, panelPrefs, savePanels } from './panels.js';
 import { addRecordFromTable, defaultLogView, lastLog, mode, renderLog, renderLogPanel, renderRecList, scheduleLog, sectionCanvas, navigationPreviewCanvas, clearNavigationPreviews, setMode } from './columns.js';
@@ -379,9 +380,9 @@ function pickCore(n) {
 const TILES = /** @type {any} */ (window).corantoolDesktop?.tiles?.enabled === true ? /** @type {any} */ (window).corantoolDesktop.tiles : null;
 
 /* Tools that a tiled section does not have yet (ARCHITECTURE §3.4 decision 8). Each refusal shows the one message `tiles.unavailable`.
-   Available: select, pan, mark and the analysis area (they use no pixel or mask arrays of full size). Mask editing arrives with card M8.4.16;
-   detection, crop, rotation, resolution and filters need the whole image (M8.5). */
-const TILED_BLOCKED_TOOLS = new Set(['wand', 'brush', 'lasso', 'cut', 'erase', 'exclude', 'include']);
+   Available: select, pan, mark, the analysis area, and the strokes of brush, erase, exclude and include (card M8.4.16 step 3). Wand, lasso and
+   scissors arrive with step 6; detection, crop, rotation, resolution and filters need the whole image (M8.5). */
+const TILED_BLOCKED_TOOLS = new Set(['wand', 'lasso', 'cut']);
 function tiledRefused(s) { if (!s?.tiled) return false; toast(t('tiles.unavailable')); return true; }
 
 /** The working image of a tiled section: its proxy level of the pyramid, read through the engine in batches of 16 verified tiles. */
@@ -439,6 +440,125 @@ function putMaskTile(s, row, col, labels, exclude) {
   reduceTile(s, s.ds, row, col, entry.labels, entry.exclude);
   s._mv = (s._mv || 0) + 1;
   requestRender();
+}
+
+/* Strokes on a tiled section (card M8.4.16 step 3). Brush, erase, exclude and include run today's code (paintAt, addPx, setLabel, setEx) on an
+   edit window (decision A: the visible level-0 mask tiles plus a margin of the brush radius, as flat arrays), seen through `windowSection`;
+   what each pointer move wrote is copied back into the tiles and into the working image's reduced masks. The window refuses beyond
+   WINDOW_TILES tiles with "zoom in to edit" (decision B). Object statistics are recomputed per tile afterwards from the level-0 pixels
+   (`tiledStatsRunner`). Tiled strokes keep no pixel log: their undo, by tile copies, is step 5. */
+const NO_PIXEL_LOG = /** @type {any} */ ({ push() { return 0; }, length: 0 });
+const canvasSize = () => { const c = /** @type {HTMLCanvasElement} */ (view); return { w: c.width, h: c.height }; };
+let editWindow = null;                                   // one window for the page (up to 120 MiB), kept while it stays current
+
+function tiledEditWindow(s, rect, ring) {
+  const range = windowRange(s.maskTiles, rect, ring);
+  if (range.count > WINDOW_TILES) { toast(t('tiles.zoomIn')); return null; }
+  if (!editWindow?.matches(s.maskTiles, range)) {
+    editWindow = null;
+    try { editWindow = new EditWindow(s.maskTiles, range); } catch (error) { toast(t('tiles.err', { code: 'MASKS', field: error.message })); return null; }
+  }
+  return editWindow;
+}
+
+/** The section with the window's masks in place of its own: today's editing code writes through it (the stack index stays the section's). */
+function windowSection(s, win) {
+  return Object.create(s, { labels: { value: win.labels }, exclude: { value: win.exclude }, w: { value: win.w }, h: { value: win.h },
+    _six: { get: () => s._six, set: (value) => { s._six = value; } } });
+}
+
+function startTiledStroke(s, p, e, tool) {
+  const ds = s.ds, radius = S.brushSize * ds, { x: vx, y: vy, zoom: z } = S.view;
+  const visible = { x0: Math.max(0, vx) * ds, y0: Math.max(0, vy) * ds, x1: Math.min(s.w, vx + canvasSize().w / z) * ds, y1: Math.min(s.h, vy + canvasSize().h / z) * ds };
+  if (visible.x1 <= visible.x0 || visible.y1 <= visible.y0) return;
+  const win = tiledEditWindow(s, visible, Math.max(1, Math.ceil(radius / TILE)));
+  if (!win) return;
+  const op = beginOp(s); op.mode = tool; op.lm = NO_PIXEL_LOG; op.ex = NO_PIXEL_LOG; op.win = win; op.section = s; op.radius = radius;
+  const at = { x: p.x * ds - win.ox, y: p.y * ds - win.oy };
+  if (tool === 'brush') {
+    const under = topAt(win.labelAt(p.x * ds, p.y * ds) ?? 0, s.stacks);
+    op.target = e.shiftKey && S.selected ? S.selected : ((!S.overlap || s.objects.get(under)?.cls === S.active) && under) || newObject(op, S.active, 'brush').id;
+    rebuildLUT(s);
+  }
+  if (tool === 'erase' && e.shiftKey && S.selected) op.only = S.selected;
+  op.s = windowSection(s, win);
+  paintAt(op, at.x, at.y, radius);
+  tiledWriteBack(op, at, at);
+  drag = { type: 'tpaint', op, last: at };
+}
+
+function moveTiledStroke(p) {
+  const op = drag.op, at = { x: p.x * op.section.ds - op.win.ox, y: p.y * op.section.ds - op.win.oy };
+  paintSeg(op, drag.last, at, op.radius);
+  tiledWriteBack(op, drag.last, at);
+  drag.last = at;
+}
+
+/** Copy what a stroke segment from a to b (window pixels) may have written back into the tiles and the reduced masks. */
+function tiledWriteBack(op, a, b) {
+  const s = op.section, r = op.radius + 1;
+  for (const [row, col] of op.win.writeBack({ x0: Math.min(a.x, b.x) - r, y0: Math.min(a.y, b.y) - r, x1: Math.max(a.x, b.x) + r, y1: Math.max(a.y, b.y) + r })) {
+    const entry = s.maskTiles.get(row, col);
+    reduceTile(s, s.ds, row, col, entry?.labels || null, entry?.exclude || null);
+  }
+  s._mv = (s._mv || 0) + 1;
+  requestRender();
+}
+
+/** The exclusion rectangle on a tiled section: the source pixels covered by working pixels x0..x1, y0..y1 (inclusive). */
+function tiledExcludeRect(s, r, mode) {
+  const ds = s.ds, rect = { x0: r.x0 * ds, y0: r.y0 * ds, x1: Math.min((r.x1 + 1) * ds, s.maskTiles.width), y1: Math.min((r.y1 + 1) * ds, s.maskTiles.height) };
+  const win = tiledEditWindow(s, rect, 0);
+  if (!win) { requestRender(); return; }
+  const value = mode === 'exclude' ? 1 : 0;
+  for (let y = rect.y0 - win.oy; y < rect.y1 - win.oy; y++) win.exclude.fill(value, y * win.w + rect.x0 - win.ox, y * win.w + rect.x1 - win.ox);
+  const op = { section: s, win, radius: 0 };
+  tiledWriteBack(op, { x: rect.x0 - win.ox, y: rect.y0 - win.oy }, { x: rect.x1 - 1 - win.ox, y: rect.y1 - 1 - win.oy });
+  afterChange(s);
+}
+
+function finishTiledStroke(op) {
+  const s = op.section, e = op.ext;
+  if (op.replaced && !ovHint) { ovHint = true; toast(t('ov.hint')); }
+  if (op.target) op.touched.add(op.target);
+  if (op.mode === 'brush' || op.mode === 'erase') {
+    const changed = e.x1 >= e.x0 ? affectedTiles(s.maskTiles, { x0: e.x0 + op.win.ox, y0: e.y0 + op.win.oy, x1: e.x1 + op.win.ox, y1: e.y1 + op.win.oy }) : [];
+    void tiledStatsRunner(s).queue(changed, op.touched);
+  }
+  afterChange(s);
+}
+
+/** Object statistics of a tiled section, per tile and from the level-0 pixels (card M8.4.16 step 3); bounding boxes also in working pixels. */
+function tiledStatsRunner(s) {
+  if (s._statsRunner) return s._statsRunner;
+  const stats = new TiledObjectStats(), tiled = s.tiled;
+  const fetchRgba = async (positions) => {
+    const out = [];
+    for (let i = 0; i < positions.length; i += 16) {
+      const batch = positions.slice(i, i + 16), read = await TILES.read(tiled.pyramid, 0, batch);
+      if (read.error) throw new Error(t('tiles.err', { code: read.error.code, field: read.error.field || '' }));
+      const bytes = new Uint8Array(read.ok.bytes.buffer || read.ok.bytes, read.ok.bytes.byteOffset || 0, read.ok.bytes.byteLength);
+      let offset = 0;
+      for (const tile of read.ok.tiles) { out.push(tileRgba(bytes.subarray(offset, offset + tile.byte_length), tiled.channels, tiled.bits)); offset += tile.byte_length; }
+    }
+    return out;
+  };
+  const onUpdate = (ids) => {
+    const ppu = pxPerCm(s) * s.ds;                       // source pixels per centimetre
+    for (const id of ids) {
+      const o = s.objects.get(id);
+      if (!o) continue;
+      const a = stats.total(id);
+      if (!a) { s.objects.delete(id); if (S.selected === id) S.selected = 0; continue; }
+      const box = [Math.floor(a.x0 / s.ds), Math.floor(a.y0 / s.ds), Math.floor(a.x1 / s.ds), Math.floor(a.y1 / s.ds)];
+      if (o.emb && (a.n !== o.area || String(box) !== String(o.bbox))) o.emb = null;   // V0.17: the trace changed
+      o.area = a.n; o.bbox = box; o.sbox = [a.x0, a.y0, a.x1, a.y1]; o.stats = a; o.feat = features(a, ppu);
+    }
+    afterChange(s);
+  };
+  s._statsRunner = new TiledStatsRunner({ tiles: s.maskTiles, stats, stacks: () => s.stacks, fetchRgba, onUpdate,
+    onError: (error) => toast(error.message || String(error), 9000) });
+  return s._statsRunner;
 }
 
 /* The masks of a tiled section over its pixel tiles (card M8.4.16 step 2): one RGBA layer (`overlayLayout`, `paintOverlay`) drawn over them. */
@@ -1286,6 +1406,8 @@ const engineAnalysis = engineBridge?.enabled === true ? createEngineAnalysis({ c
 } }) : null;
 /** Brings the bins of the sections up to date. Resolves when every section has a final state (always, without the engine). */
 export function analyzeSections(sections) {
+  for (const s of sections) if (s.tiled) s.bins = [];   // counting on full-resolution mask tiles is card M8.4.17; never from the reduced copy
+  sections = sections.filter((s) => !s.tiled);
   if (engineAnalysis) return engineAnalysis.all(sections);
   for (const s of sections) analyze(s);
   return Promise.resolve();
@@ -1892,8 +2014,8 @@ let drag = null, spaceDown = false;
 function toImg(e) { const r = view.getBoundingClientRect(); const sx = e.clientX - r.left, sy = e.clientY - r.top; return { sx, sy, x: S.view.x + sx / S.view.zoom, y: S.view.y + sy / S.view.zoom }; }
 const inImg = (s, p) => p.x >= 0 && p.y >= 0 && p.x < s.w && p.y < s.h;
 
-function paintAt(op, cx, cy) {
-  const s = op.s, r = S.brushSize, r2 = r * r;
+function paintAt(op, cx, cy, r = S.brushSize) {
+  const s = op.s, r2 = r * r;
   const xa = Math.max(0, Math.floor(cx - r)), xb = Math.min(s.w - 1, Math.ceil(cx + r)), ya = Math.max(0, Math.floor(cy - r)), yb = Math.min(s.h - 1, Math.ceil(cy + r));
   for (let y = ya; y <= yb; y++) for (let x = xa; x <= xb; x++) {
     if ((x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 > r2) continue;
@@ -1903,9 +2025,9 @@ function paintAt(op, cx, cy) {
     else setEx(op, i, op.mode === 'exclude' ? 1 : 0);
   }
 }
-function paintSeg(op, a, b) {
-  const dist = Math.hypot(b.x - a.x, b.y - a.y), n = Math.max(1, Math.ceil(dist / Math.max(1, S.brushSize / 3)));
-  for (let k = 1; k <= n; k++) paintAt(op, a.x + ((b.x - a.x) * k) / n, a.y + ((b.y - a.y) * k) / n);
+function paintSeg(op, a, b, r = S.brushSize) {
+  const dist = Math.hypot(b.x - a.x, b.y - a.y), n = Math.max(1, Math.ceil(dist / Math.max(1, r / 3)));
+  for (let k = 1; k <= n; k++) paintAt(op, a.x + ((b.x - a.x) * k) / n, a.y + ((b.y - a.y) * k) / n, r);
 }
 
 view.addEventListener('pointerdown', (e) => {
@@ -1919,6 +2041,7 @@ view.addEventListener('pointerdown', (e) => {
   const tool = S.tool;
   // Selection: click selects; Shift/Ctrl+click adds or removes; dragging draws a box (Shift/Ctrl adds to the selection).
   if (tool === 'select') drag = { type: 'select', sx: e.clientX, sy: e.clientY, moved: false, p, add: e.shiftKey || e.ctrlKey || e.metaKey };
+  else if (s.tiled && ['brush', 'erase', 'exclude', 'include'].includes(tool) && !((tool === 'exclude' || tool === 'include') && (e.shiftKey || S.exShape === 'rect'))) startTiledStroke(s, p, e, tool);
   else if ((tool === 'exclude' || tool === 'include') && (e.shiftKey || S.exShape === 'rect')) { boxDrag = { x0: p.x, y0: p.y, x1: p.x, y1: p.y }; drag = { type: 'exrect', mode: tool }; }
   else if (tool === 'roi') { roiDrag = { x0: p.x, y0: p.y, x1: p.x, y1: p.y }; drag = { type: 'roi' }; }
   else if (tool === 'mark') { toggleMark(s, p, e.altKey); return; }
@@ -1960,6 +2083,7 @@ view.addEventListener('pointermove', (e) => {
     const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
     S.view.x = drag.vx - dx / S.view.zoom; S.view.y = drag.vy - dy / S.view.zoom; clampView(); requestRender();
   } else if (drag.type === 'paint') { paintSeg(drag.op, drag.last, p); drag.last = p; requestRender(); }
+  else if (drag.type === 'tpaint') moveTiledStroke(p);
   else if (drag.type === 'lasso' || drag.type === 'cut') { lassoPts.push([p.x, p.y]); requestRender(); }
   else if (drag.type === 'roi') { roiDrag.x1 = p.x; roiDrag.y1 = p.y; requestRender(); }
   else if (drag.type === 'box' || drag.type === 'exrect') { boxDrag.x1 = p.x; boxDrag.y1 = p.y; requestRender(); }
@@ -1969,7 +2093,7 @@ function endDrag() {
   const s = sec(); const d = drag; drag = null; if (!d || !s) return;
   if (d.type === 'edge') { if (!cropState) setRoi(s, { ...s.roi }); return; }
   if (d.type === 'select') {
-    const p = d.p, v = inImg(s, p) ? s.labels[Math.floor(p.y) * s.w + Math.floor(p.x)] : 0, ids = idsAt(v, s.stacks);
+    const p = d.p, v = !inImg(s, p) ? 0 : (s.maskTiles?.labelAt(p.x * s.ds, p.y * s.ds) ?? s.labels[Math.floor(p.y) * s.w + Math.floor(p.x)]), ids = idsAt(v, s.stacks);
     // V0.20: clicking again on an overlap selects the trace underneath
     const k = ids.indexOf(S.selected), id = ids.length > 1 && k >= 0 ? ids[(k + ids.length - 1) % ids.length] : topAt(v, s.stacks);
     if (d.add) toggleSelect(id); else select(id);
@@ -1978,6 +2102,7 @@ function endDrag() {
     const x0 = Math.max(0, Math.floor(Math.min(r.x0, r.x1))), x1 = Math.min(s.w - 1, Math.ceil(Math.max(r.x0, r.x1)));
     const y0 = Math.max(0, Math.floor(Math.min(r.y0, r.y1))), y1 = Math.min(s.h - 1, Math.ceil(Math.max(r.y0, r.y1)));
     if (x1 <= x0 || y1 <= y0) { requestRender(); return; }
+    if (s.tiled) { tiledExcludeRect(s, { x0, y0, x1, y1 }, d.mode); return; }
     const op = beginOp(s); op.mode = d.mode;
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { setEx(op, y * s.w + x, d.mode === 'exclude' ? 1 : 0); }
     grow(op, x0, y0); grow(op, x1, y1);
@@ -1989,6 +2114,7 @@ function endDrag() {
     for (const o of s.objects.values()) { if (!o.bbox) continue; const cx = (o.bbox[0] + o.bbox[2]) / 2, cy = (o.bbox[1] + o.bbox[3]) / 2; if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) S.multi.add(o.id); }
     S.selected = [...S.multi][0] || 0; renderObject(); requestRender(); if (S.multi.size) showTab('object', true);
   } else if (d.type === 'paint') finishPixelOp(d.op, d.op.mode === 'brush' ? d.op.target : 0);
+  else if (d.type === 'tpaint') finishTiledStroke(d.op);
   else if (d.type === 'cut') { const pts = lassoPts; lassoPts = null; splitAlong(pts); requestRender(); }
   else if (d.type === 'lasso') {
     const pts = lassoPts; lassoPts = null;
@@ -4570,4 +4696,5 @@ const startupReady = startup();
 // Exposed for automated tests.
 window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, needPixels, requestRender, setTool, renderSectionForm, t, tilesIdle: () => [...tileSchedulers.values()].every((q) => q.idle),
   putMaskTile: (row, col, labels, exclude) => putMaskTile(sec(), row, col, labels, exclude),   // end-to-end tests of tiled masks (card M8.4.16)
+  tiledStatsIdle: () => S.sections.every((q) => !q._statsRunner || q._statsRunner.idle),
   saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };

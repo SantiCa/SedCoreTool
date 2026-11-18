@@ -16,6 +16,12 @@
 //   pan and zoom with masks (card M8.4.16 step 2): the same 120 frames after putting dense full-resolution masks in the page around the path
 //                       (6 x 5 level-0 tiles: objects in 200-pixel blocks over 60 % of the area, 8 objects, and a band of exclusion every
 //                       1,000 rows), so the masks are painted over the pixel tiles in every frame (same targets as cached pan and zoom).
+//   strokes (card M8.4.16 step 3): brush strokes with the real mouse on the tiled section, 60 moves of about 4 screen pixels each; input to next
+//                       frame = from the pointer event's time stamp to an animation frame requested after the program's own handler, so
+//                       after its render (target: p95 <= 33 ms). Cases: 1 screen pixel per source pixel with brush sizes 10 and 3, and
+//                       1 screen pixel per 3 source pixels with size 10 (the edge of the edit window's budget). Also: the first frame after
+//                       pointer down (it may build the edit window), the time until the object statistics are recomputed, and that a stroke
+//                       at 1 screen pixel per 8 source pixels is refused (more than 96 tiles).
 // --small: the same scripted pan and zoom, in working-image coordinates, on a section that is small enough for today's path, shown tiled
 // (flag on) and not tiled (flag off), to compare frame costs (evidence for rule 6 of the card). The disk cache is warm in every run.
 import assert from 'node:assert/strict';
@@ -174,6 +180,58 @@ const inPage = {
   },
 };
 
+/** Brush strokes with the real mouse; returns per-case input-to-next-frame costs (ms). */
+async function measureStrokes(page, info) {
+  await page.evaluate(() => {
+    const view = document.getElementById('view');
+    window.__strokeCosts = { move: [], down: [] };
+    for (const [type, key] of [['pointermove', 'move'], ['pointerdown', 'down']]) {
+      // Registered after the program's own listener, so the frame requested here comes after its render.
+      view.addEventListener(type, (e) => { if (e.buttons) requestAnimationFrame(() => window.__strokeCosts[key].push(performance.now() - e.timeStamp)); });
+    }
+  });
+  // Run 2 opens the project by code, so the home screen is still over the canvas: close it as the user would see the section.
+  await page.evaluate(async () => { document.getElementById('home').hidden = true; window.dispatchEvent(new Event('resize')); await new Promise((r) => setTimeout(r, 300)); });
+  const box = await page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left + r.width * 0.3, top: r.top + r.height * 0.35, width: r.width, height: r.height }; });
+  const out = {};
+  const cases = [['oneToOne_size10', 1, 10], ['oneToOne_size3', 1, 3], ['oneToThree_size10', 3, 10]];
+  for (const [name, sourcePerScreen, size] of cases) {
+    await page.evaluate(({ sourcePerScreen, size, n }) => {
+      const { S } = window.ichantool, s = S.sections.at(-1), canvas = document.getElementById('view');
+      const zoom = s.ds / sourcePerScreen, row = s.h * (0.3 + 0.1 * n);
+      S.view = { zoom, x: s.w / 2 - canvas.width / 2 / zoom, y: row - canvas.height / 2 / zoom };
+      S.brushSize = size; S.overlap = false; window.ichantool.setTool('brush'); window.ichantool.requestRender();
+      window.__strokeCosts = { move: [], down: [] };
+    }, { sourcePerScreen, size, n: cases.findIndex((c) => c[0] === name) });
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 1500)));          // pixel tiles of the new place load first
+    const objectsBefore = await page.evaluate(() => window.ichantool.S.sections.at(-1).objects.size);
+    await page.mouse.move(box.left, box.top); await page.mouse.down();
+    for (let k = 1; k <= 60; k++) await page.mouse.move(box.left + 4 * k, box.top + 1.5 * k);
+    const released = Date.now();
+    await page.mouse.up();
+    await page.waitForFunction(() => window.ichantool.tiledStatsIdle(), { polling: 20, timeout: 120000 });
+    const statsMs = Date.now() - released;
+    const result = await page.evaluate(() => {
+      const s = window.ichantool.S.sections.at(-1), last = [...s.objects.values()].at(-1);
+      return { costs: window.__strokeCosts, objects: s.objects.size, area: last?.area ?? 0 };
+    });
+    out[name] = { moves: summary(result.costs.move), pointerDownMs: round(result.costs.down[0]), statsAfterReleaseMs: statsMs,
+      newObjects: result.objects - objectsBefore, areaSourcePixels: result.area };
+  }
+  // Far out: more than 96 tiles would be visible, so the brush refuses.
+  const refused = await page.evaluate(() => {
+    const { S } = window.ichantool, s = S.sections.at(-1), canvas = document.getElementById('view'), zoom = s.ds / 8;
+    S.view = { zoom, x: s.w / 2 - canvas.width / 2 / zoom, y: s.h * 0.8 - canvas.height / 2 / zoom }; S.brushSize = 10; window.ichantool.requestRender();
+    document.getElementById('toast').textContent = '';
+    return s.objects.size;
+  });
+  await page.mouse.move(box.left, box.top); await page.mouse.down(); await page.mouse.move(box.left + 20, box.top); await page.mouse.up();
+  out.refusedAtOneToEight = await page.evaluate((before) => ({ objectsUnchanged: window.ichantool.S.sections.at(-1).objects.size === before,
+    message: document.getElementById('toast').textContent === window.ichantool.t('tiles.zoomIn') }), refused);
+  out.section = { ds: info.ds, canvas: [Math.round(box.width), Math.round(box.height)] };
+  return out;
+}
+
 const percentile = (values, p) => { const s = [...values].sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.ceil(p * s.length) - 1)] : null; };
 const round = (v) => v == null ? null : Math.round(v * 100) / 100;
 const summary = (values) => ({ n: values.length, median: round(percentile(values, 0.5)), p95: round(percentile(values, 0.95)), max: round(Math.max(...values)) });
@@ -217,6 +275,7 @@ if (small) {
     result.jumps = { firstFrameMs: summary(jumps.map((j) => j.firstFrameMs)), completeMs: summary(jumps.map((j) => j.completeMs ?? 1e9)), minImageShare: Math.min(...jumps.map((j) => j.imageShare)), incomplete: jumps.filter((j) => j.completeMs == null).length };
     result.maskTiles = await run.page.evaluate(inPage.putMasks);
     result.maskedPanZoom = await measure(run.page, { frames: 120, base: info.ds });
+    result.strokes = await measureStrokes(run.page, info);
     assert.deepEqual(run.errors, []);
   } finally { result.memory = await run.close(); }
   result.targets = {
@@ -225,6 +284,10 @@ if (small) {
     cachedFrameP95Ms: { target: 33, value: result.cachedPanZoom.frameCost.p95, ok: result.cachedPanZoom.frameCost.p95 <= 33 },
     maskedFrameMedianMs: { target: 17, value: result.maskedPanZoom.frameCost.median, ok: result.maskedPanZoom.frameCost.median <= 17 },
     maskedFrameP95Ms: { target: 33, value: result.maskedPanZoom.frameCost.p95, ok: result.maskedPanZoom.frameCost.p95 <= 33 },
+    ...Object.fromEntries(['oneToOne_size10', 'oneToOne_size3', 'oneToThree_size10'].map((name) => [`stroke_${name}_inputToFrameP95Ms`,
+      { target: 33, value: result.strokes[name].moves.p95, ok: result.strokes[name].moves.p95 <= 33 }])),
+    strokeRefusedBeyondBudget: { target: true, value: result.strokes.refusedAtOneToEight.objectsUnchanged && result.strokes.refusedAtOneToEight.message,
+      ok: result.strokes.refusedAtOneToEight.objectsUnchanged && result.strokes.refusedAtOneToEight.message },
     jumpFirstFrameShowsImage: { target: 1, value: result.jumps.minImageShare, ok: result.jumps.minImageShare >= 0.95 },
     jumpCompleteP95Ms: { target: 250, value: result.jumps.completeMs.p95, ok: result.jumps.completeMs.p95 <= 250 },
     processTreePeakMiB: { target: 2048, value: result.memory?.peakMiB ?? null, ok: (result.memory?.peakMiB ?? Infinity) <= 2048 },

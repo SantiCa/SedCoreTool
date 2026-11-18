@@ -39,6 +39,8 @@ export class MaskTiles {
     /** Positions with a stored layer in the version the engine acknowledged; a position neither here nor cached is empty. @type {Set<number>} */
     this.stored = new Set();
     this.bytes = 0;
+    /** Changes with every `set`, so that a copy of the tiles (an edit window) knows whether it is still current. */
+    this.version = 0;
   }
   /** @param {number} row @param {number} col */
   index(row, col) {
@@ -71,6 +73,7 @@ export class MaskTiles {
     if (old) { this.bytes -= old.bytes; this.entries.delete(i); }
     this.entries.set(i, { ...kept, dirty, pins: old?.pins || 0, bytes });
     this.bytes += bytes;
+    this.version++;
     return this.evict();
   }
   /**
@@ -85,6 +88,16 @@ export class MaskTiles {
       if (entry.labels || entry.exclude) this.stored.add(i); else this.stored.delete(i);
     }
     return this.evict();
+  }
+  /**
+   * The label at source pixel (x, y): 0 for an empty tile, null when the tile is stored in the engine but not in the page, or outside.
+   * @param {number} x @param {number} y
+   */
+  labelAt(x, y) {
+    if (!(x >= 0 && y >= 0 && x < this.width && y < this.height)) return null;
+    const row = Math.floor(y / TILE), col = Math.floor(x / TILE), i = row * this.cols + col, entry = this.entries.get(i);
+    if (!entry) return this.stored.has(i) ? null : 0;
+    return entry.labels ? entry.labels[(Math.floor(y) - row * TILE) * TILE + Math.floor(x) - col * TILE] : 0;
   }
   /** @param {number} row @param {number} col */
   pin(row, col) { const entry = this.entries.get(this.index(row, col)); if (entry) entry.pins++; }

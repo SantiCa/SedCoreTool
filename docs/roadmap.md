@@ -82,7 +82,7 @@ Updated 16 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.16 step 3** (strokes in the edit window; **model: most capable, effort high**). The card's detailed steps and decisions A-E were written on 17 November 2026 and approved by the maintainer as written the same day (commit `b2b4cdc`, whose `tests` and *Desktop builds* passed on Windows, macOS and Linux). Step 1 (mask store format, contract §8.7, and the engine's mask operations) was done on 17 November 2026; step 2 (the page's mask tiles, the reduced overview masks and the mask layer over pixel tiles, `app/js/tiledmasks.js`) on 18 November 2026; their checks are below. M8.4.15 was done on 17 November 2026 ([summary](validation/M8.4.15-summary.md)); its first-view target needed the identity record of the tile store, chosen by the maintainer (option 1). Card H7 (16-bit images above about 28 megapixels killed the page) was done on 17 November 2026 at the maintainer's request, between steps 4 and 5. **Checkpoint of 17 November 2026:** commit `ccffe7c`; on Windows `npm test` 402 passed, typecheck, standalone build, `tests/e2e/desktop.mjs` (engine off), `tests/e2e/tiled-sections.mjs` (public example and `rgb2g`) and `tests/e2e/large-16bit-desktop.mjs`; GitHub `tests` and *Desktop builds* passed on Windows, macOS and Linux (the macOS `web-app` job needed three attempts: GitHub had no macOS arm64 runner free, "not acquired by Runner"). The full session checks (pytest, ruff, smoke) were not repeated: no Python changed since the last full run. M8.4.14 was done on 17 November 2026 ([summary](validation/M8.4.14-summary.md)). The design session of part C was held on 16 November 2026: decisions in
+- **Next step: M8.4.16 step 4** (background send and recovery; **model: most capable, effort high**). The card's detailed steps and decisions A-E were written on 17 November 2026 and approved by the maintainer as written the same day (commit `b2b4cdc`, whose `tests` and *Desktop builds* passed on Windows, macOS and Linux). Step 1 (mask store format, contract §8.7, and the engine's mask operations) was done on 17 November 2026; step 2 (the page's mask tiles, the reduced overview masks and the mask layer over pixel tiles, `app/js/tiledmasks.js`) and step 3 (strokes on an edit window, statistics per tile, `app/js/tiledit.js`) on 18 November 2026; their checks are below. M8.4.15 was done on 17 November 2026 ([summary](validation/M8.4.15-summary.md)); its first-view target needed the identity record of the tile store, chosen by the maintainer (option 1). Card H7 (16-bit images above about 28 megapixels killed the page) was done on 17 November 2026 at the maintainer's request, between steps 4 and 5. **Checkpoint of 17 November 2026:** commit `ccffe7c`; on Windows `npm test` 402 passed, typecheck, standalone build, `tests/e2e/desktop.mjs` (engine off), `tests/e2e/tiled-sections.mjs` (public example and `rgb2g`) and `tests/e2e/large-16bit-desktop.mjs`; GitHub `tests` and *Desktop builds* passed on Windows, macOS and Linux (the macOS `web-app` job needed three attempts: GitHub had no macOS arm64 runner free, "not acquired by Runner"). The full session checks (pytest, ruff, smoke) were not repeated: no Python changed since the last full run. M8.4.14 was done on 17 November 2026 ([summary](validation/M8.4.14-summary.md)). The design session of part C was held on 16 November 2026: decisions in
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -101,6 +101,11 @@ Updated 16 November 2026.
   from it (item above), which also answers the timing question of 14 November. Decided on 13 November 2026: acceptance levels (accepted),
   scope of 1.0 (below), publication of V0.149. Decided on 14 November 2026: a milestone gate on macOS and Linux closes every milestone; the
   five decisions of M8.4 (answers recorded there, among them **multi-gigabyte images are required for 1.0**).
+- **Checks of M8.4.16 step 3 (18 November 2026, maintainer's Windows computer):** `npm test` 415 passed (5 new in `tests/app/tiledit.test.mjs`);
+  `npm run typecheck`; standalone build; `tests/e2e/tiled-sections.mjs` (strokes with the real mouse); `tests/e2e/desktop.mjs` with the engine off and
+  on; `tools/measure_tiled_viewer.mjs` on `rgb8g` (every target met; strokes p95 18.4-31.8 ms against 33, the closest at 1 screen pixel per 3
+  source pixels over dense masks; process tree 1,800 MiB; [evidence](validation/M8.4.16-step3-viewer-rgb8g-windows.json)) and on `rgb2g`
+  (15.8-26.2 ms, not kept). Not run: pytest and ruff (no Python changed), `smoke.mjs`. `tests/e2e/tiled-sections.mjs` is not run by GitHub.
 - **Checks of M8.4.16 step 2 (18 November 2026, maintainer's Windows computer):** `npm test` 410 passed (8 new in `tests/app/tiledmasks.test.mjs`);
   `npm run typecheck`; standalone build; `tests/e2e/tiled-sections.mjs` (masks at full resolution and two coarser zooms); `tests/e2e/desktop.mjs`
   (engine off); `tools/measure_tiled_viewer.mjs` on `rgb8g`: every target met, with masks 10.5 ms median / 12.9 ms p95 per frame, process tree
@@ -1064,7 +1069,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
 - **Done when:** the targets of step 7 are measured (a failure is recorded with numbers and the card stops for a decision); the flag is off by
   default and in the flag table.
 
-##### M8.4.16 - Masks of tiled sections: storage, editing and undo — state: In progress; decisions A-E approved by the maintainer on 17 Nov 2026 as written; steps 1-2 done; next: step 3
+##### M8.4.16 - Masks of tiled sections: storage, editing and undo — state: In progress; decisions A-E approved by the maintainer on 17 Nov 2026 as written; steps 1-3 done; next: step 4
 
 - **Goal:** labels and exclusion of a tiled section live as mask tiles in the store (decision 6); every editing tool works on loaded tiles; undo and
   redo are per tile and bounded; changed tiles are sent in the background and sent again after an engine failure.
@@ -1117,9 +1122,16 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
      edges across tile seams need no special case; at levels between full resolution and the working image it is painted from the reduced copy,
      and `render()` skips its own mask mixing where the layer covers it. Clean mask tiles are kept up to 128 MiB per section. Tests put tiles in
      the page through `window.ichantool.putMaskTile`. Pixel tiles are now drawn over objects and exclusion too.
-  3. **Strokes in the edit window** [most capable, high]: brush, erase, exclude, include on the window of decision A, with the zoom rule of B;
+  3. **Done 18 Nov 2026.** **Strokes in the edit window** [most capable, high]: brush, erase, exclude, include on the window of decision A, with the zoom rule of B;
      writes cut back into tiles; objects' statistics from the window (pixels of level 0). Input-to-next-frame p95 <= 33 ms during strokes, measured on
      `rgb8g`.
+     *As built:* statistics are not taken from the window but kept per tile and summed per object (`tileStats`, `TiledObjectStats`), so a stroke on
+     an object larger than the window still gives its exact statistics; they are recomputed after the stroke from the level-0 pixels of the tiles
+     within 3 pixels of the change. The window has a margin of `ceil(radius / 512)` tiles. Strokes keep no pixel log and have no undo until step 5.
+     For step 8 (exact equality): `TiledObjectStats` sums the luminance sums in another order than `objectStats` (equal within a relative 1e-12),
+     so objects compare exactly on every integer field and with that tolerance on `sL`, `sLL`, `rL` and the features computed from them.
+     `window.ichantool.putMaskTile` (a test hook) shows tiles without computing statistics. Measured on `rgb8g`: p95 18.4-31.8 ms; the closest
+     case (1 screen pixel per 3 source pixels, brush radius 320 source pixels, over dense masks) has 1.2 ms of margin.
   4. **Background send and recovery** [most capable, high]: dirty tiles go out with `mask.put` after the stroke (never blocking it; a newer edit of a
      tile replaces a pending send); a tile is acknowledged only after `mask.commit`; after an engine failure the unacknowledged tiles
      are sent again once M8.4.7 has restarted it. Test: the engine killed during a send; the masks in the page and, after the resend, in the store

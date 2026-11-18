@@ -158,8 +158,9 @@ try {
   const readDepth = parseFloat(nav.depth.replace(/^[^0-9-]*/, '')), expected = nav.top + (sourceRow / nav.full.h) * (nav.bottom - nav.top);
   assert.ok(Math.abs(readDepth - expected) <= (nav.bottom - nav.top) / nav.h + 0.0006, `depth of the source row ${sourceRow}: read ${readDepth}, expected ${expected}`);
   assert.ok(nav.stripColours >= 2, 'the navigation strip shows the section image: ' + nav.stripColours + ' colours');
-  // Step 6: every tool of the Section mode on a tiled section. Editing tools, detection, crop, rotation, resolution and filters refuse with the
-  // one message; select, pan, mark and the analysis area work. A blocked tool selected on another section does not follow into a tiled one.
+  // Step 6 of M8.4.15, updated by M8.4.16 step 3: every tool of the Section mode on a tiled section. Wand, lasso, scissors, detection, crop,
+  // rotation, resolution and filters refuse with the one message; select, pan, mark, the analysis area and the strokes (brush, erase, exclude,
+  // include) work. A blocked tool selected on another section does not follow into a tiled one.
   const gating = await on.page.evaluate(async () => {
     const { S } = window.ichantool, s = S.sections.at(-1), toastText = () => document.getElementById('toast').textContent, out = { tools: {}, actions: {} };
     const pause = () => new Promise((r) => setTimeout(r, 120));
@@ -176,19 +177,19 @@ try {
     const gamma = document.getElementById('f-gamma'); document.getElementById('toast').textContent = '';
     gamma.value = '1.8'; gamma.dispatchEvent(new Event('input', { bubbles: true })); await new Promise((r) => setTimeout(r, 300)); out.actions.filter = toastText();
     out.unchanged = JSON.stringify(before) === JSON.stringify({ w: s.w, h: s.h, ds: s.ds, rot: s.rot, crop: s.crop, filters: JSON.stringify(s.filters) });
-    // A brush chosen on the first section does not follow into the tiled one.
-    S.cur = 0; window.ichantool.setTool('brush'); S.cur = S.sections.length - 1; window.ichantool.renderSectionForm?.(); out.carried = S.tool;
+    // A wand chosen on the first section does not follow into the tiled one.
+    S.cur = 0; window.ichantool.setTool('wand'); S.cur = S.sections.length - 1; window.ichantool.renderSectionForm?.(); out.carried = S.tool;
     return out;
   });
-  for (const tool of ['select', 'pan', 'mark']) assert.equal(gating.tools[tool].active, true, tool + ' is available on a tiled section');
+  for (const tool of ['select', 'pan', 'mark', 'brush', 'erase', 'exclude', 'include']) assert.equal(gating.tools[tool].active, true, tool + ' is available on a tiled section');
   assert.equal(gating.tools.roi, true, 'the analysis area is available');
   const message = await on.page.evaluate(() => window.ichantool.t?.('tiles.unavailable'));
-  for (const tool of ['wand', 'brush', 'lasso', 'cut', 'erase', 'exclude', 'include']) {
+  for (const tool of ['wand', 'lasso', 'cut']) {
     assert.equal(gating.tools[tool].active, false, tool + ' is refused');
     assert.ok(gating.tools[tool].message.length > 10 && (!message || gating.tools[tool].message === message), `${tool} shows the one message: ${gating.tools[tool].message}`);
   }
   for (const [action, text] of Object.entries(gating.actions)) assert.equal(text, gating.tools.wand.message, `${action} shows the same message`);
-  assert.equal(gating.carried, 'pan', 'a brush chosen on another section does not follow into a tiled one');
+  assert.equal(gating.carried, 'pan', 'a wand chosen on another section does not follow into a tiled one');
   assert.equal(gating.unchanged, true, 'the refused tools changed nothing');
   assert.equal(gating.resValue, String(section.ds), 'the resolution control returns to the current value');
   // Card M8.4.16 step 2: a mask tile put in the page shows at full resolution over the pixel tiles and, reduced, in the working image at every
@@ -239,6 +240,58 @@ try {
     assert.deepEqual(at(after, 'outside').rgb, at(before, 'outside').rgb, `${name}: unchanged outside the masks`);
   }
   assert.equal(masks.reduced, 0, 'removing the tile clears the reduced masks');
+  // Card M8.4.16 step 3: strokes with the real mouse at full resolution (1 screen pixel per source pixel). Brush radius 10 working pixels =
+  // 20 source pixels. The tiles hold the stroke exactly where it was drawn; the object's statistics, recomputed per tile from the level-0
+  // pixels, count exactly the labelled source pixels; erase, exclude and include change the tiles and the reduced copy.
+  const strokes = await (async () => {
+    const page = on.page, box = await page.evaluate(() => {
+      const { S } = window.ichantool, s = S.sections.at(-1), r = document.getElementById('view').getBoundingClientRect();
+      S.view = { x: 0, y: 3000, zoom: s.ds }; S.brushSize = 10; S.exShape = 'free'; S.overlap = false; window.ichantool.requestRender();
+      return { left: r.left, top: r.top };
+    });
+    const stroke = async (tool, y, x0, x1) => {
+      await page.evaluate((tool) => window.ichantool.setTool(tool), tool);
+      await page.mouse.move(box.left + x0, box.top + y); await page.mouse.down();
+      for (let x = x0; x <= x1; x += 10) await page.mouse.move(box.left + x, box.top + y);
+      await page.mouse.up();
+      await page.waitForFunction(() => window.ichantool.tiledStatsIdle(), { polling: 50 });
+    };
+    const read = () => page.evaluate(() => {
+      const { S } = window.ichantool, s = S.sections.at(-1), tiles = s.maskTiles, at = (x, y) => tiles.labelAt(x, y);
+      const ex = (x, y) => { const e = tiles.get(Math.floor(y / 512), Math.floor(x / 512)); return e?.exclude ? e.exclude[(y % 512) * 512 + (x % 512)] : 0; };
+      const id = at(350, 6200), counts = new Map();
+      for (let row = 0; row < tiles.rows; row++) for (let col = 0; col < tiles.cols; col++) {
+        const labels = tiles.get(row, col)?.labels; if (!labels) continue;
+        for (const v of labels) if (v > 0) counts.set(v, (counts.get(v) || 0) + 1);
+      }
+      const o = s.objects.get(id);
+      return { id, centre: at(350, 6200), radius: [at(350, 6219), at(350, 6221), at(281, 6200), at(279, 6200)], far: at(350, 6230),
+        counted: counts.get(id) || 0, area: o?.area, n: o?.stats?.n, sbox: o?.sbox, bbox: o?.bbox, ds: s.ds, excluded: ex(350, 6400), excludedOut: ex(350, 6430),
+        reducedLabel: s.labels[(6200 / s.ds) * s.w + 350 / s.ds], reducedExclude: s.exclude[(6400 / s.ds) * s.w + 350 / s.ds], objects: s.objects.size };
+    });
+    await stroke('brush', 200, 300, 400);
+    const painted = await read();
+    await stroke('erase', 200, 380, 420);   // erases x 360-439: the probe at x 350 stays
+    const erased = await read();
+    await stroke('exclude', 400, 300, 400);
+    const excluded = await read();
+    await stroke('include', 400, 300, 400);
+    const included = await read();
+    return { painted, erased, excluded, included };
+  })();
+  const { painted, erased, excluded, included } = strokes;
+  assert.ok(painted.id > 0, 'the brush wrote an object into the tiles: ' + JSON.stringify(painted));
+  assert.deepEqual(painted.radius, [painted.id, 0, painted.id, 0], 'the stroke has the brush radius in source pixels (20): ' + JSON.stringify(painted));
+  assert.equal(painted.far, 0);
+  assert.equal(painted.area, painted.counted, 'the area is the number of labelled source pixels in the tiles');
+  assert.equal(painted.n, painted.counted);
+  assert.deepEqual(painted.sbox, [280, 6180, 419, 6219], 'source bounding box of a stroke from x 300 to 400 at y 6200 with radius 20 (a pixel is painted when its centre is within the radius)');
+  assert.deepEqual(painted.bbox, painted.sbox.map((v) => Math.floor(v / painted.ds)), 'the working bounding box is the source one divided by ds');
+  assert.equal(painted.reducedLabel, painted.id, 'the reduced copy shows the stroke');
+  assert.ok(erased.area < painted.area && erased.area === erased.counted && erased.centre === erased.id, 'erasing part of the stroke: ' + JSON.stringify(erased));
+  assert.equal(excluded.excluded, 1); assert.equal(excluded.excludedOut, 0); assert.equal(excluded.reducedExclude, 1);
+  assert.equal(excluded.area, erased.area, 'exclusion does not change the object');
+  assert.equal(included.excluded, 0); assert.equal(included.reducedExclude, 0);
   assert.deepEqual(on.errors, []);
   console.log('Tiled sections: added through the interface, working image from the pyramid, not saved, reloaded, tools refused; full-resolution tiles drawn (' + drawn.probes.length + ' probes):', JSON.stringify(section));
 } finally { await on.close(); }

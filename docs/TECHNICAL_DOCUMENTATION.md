@@ -162,6 +162,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `tiledsection.js` | Tiled sections (card M8.4.15): image sizes read from TIFF, JPEG and PNG headers (`imageDimensions`), the pyramid level that serves as a tiled section's working image (`proxyLevel`) and a level assembled from its tiles into RGBA (`assembleLevel`) and one tile as 8-bit RGBA for display (`tileRgba`) | Yes |
 | `tilecache.js` | Which tiles of a tiled section the viewer needs (card M8.4.15): the level for a zoom (`levelForZoom`: the coarsest with at least one level pixel per screen pixel), the visible tiles plus one ring, nearest the centre first, a coarser cached tile to draw while one is missing (`coarserCover`), a 256 MiB least-recently-used cache that keeps the tiles on screen (`TileCache`) and batched requests, 16 tiles each, two at a time, dropping tiles no longer wanted (`TileScheduler`, keys prefixed per pyramid); where a tile goes on screen (`tilePlacement`) | Yes |
 | `tiledmasks.js` | Masks of tiled sections in the page (card M8.4.16): the cache of level-0 mask tiles (`MaskTiles`: all-zero layers kept as nothing, tiles changed and not acknowledged by the engine never dropped, pinned tiles kept, clean tiles dropped least recently used first beyond 128 MiB), the reduced copy in the working image (`reduceTile`), and the mask layer painted over pixel tiles (`overlayLayout`, `axisMap`, `paintOverlay`) | Yes |
+| `tiledit.js` | Editing the masks of tiled sections (card M8.4.16): the edit window (`EditWindow`: whole level-0 mask tiles as flat arrays, written back tile by tile; `windowRange`, `WINDOW_TILES`) and object statistics kept per tile and summed per object (`tileStats`, `TiledObjectStats`, `affectedTiles`, `TiledStatsRunner`) | Yes |
 | `maskchanges.js` | Which rows of each section's label and exclusion masks changed since the engine last received them: `createMaskChanges` (mark, take, restore, mark all) and `indexRangeOfPairs` (the pixels named by an edit-history list). A hint for the engine path, never a proof (§26.2) | Yes |
 | `sectionanalysis.js` | Analysis of one section without the DOM: effective class of each object, class-index table, row counts (cached per section), interval bins with no-data padding, ages and manual indices (§3.2), plus the builders of the engine method's input snapshot and reference result columns (`buildIntervalSnapshot`, `referenceColumns`), the revision key of a section's calculation (`analysisRevision`) and the conversion of engine result columns to `s.bins` (`resultToBins`). `app.js::analyze` passes the project state in | Yes |
 | `imageproc.js` | Enhancement, detection, connected components, magic wand, lasso, descriptors, rotation, downsampling | ✓ |
@@ -3078,7 +3079,33 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
 - **Tiled sections in the interface** (behind the same flag): an image added through the interface whose header says it has more pixels than the
   maximum size when adding images gets a pyramid (a dialog shows the progress and can cancel) and becomes a section whose working image is the
   finest pyramid level within that size. Such a section is not saved in the project yet, has no interval table yet, keeps the default filters, and
-  tools that would decode the source (crop, rotation, resolution) refuse with a message.
+  tools that would decode the source (crop, rotation, resolution) refuse with a message, as do the wand, the lasso and the scissors (card M8.4.16
+  step 6).
+- **Strokes on tiled sections** (`tiledit.js`, `startTiledStroke` and the following functions in `app.js`; card M8.4.16 step 3): brush, erase,
+  exclude and include (free hand and the exclusion rectangle) edit the masks at full resolution. A stroke runs today's code (`paintAt`, `addPx`,
+  `setLabel`, `setEx`) on an *edit window*: the level-0 mask tiles that cover the visible part of the section plus a margin of
+  `ceil(radius / 512)` tiles (at least one), copied into flat arrays clipped at the section's edge (`EditWindow`). The brush radius in source pixels
+  is the brush size times `ds`, so the circle drawn on screen is the one painted. After every pointer move the rectangle the segment may have
+  written (its end points plus the radius and one pixel) is copied back into the tiles, which become dirty, and into the working image's reduced
+  copy. A window of more than 96 tiles is refused with "zoom in to edit" (at a canvas of 710 x 757 that happens between 1 screen pixel per 3 and
+  per 8 source pixels). The window is kept between strokes while nothing else wrote the tiles. A stroke near the edge of the window is cut at
+  it. Tiled strokes keep no pixel log and have no undo yet (undo by tile copies is step 5), and unused overlap stacks of tiled sections are not
+  reclaimed (that scans the whole label image). Clicking with Select reads the full-resolution label when its tile is in the page.
+- **Object statistics of tiled sections** (`tiledit.js`): `objectStats` reads a pixel's labels and colours up to 3 pixels away, so the
+  statistics of a tile's pixels (`tileStats`) are computed on arrays padded by 3 pixels from the neighbouring tiles, with the image's real
+  edges passed as `bounds` (pixels beyond them are never an object's neighbour or part of its surrounding contrast), then moved into source
+  coordinates (`shiftStats`: `Σ(x + o) = Σx + n·o`, `Σ(x + o)² = Σx² + 2o·Σx + n·o²`, `Σ(x + ox)(y + oy) = Σxy + oy·Σx + ox·Σy + n·ox·oy`). An
+  object's statistics are the sum of its tiles' (`TiledObjectStats`; bounding box by minimum and maximum), which equals `objectStats` over the
+  whole image (integer sums exactly, the luminance sums within a relative 1e-12, `tests/app/tiledit.test.mjs`). After a stroke the tiles within
+  3 pixels of what it changed are recomputed one by one between frames from the level-0 pixels of the tile and its neighbours (read through the
+  engine, 48 tiles cached) and the labels as they are at that moment (`TiledStatsRunner`). An object keeps `area` and `stats` in source pixels,
+  `sbox` (source bounding box) and `bbox` in working pixels (`floor(source / ds)`); `feat` uses `pxPerCm(s) · ds` source pixels per centimetre.
+  An object left with no pixel is removed.
+- **Measured on Windows (card M8.4.16 step 3,** [evidence](validation/M8.4.16-step3-viewer-rgb8g-windows.json)**,** `rgb8g`, `ds` 32, canvas
+  710 x 757, real mouse): input to the next frame during a stroke, p95, 23.9 ms (1 screen pixel per source pixel, brush size 10 = radius 320
+  source pixels), 18.4 ms (size 3) and 31.8 ms (1 screen pixel per 3 source pixels, size 10, painting over dense masks), against 33 ms; the first
+  frame after pointer down 20-48 ms; statistics recomputed 0.18-0.29 s after the stroke ends. At 1 screen pixel per 8 source pixels the brush
+  refuses with the message.
 - **Drawing tiles** (`render` → `drawTiles` in `app.js`, `tilecache.js`): after the working image is drawn, when the zoom in screen pixels per source
   pixel (`zoom / ds`) asks for a level `k = levelForZoom(levels, zoom / ds)` finer than the working image's level, the tiles of level `k` that cover
   the visible part of the analysis area are drawn over it, clipped to that area, with nearest-pixel scaling and edges rounded to whole screen pixels

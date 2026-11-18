@@ -1,0 +1,181 @@
+{
+  "file": "rgb8g.tif",
+  "date": "2026-11-18T00:06:57.948Z",
+  "computer": "Windows 11, AMD Ryzen 7 7700X, 31 GiB (maintainer's computer)",
+  "viewport": "1440 x 900",
+  "firstRunSeconds": 1.46,
+  "section": {
+    "tiled": true,
+    "ds": 32,
+    "level": 5,
+    "w": 256,
+    "h": 10923,
+    "full": {
+      "w": 8192,
+      "h": 349526
+    },
+    "bits": 8,
+    "channels": 3
+  },
+  "firstUsefulViewMs": 895,
+  "cachedPanZoom": {
+    "frameCost": {
+      "n": 120,
+      "median": 4.7,
+      "p95": 6.8,
+      "max": 7.9
+    },
+    "frameInterval": {
+      "n": 119,
+      "median": 4.2,
+      "p95": 8.4,
+      "max": 8.5
+    }
+  },
+  "jumps": {
+    "firstFrameMs": {
+      "n": 20,
+      "median": 5.2,
+      "p95": 6.8,
+      "max": 7.5
+    },
+    "completeMs": {
+      "n": 20,
+      "median": 67.4,
+      "p95": 82.8,
+      "max": 425.8
+    },
+    "minImageShare": 1,
+    "incomplete": 0
+  },
+  "maskTiles": 30,
+  "maskedPanZoom": {
+    "frameCost": {
+      "n": 120,
+      "median": 10.5,
+      "p95": 12.9,
+      "max": 13.8
+    },
+    "frameInterval": {
+      "n": 119,
+      "median": 12.4,
+      "p95": 12.6,
+      "max": 12.6
+    }
+  },
+  "strokes": {
+    "oneToOne_size10": {
+      "moves": {
+        "n": 60,
+        "median": 23.3,
+        "p95": 23.9,
+        "max": 31.9
+      },
+      "pointerDownMs": 31.3,
+      "statsAfterReleaseMs": 210,
+      "newObjects": 1,
+      "areaSourcePixels": 485756
+    },
+    "oneToOne_size3": {
+      "moves": {
+        "n": 60,
+        "median": 17.2,
+        "p95": 18.4,
+        "max": 20.6
+      },
+      "pointerDownMs": 19.9,
+      "statsAfterReleaseMs": 181,
+      "newObjects": 1,
+      "areaSourcePixels": 78156
+    },
+    "oneToThree_size10": {
+      "moves": {
+        "n": 60,
+        "median": 29.5,
+        "p95": 31.8,
+        "max": 33.2
+      },
+      "pointerDownMs": 48.2,
+      "statsAfterReleaseMs": 292,
+      "newObjects": 0,
+      "areaSourcePixels": 78156
+    },
+    "refusedAtOneToEight": {
+      "objectsUnchanged": true,
+      "message": true
+    },
+    "section": {
+      "ds": 32,
+      "canvas": [
+        710,
+        757
+      ]
+    }
+  },
+  "memory": {
+    "samples": 31,
+    "peakMiB": 1800
+  },
+  "targets": {
+    "firstUsefulViewMs": {
+      "target": 2000,
+      "value": 895,
+      "ok": true
+    },
+    "cachedFrameMedianMs": {
+      "target": 17,
+      "value": 4.7,
+      "ok": true
+    },
+    "cachedFrameP95Ms": {
+      "target": 33,
+      "value": 6.8,
+      "ok": true
+    },
+    "maskedFrameMedianMs": {
+      "target": 17,
+      "value": 10.5,
+      "ok": true
+    },
+    "maskedFrameP95Ms": {
+      "target": 33,
+      "value": 12.9,
+      "ok": true
+    },
+    "stroke_oneToOne_size10_inputToFrameP95Ms": {
+      "target": 33,
+      "value": 23.9,
+      "ok": true
+    },
+    "stroke_oneToOne_size3_inputToFrameP95Ms": {
+      "target": 33,
+      "value": 18.4,
+      "ok": true
+    },
+    "stroke_oneToThree_size10_inputToFrameP95Ms": {
+      "target": 33,
+      "value": 31.8,
+      "ok": true
+    },
+    "strokeRefusedBeyondBudget": {
+      "target": true,
+      "value": true,
+      "ok": true
+    },
+    "jumpFirstFrameShowsImage": {
+      "target": 1,
+      "value": 1,
+      "ok": true
+    },
+    "jumpCompleteP95Ms": {
+      "target": 250,
+      "value": 82.8,
+      "ok": true
+    },
+    "processTreePeakMiB": {
+      "target": 2048,
+      "value": 1800,
+      "ok": true
+    }
+  }
+}
