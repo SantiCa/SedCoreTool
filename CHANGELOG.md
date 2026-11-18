@@ -20,6 +20,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.16, step 7: the metadata limits measured with the page's own table builders (`tools/measure_mask_tables.mjs`): the 4 MiB cap of the objects table binds at about 51,000-56,000 objects, before the 65,536-record cap ([evidence](docs/validation/M8.4.16-step7-mask-tables.json)); the contract is unchanged.
 - Card M8.4.16, step 6: wand, lasso, scissors, delete, clear candidates, merge and the merge of overlapping objects of one ichnotaxon after a
   class change work on tiled sections at full resolution, each on edit windows of the object boxes (or of the lasso's box, or of the visible
   area for the wand) and as one undo step; an object whose box covers more than 96 mask tiles refuses with a message. The object panel no longer
