@@ -401,9 +401,16 @@ test('mask tiles through the real client and the page bridge: a version written,
   assert.deepEqual(await bridge.call(page, 'maskPut', begun.ok.staged, 'labels', 1, 2, digest(labelBytes), labelBytes), { ok: { stored: true } });
   assert.deepEqual(await bridge.call(page, 'maskPut', begun.ok.staged, 'exclude', 1, 2, digest(excludeBytes), excludeBytes), { ok: { stored: true } });
   assert.equal((await bridge.call(other, 'maskPut', begun.ok.staged, 'labels', 1, 2, digest(labelBytes), labelBytes)).error.field, 'staged', 'another page cannot use it');
-  const objects = new TextEncoder().encode(JSON.stringify([{ id: 42, class_id: null, predicted_class_id: null, confidence: 0 }]));
-  const committed = await bridge.call(page, 'maskCommit', begun.ok.staged,
-    { objects, classes: new TextEncoder().encode('[]'), stack_offsets: new Uint8Array(new Uint32Array([0, 0]).buffer), stack_members: null });
+  // Card M8.4.22: the objects as four binary columns; an index the classes table does not hold is refused by the engine.
+  const columns = (cls) => ({ object_ids: new Uint8Array(new Uint32Array([42]).buffer), object_class: new Uint8Array(new Int32Array([cls]).buffer),
+    object_predicted: new Uint8Array(new Int32Array([-1]).buffer), object_confidence: new Uint8Array(new Float64Array([0]).buffer) });
+  const classes = new TextEncoder().encode('[{"id":"a","name":"Burrow","counts":true}]'), offsets = new Uint8Array(new Uint32Array([0, 0]).buffer);
+  const unknownClass = await bridge.call(page, 'maskCommit', begun.ok.staged, { ...columns(1), classes, stack_offsets: offsets, stack_members: null });
+  assert.deepEqual(unknownClass.error, { code: 'INVALID_BUFFER', field: 'tables.object_class' });
+  const retry = await bridge.call(page, 'maskBegin', 'p1', 's1', 1300, 1100, null);              // a failed commit closes the staged version
+  assert.deepEqual(await bridge.call(page, 'maskPut', retry.ok.staged, 'labels', 1, 2, digest(labelBytes), labelBytes), { ok: { stored: true } });
+  assert.deepEqual(await bridge.call(page, 'maskPut', retry.ok.staged, 'exclude', 1, 2, digest(excludeBytes), excludeBytes), { ok: { stored: true } });
+  const committed = await bridge.call(page, 'maskCommit', retry.ok.staged, { ...columns(0), classes, stack_offsets: offsets, stack_members: null });
   assert.match(committed.ok.manifest, /^[0-9a-f]{64}$/);
   const read = await bridge.call(page, 'maskRead', 'p1', committed.ok.manifest, 'labels', [[1, 2], [0, 0]]);
   assert.deepEqual(read.ok.tiles, [{ row: 1, col: 2, byte_length: 1048576 }, { row: 0, col: 0, byte_length: 0 }]);

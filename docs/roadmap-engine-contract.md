@@ -465,22 +465,40 @@ pyramid (coordinates are full-resolution source pixels, ARCHITECTURE §6). A til
 Samples outside the section (tiles on the right and bottom edges) are 0. A layer whose samples are all 0 is **not stored**: the manifest has
 no hash for it, and a reader returns zeros.
 
-**Tables.** The objects, classes and overlap-stack tables of §4, stored as blobs of their exact bytes: `objects` and `classes` `utf8json`
-(at most 4 MiB each, the metadata limits of §3), `stack_offsets` and `stack_members` `u32le`. `stack_members` is absent when there is no overlap.
+**Tables** (version 2, card M8.4.22), stored as blobs of their exact bytes, all little-endian:
+
+| Table | Dtype | Rows | Content |
+|---|---|---|---|
+| `object_ids` | `u32le` | N | object IDs, 1 to 2,147,483,647 (a positive `i32` label), all different, in the page's order of its objects |
+| `object_class` | `i32le` | N | index into `classes` of the class given by hand, or -1 |
+| `object_predicted` | `i32le` | N | index into `classes` of the predicted class, or -1 |
+| `object_confidence` | `f64le` | N | confidence of the prediction, finite, 0 to 1 |
+| `classes` | `utf8json` | — | the classes table of §4 (a JSON array of records), at most 4 MiB (the metadata limit of §3) |
+| `stack_offsets`, `stack_members` | `u32le` | K + 1, M | the overlap stacks of §4; `stack_members` is `null` when there is no overlap |
+
+N is at most **1,048,576** (2^20). The four object columns have the same N and are all `null` when the section has no object. Unlike
+version 1, whose `objects` table was `utf8json` and so limited to about 51,000-56,000 objects by the 4 MiB cap (measured in card M8.4.16
+step 7), the columns take 20 bytes per object.
 
 **Manifest.** A JSON object with exactly these members:
 
 ```
-{"format": "sedcoretool.masks", "version": 1, "section": "<section id>", "width": W, "height": H, "tile": 512,
+{"format": "sedcoretool.masks", "version": 2, "section": "<section id>", "width": W, "height": H, "tile": 512,
  "tiles": {"<i>.<j>": {"labels": "<sha256>" | null, "exclude": "<sha256>" | null}, ...},
- "tables": {"objects": T, "classes": T, "stack_offsets": T, "stack_members": T | null}}       T = {"sha256": "<sha256>", "byte_length": n}
+ "tables": {"object_ids": T | null, "object_class": T | null, "object_predicted": T | null, "object_confidence": T | null,
+            "classes": T, "stack_offsets": T, "stack_members": T | null}}                       T = {"sha256": "<sha256>", "byte_length": n}
 ```
 
 - `section` is a section identifier; `W` from 1 to 262,144 and `H` from 1 to 16,777,216 (the source limits of §8.3), with
   `rows x cols` at most 262,144 positions (68.7 gigapixels; the 8-GiB fixture `rgb8g` has 10,928).
 - `tiles` lists only positions with at least one stored layer. Keys are `<i>.<j>` in decimal without leading zeros, inside the grid.
-- `byte_length` of a table: `objects` and `classes` 1 to 4,194,304; `stack_offsets` a multiple of 4, from 8 to 16,777,216; `stack_members` a
-  positive multiple of 4 up to 16,777,216, or the table is `null`. Table content is checked by the method that uses it (§4), not by the store.
+- `byte_length` of a table: `object_ids`, `object_class` and `object_predicted` a positive multiple of 4 up to 4,194,304, `object_confidence`
+  a positive multiple of 8 up to 8,388,608, the four giving the same N (or all four `null`); `classes` 1 to 4,194,304; `stack_offsets` a
+  multiple of 4, from 8 to 16,777,216; `stack_members` a positive multiple of 4 up to 16,777,216, or `null`.
+- **Version 1 manifests** (written only during card M8.4.16, never named by a project) are refused with `UNSUPPORTED_INPUT`,
+  `details.field = "manifest.version"`. Any other version is `INVALID_BUFFER`.
+- The store checks the object columns when they are committed (below); the classes and stack tables' content is checked by the method that
+  uses them (§4).
 - **Canonical JSON:** every key and string of a manifest is printable ASCII without `"` or `\`, so the canonical form is simply: keys
   sorted by byte value at every level, no white space, integers in decimal (Python's
   `json.dumps(value, sort_keys=True, separators=(",", ":"))`). A file whose bytes differ from the canonical form of its own content is not a manifest. At most 64 MiB.
@@ -496,7 +514,7 @@ else is `INVALID_BUFFER` with `details.field = "manifest"` or `"tile"` / `"table
 |---|---|---|
 | `mask.begin` | `{project, section, width, height, base}`: `base` `null` (no masks yet: every tile empty, no tables) or the SHA-256 of a manifest of that project with the same `section`, `width` and `height` | `{staged, rows, cols}`; `staged` a session-local UUID naming a new version in preparation, which starts as a copy of `base`. At most 16 per session. |
 | `mask.put` | `{staged, layer, row, col, sha256}` immediately followed by **one binary frame** of exactly the layer's byte length (the descriptor/binary pair of §3) | `{stored}`: `true` when the layer is now stored, `false` when it was all zeros and its entry was removed. The engine checks the length, the SHA-256, the zeros outside the section and, for `exclude`, that every sample is 0 or 1; any failure is `INVALID_BUFFER` (`details.field = "tile"`) and leaves the staged version unchanged. The blob is on disk before the answer. A later `mask.put` of the same layer and position replaces it. |
-| `mask.commit` | `{staged, tables}`: `tables` has any of `objects`, `classes`, `stack_offsets`, `stack_members`, each the handle of a committed buffer of §3 (`utf8json` 1-D, `utf8json` 1-D, `u32le` 1-D, `u32le` 1-D), or `null` for `stack_members` only (no overlap); a name left out keeps the base's table. With `base: null`, `objects`, `classes` and `stack_offsets` are required. | `{manifest}`: the new version's SHA-256, after every blob and the manifest file are on disk. The staged version is closed (also when the commit fails). Committing the same content twice gives the same manifest. |
+| `mask.commit` | `{staged, tables}`: `tables` has any of the seven tables above, each the handle of a committed 1-D buffer of §3 with the table's dtype, or `null` for the four object columns together (no object) and for `stack_members` (no overlap); a name left out keeps the base's table. The four object columns and `classes` are given together or not at all; they are checked against each other before anything is written (same N, at most 2^20 rows else `LIMIT_EXCEEDED` `tables.object_ids`; IDs in range and all different; class indices from -1 to the number of `classes` records minus one; confidence finite in [0, 1]; else `INVALID_BUFFER` with `details.field = "tables.<name>"`). With `base: null`, all of them and `stack_offsets` are required. | `{manifest}`: the new version's SHA-256, after every blob and the manifest file are on disk. The staged version is closed (also when the commit fails). Committing the same content twice gives the same manifest. |
 | `mask.discard` | `{staged}` | `{}`; closes a staged version without writing a manifest (blobs already written stay, unreferenced). Idempotent. |
 | `mask.read` | `{project, manifest, layer, positions}`, 1 to 16 `[row, col]` positions inside the grid | `{tiles: [{row, col, sha256, byte_length}, ...], frames: [n1, n2, ...]}` in request order; an empty layer has `sha256: null` and `byte_length: 0` and sends no bytes; the bytes of the other tiles follow, concatenated and cut into binary frames of at most 1,048,576 bytes, exactly as for `tile.read` (§8.5). Every blob is verified before anything is sent. |
 
@@ -510,7 +528,8 @@ loading, card M8.4.18). Until then the folder only grows: a stroke adds the tile
 **From the page (card M8.4.16 step 4).** The main process passes `--projects-dir <user data>/projects`. The page reaches the five operations
 only through `desktop/tile-ipc.js` (`window.corantoolDesktop.tiles.maskBegin`, `maskPut`, `maskCommit`, `maskDiscard`, `maskRead`), which checks
 every argument again, lets a page use only the staged versions it began (at most 8 at a time), and for `maskCommit` takes the tables as bytes,
-uploads each as a committed buffer (§3), names them in `mask.commit` and releases them. The page sends with `app/js/tiledsync.js` (`MaskSync`):
+uploads each as a committed buffer (§3), names them in `mask.commit` and releases them. The page sends with `app/js/tiledsync.js` (`MaskSync`;
+before a round it checks the limits above with `tableLimit` and, beyond one, sends nothing, says so once and waits for the next change):
 after a change, a round begins a staged version on the last acknowledged manifest, sends each dirty tile (both layers, copied just before they
 are sent) and the four tables, and commits; a tile is acknowledged only if it did not change after its copy was taken. A failed round
 acknowledges nothing, discards its staged version and is tried again (pauses of 1, 2, 5, 15, then 30 s), after asking for the one automatic

@@ -3112,6 +3112,15 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   statistics need them (a stroke over a tile not read back yet asks to try again in a moment). The edit window pins its tiles, and writes a layer
   the tile does not hold as a whole. Until card M8.4.18 the project record does not name the stored version, so closing the program still loses
   a tiled section.
+- **Stored tables of tiled sections** (`maskTables`, `tableLimit` in `tiledsync.js`; `src/sedcoretool/store/masks.py`; card M8.4.22; contract
+  §8.7, manifest version 2): the objects go to the store as four little-endian columns in the order of the section's objects: `object_ids`
+  (`u32`), `object_class` and `object_predicted` (`i32`, the index of the class in the project's classes table, -1 for none or for an
+  identifier that table does not hold) and `object_confidence` (`f64`, a non-finite value stored as 0); 20 bytes per object, at most
+  1,048,576 objects. The classes go as JSON, the overlap stacks as the CSR tables of §4. The engine checks the columns against each other and
+  the classes table before writing anything. Before a round the page checks the limits; beyond one it sends nothing, shows "This large
+  section exceeds a limit of the engine's store…" once and waits for the next change, keeping the masks in the page. Building the tables
+  takes about 9 ms for 65,536 objects and 0.24 s for 1,048,576 (once per round, on the page's thread;
+  [measurement](validation/M8.4.22-mask-tables.json)). Version 1 manifests (objects as JSON) are refused with `UNSUPPORTED_INPUT`.
 - **Wand, lasso, scissors and object operations on tiled sections** (`planWindows`, `pinRanges`, `toWindowRect`, `windowRgba` in `tiledit.js`;
   `tiledPlan` and the following functions in `app.js`; card M8.4.16 step 6): each runs today's function (`regionGrow`, `polygonPixels`,
   `splitPieces`, `subPx`, `renameId`, `sameTaxonGroups`) on edit windows of whole level-0 tiles and copies back what it wrote, at full

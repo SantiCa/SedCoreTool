@@ -38,8 +38,13 @@ def sample_masks(seed=0):
     return labels, exclude
 
 
-TABLES = {'objects': json.dumps([{'id': 7, 'class_id': 'a', 'predicted_class_id': None, 'confidence': 1}]).encode(),
-          'classes': json.dumps([{'id': 'a', 'name': 'Burrow', 'counts': True}]).encode(),
+def object_columns(ids, cls, pred, conf):
+    return {'object_ids': np.array(ids, dtype='<u4').tobytes(), 'object_class': np.array(cls, dtype='<i4').tobytes(),
+            'object_predicted': np.array(pred, dtype='<i4').tobytes(), 'object_confidence': np.array(conf, dtype='<f8').tobytes()}
+
+
+CLASSES = json.dumps([{'id': 'a', 'name': 'Burrow', 'counts': True}, {'id': 'b', 'name': 'Other', 'counts': False}]).encode()
+TABLES = {**object_columns([7, 8], [0, -1], [-1, 1], [0.0, 0.75]), 'classes': CLASSES,
           'stack_offsets': np.array([0, 0, 2], dtype='<u4').tobytes(), 'stack_members': np.array([7, 8], dtype='<u4').tobytes()}
 
 
@@ -97,7 +102,7 @@ def test_the_manifest_is_canonical_json_named_by_its_hash_and_blobs_are_compress
     assert hashlib.sha256(data).hexdigest() == manifest
     assert data == json.dumps(json.loads(data), sort_keys=True, separators=(',', ':')).encode()
     value = json.loads(data)
-    assert (value['format'], value['version'], value['tile'], value['section'], value['width'], value['height']) == ('sedcoretool.masks', 1, 512, 's1', W, H)
+    assert (value['format'], value['version'], value['tile'], value['section'], value['width'], value['height']) == ('sedcoretool.masks', 2, 512, 's1', W, H)
     sha = value['tiles']['0.0']['labels']
     blob = target.blob_path(sha)
     assert blob.parent.name == sha[:2] and len(zlib.decompress(blob.read_bytes())) == masks.LAYER_BYTES['labels']
@@ -134,16 +139,70 @@ def test_tables_kept_replaced_or_required(tmp_path):
     version = staging.commit({'stack_offsets': no_overlap, 'stack_members': None})
     tables = target.read_manifest(version)[0]['tables']
     assert tables['stack_members'] is None and tables['stack_offsets']['byte_length'] == 8
-    assert tables['objects'] == target.read_manifest(base)[0]['tables']['objects']
+    assert tables['object_ids'] == target.read_manifest(base)[0]['tables']['object_ids']
     fresh = masks.Staging(target, 's2', W, H, None)
     with pytest.raises(masks.MaskError) as error:
-        fresh.commit({'objects': TABLES['objects'], 'classes': TABLES['classes']})
+        fresh.commit({name: TABLES[name] for name in (*masks.OBJECT_COLUMNS, 'classes')})
     assert (error.value.code, error.value.field) == ('INVALID_REQUEST', 'tables.stack_offsets')
-    for bad, code in (({'objects': None}, 'INVALID_REQUEST'), ({'stack_offsets': b'\0' * 6}, 'INVALID_BUFFER'),
-                      ({'objects': b' ' * (masks.MAX_METADATA_BYTES + 1)}, 'LIMIT_EXCEEDED'), ({'other': b'[]'}, 'INVALID_REQUEST')):
+    for bad, code in (({'classes': None}, 'INVALID_REQUEST'), ({'stack_offsets': b'\0' * 6}, 'INVALID_BUFFER'),
+                      ({'classes': b' ' * (masks.MAX_METADATA_BYTES + 1)}, 'LIMIT_EXCEEDED'), ({'other': b'[]'}, 'INVALID_REQUEST'),
+                      ({'object_ids': TABLES['object_ids']}, 'INVALID_REQUEST')):          # the object columns and classes go together
         with pytest.raises(masks.MaskError) as error:
             masks.Staging(target, 's1', W, H, base).commit(bad)
         assert error.value.code == code
+
+
+def test_a_section_without_objects_stores_null_columns(tmp_path):
+    target = store(tmp_path)
+    staging = masks.Staging(target, 's1', W, H, None)
+    version = staging.commit({**{name: None for name in masks.OBJECT_COLUMNS}, 'classes': CLASSES,
+                              'stack_offsets': np.array([0, 0], dtype='<u4').tobytes()})
+    tables = target.read_manifest(version)[0]['tables']
+    assert all(tables[name] is None for name in masks.OBJECT_COLUMNS)
+
+
+def test_the_object_columns_round_trip_exactly_up_to_two_to_the_twentieth_objects(tmp_path):
+    n = masks.MAX_OBJECTS
+    ids = np.arange(1, n + 1, dtype='<u4')[::-1].copy()                     # any order; it is kept
+    columns = object_columns(ids, np.where(ids % 3 == 0, 1, -1), np.zeros(n, dtype='<i4'), np.linspace(0, 1, n))
+    target = store(tmp_path)
+    version = masks.Staging(target, 's1', W, H, None).commit({**columns, 'classes': CLASSES, 'stack_offsets': np.zeros(2, dtype='<u4').tobytes()})
+    tables = target.read_manifest(version)[0]['tables']
+    for name, data in columns.items():
+        assert tables[name]['byte_length'] == len(data) and target.read_blob(tables[name]['sha256'], len(data), 'table') == data
+    over = object_columns(np.arange(1, n + 2), np.zeros(n + 1), np.zeros(n + 1), np.zeros(n + 1))
+    with pytest.raises(masks.MaskError) as error:
+        masks.Staging(target, 's1', W, H, None).commit({**over, 'classes': CLASSES, 'stack_offsets': np.zeros(2, dtype='<u4').tobytes()})
+    assert (error.value.code, error.value.field) == ('LIMIT_EXCEEDED', 'tables.object_ids')
+
+
+@pytest.mark.parametrize('columns, field', [
+    (object_columns([7, 8], [0], [-1, -1], [0, 0]), 'tables.object_class'),                    # wrong length
+    (object_columns([7, 7], [0, 0], [-1, -1], [0, 0]), 'tables.object_ids'),                   # duplicate id
+    (object_columns([0, 8], [0, 0], [-1, -1], [0, 0]), 'tables.object_ids'),                   # zero is the matrix, not an object
+    (object_columns([7, 2**31], [0, 0], [-1, -1], [0, 0]), 'tables.object_ids'),               # not a positive i32 label
+    (object_columns([7, 8], [0, 2], [-1, -1], [0, 0]), 'tables.object_class'),                 # unknown class index (two classes)
+    (object_columns([7, 8], [0, 0], [-1, -2], [0, 0]), 'tables.object_predicted'),
+    (object_columns([7, 8], [0, 0], [-1, -1], [0, 1.5]), 'tables.object_confidence'),
+    (object_columns([7, 8], [0, 0], [-1, -1], [0, float('nan')]), 'tables.object_confidence'),
+], ids=['length', 'duplicate', 'zero', 'too-large-id', 'class-index', 'predicted-index', 'confidence-range', 'confidence-nan'])
+def test_hostile_object_columns_are_refused_before_anything_is_written(tmp_path, columns, field):
+    target, base, _, _, _ = committed_version(tmp_path)
+    blobs = sorted(path.name for path in (target.folder / 'blobs').rglob('*'))
+    with pytest.raises(masks.MaskError) as error:
+        masks.Staging(target, 's1', W, H, base).commit({**columns, 'classes': CLASSES})
+    assert (error.value.code, error.value.field) == ('INVALID_BUFFER', field)
+    assert sorted(path.name for path in (target.folder / 'blobs').rglob('*')) == blobs
+
+
+def test_a_version_1_manifest_is_refused_with_its_own_code(tmp_path):
+    target, base, _, _, _ = committed_version(tmp_path)
+    old = valid_manifest(target, base)
+    old['version'] = 1
+    name = write_manifest_file(target, canonical(old))
+    with pytest.raises(masks.MaskError) as error:
+        target.read_manifest(name)
+    assert (error.value.code, error.value.field) == ('UNSUPPORTED_INPUT', 'manifest.version')
 
 
 def tile_with(layer, setter):
@@ -230,20 +289,22 @@ def canonical(value):
     lambda m: canonical(m).replace(b',', b', ', 1),                                       # not canonical
     lambda m: canonical(m)[:-1] + b',"tile":512}',                                        # duplicate key
     lambda m: canonical({**m, 'extra': 1}),
-    lambda m: canonical({**m, 'version': 2}),
+    lambda m: canonical({**m, 'version': 3}),
     lambda m: canonical({**m, 'width': 262_145}),
     lambda m: canonical({**m, 'section': '../x'}),
     lambda m: canonical({**m, 'tiles': {**m['tiles'], '3.0': m['tiles']['0.0']}}),        # outside the grid
     lambda m: canonical({**m, 'tiles': {**m['tiles'], '01.0': m['tiles']['0.0']}}),       # leading zero
     lambda m: canonical({**m, 'tiles': {**m['tiles'], '2.0': {'labels': None, 'exclude': None}}}),
     lambda m: canonical({**m, 'tiles': {**m['tiles'], '2.0': {'labels': '../../x', 'exclude': None}}}),
-    lambda m: canonical({**m, 'tables': {**m['tables'], 'objects': None}}),
+    lambda m: canonical({**m, 'tables': {**m['tables'], 'classes': None}}),
+    lambda m: canonical({**m, 'tables': {**m['tables'], 'object_class': None}}),                 # the object columns are null together
+    lambda m: canonical({**m, 'tables': {**m['tables'], 'object_confidence': {**m['tables']['object_confidence'], 'byte_length': 8}}}),
     lambda m: canonical({**m, 'tables': {**m['tables'], 'stack_offsets': {**m['tables']['stack_offsets'], 'byte_length': 6}}}),
-    lambda m: canonical({**m, 'tables': {**m['tables'], 'objects': {**m['tables']['objects'], 'byte_length': True}}}),
+    lambda m: canonical({**m, 'tables': {**m['tables'], 'object_ids': {**m['tables']['object_ids'], 'byte_length': True}}}),
     lambda m: canonical(m).replace(b'"height":1100', b'"height":NaN'),
     lambda m: b'[' * 100_000,
 ], ids=['not-canonical', 'duplicate-key', 'extra-member', 'other-version', 'too-wide', 'section-path', 'outside-grid', 'leading-zero',
-        'empty-entry', 'hash-as-path', 'missing-table', 'offsets-length', 'boolean-length', 'nan', 'deep-nesting'])
+        'empty-entry', 'hash-as-path', 'missing-table', 'one-null-column', 'unequal-columns', 'offsets-length', 'boolean-length', 'nan', 'deep-nesting'])
 def test_a_hostile_manifest_is_refused(tmp_path, mutate):
     target, base, _, _, _ = committed_version(tmp_path)
     name = write_manifest_file(target, mutate(valid_manifest(target, base)))

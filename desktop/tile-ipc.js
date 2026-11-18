@@ -12,8 +12,12 @@ const MAX_SOURCES_PER_PAGE = 64, MAX_BUILDS_PER_PAGE = 4, MAX_STAGED_PER_PAGE = 
 const LAYER_BYTES = { labels: 1048576, exclude: 262144 };
 const PROJECT = /^[a-z0-9_-]{1,64}$/, SECTION = /^[A-Za-z0-9_-]{1,64}$/;
 const WINDOWS_DEVICES = new Set(['con', 'prn', 'aux', 'nul', ...[...'0123456789'].flatMap((d) => [`com${d}`, `lpt${d}`])]);
-const TABLES = { objects: { dtype: 'utf8json', item: 1, limit: 4 * 2 ** 20 }, classes: { dtype: 'utf8json', item: 1, limit: 4 * 2 ** 20 },
+const MAX_OBJECTS = 2 ** 20;                       // card M8.4.22: the objects are four columns of at most 2^20 rows
+const TABLES = { object_ids: { dtype: 'u32le', item: 4, limit: 4 * MAX_OBJECTS }, object_class: { dtype: 'i32le', item: 4, limit: 4 * MAX_OBJECTS },
+  object_predicted: { dtype: 'i32le', item: 4, limit: 4 * MAX_OBJECTS }, object_confidence: { dtype: 'f64le', item: 8, limit: 8 * MAX_OBJECTS },
+  classes: { dtype: 'utf8json', item: 1, limit: 4 * 2 ** 20 },
   stack_offsets: { dtype: 'u32le', item: 4, limit: 16 * 2 ** 20 }, stack_members: { dtype: 'u32le', item: 4, limit: 16 * 2 ** 20 } };
+const NULLABLE_TABLES = new Set(['object_ids', 'object_class', 'object_predicted', 'object_confidence', 'stack_members']);
 const isPosition = (value) => Number.isSafeInteger(value) && value >= 0;
 function bytesOf(value) {
   if (Buffer.isBuffer(value)) return value;
@@ -146,14 +150,15 @@ function createTileIpc({ engine, pyramidRoot = null, delivery = 'engine' }) {
       const result = await engine.request('mask.put', { staged: id, layer, row, col, sha256 }, Buffer.from(bytes));
       return { stored: result.stored === true };
     },
-    /** `tables`: any of objects, classes, stack_offsets, stack_members as bytes (stack_members may be null: no overlap); left out = the base's. */
+    /** `tables`: any of the tables of contract §8.7 as bytes (the object columns null when there is no object, stack_members null when there
+     *  is no overlap); left out = the base's. */
     async maskCommit(owner, id, tables) {
       ownedStaging(owner, id);
       if (!tables || typeof tables !== 'object' || Array.isArray(tables) || !Object.keys(tables).every((name) => Object.hasOwn(TABLES, name))) reject('INVALID_REQUEST', 'tables');
       const handles = {}, uploaded = [];
       try {
         for (const [name, data] of Object.entries(tables)) {
-          if (data === null && name === 'stack_members') { handles[name] = null; continue; }
+          if (data === null && NULLABLE_TABLES.has(name)) { handles[name] = null; continue; }
           handles[name] = await uploadTable(name, data);
           uploaded.push(handles[name]);
         }

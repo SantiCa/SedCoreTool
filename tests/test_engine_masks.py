@@ -64,14 +64,17 @@ class Engine:
 
     def buffer(self, data, dtype):
         sha = hashlib.sha256(data).hexdigest()
-        size = {'u8': 1, 'utf8json': 1, 'u32le': 4, 'i32le': 4}[dtype]
+        size = {'u8': 1, 'utf8json': 1, 'u32le': 4, 'i32le': 4, 'f64le': 8}[dtype]
         handle = self.ok('buffer.begin', {'dtype': dtype, 'shape': [len(data) // size], 'byte_length': len(data), 'sha256': sha})[0]['handle']
         self.ok('buffer.chunk', {'handle': handle, 'offset': 0, 'byte_length': len(data)}, data)
         self.ok('buffer.commit', {'handle': handle})
         return handle
 
     def tables(self):
-        return {'objects': self.buffer(json.dumps([{'id': 1, 'class_id': 'a', 'predicted_class_id': None, 'confidence': 1}]).encode(), 'utf8json'),
+        return {'object_ids': self.buffer(np.array([1], dtype='<u4').tobytes(), 'u32le'),
+                'object_class': self.buffer(np.array([0], dtype='<i4').tobytes(), 'i32le'),
+                'object_predicted': self.buffer(np.array([-1], dtype='<i4').tobytes(), 'i32le'),
+                'object_confidence': self.buffer(np.array([1.0], dtype='<f8').tobytes(), 'f64le'),
                 'classes': self.buffer(json.dumps([{'id': 'a', 'name': 'Burrow', 'counts': True}]).encode(), 'utf8json'),
                 'stack_offsets': self.buffer(np.array([0, 0], dtype='<u4').tobytes(), 'u32le')}
 
@@ -168,13 +171,16 @@ def test_mask_requests_are_validated(engine):
     assert value.error('mask.put', {'staged': str(uuid4()), 'layer': 'labels', 'row': 0, 'col': 0, 'sha256': sha}, data) == ('INVALID_REQUEST', 'staged')
     assert value.error('mask.put', {'staged': staged, 'layer': 'labels', 'row': 9, 'col': 0, 'sha256': sha}, data) == ('INVALID_REQUEST', 'row')
     tables = value.tables()
-    wrong = {**tables, 'objects': value.buffer(b'\x01\x02\x03\x04', 'u8')}
-    assert value.error('mask.commit', {'staged': staged, 'tables': wrong}) == ('INVALID_BUFFER', 'tables.objects')
+    wrong = {**tables, 'object_ids': value.buffer(b'\x01\x02\x03\x04', 'u8')}
+    assert value.error('mask.commit', {'staged': staged, 'tables': wrong}) == ('INVALID_BUFFER', 'tables.object_ids')
     assert value.error('mask.commit', {'staged': staged, 'tables': tables}) == ('INVALID_REQUEST', 'staged')   # closed by the failed commit
     staged = begin(value)['staged']
-    assert value.error('mask.commit', {'staged': staged, 'tables': {'objects': str(uuid4())}}) == ('INVALID_BUFFER', 'handle')
+    assert value.error('mask.commit', {'staged': staged, 'tables': {'object_ids': str(uuid4())}}) == ('INVALID_BUFFER', 'handle')
     staged = begin(value)['staged']
-    assert value.error('mask.commit', {'staged': staged, 'tables': {'objects': tables['objects']}}) == ('INVALID_REQUEST', 'tables.classes')
+    assert value.error('mask.commit', {'staged': staged, 'tables': {'object_ids': tables['object_ids']}}) == ('INVALID_REQUEST', 'tables.object_class')
+    staged = begin(value)['staged']
+    unknown = {**tables, 'object_class': value.buffer(np.array([1], dtype='<i4').tobytes(), 'i32le')}   # one class only
+    assert value.error('mask.commit', {'staged': staged, 'tables': unknown}) == ('INVALID_BUFFER', 'tables.object_class')
     for payload, expected in (({'project': 'p1', 'manifest': 'x', 'layer': 'labels', 'positions': [[0, 0]]}, ('INVALID_REQUEST', 'manifest')),
                               ({'project': 'p1', 'manifest': '0' * 64, 'layer': 'labels', 'positions': [[0, 0]]}, ('INVALID_REQUEST', 'manifest'))):
         assert value.error('mask.read', payload) == expected
@@ -238,12 +244,14 @@ class Process:
 def test_an_engine_killed_between_put_and_commit_leaves_the_last_version_readable(tmp_path):
     engine = Process(tmp_path)
     try:
-        objects = json.dumps([{'id': 1}]).encode()
         handles = {}
-        for name, data, dtype in (('objects', objects, 'utf8json'), ('classes', b'[]', 'utf8json'),
+        for name, data, dtype in (('object_ids', np.array([1], dtype='<u4').tobytes(), 'u32le'),
+                                  ('object_class', np.array([-1], dtype='<i4').tobytes(), 'i32le'),
+                                  ('object_predicted', np.array([-1], dtype='<i4').tobytes(), 'i32le'),
+                                  ('object_confidence', np.array([0.0], dtype='<f8').tobytes(), 'f64le'), ('classes', b'[]', 'utf8json'),
                                   ('stack_offsets', np.array([0, 0], dtype='<u4').tobytes(), 'u32le')):
             sha = hashlib.sha256(data).hexdigest()
-            size = 4 if dtype == 'u32le' else 1
+            size = {'u32le': 4, 'i32le': 4, 'f64le': 8}.get(dtype, 1)
             handle = engine.call('buffer.begin', {'dtype': dtype, 'shape': [len(data) // size], 'byte_length': len(data), 'sha256': sha})['result']['handle']
             engine.call('buffer.chunk', {'handle': handle, 'offset': 0, 'byte_length': len(data)}, data)
             assert engine.call('buffer.commit', {'handle': handle})['status'] == 'ok'

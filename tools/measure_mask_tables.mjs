@@ -1,49 +1,39 @@
-// Card M8.4.16 step 7: how many objects and overlap stacks fit the metadata limits of the engine contract (§3, §8.7), measured with the page's own
-// table builders (`maskTables`), not estimated. Writes a JSON record.
-//   node tools/measure_mask_tables.mjs --out docs/validation/M8.4.16-step7-mask-tables.json
+// Cards M8.4.16 step 7 and M8.4.22: how many objects and overlap stacks fit the limits of the stored tables (contract §8.7), measured with the
+// page's own table builder (`maskTables`) and limit check (`tableLimit`), not estimated. Writes a JSON record.
+//   node tools/measure_mask_tables.mjs --out docs/validation/M8.4.22-mask-tables.json
 import fs from 'node:fs';
 import os from 'node:os';
-import { maskTables } from '../app/js/tiledsync.js';
+import { maskTables, tableLimit, MAX_OBJECTS, MAX_STACK_BYTES } from '../app/js/tiledsync.js';
 
-const LIMITS = { records: 65536, metadataBytes: 4 * 2 ** 20, stackBytes: 16 * 2 ** 20 };
 const out = process.argv.includes('--out') ? process.argv[process.argv.indexOf('--out') + 1] : null;
 const uid = () => Math.random().toString(36).slice(2, 9);                          // the page's class identifiers (state.js)
 const classes = ['burrow', 'planolites', 'thalassinoides', 'chondrites', 'skolithos', 'other'].map((name) => ({ id: uid(), name, counts: true }));
 
-/** A section with `n` objects, a share of them classified (class id), predicted or neither, and `k` stacks of 2-4 members. */
-function section(n, stacks, classified = 1) {
+/** A section with `n` objects (half classified by hand, half only predicted) and `k` stacks of 2-4 members. */
+function section(n, k) {
   const objects = new Map();
   for (let id = 1; id <= n; id++) {
-    const c = classes[id % classes.length].id, labelled = Math.random() < classified;
-    objects.set(id, { id, cls: labelled ? c : null, pred: !labelled ? c : null, conf: !labelled ? Math.round(Math.random() * 1e6) / 1e6 : 0 });
+    const c = classes[id % classes.length].id, byHand = id % 2 === 0;
+    objects.set(id, { id, cls: byHand ? c : null, pred: byHand ? null : c, conf: byHand ? 0 : (id % 1000) / 1000 });
   }
-  const list = [null];
-  for (let k = 1; k <= stacks; k++) list.push(Array.from({ length: 2 + (k % 3) }, (_, m) => 1 + ((k * 7 + m * 13) % n)));
-  return { objects, stacks: list };
+  const stacks = [null];
+  for (let s = 1; s <= k; s++) stacks.push(Array.from({ length: 2 + (s % 3) }, (_, m) => 1 + ((s * 7 + m * 13) % Math.max(1, n))));
+  return { objects, stacks };
 }
-const size = (n, stacks, classified) => {
-  const t = maskTables(section(n, stacks, classified), classes);
-  return { objects: t.objects.length, classes: t.classes.length, stack_offsets: t.stack_offsets.length, stack_members: t.stack_members?.length ?? 0 };
+const measure = (n, k) => {
+  const started = performance.now(), tables = maskTables(section(n, k), classes), ms = performance.now() - started;
+  const bytes = Object.fromEntries(Object.entries(tables).map(([name, data]) => [name, data?.length ?? 0]));
+  return { objects: n, stacks: k, bytes, objectBytes: bytes.object_ids + bytes.object_class + bytes.object_predicted + bytes.object_confidence,
+    buildMs: Math.round(ms), limit: tableLimit(tables) };
 };
 
-const rows = [];
-for (const n of [1000, 10000, 50000, 65536]) for (const classified of [1, 0]) rows.push({ objects: n, stacks: 0, classified, ...size(n, 0, classified) });
-// The largest object count that fits both limits, found by doubling and bisection for each shape of record.
-const fits = (classified) => {
-  let lo = 1, hi = LIMITS.records;
-  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (size(mid, 0, classified).objects <= LIMITS.metadataBytes) lo = mid; else hi = mid - 1; }
-  return lo;
-};
-const maxClassified = fits(1), maxPredicted = fits(0);
-const stackRows = [];
-for (const k of [1000, 100000, 1000000]) stackRows.push({ stacks: k, ...size(1000, k, 1) });
-// Per table (each has its own 16 MiB cap): offsets take 4 bytes per stack, members 4 bytes per member; the test stacks have 2-4 members (3 on average).
-const stacksByOffsets = Math.floor((LIMITS.stackBytes - 4) / 4), stacksByMembers = Math.floor(LIMITS.stackBytes / (4 * 3));
+const rows = [1000, 65536, MAX_OBJECTS, MAX_OBJECTS + 1].map((n) => measure(n, 0));
+const stackRows = [1000, 1_000_000].map((k) => measure(1000, k));
 const record = {
-  date: new Date().toISOString(), computer: `${os.type()} ${os.release()}, ${os.cpus()[0].model}, ${Math.round(os.totalmem() / 2 ** 30)} GiB`, limits: LIMITS,
-  objectTable: rows, largestObjectCount: { classifiedByHand: maxClassified, predictedOnly: maxPredicted, bytesPerRecordClassified: size(maxClassified, 0, 1).objects / maxClassified },
-  stackTables: stackRows, stacksByOffsets, stacksByMembers, stacksWithinLimits: Math.min(stacksByOffsets, stacksByMembers),
-  recordLimitBinds: maxClassified >= LIMITS.records && maxPredicted >= LIMITS.records,
+  date: new Date().toISOString(), computer: `${os.type()} ${os.release()}, ${os.cpus()[0].model}, ${Math.round(os.totalmem() / 2 ** 30)} GiB`, node: process.version,
+  limits: { objects: MAX_OBJECTS, stackBytes: MAX_STACK_BYTES }, objectTable: rows, stackTables: stackRows,
+  bytesPerObject: rows[2].objectBytes / MAX_OBJECTS, largestObjectCount: MAX_OBJECTS,
+  stacksWithinLimits: { byOffsets: Math.floor((MAX_STACK_BYTES - 4) / 4), byMembersOf3: Math.floor(MAX_STACK_BYTES / 12) },
 };
 console.log(JSON.stringify(record, null, 2));
 if (out) fs.writeFileSync(out, JSON.stringify(record, null, 2) + '\n');

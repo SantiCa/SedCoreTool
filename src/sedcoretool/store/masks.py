@@ -2,7 +2,8 @@
 
 The masks of a tiled section are project data in ``<projects>/<project>/tiles/``: every mask tile (labels ``i32le`` or exclusion ``u8``,
 512 x 512 samples) and every table (objects, classes, overlap stacks) is a *blob*, stored zlib-compressed under the SHA-256 of its
-uncompressed bytes, and one *manifest* (canonical JSON, named by its own SHA-256) lists the blobs of one version of one section. All-zero
+uncompressed bytes, and one *manifest* (canonical JSON, named by its own SHA-256) lists the blobs of one version of one section. The objects
+are four binary columns (card M8.4.22: up to 2^20 objects), checked against each other and the classes table when they are committed. All-zero
 layers are not stored. Blobs and manifests are immutable and written through a temporary file that is flushed and renamed, so a stopped
 engine leaves every earlier manifest readable. A blob or manifest is used only after its bytes have been checked against its name
 (ARCHITECTURE §3.4 rule 3).
@@ -13,23 +14,34 @@ from __future__ import annotations
 import errno
 import hashlib
 import json
+import math
 import os
 import re
+import sys
 import zlib
+from array import array
 from collections import OrderedDict
 from pathlib import Path
 from uuid import uuid4
 
 FORMAT = 'sedcoretool.masks'
-VERSION = 1
+VERSION = 2                                     # 1 (utf8json objects table) is refused: no project named a version 1 manifest (card M8.4.22)
 TILE = 512
 SAMPLE_BYTES = {'labels': 4, 'exclude': 1}
 LAYER_BYTES = {layer: TILE * TILE * item for layer, item in SAMPLE_BYTES.items()}
-TABLES = ('objects', 'classes', 'stack_offsets', 'stack_members')
-TABLE_DTYPES = {'objects': 'utf8json', 'classes': 'utf8json', 'stack_offsets': 'u32le', 'stack_members': 'u32le'}
-REQUIRED_TABLES = ('objects', 'classes', 'stack_offsets')
+OBJECT_COLUMNS = ('object_ids', 'object_class', 'object_predicted', 'object_confidence')
+TABLES = (*OBJECT_COLUMNS, 'classes', 'stack_offsets', 'stack_members')
+TABLE_DTYPES = {'object_ids': 'u32le', 'object_class': 'i32le', 'object_predicted': 'i32le', 'object_confidence': 'f64le',
+                'classes': 'utf8json', 'stack_offsets': 'u32le', 'stack_members': 'u32le'}
+ITEM_BYTES = {'u32le': 4, 'i32le': 4, 'f64le': 8, 'utf8json': 1}
+NULLABLE_TABLES = (*OBJECT_COLUMNS, 'stack_members')   # the object columns together (no objects), stack_members alone (no overlap)
+REQUIRED_TABLES = (*OBJECT_COLUMNS, 'classes', 'stack_offsets')
+MAX_OBJECTS = 2**20
 MAX_METADATA_BYTES = 4 * 2**20
 MAX_STACK_BYTES = 16 * 2**20
+TABLE_LIMITS = {**{name: MAX_OBJECTS * ITEM_BYTES[TABLE_DTYPES[name]] for name in OBJECT_COLUMNS}, 'classes': MAX_METADATA_BYTES,
+                'stack_offsets': MAX_STACK_BYTES, 'stack_members': MAX_STACK_BYTES}
+MAX_OBJECT_ID = 2**31 - 1                        # a positive label (i32)
 MAX_WIDTH = 262_144
 MAX_HEIGHT = 16_777_216
 MAX_POSITIONS = 262_144
@@ -103,10 +115,50 @@ def tile_is_empty(layer: str, row: int, col: int, data: bytes, width: int, heigh
 def table_length_ok(name: str, byte_length) -> bool:
     if type(byte_length) is not int:
         return False
-    if TABLE_DTYPES[name] == 'utf8json':
-        return 1 <= byte_length <= MAX_METADATA_BYTES
-    minimum = 8 if name == 'stack_offsets' else 4
-    return minimum <= byte_length <= MAX_STACK_BYTES and byte_length % 4 == 0
+    item = ITEM_BYTES[TABLE_DTYPES[name]]
+    minimum = 8 if name == 'stack_offsets' else item
+    return minimum <= byte_length <= TABLE_LIMITS[name] and byte_length % item == 0
+
+
+def _column(name: str, data: bytes) -> array:
+    values = array({'u32le': 'I', 'i32le': 'i', 'f64le': 'd'}[TABLE_DTYPES[name]])
+    if values.itemsize != ITEM_BYTES[TABLE_DTYPES[name]]:      # never on the supported platforms; refuse rather than misread
+        raise MaskError('INTERNAL', name)
+    values.frombytes(data)
+    if sys.byteorder == 'big':
+        values.byteswap()
+    return values
+
+
+def check_objects(columns: dict, classes: bytes) -> None:
+    """Check the object columns against each other and the classes table (contract §8.7); ``MaskError`` with the column's name otherwise.
+    ``columns`` maps every name of ``OBJECT_COLUMNS`` to bytes, or every one to None (no objects)."""
+    try:
+        records = json.loads(classes.decode('utf-8'), parse_constant=_reject_constant)
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        raise MaskError('INVALID_BUFFER', 'tables.classes') from None
+    if not isinstance(records, list):
+        raise MaskError('INVALID_BUFFER', 'tables.classes')
+    present = [columns[name] is not None for name in OBJECT_COLUMNS]
+    if not any(present):
+        return
+    if not all(present):
+        raise MaskError('INVALID_REQUEST', 'tables.' + OBJECT_COLUMNS[present.index(False)])
+    counts = {name: len(columns[name]) // ITEM_BYTES[TABLE_DTYPES[name]] for name in OBJECT_COLUMNS}
+    if counts['object_ids'] > MAX_OBJECTS:
+        raise MaskError('LIMIT_EXCEEDED', 'tables.object_ids')
+    for name in OBJECT_COLUMNS[1:]:
+        if counts[name] != counts['object_ids']:
+            raise MaskError('INVALID_BUFFER', f'tables.{name}')
+    ids = _column('object_ids', columns['object_ids'])
+    if min(ids) < 1 or max(ids) > MAX_OBJECT_ID or len(set(ids)) != len(ids):
+        raise MaskError('INVALID_BUFFER', 'tables.object_ids')
+    for name in ('object_class', 'object_predicted'):
+        values = _column(name, columns[name])
+        if min(values) < -1 or max(values) >= len(records):
+            raise MaskError('INVALID_BUFFER', f'tables.{name}')
+    if not all(math.isfinite(c) and 0 <= c <= 1 for c in _column('object_confidence', columns['object_confidence'])):
+        raise MaskError('INVALID_BUFFER', 'tables.object_confidence')
 
 
 def canonical(manifest: dict) -> bytes:
@@ -121,6 +173,8 @@ def check_manifest(value) -> dict[tuple[int, int], dict]:
     """Check a parsed manifest against every rule of contract §8.7; returns its tiles keyed by ``(row, col)``. Raises ``MaskError``."""
     def bad():
         return MaskError('INVALID_BUFFER', 'manifest')
+    if isinstance(value, dict) and value.get('format') == FORMAT and type(value.get('version')) is int and value['version'] < VERSION:
+        raise MaskError('UNSUPPORTED_INPUT', 'manifest.version')       # version 1: objects as JSON, never named by a project (card M8.4.22)
     if not isinstance(value, dict) or set(value) != {'format', 'version', 'section', 'width', 'height', 'tile', 'tiles', 'tables'}:
         raise bad()
     if value['format'] != FORMAT or type(value['version']) is not int or value['version'] != VERSION or type(value['tile']) is not int \
@@ -145,11 +199,17 @@ def check_manifest(value) -> dict[tuple[int, int], dict]:
         out[(row, col)] = entry
     for name in TABLES:
         table = tables[name]
-        if table is None and name == 'stack_members':
+        if table is None and name in NULLABLE_TABLES:
             continue
         if not isinstance(table, dict) or set(table) != {'sha256', 'byte_length'} or not isinstance(table['sha256'], str) \
                 or not HEX64.fullmatch(table['sha256']) or not table_length_ok(name, table['byte_length']):
             raise bad()
+    columns = [tables[name] for name in OBJECT_COLUMNS]
+    if any(column is None for column in columns):
+        if any(column is not None for column in columns):
+            raise bad()
+    elif len({column['byte_length'] // ITEM_BYTES[TABLE_DTYPES[name]] for column, name in zip(columns, OBJECT_COLUMNS)}) != 1:
+        raise bad()
     return out
 
 
@@ -341,18 +401,25 @@ class Staging:
         return not empty
 
     def commit(self, tables: dict) -> str:
-        """Write the given tables (``name -> bytes``, or None for ``stack_members`` only), then the manifest; returns its SHA-256.
-        A table left out keeps the base's; without a base, objects, classes and stack offsets are required."""
+        """Write the given tables (``name -> bytes``, or None for a nullable table), then the manifest; returns its SHA-256.
+        A table left out keeps the base's. The four object columns and ``classes`` are given together or not at all, and are checked against
+        each other before anything is written; without a base they, and ``stack_offsets``, are required."""
         merged = dict(self.tables) if self.tables else {'stack_members': None}
         for name, data in tables.items():
-            if name not in TABLES or (data is None and name != 'stack_members'):
+            if name not in TABLES or (data is None and name not in NULLABLE_TABLES):
                 raise MaskError('INVALID_REQUEST', f'tables.{name}' if name in TABLES else 'tables')
+            if data is not None and not table_length_ok(name, len(data)):
+                raise MaskError('LIMIT_EXCEEDED' if len(data) > TABLE_LIMITS[name] else 'INVALID_BUFFER', f'tables.{name}')
+        objects = [name for name in (*OBJECT_COLUMNS, 'classes') if name in tables]
+        if objects:
+            if len(objects) != len(OBJECT_COLUMNS) + 1:
+                missing = next(name for name in (*OBJECT_COLUMNS, 'classes') if name not in tables)
+                raise MaskError('INVALID_REQUEST', f'tables.{missing}')
+            check_objects({name: tables[name] for name in OBJECT_COLUMNS}, tables['classes'])
+        for name, data in tables.items():
             if data is None:
                 merged[name] = None
                 continue
-            if not table_length_ok(name, len(data)):
-                limit = MAX_METADATA_BYTES if TABLE_DTYPES[name] == 'utf8json' else MAX_STACK_BYTES
-                raise MaskError('LIMIT_EXCEEDED' if len(data) > limit else 'INVALID_BUFFER', f'tables.{name}')
             sha256 = hashlib.sha256(data).hexdigest()
             write_or_disk_error(self.store.write_blob, bytes(data), sha256, 'table')
             merged[name] = {'sha256': sha256, 'byte_length': len(data)}

@@ -20,6 +20,12 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.22: the store keeps the objects of a tiled section as four binary columns (contract §8.7, manifest version 2), so a tiled section
+  can hold up to 1,048,576 objects instead of about 51,000-56,000; the engine checks the columns against each other and the classes before
+  writing anything, and refuses version 1 manifests with its own code. Beyond a limit the page now says so once and stops sending until the
+  count drops, instead of retrying every 30 s. Python tests (exact round trip of 2^20 objects, eight hostile columns, version 1), Node tests
+  (columns, limits, a round beyond a limit sends nothing) and the bridge test through the real engine
+  ([measurement](docs/validation/M8.4.22-mask-tables.json)).
 - Card M8.4.16, step 8: `tests/e2e/tiled-sections.mjs` opens the same image whole and as a tiled section at factor 1 and makes the same scripted edits on both with the real mouse: labels, exclusion, objects, overlapping sets and statistics are identical (sums of luminance within a relative 1e-12). The test found that the browser's JPEG decoder and libvips differ slightly, so it compares a lossless copy; the program has a test hook `forceTiledSections`. Card M8.4.16 is closed at the development gate.
 - Roadmap: card M8.4.22 (objects table of tiled sections beyond 4 MiB, as binary columns, up to 1,048,576 objects) added before M8.4.18.
 - Card M8.4.16, step 7: the metadata limits measured with the page's own table builders (`tools/measure_mask_tables.mjs`): the 4 MiB cap of the objects table binds at about 51,000-56,000 objects, before the 65,536-record cap ([evidence](docs/validation/M8.4.16-step7-mask-tables.json)); the contract is unchanged.

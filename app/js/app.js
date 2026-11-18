@@ -824,14 +824,16 @@ function maskSync(s) {
     commit: async (staged, tables) => (await bridgeResult(TILES.maskCommit(staged, tables))).manifest,
     discard: (staged) => bridgeResult(TILES.maskDiscard(staged)),
   };
-  let failing = false;
+  let failing = false, limited = false;
   const recover = async () => {
     const desktopEngine = /** @type {any} */ (window).corantoolDesktop.engine;
     if ((await desktopEngine.status()).state !== 'ready') await desktopEngine.restart({ automatic: true });
   };
   s._maskSync = new MaskSync({ tiles: s.maskTiles, api, tables: () => maskTables(s, S.classes), sha256: hexDigest, recover,
-    onState: ({ state }) => {
+    onState: ({ state, error }) => {
+      if (state === 'limit' && !limited) { limited = true; toast(t('tiles.storeLimit', { field: error.field, n: error.limit }), 12000); }
       if (state === 'failed' && !failing) { failing = true; toast(t('tiles.masksUnsent'), 9000); }
+      if (state === 'stored') limited = false;
       if (state === 'stored' && failing) { failing = false; toast(t('tiles.masksSent')); void s._statsRunner?.retry(); }
     } });
   return s._maskSync;

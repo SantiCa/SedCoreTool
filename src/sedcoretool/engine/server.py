@@ -347,18 +347,19 @@ class Coordinator:
                 'frames': [len(part) for part in self.attachments]}
 
     def mask_tables(self, tables):
-        """The bytes of the committed buffers named in ``mask.commit`` (None for ``stack_members: null``), checked against their dtypes."""
+        """The bytes of the committed buffers named in ``mask.commit`` (None for a nullable table: no objects, no overlap), checked against
+        their dtypes and limits (contract §8.7)."""
         if not isinstance(tables, dict) or not set(tables) <= set(self.masks.TABLES):
             raise RequestError('INVALID_REQUEST', 'tables')
         out = {}
         for name, handle in tables.items():
-            if handle is None and name == 'stack_members':
+            if handle is None and name in self.masks.NULLABLE_TABLES:
                 out[name] = None
                 continue
             value = self.store.get(handle, committed=True)
             if value.dtype != self.masks.TABLE_DTYPES[name] or len(value.shape) != 1:
                 raise RequestError('INVALID_BUFFER', f'tables.{name}')
-            if value.length > (self.masks.MAX_METADATA_BYTES if value.dtype == 'utf8json' else self.masks.MAX_STACK_BYTES):
+            if value.length > self.masks.TABLE_LIMITS[name]:
                 raise RequestError('LIMIT_EXCEEDED', f'tables.{name}')
             data = value.path.read_bytes()
             if len(data) != value.length or hashlib.sha256(data).hexdigest() != value.expected_hash:

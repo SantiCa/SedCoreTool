@@ -82,7 +82,7 @@ Updated 16 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: card M8.4.22** (objects table of tiled sections beyond 4 MiB; **model: most capable, effort high**; the maintainer approves its decision first), then M8.4.17 (interval table of tiled sections). Card M8.4.16 is closed at the development gate (steps 1-8); its milestone gate is the GitHub run of the closing commit on three systems. The card's detailed steps and decisions A-E were written on 17 November 2026 and approved by the maintainer as written the same day (commit `b2b4cdc`, whose `tests` and *Desktop builds* passed on Windows, macOS and Linux). Step 1 (mask store format, contract §8.7, and the engine's mask operations) was done on 17 November 2026; step 2 (the page's mask tiles, the reduced overview masks and the mask layer over pixel tiles, `app/js/tiledmasks.js`) step 3 (strokes on an edit window, statistics per tile, `app/js/tiledit.js`) step 4 (background sending to the store and recovery, `app/js/tiledsync.js`) step 5 (undo and redo by tile copies, `app/js/tiledundo.js`) and step 6 (wand, lasso, scissors and object operations on edit windows) and step 7 (metadata limits measured) on 18 November 2026; their checks are below. M8.4.15 was done on 17 November 2026 ([summary](validation/M8.4.15-summary.md)); its first-view target needed the identity record of the tile store, chosen by the maintainer (option 1). Card H7 (16-bit images above about 28 megapixels killed the page) was done on 17 November 2026 at the maintainer's request, between steps 4 and 5. **Checkpoint of 17 November 2026:** commit `ccffe7c`; on Windows `npm test` 402 passed, typecheck, standalone build, `tests/e2e/desktop.mjs` (engine off), `tests/e2e/tiled-sections.mjs` (public example and `rgb2g`) and `tests/e2e/large-16bit-desktop.mjs`; GitHub `tests` and *Desktop builds* passed on Windows, macOS and Linux (the macOS `web-app` job needed three attempts: GitHub had no macOS arm64 runner free, "not acquired by Runner"). The full session checks (pytest, ruff, smoke) were not repeated: no Python changed since the last full run. M8.4.14 was done on 17 November 2026 ([summary](validation/M8.4.14-summary.md)). The design session of part C was held on 16 November 2026: decisions in
+- **Next step: M8.4.17** (interval table of tiled sections; it reads the object columns of M8.4.22). Cards M8.4.16 (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux) and M8.4.22 (development gate) are done.
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -101,6 +101,7 @@ Updated 16 November 2026.
   from it (item above), which also answers the timing question of 14 November. Decided on 13 November 2026: acceptance levels (accepted),
   scope of 1.0 (below), publication of V0.149. Decided on 14 November 2026: a milestone gate on macOS and Linux closes every milestone; the
   five decisions of M8.4 (answers recorded there, among them **multi-gigabyte images are required for 1.0**).
+- **Checks of M8.4.22 (18 November 2026, maintainer's Windows computer):** `pytest -q` 861 passed / 9 skipped; `npm test` 432 passed; `npm run typecheck`; `ruff check src tests tools`; `sync_version.py --check`; standalone build; runtime rebuilt (`npm run prepare-runtime -- --offline`: needed after editing the engine's Python, or the engine stays `unavailable`); `tests/e2e/desktop.mjs` with the engine off and on; `tests/e2e/tiled-sections.mjs` passed twice. Its first run after the rebuild failed once in the M8.4.15 viewer probe ("drawn pixel = source pixel" at screen 230, 570: drawn 106, 79, 35 against 14, 14, 14); not reproduced in the two following runs, recorded as an incident. GitHub on `4654ce0` (M8.4.16 step 8): `tests` and *Desktop builds* passed on Windows, macOS and Linux, the milestone gate of card M8.4.16.
 - **Full checks of M8.4.16 closing (18 November 2026, maintainer's Windows computer):** `pytest -q` 848 passed / 9 skipped (Python 3.12, Anaconda); `npm test` 431 passed; `npm run typecheck`; `sync_version.py --check`; `ruff check src tests tools`; standalone build; `tests/e2e/desktop.mjs` with the engine off and on; `tests/e2e/tiled-sections.mjs` including the exact-equality block. Not run: `smoke.mjs`, the viewer measurement after step 6. GitHub: `d3ec007` `tests` passed; *Desktop builds* of `bdd1b14` and `d51a53e` were cancelled by the next push (not failures), so the milestone gate waits for a run that finishes on the closing commit.
 - **Checks of M8.4.16 step 7 (18 November 2026, maintainer's Windows computer):** `node tools/measure_mask_tables.mjs` run once (synthetic records, no image); no code of the program changed. GitHub on `bdd1b14` (step 6): `tests` passed; *Desktop builds* see the next line when finished.
 - **Checks of M8.4.16 step 6 (18 November 2026, maintainer's Windows computer):** `npm test` 431 passed (4 new in `tests/app/tiledops.test.mjs`);
@@ -1190,7 +1191,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
      exists yet to justify a larger cap, and the same 4 MiB cap protects the analysis path. **Open (maintainer):** a tiled section with more than
      about 51,000-56,000 objects cannot commit its tables; the page would show "did not reach the store" and retry every 30 s without end. A
      later card must either raise the cap for `objects` in §8.7 or make the page say that the limit was reached; the number to decide with is above.
-     Card M8.4.22 (added 18 November 2026 at the maintainer's request) does both.
+     Card M8.4.22 (added 18 November 2026 at the maintainer's request) does both; done the same day.
   8. **Done 18 Nov 2026.** **Exact equality and closing** [fast, medium]: a small image opened both ways (whole, and forced tiled with a section factor of 1) with the same
      scripted edit sequence gives identical labels, exclusion, objects and stacks; tool gating of M8.4.15 updated (the editing tools leave the refused
      list); documents.
@@ -1222,7 +1223,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   4 tiles p95 <= 150 ms; interval-size change for all sections p95 <= 300 ms (re-binning only); a settings change that changes effective
   classes recounts every tile: measured on `rgb8g`, shown with progress and cancellable (no target yet: report it).
 
-##### M8.4.22 - Objects table of tiled sections beyond 4 MiB — state: Ready after M8.4.16; before M8.4.18 (added 18 Nov 2026 at the maintainer's request)
+##### M8.4.22 - Objects table of tiled sections beyond 4 MiB — state: Done (18 Nov 2026, development gate); decision approved by the maintainer on 18 Nov 2026 as written
 
 - **Goal:** a tiled section keeps up to 1,048,576 objects in the store (today about 51,000-56,000: the 4 MiB cap of `utf8json` metadata binds
   first, measured in M8.4.16 step 7, [evidence](validation/M8.4.16-step7-mask-tables.json)); when a limit is reached anyway the page says so once
@@ -1249,6 +1250,14 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
      objects than the store accepts (limit …)" once, keeps the masks in the page and stops the rounds until the count drops. Node tests at the
      limits (2^20 objects pass, 2^20 + 1 refuse without a request to the engine).
   3. Measure again with `tools/measure_mask_tables.mjs` (columns) and run the step-4 desktop test of M8.4.16 unchanged.
+- *As built (18 November 2026):* steps 1-3 in one commit. Contract §8.7 version 2; `store/masks.py` (`OBJECT_COLUMNS`, `check_objects`,
+  `TABLE_LIMITS`, `NULLABLE_TABLES`), `engine/server.py`, `desktop/tile-ipc.js`, `app/js/tiledsync.js` (`maskTables`, `tableLimit`, state
+  `limit`), `app/js/app.js` (the message), `tools/measure_mask_tables.mjs`. The page maps a class identifier the classes table does not hold to
+  -1 rather than failing every round. **Measured** ([evidence](validation/M8.4.22-mask-tables.json)): 20 bytes per object; 2^20 objects pass
+  the page's check and 2^20 + 1 are refused without a request; building the tables takes 9 ms for 65,536 objects and 0.24 s for 2^20 on the
+  page's thread, once per round, so a section near the limit has a visible pause of that length every time its masks are sent (not optimised
+  here). M8.4.17 reads the same columns. Tests: `tests/test_store_masks.py` (42), `tests/test_engine_masks.py`, `tests/app/tiledsync.test.mjs`
+  (7), `tests/app/engine.test.mjs`.
 - **Tests and acceptance:** Python and Node tests above; `tests/e2e/tiled-sections.mjs` passes; contract, technical manual and changelog
   updated in the same commit; development gate on Windows.
 
