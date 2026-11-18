@@ -3081,8 +3081,8 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
 - **Tiled sections in the interface** (behind the same flag): an image added through the interface whose header says it has more pixels than the
   maximum size when adding images gets a pyramid (a dialog shows the progress and can cancel) and becomes a section whose working image is the
   finest pyramid level within that size. Such a section is not saved in the project yet, has no interval table yet, keeps the default filters, and
-  tools that would decode the source (crop, rotation, resolution) refuse with a message, as do the wand, the lasso and the scissors (card M8.4.16
-  step 6).
+  actions that would decode the source (detection, crop, rotation, resolution, filters) refuse with a message. Every tool of the toolbar works
+  (below).
 - **Strokes on tiled sections** (`tiledit.js`, `startTiledStroke` and the following functions in `app.js`; card M8.4.16 step 3): brush, erase,
   exclude and include (free hand and the exclusion rectangle) edit the masks at full resolution. A stroke runs today's code (`paintAt`, `addPx`,
   `setLabel`, `setEx`) on an *edit window*: the level-0 mask tiles that cover the visible part of the section plus a margin of
@@ -3112,6 +3112,19 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   statistics need them (a stroke over a tile not read back yet asks to try again in a moment). The edit window pins its tiles, and writes a layer
   the tile does not hold as a whole. Until card M8.4.18 the project record does not name the stored version, so closing the program still loses
   a tiled section.
+- **Wand, lasso, scissors and object operations on tiled sections** (`planWindows`, `pinRanges`, `toWindowRect`, `windowRgba` in `tiledit.js`;
+  `tiledPlan` and the following functions in `app.js`; card M8.4.16 step 6): each runs today's function (`regionGrow`, `polygonPixels`,
+  `splitPieces`, `subPx`, `renameId`, `sameTaxonGroups`) on edit windows of whole level-0 tiles and copies back what it wrote, at full
+  resolution: the **lasso** on the window of its polygon's box (vertices times `ds`, pixel centres inside, clipped to the analysis area); the
+  **wand** on the window of the visible area, over the level-0 pixels read through the engine (a region stops at the edge of that window); the
+  **scissors** draw a line 3 source pixels wide and split the object on the window of its source box; **delete**, **clear candidates**,
+  **merge** and the merge of overlapping objects of one ichnotaxon after a **class change** (V0.30) work object by object on the window of each
+  object's source box (`sbox`), so the objects of one operation may lie anywhere in the section. A window has at most 96 tiles: a lasso or wand
+  beyond it asks to zoom in, an object whose box is larger refuses ("This object is too large to edit at once…"). Every window of an operation
+  is planned and its tiles pinned before anything is written; tiles the page dropped are read back first ("try again in a moment"); an
+  operation that reads objects' boxes waits until their statistics are current ("The objects of this large section are being computed…").
+  Each operation is one undo step (tile copies, below). On a window these functions give exactly what they give on the whole image, shifted by
+  the window's origin (`tests/app/tiledops.test.mjs`).
 - **Undo and redo of tiled edits** (`tiledundo.js`, `commitTiledOp` and `swapTiledStep` in `app.js`; card M8.4.16 step 5): a stroke or an
   exclusion rectangle on a tiled section is one step of the usual Undo/Redo history. Instead of a pixel log the step keeps a copy of each mask tile
   (both layers; an all-zero layer is kept as nothing) as it was just before the edit first wrote it. Undo and redo swap those copies with the

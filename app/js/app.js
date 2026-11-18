@@ -29,7 +29,7 @@ import { figTabsData, loadFigTabs, renderFigPanel, renderFigure, resetFigTabs, s
 import { assembleLevel, imageDimensions, levelPositions, proxyLevel, tileRgba, TILE } from './tiledsection.js';
 import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlacement, tileRange, tilesByDistance } from './tilecache.js';
 import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks.js';
-import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, windowRange } from './tiledit.js';
+import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, windowRange, planWindows, pinRanges, toWindowRect, windowRgba } from './tiledit.js';
 import { MaskLoader, MaskSync, maskTables } from './tiledsync.js';
 import { TileChanges, trimTileHistory } from './tiledundo.js';
 import { renderData } from './datatab.js';
@@ -382,9 +382,9 @@ function pickCore(n) {
 const TILES = /** @type {any} */ (window).corantoolDesktop?.tiles?.enabled === true ? /** @type {any} */ (window).corantoolDesktop.tiles : null;
 
 /* Tools that a tiled section does not have yet (ARCHITECTURE §3.4 decision 8). Each refusal shows the one message `tiles.unavailable`.
-   Available: select, pan, mark, the analysis area, and the strokes of brush, erase, exclude and include (card M8.4.16 step 3). Wand, lasso and
-   scissors arrive with step 6; detection, crop, rotation, resolution and filters need the whole image (M8.5). */
-const TILED_BLOCKED_TOOLS = new Set(['wand', 'lasso', 'cut']);
+   Every tool of the toolbar works on a tiled section since card M8.4.16 step 6; detection, crop, rotation, resolution and filters, which are
+   not tools of the toolbar, need the whole image (M8.5) and refuse where they are started. */
+const TILED_BLOCKED_TOOLS = new Set();
 function tiledRefused(s) { if (!s?.tiled) return false; toast(t('tiles.unavailable')); return true; }
 
 /** The working image of a tiled section: its proxy level of the pyramid, read through the engine in batches of 16 verified tiles. */
@@ -470,14 +470,21 @@ function tiledEditWindow(s, rect, ring) {
 
 /** The section with the window's masks in place of its own: today's editing code writes through it (the stack index stays the section's). */
 function windowSection(s, win) {
+  const shared = (key) => ({ get: () => s[key], set: (value) => { s[key] = value; } });
   return Object.create(s, { labels: { value: win.labels }, exclude: { value: win.exclude }, w: { value: win.w }, h: { value: win.h },
-    _six: { get: () => s._six, set: (value) => { s._six = value; } } });
+    _six: shared('_six'), nextId: shared('nextId'), nextTraceOrder: shared('nextTraceOrder') });
+}
+
+/** The visible part of a tiled section in source pixels (half-open), or null. */
+function visibleSource(s) {
+  const ds = s.ds, { x: vx, y: vy, zoom: z } = S.view;
+  const r = { x0: Math.max(0, vx) * ds, y0: Math.max(0, vy) * ds, x1: Math.min(s.w, vx + canvasSize().w / z) * ds, y1: Math.min(s.h, vy + canvasSize().h / z) * ds };
+  return r.x1 > r.x0 && r.y1 > r.y0 ? r : null;
 }
 
 function startTiledStroke(s, p, e, tool) {
-  const ds = s.ds, radius = S.brushSize * ds, { x: vx, y: vy, zoom: z } = S.view;
-  const visible = { x0: Math.max(0, vx) * ds, y0: Math.max(0, vy) * ds, x1: Math.min(s.w, vx + canvasSize().w / z) * ds, y1: Math.min(s.h, vy + canvasSize().h / z) * ds };
-  if (visible.x1 <= visible.x0 || visible.y1 <= visible.y0) return;
+  const ds = s.ds, radius = S.brushSize * ds, visible = visibleSource(s);
+  if (!visible) return;
   const win = tiledEditWindow(s, visible, Math.max(1, Math.ceil(radius / TILE)));
   if (!win) return;
   const op = beginOp(s); op.mode = tool; op.lm = NO_PIXEL_LOG; op.ex = NO_PIXEL_LOG; op.win = win; op.section = s; op.radius = radius;
@@ -563,21 +570,207 @@ function swapTiledStep(op) {
   void tiledStatsRunner(s).queue([...around.values()], op.objs.keys());
 }
 
+/* Wand, lasso, scissors and object operations on a tiled section (card M8.4.16 step 6, decisions A-B): today's code runs on edit windows, one
+   per object box (`o.sbox`), the lasso's box or the visible area for the wand, seen through `windowSection`; what it wrote is copied back into
+   the tiles (copied first for undo) and the statistics of the tiles around it are recomputed. Every window of an operation is checked before
+   anything is written: a box of more than WINDOW_TILES tiles refuses, tiles the page dropped are read back first, and an operation that reads
+   objects' boxes waits until their statistics are current ("try again in a moment"). */
+const sourceBox = (o) => (o?.sbox ? { x0: o.sbox[0], y0: o.sbox[1], x1: o.sbox[2] + 1, y1: o.sbox[3] + 1 } : null);
+
+/** The windows of an operation on these source rectangles, or null after telling the user why it cannot run now. */
+function tiledPlan(s, rects, { boxes = true, tooLarge = 'tiles.boxTooLarge' } = {}) {
+  const runner = s._statsRunner;
+  if (boxes && ((runner && (!runner.idle || runner.failed.size)) || rects.some((r) => !r))) { void runner?.retry(); toast(t('tiles.busy')); return null; }
+  const plan = planWindows(s.maskTiles, rects);
+  if (plan.tooLarge) { toast(t(tooLarge, { n: WINDOW_TILES })); return null; }
+  if (plan.missing.length) { void maskLoader(s).want(plan.missing).catch(() => {}); toast(t('tiles.loadingMasks')); return null; }
+  return plan;
+}
+
+function tiledOp(s, group = '') {
+  const op = beginOp(s, group);
+  Object.assign(op, { section: s, lm: NO_PIXEL_LOG, ex: NO_PIXEL_LOG, tiles: new TileChanges(s.maskTiles), boxes: [] });
+  return op;
+}
+
+/** Open an edit window of `range` for `op`: today's code then writes through `op.s`. */
+function openEditWindow(op, range) {
+  const win = new EditWindow(op.section.maskTiles, range);
+  op.s = windowSection(op.section, win);
+  return win;
+}
+
+/** Copy what the window may have written inside `rect` (source, half-open) back into the tiles and the reduced copy; close the window. */
+function closeEditWindow(op, win, rect) {
+  const s = op.section, r = toWindowRect(win, rect);
+  if (r.x1 > r.x0 && r.y1 > r.y0) {
+    for (const [row, col] of win.writeBack({ x0: r.x0, y0: r.y0, x1: r.x1 - 1, y1: r.y1 - 1 }, (row, col) => op.tiles.capture(row, col))) {
+      const entry = s.maskTiles.get(row, col);
+      reduceTile(s, s.ds, row, col, entry?.labels || null, entry?.exclude || null);
+    }
+    op.boxes.push({ x0: r.x0 + win.ox, y0: r.y0 + win.oy, x1: r.x1 + win.ox, y1: r.y1 + win.oy });
+  }
+  win.release();
+  op.s = s;
+}
+
+/** Statistics of the tiles around what the operation wrote, one undo step, and the usual refresh. */
+function finishTiledOp(op, target = 0) {
+  const s = op.section, around = new Map();
+  if (target) op.touched.add(target);
+  for (const r of op.boxes) for (const [row, col] of affectedTiles(s.maskTiles, { x0: r.x0, y0: r.y0, x1: r.x1 - 1, y1: r.y1 - 1 })) around.set(row * s.maskTiles.cols + col, [row, col]);
+  if (around.size) void tiledStatsRunner(s).queue([...around.values()], op.touched);
+  commitTiledOp(op);
+  afterChange(s);
+}
+
+/** Run `edit(op, o, win, box)` for each object on the window of its box (box in window coordinates, half-open), as one operation. */
+function eachObjectWindow(s, objs, group, edit) {
+  const rects = objs.map(sourceBox), plan = tiledPlan(s, rects);
+  if (!plan) return null;
+  const op = tiledOp(s, group), release = pinRanges(s.maskTiles, plan.ranges);
+  try {
+    objs.forEach((o, k) => { const win = openEditWindow(op, plan.ranges[k]); edit(op, o, win, toWindowRect(win, rects[k])); closeEditWindow(op, win, rects[k]); });
+  } finally { release(); op.s = s; }
+  return op;
+}
+
+/** Remove objects from a tiled section (Delete, clearing candidates). */
+function deleteTiledObjects(s, objs) {
+  const op = eachObjectWindow(s, objs, '', (step, o, win, b) => {
+    for (let y = b.y0; y < b.y1; y++) for (let i = y * win.w + b.x0, e = y * win.w + b.x1; i < e; i++) if (hasId(win.labels[i], o.id, s.stacks)) subPx(step, i, o.id);
+  });
+  if (!op) return false;
+  for (const o of objs) removeTrace(op, o.id);
+  if (objs.some((o) => o.id === S.selected)) S.selected = 0;
+  S.multi.clear();
+  finishTiledOp(op);
+  return true;
+}
+
+/** Merge on a tiled section: every pixel of the other objects (all inside their boxes) takes the keeper's id. */
+function mergeTiledObjects(s, objs, keep, group) {
+  const others = objs.filter((o) => o !== keep);
+  const op = eachObjectWindow(s, others, group, (step, o, win, b) => {
+    for (let y = b.y0; y < b.y1; y++) for (let i = y * win.w + b.x0, e = y * win.w + b.x1; i < e; i++) {
+      if (hasId(win.labels[i], o.id, s.stacks)) setLabel(step, i, renameId(win.labels[i], o.id, keep.id, s.stacks, six(s)));
+    }
+  });
+  if (!op) return;
+  for (const o of others) removeTrace(op, o.id);
+  S.multi.clear();
+  finishTiledOp(op, keep.id);
+  select(keep.id);
+}
+
+/** V0.30 on a tiled section: overlapping objects of the same ichnotaxon, found in each object's window. */
+function tiledSameTaxonGroups(s, ids) {
+  const objs = ids.map((id) => s.objects.get(id)).filter(Boolean), rects = objs.map(sourceBox), plan = tiledPlan(s, rects);
+  if (!plan) return [];
+  const groups = [], release = pinRanges(s.maskTiles, plan.ranges);
+  try {
+    objs.forEach((o, k) => {
+      const win = new EditWindow(s.maskTiles, plan.ranges[k]), b = toWindowRect(win, rects[k]);
+      const view = { get: (id) => (id === o.id ? { ...o, bbox: [b.x0, b.y0, b.x1 - 1, b.y1 - 1] } : s.objects.get(id)) };
+      groups.push(...sameTaxonGroups(win.labels, win.w, s.stacks, view, [o.id]));
+      win.release();
+    });
+  } finally { release(); }
+  return groups;
+}
+
+/** Scissors on a tiled section: the line is 3 source pixels wide; the object is split on the window of its box. */
+function splitTiled(s, pts) {
+  const tiles = s.maskTiles, W = tiles.width, st = s.stacks, ds = s.ds;
+  const cut = linePixels({ w: W, h: tiles.height }, pts.map(([x, y]) => [x * ds, y * ds])), at = (i) => tiles.labelAt(i % W, Math.floor(i / W)) ?? 0;
+  let id = 0;
+  if (S.selected && [...cut].some((i) => hasId(at(i), S.selected, st))) id = S.selected;
+  else for (const i of cut) { const v = topAt(at(i), st); if (v) { id = v; break; } }
+  const o = id && s.objects.get(id);
+  if (!o) { toast(t('cut.none')); return; }
+  const rect = sourceBox(o), plan = tiledPlan(s, [rect]);
+  if (!plan) return;
+  const op = tiledOp(s), win = openEditWindow(op, plan.ranges[0]), b = toWindowRect(win, rect), inWindow = new Set();
+  for (const i of cut) { const x = i % W - win.ox, y = Math.floor(i / W) - win.oy; if (x >= 0 && y >= 0 && x < win.w && y < win.h) inWindow.add(y * win.w + x); }
+  const { comp, bw, n, main } = splitPieces(win.labels, win.w, st, [b.x0, b.y0, b.x1 - 1, b.y1 - 1], id, inWindow);
+  if (n < 2) { win.release(); op.s = s; toast(t('cut.noSplit')); return; }
+  const ids = [0];
+  for (let k = 1; k <= n; k++) ids.push(k === main ? id : newObject(op, o.cls, o.src).id);
+  for (let k = 1; k <= n; k++) if (k !== main) { const c = s.objects.get(ids[k]); c.pred = o.pred; c.conf = o.conf; c.nt = o.nt; op.touched.add(ids[k]); }
+  for (let j = 0; j < comp.length; j++) {
+    const k = comp[j]; if (k <= 0 || k === main) continue;
+    const i = (b.y0 + ((j / bw) | 0)) * win.w + b.x0 + (j % bw);
+    setLabel(op, i, renameId(win.labels[i], id, ids[k], st, six(s)));
+  }
+  closeEditWindow(op, win, rect);
+  finishTiledOp(op, id);
+  toast(t('cut.done', { n }));
+}
+
+/** Wand and lasso on a tiled section: `pixelsIn(win)` gives the window's pixels to add or remove; `rect` is the area they may lie in. */
+function tiledPixels(s, rect, mode, pixelsIn) {
+  const plan = tiledPlan(s, [rect], { boxes: false, tooLarge: 'tiles.zoomIn' });
+  if (!plan) return;
+  const op = tiledOp(s), win = openEditWindow(op, plan.ranges[0]), pixels = pixelsIn(win);
+  if (!pixels.length) { win.release(); op.s = s; return; }
+  const target = pixelTarget(op, s, mode);
+  paintPixels(op, pixels, mode, target);
+  const e = op.ext;
+  closeEditWindow(op, win, { x0: e.x0 + win.ox, y0: e.y0 + win.oy, x1: e.x1 + 1 + win.ox, y1: e.y1 + 1 + win.oy });
+  finishTiledOp(op, target);
+  if (target && s.objects.has(target)) select(target);
+}
+
+/** The analysis area of a tiled section in source pixels (half-open). */
+const sourceRoi = (s) => ({ x0: s.roi.x0 * s.ds, y0: s.roi.y0 * s.ds, x1: Math.min(s.roi.x1 * s.ds, s.maskTiles.width), y1: Math.min(s.roi.y1 * s.ds, s.maskTiles.height) });
+
+function tiledLasso(s, pts, mode) {
+  if (!pts || pts.length < 3) return;
+  const src = pts.map(([x, y]) => [x * s.ds, y * s.ds]), roi = sourceRoi(s);
+  const xs = src.map((p) => p[0]), ys = src.map((p) => p[1]);
+  const rect = { x0: Math.max(roi.x0, Math.floor(Math.min(...xs))), y0: Math.max(roi.y0, Math.floor(Math.min(...ys))),
+    x1: Math.min(roi.x1, Math.ceil(Math.max(...xs)) + 1), y1: Math.min(roi.y1, Math.ceil(Math.max(...ys)) + 1) };
+  if (rect.x1 <= rect.x0 || rect.y1 <= rect.y0) return;
+  tiledPixels(s, rect, mode, (win) => polygonPixels(src.map(([x, y]) => [x - win.ox, y - win.oy]), win.w, toWindowRect(win, roi)));
+}
+
+let wandBusy = false;
+/** The wand on a tiled section grows over the level-0 pixels of the visible area (plus nothing beyond it). */
+async function tiledWand(s, p, mode) {
+  const visible = visibleSource(s), x = Math.floor(p.x * s.ds), y = Math.floor(p.y * s.ds);
+  if (!visible || wandBusy || !tiledPlan(s, [visible], { boxes: false, tooLarge: 'tiles.zoomIn' })) return;
+  const range = windowRange(s.maskTiles, visible, 0), positions = [];
+  for (let row = range.row0; row <= range.row1; row++) for (let col = range.col0; col <= range.col1; col++) positions.push([row, col]);
+  wandBusy = true;
+  let rgba;
+  try { rgba = await level0Rgba(s, positions); } catch (error) { toast(error.message || String(error), 9000); return; } finally { wandBusy = false; }
+  if (sec() !== s) return;
+  const byTile = new Map(positions.map(([row, col], k) => [row * s.maskTiles.cols + col, rgba[k]]));
+  tiledPixels(s, visible, mode, (win) => {
+    const roi = toWindowRect(win, sourceRoi(s)), wx = x - win.ox, wy = y - win.oy;
+    if (wx < roi.x0 || wy < roi.y0 || wx >= roi.x1 || wy >= roi.y1) return [];
+    const pixels = windowRgba(win, (row, col) => /** @type {Uint8ClampedArray} */ (byTile.get(row * s.maskTiles.cols + col)));
+    return regionGrow(pixels, win.w, win.h, wy * win.w + wx, S.wandTol, roi, win.exclude);
+  });
+}
+
 /** Object statistics of a tiled section, per tile and from the level-0 pixels (card M8.4.16 step 3); bounding boxes also in working pixels. */
+/** RGBA level-0 pixel tiles of a tiled section, read through the engine in batches of 16. */
+async function level0Rgba(s, positions) {
+  const tiled = s.tiled, out = [];
+  for (let i = 0; i < positions.length; i += 16) {
+    const batch = positions.slice(i, i + 16), read = await TILES.read(tiled.pyramid, 0, batch);
+    if (read.error) throw new Error(t('tiles.err', { code: read.error.code, field: read.error.field || '' }));
+    const bytes = new Uint8Array(read.ok.bytes.buffer || read.ok.bytes, read.ok.bytes.byteOffset || 0, read.ok.bytes.byteLength);
+    let offset = 0;
+    for (const tile of read.ok.tiles) { out.push(tileRgba(bytes.subarray(offset, offset + tile.byte_length), tiled.channels, tiled.bits)); offset += tile.byte_length; }
+  }
+  return out;
+}
+
 function tiledStatsRunner(s) {
   if (s._statsRunner) return s._statsRunner;
-  const stats = new TiledObjectStats(), tiled = s.tiled;
-  const fetchRgba = async (positions) => {
-    const out = [];
-    for (let i = 0; i < positions.length; i += 16) {
-      const batch = positions.slice(i, i + 16), read = await TILES.read(tiled.pyramid, 0, batch);
-      if (read.error) throw new Error(t('tiles.err', { code: read.error.code, field: read.error.field || '' }));
-      const bytes = new Uint8Array(read.ok.bytes.buffer || read.ok.bytes, read.ok.bytes.byteOffset || 0, read.ok.bytes.byteLength);
-      let offset = 0;
-      for (const tile of read.ok.tiles) { out.push(tileRgba(bytes.subarray(offset, offset + tile.byte_length), tiled.channels, tiled.bits)); offset += tile.byte_length; }
-    }
-    return out;
-  };
+  const stats = new TiledObjectStats(), fetchRgba = (positions) => level0Rgba(s, positions);
   const onUpdate = (ids) => {
     const ppu = pxPerCm(s) * s.ds;                       // source pixels per centimetre
     for (const id of ids) {
@@ -911,7 +1104,7 @@ const addPx = (op, i, id) => {
 };
 /** V0.30: after a class change, traces of the same ichnotaxon that overlap are merged into one. */
 function mergeSameTaxon(s, ids, group) {
-  for (const g of sameTaxonGroups(s.labels, s.w, s.stacks, s.objects, ids)) if (g.every((id) => s.objects.has(id))) mergeObjects(g, group);   // V0.42: edit.js
+  for (const g of s.maskTiles ? tiledSameTaxonGroups(s, ids) : sameTaxonGroups(s.labels, s.w, s.stacks, s.objects, ids)) if (g.every((id) => s.objects.has(id))) mergeObjects(g, group);   // V0.42: edit.js
 }
 const subPx = (op, i, id) => setLabel(op, i, withoutId(op.s.labels[i], id, op.s.stacks, six(op.s)));
 /** Remove a set of ids from every pixel. */
@@ -1026,24 +1219,32 @@ function afterChange(s) { if (s.maskTiles && TILES) void maskSync(s).request(); 
 /* pixel-set edits from wand and lasso */
 function applyPixels(pixels, mode) {
   const s = sec(); if (!pixels.length) return;
-  const op = beginOp(s);
-  let target = 0;
-  if (mode === 'sub') target = 0;
-  else if (mode === 'add' && S.selected && s.objects.has(S.selected)) target = S.selected;
-  else target = newObject(op, S.active, S.tool).id;
+  const op = beginOp(s), target = pixelTarget(op, s, mode);
+  paintPixels(op, pixels, mode, target);
+  finishPixelOp(op, target);
+  if (target && s.objects.has(target)) select(target);
+}
+/** The object the pixels go to: none when removing, the selected one when adding to it, else a new one. */
+function pixelTarget(op, s, mode) {
+  if (mode === 'sub') return 0;
+  if (mode === 'add' && S.selected && s.objects.has(S.selected)) return S.selected;
+  return newObject(op, S.active, S.tool).id;
+}
+/** Add the pixels (indices of `op.s`) to `target`, or remove them from the selected object (or from every object when none is selected). */
+function paintPixels(op, pixels, mode, target) {
+  const s = op.s;
   for (const i of pixels) {
     grow(op, i % s.w, (i / s.w) | 0);
     const old = s.labels[i];
     if (mode === 'sub') { if (old) { if (S.selected) { if (hasId(old, S.selected, s.stacks)) subPx(op, i, S.selected); } else setLabel(op, i, 0); } }
     else addPx(op, i, target);
   }
-  finishPixelOp(op, target);
-  if (target && s.objects.has(target)) select(target);
 }
 
 function deleteObject(id) { deleteObjects([id]); }
 function deleteObjects(ids) {
   const s = sec(); if (!s) return;
+  if (s.maskTiles) { const objs = ids.map((id) => s.objects.get(id)).filter(Boolean); if (objs.length) deleteTiledObjects(s, objs); return; }
   const objs = ids.map((id) => s.objects.get(id)).filter((o) => o?.bbox); if (!objs.length) return;
   const op = beginOp(s);
   for (const o of objs) {
@@ -1060,6 +1261,7 @@ function assignClass(id, clsId) { assignClassMany([id], clsId); }
 function assignClassMany(ids, clsId) {
   const s = sec(); if (!s) return;
   const objs = ids.map((id) => s.objects.get(id)).filter(Boolean); if (!objs.length) return;
+  if (s.maskTiles && !tiledPlan(s, objs.map(sourceBox))) return;   // the merge of V0.30 reads the objects' tiles
   const group = uid(), op = beginOp(s, group);
   for (const o of objs) {
     if (o.cls === clsId && o.pred === null && o.conf === 0) continue;
@@ -1091,6 +1293,7 @@ function linePixels(s, pts) {
 }
 function splitAlong(pts) {
   const s = sec(); if (!s || !pts || pts.length < 2) return;
+  if (s.maskTiles) { splitTiled(s, pts); return; }
   const cut = linePixels(s, pts), L = s.labels, st = s.stacks;
   let id = 0;
   if (S.selected && [...cut].some((i) => hasId(L[i], S.selected, st))) id = S.selected;
@@ -1115,6 +1318,7 @@ function mergeObjects(list, group = '') {
   const s = sec(); if (!s) return;
   const objs = list.map((id) => s.objects.get(id)).filter((o) => o?.bbox); if (objs.length < 2) return;
   const keep = mergeKeeper(objs), L = s.labels, st = s.stacks;   // V0.42: edit.js
+  if (s.maskTiles) { mergeTiledObjects(s, objs, keep, group); return; }
   const op = beginOp(s, group);
   for (const o of objs) {
     if (o === keep) continue;
@@ -1334,6 +1538,7 @@ async function detectSection(s) {
 
 function clearCandidates() {
   const s = sec(); if (!s) return;
+  if (s.maskTiles) { const cand = [...s.objects.values()].filter((o) => !o.cls); if (cand.length && deleteTiledObjects(s, cand)) $('detectStatus').textContent = ''; return; }
   const op = beginOp(s), cand = new Set([...s.objects.values()].filter((o) => !o.cls).map((o) => o.id));
   dropIds(op, cand);
   for (const id of cand) removeTrace(op, id);
@@ -2142,6 +2347,7 @@ view.addEventListener('pointerdown', (e) => {
   else if (tool === 'lasso') { lassoPts = [[p.x, p.y]]; drag = { type: 'lasso', mode: e.altKey ? 'sub' : e.shiftKey ? 'add' : 'new' }; }
   else if (tool === 'wand') {
     if (!inImg(s, p)) return;
+    if (s.maskTiles) { void tiledWand(s, p, e.altKey ? 'sub' : e.shiftKey ? 'add' : 'new'); return; }
     const seed = Math.floor(p.y) * s.w + Math.floor(p.x);
     applyPixels(regionGrow(S.showOrig ? s.orig : s.enh, s.w, s.h, seed, S.wandTol, s.roi, s.exclude), e.altKey ? 'sub' : e.shiftKey ? 'add' : 'new');
   } else {
@@ -2211,7 +2417,8 @@ function endDrag() {
   else if (d.type === 'cut') { const pts = lassoPts; lassoPts = null; splitAlong(pts); requestRender(); }
   else if (d.type === 'lasso') {
     const pts = lassoPts; lassoPts = null;
-    applyPixels(polygonPixels(pts, s.w, s.roi), d.mode); requestRender();
+    if (s.maskTiles) tiledLasso(s, pts, d.mode); else applyPixels(polygonPixels(pts, s.w, s.roi), d.mode);
+    requestRender();
   } else if (d.type === 'roi') {
     const r = roiDrag; roiDrag = null;
     const x0 = Math.max(0, Math.round(Math.min(r.x0, r.x1))), x1 = Math.min(s.w, Math.round(Math.max(r.x0, r.x1)));
@@ -2477,7 +2684,7 @@ function renderObject() {
   renderObjectList(s);
   if (s && S.multi.size > 1) { renderMulti(s, box); return; }
   if (!o) { box.innerHTML = `<p class="note">${t('obj.none')}</p>`; return; }
-  const st = status(o), ppu = pxPerCm(s), f = o.feat || {}, [, y0, , y1] = o.bbox;
+  const st = status(o), ppu = pxPerCm(s), f = o.feat || {}, [, y0, , y1] = o.bbox || [];   // no box yet: a tiled object whose statistics are on their way
   const opts = [`<option value="">${t('obj.unassigned')}</option>`].concat(S.classes.map((c) => `<option value="${esc(c.id)}" ${c.id === o.cls ? 'selected' : ''}>${keyOf(c) ? esc(keyOf(c)) + ' · ' : ''}${esc(c.name)}</option>`)).join('');
   const sugg = o.pred ? `<span class="swatch" style="background:${validHexColor(clsById(o.pred)?.color, '#777777')}"></span>${esc(clsById(o.pred)?.name || '')} · ${Math.round(o.conf * 100)}%` : 'novel' in o && o.novel ? t('obj.novel') : '—';
   const u = s.units, toU = (cm) => cm / UNIT_TO_CM[u];
@@ -2487,7 +2694,7 @@ function renderObject() {
       <dt>${t('obj.status')}</dt><dd><span class="pill ${st}">${t('obj.' + st)}</span></dd>
       ${o.cls ? '' : `<dt>${t('obj.suggest')}</dt><dd>${sugg}</dd>`}
       ${o.cls || !xOf(o) ? '' : `<dt>${t('obj.probs')}</dt><dd>${probTable(o)}</dd>`}
-      <dt>${t('obj.depth')}</dt><dd>${fmt(depthAtRow(s, y0), 3)}–${fmt(depthAtRow(s, y1 + 1), 3)} ${u}</dd>
+      <dt>${t('obj.depth')}</dt><dd>${o.bbox ? `${fmt(depthAtRow(s, y0), 3)}–${fmt(depthAtRow(s, y1 + 1), 3)} ${u}` : '—'}</dd>
       <dt>${t('obj.size')}</dt><dd>${fmt(toU(f.majorCm), 3)} × ${fmt(toU(f.minorCm), 3)} ${u}</dd>
       <dt>${t('obj.area')}</dt><dd>${fmt(o.area / (ppu * ppu) / UNIT_TO_CM[u] ** 2, 4)} ${u}² · ${o.area} px</dd>
       <dt>${t('obj.shape')}</dt><dd>${t('obj.elong')} ${fmt(f.elong, 1)} · ${t('obj.vert')} ${fmt(f.vert, 2)}</dd>
@@ -4790,5 +4997,5 @@ const startupReady = startup();
 window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, needPixels, requestRender, setTool, renderSectionForm, t, tilesIdle: () => [...tileSchedulers.values()].every((q) => q.idle),
   putMaskTile: (row, col, labels, exclude) => putMaskTile(sec(), row, col, labels, exclude),   // end-to-end tests of tiled masks (card M8.4.16)
   tiledStatsIdle: () => S.sections.every((q) => !q._statsRunner || q._statsRunner.idle),
-  masksSettled: () => S.sections.every((q) => !q.maskTiles || !q._maskSync || q._maskSync.settled),
+  masksSettled: () => S.sections.every((q) => !q.maskTiles || !q._maskSync || q._maskSync.settled), mergeObjects, deleteObjects,
   saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };

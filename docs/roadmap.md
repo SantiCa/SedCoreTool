@@ -82,7 +82,7 @@ Updated 16 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.16 step 6** (wand, lasso, scissors and object operations on tiled sections; **model: most capable, effort medium**). The card's detailed steps and decisions A-E were written on 17 November 2026 and approved by the maintainer as written the same day (commit `b2b4cdc`, whose `tests` and *Desktop builds* passed on Windows, macOS and Linux). Step 1 (mask store format, contract §8.7, and the engine's mask operations) was done on 17 November 2026; step 2 (the page's mask tiles, the reduced overview masks and the mask layer over pixel tiles, `app/js/tiledmasks.js`) step 3 (strokes on an edit window, statistics per tile, `app/js/tiledit.js`) step 4 (background sending to the store and recovery, `app/js/tiledsync.js`) and step 5 (undo and redo by tile copies, `app/js/tiledundo.js`) on 18 November 2026; their checks are below. M8.4.15 was done on 17 November 2026 ([summary](validation/M8.4.15-summary.md)); its first-view target needed the identity record of the tile store, chosen by the maintainer (option 1). Card H7 (16-bit images above about 28 megapixels killed the page) was done on 17 November 2026 at the maintainer's request, between steps 4 and 5. **Checkpoint of 17 November 2026:** commit `ccffe7c`; on Windows `npm test` 402 passed, typecheck, standalone build, `tests/e2e/desktop.mjs` (engine off), `tests/e2e/tiled-sections.mjs` (public example and `rgb2g`) and `tests/e2e/large-16bit-desktop.mjs`; GitHub `tests` and *Desktop builds* passed on Windows, macOS and Linux (the macOS `web-app` job needed three attempts: GitHub had no macOS arm64 runner free, "not acquired by Runner"). The full session checks (pytest, ruff, smoke) were not repeated: no Python changed since the last full run. M8.4.14 was done on 17 November 2026 ([summary](validation/M8.4.14-summary.md)). The design session of part C was held on 16 November 2026: decisions in
+- **Next step: M8.4.16 step 7** (metadata limits: measure the objects and stacks tables of a dense synthetic `rgb8g` annotation; **model: fast, effort medium**). The card's detailed steps and decisions A-E were written on 17 November 2026 and approved by the maintainer as written the same day (commit `b2b4cdc`, whose `tests` and *Desktop builds* passed on Windows, macOS and Linux). Step 1 (mask store format, contract §8.7, and the engine's mask operations) was done on 17 November 2026; step 2 (the page's mask tiles, the reduced overview masks and the mask layer over pixel tiles, `app/js/tiledmasks.js`) step 3 (strokes on an edit window, statistics per tile, `app/js/tiledit.js`) step 4 (background sending to the store and recovery, `app/js/tiledsync.js`) step 5 (undo and redo by tile copies, `app/js/tiledundo.js`) and step 6 (wand, lasso, scissors and object operations on edit windows) on 18 November 2026; their checks are below. M8.4.15 was done on 17 November 2026 ([summary](validation/M8.4.15-summary.md)); its first-view target needed the identity record of the tile store, chosen by the maintainer (option 1). Card H7 (16-bit images above about 28 megapixels killed the page) was done on 17 November 2026 at the maintainer's request, between steps 4 and 5. **Checkpoint of 17 November 2026:** commit `ccffe7c`; on Windows `npm test` 402 passed, typecheck, standalone build, `tests/e2e/desktop.mjs` (engine off), `tests/e2e/tiled-sections.mjs` (public example and `rgb2g`) and `tests/e2e/large-16bit-desktop.mjs`; GitHub `tests` and *Desktop builds* passed on Windows, macOS and Linux (the macOS `web-app` job needed three attempts: GitHub had no macOS arm64 runner free, "not acquired by Runner"). The full session checks (pytest, ruff, smoke) were not repeated: no Python changed since the last full run. M8.4.14 was done on 17 November 2026 ([summary](validation/M8.4.14-summary.md)). The design session of part C was held on 16 November 2026: decisions in
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -101,6 +101,12 @@ Updated 16 November 2026.
   from it (item above), which also answers the timing question of 14 November. Decided on 13 November 2026: acceptance levels (accepted),
   scope of 1.0 (below), publication of V0.149. Decided on 14 November 2026: a milestone gate on macOS and Linux closes every milestone; the
   five decisions of M8.4 (answers recorded there, among them **multi-gigabyte images are required for 1.0**).
+- **Checks of M8.4.16 step 6 (18 November 2026, maintainer's Windows computer):** `npm test` 431 passed (4 new in `tests/app/tiledops.test.mjs`);
+  `npm run typecheck`; standalone build; `tests/e2e/tiled-sections.mjs` (lasso, scissors, merge, class-change merge, delete with undo and redo,
+  the wand and the wait while statistics are computed, all with exact areas against the tiles); `tests/e2e/desktop.mjs` with the engine off and
+  on. Not run: pytest and ruff (no Python changed), `smoke.mjs`, the viewer measurement (the stroke path did not change). GitHub on `d407763`
+  (step 5): `tests` passed; *Desktop builds* failed on macOS while packaging (a download of a Python wheel for the bundled runtime timed out;
+  the desktop end-to-end tests on macOS had passed) and passed on all three systems when the failed job was run again.
 - **Checks of M8.4.16 step 5 (18 November 2026, maintainer's Windows computer):** `npm test` 427 passed (5 new in `tests/app/tiledundo.test.mjs`);
   `npm run typecheck`; standalone build; `tests/e2e/tiled-sections.mjs` (the stroke undone while the engine is down and redone after the restart:
   page and store equal to the state before the stroke, then to the stroke; objects and statistics restored); `tests/e2e/desktop.mjs` with the
@@ -1084,7 +1090,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
 - **Done when:** the targets of step 7 are measured (a failure is recorded with numbers and the card stops for a decision); the flag is off by
   default and in the flag table.
 
-##### M8.4.16 - Masks of tiled sections: storage, editing and undo — state: In progress; decisions A-E approved by the maintainer on 17 Nov 2026 as written; steps 1-5 done; next: step 6
+##### M8.4.16 - Masks of tiled sections: storage, editing and undo — state: In progress; decisions A-E approved by the maintainer on 17 Nov 2026 as written; steps 1-6 done; next: step 7
 
 - **Goal:** labels and exclusion of a tiled section live as mask tiles in the store (decision 6); every editing tool works on loaded tiles; undo and
   redo are per tile and bounded; changed tiles are sent in the background and sent again after an engine failure.
@@ -1164,8 +1170,15 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
      of a window); the message is shown once per section. A step whose tiles the page dropped asks to try again while they are read back.
      Stacks of tiled sections are never compacted, so a restored tile's stack codes stay valid. Strokes on `rgb8g` with the copies: p95
      22.7-31.1 ms against 33 (the 1 : 3 case over dense masks has 1.9 ms of margin).
-  6. **Wand, lasso, scissors and object operations** [most capable, medium]: on the window of the object boxes (decision B); brushes and fills that
+  6. **Done 18 Nov 2026.** **Wand, lasso, scissors and object operations** [most capable, medium]: on the window of the object boxes (decision B); brushes and fills that
      cross a tile seam write each tile; stacks stay one table per section; refusal when a box exceeds the budget.
+     *As built:* one window per object (not one for the union of the boxes), so an operation on objects far apart works; every window is planned
+     and pinned before anything is written. The lasso uses the window of its box, the wand the window of the visible area (its region stops at
+     that window's edge; on the whole-image path it may grow over the whole analysis area). Operations that read `sbox` wait until the
+     statistics are current. The wand, the lasso and the scissors left the refused list here rather than in step 8 (they work now); detection,
+     crop, rotation, resolution and filters stay refused. Also fixed: the object panel read the box of a tiled object before its statistics
+     arrived. Not covered by a desktop test: the refusal of a box over 96 tiles (the public example has 66 tiles in all; `planWindows` is tested
+     in Node).
   7. **Metadata limits** [fast, medium]: measure the objects and stacks tables of a dense synthetic `rgb8g` annotation against 65,536 records and
      4 MiB (contract §3); change the contract only with that number.
   8. **Exact equality and closing** [fast, medium]: a small image opened both ways (whole, and forced tiled with a section factor of 1) with the same

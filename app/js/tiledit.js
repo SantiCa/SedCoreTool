@@ -123,6 +123,57 @@ export class EditWindow {
 }
 
 /**
+ * The edit windows of an operation on several source rectangles (half-open; card M8.4.16 step 6): one range of tiles per rectangle, whether
+ * one of them needs more than `budget` tiles (decision B: the operation refuses), and the tiles the page dropped (they are read back first).
+ * @param {MaskTiles} tiles @param {{x0: number, y0: number, x1: number, y1: number}[]} rects @param {number} [budget]
+ */
+export function planWindows(tiles, rects, budget = WINDOW_TILES) {
+  const ranges = rects.map((rect) => windowRange(tiles, rect, 0)), missing = new Map();
+  for (const r of ranges) {
+    for (let row = r.row0; row <= r.row1; row++) for (let col = r.col0; col <= r.col1; col++) {
+      if (tiles.state(row, col) === 'missing') missing.set(row * tiles.cols + col, /** @type {[number, number]} */ ([row, col]));
+    }
+  }
+  return { ranges, tooLarge: ranges.some((r) => r.count > budget), missing: [...missing.values()] };
+}
+
+/**
+ * Pin the tiles of these ranges, so that writing one window never drops a tile a later window of the same operation reads. Returns the
+ * function that unpins them. @param {MaskTiles} tiles @param {TileRange[]} ranges @returns {() => void}
+ */
+export function pinRanges(tiles, ranges) {
+  const pinned = /** @type {[number, number][]} */ ([]), seen = new Set();
+  for (const r of ranges) {
+    for (let row = r.row0; row <= r.row1; row++) for (let col = r.col0; col <= r.col1; col++) {
+      const i = row * tiles.cols + col;
+      if (seen.has(i) || !tiles.entries.has(i)) continue;
+      seen.add(i); tiles.pin(row, col); pinned.push([row, col]);
+    }
+  }
+  return () => { for (const [row, col] of pinned) tiles.unpin(row, col); pinned.length = 0; };
+}
+
+/** A source rectangle (half-open) in the coordinates of a window, clipped to it. @param {EditWindow} win @param {{x0: number, y0: number, x1: number, y1: number}} r */
+export function toWindowRect(win, r) {
+  return { x0: Math.max(0, r.x0 - win.ox), y0: Math.max(0, r.y0 - win.oy), x1: Math.min(win.w, r.x1 - win.ox), y1: Math.min(win.h, r.y1 - win.oy) };
+}
+
+/**
+ * The level-0 pixels of a window as one RGBA array (`win.w` x `win.h`), from tiles of TILE x TILE RGBA pixels.
+ * @param {EditWindow} win @param {(row: number, col: number) => Uint8ClampedArray | Uint8Array} rgbaAt
+ */
+export function windowRgba(win, rgbaAt) {
+  const out = new Uint8ClampedArray(win.w * win.h * 4), r = win.range;
+  for (let row = r.row0; row <= r.row1; row++) {
+    for (let col = r.col0; col <= r.col1; col++) {
+      const tile = rgbaAt(row, col), tx = col * TILE - win.ox, ty = row * TILE - win.oy, cols = Math.min(TILE, win.w - tx), rows = Math.min(TILE, win.h - ty);
+      for (let y = 0; y < rows; y++) out.set(tile.subarray(y * TILE * 4, (y * TILE + cols) * 4), ((ty + y) * win.w + tx) * 4);
+    }
+  }
+  return out;
+}
+
+/**
  * The tiles whose statistics change when the source pixels of `rect` (inclusive) change: those within 3 pixels of it.
  * @param {{rows: number, cols: number}} grid @param {{x0: number, y0: number, x1: number, y1: number}} rect @returns {[number, number][]}
  */

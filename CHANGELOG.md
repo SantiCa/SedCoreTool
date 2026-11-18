@@ -20,6 +20,12 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.16, step 6: wand, lasso, scissors, delete, clear candidates, merge and the merge of overlapping objects of one ichnotaxon after a
+  class change work on tiled sections at full resolution, each on edit windows of the object boxes (or of the lasso's box, or of the visible
+  area for the wand) and as one undo step; an object whose box covers more than 96 mask tiles refuses with a message. The object panel no longer
+  fails while a new tiled object's statistics are on their way. `tests/e2e/tiled-sections.mjs` checks each operation with the real mouse
+  against the labels in the tiles (exact areas for lasso, scissors, merge and the class-change merge), and undo and redo of a delete; Node
+  tests that the window gives the whole image's result for lasso, wand and scissors (`tests/app/tiledops.test.mjs`).
 - Card M8.4.16, step 5: strokes and exclusion rectangles on tiled sections can be undone and redone; each step keeps the mask tiles it changed
   as they were before (copied on the first write) and undo and redo swap them, within 64 MiB for the whole history (the oldest steps are dropped
   beyond it, with a message) (`app/js/tiledundo.js`). `tests/e2e/tiled-sections.mjs` now undoes the stroke while the engine is down and redoes it

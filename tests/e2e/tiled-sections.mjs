@@ -37,7 +37,7 @@ async function program(tiled) {
   const page = await (await browser.waitForTarget((t) => t.url().startsWith('app://corantool/app/index.html'), { timeout: 60000 })).page();
   page.setDefaultTimeout(600000);
   const errors = [];
-  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('pageerror', (error) => errors.push(error.message + ' @ ' + String(error.stack).split('\n').slice(1, 4).join(' | ')));
   page.on('dialog', (dialog) => dialog.accept().catch(() => {}));
   await page.waitForFunction(() => !!window.ichantool, { timeout: 60000 });
   await page.waitForFunction(async () => (await window.corantoolDesktop.engine.status()).state === 'ready', { timeout: 90000 });
@@ -158,9 +158,8 @@ try {
   const readDepth = parseFloat(nav.depth.replace(/^[^0-9-]*/, '')), expected = nav.top + (sourceRow / nav.full.h) * (nav.bottom - nav.top);
   assert.ok(Math.abs(readDepth - expected) <= (nav.bottom - nav.top) / nav.h + 0.0006, `depth of the source row ${sourceRow}: read ${readDepth}, expected ${expected}`);
   assert.ok(nav.stripColours >= 2, 'the navigation strip shows the section image: ' + nav.stripColours + ' colours');
-  // Step 6 of M8.4.15, updated by M8.4.16 step 3: every tool of the Section mode on a tiled section. Wand, lasso, scissors, detection, crop,
-  // rotation, resolution and filters refuse with the one message; select, pan, mark, the analysis area and the strokes (brush, erase, exclude,
-  // include) work. A blocked tool selected on another section does not follow into a tiled one.
+  // Step 6 of M8.4.15, updated by M8.4.16 steps 3 and 6: every tool of the Section mode works on a tiled section; detection, crop, rotation,
+  // resolution and filters refuse with the one message. A tool selected on another section stays selected in a tiled one.
   const gating = await on.page.evaluate(async () => {
     const { S } = window.ichantool, s = S.sections.at(-1), toastText = () => document.getElementById('toast').textContent, out = { tools: {}, actions: {} };
     const pause = () => new Promise((r) => setTimeout(r, 120));
@@ -181,15 +180,14 @@ try {
     S.cur = 0; window.ichantool.setTool('wand'); S.cur = S.sections.length - 1; window.ichantool.renderSectionForm?.(); out.carried = S.tool;
     return out;
   });
-  for (const tool of ['select', 'pan', 'mark', 'brush', 'erase', 'exclude', 'include']) assert.equal(gating.tools[tool].active, true, tool + ' is available on a tiled section');
-  assert.equal(gating.tools.roi, true, 'the analysis area is available');
-  const message = await on.page.evaluate(() => window.ichantool.t?.('tiles.unavailable'));
-  for (const tool of ['wand', 'lasso', 'cut']) {
-    assert.equal(gating.tools[tool].active, false, tool + ' is refused');
-    assert.ok(gating.tools[tool].message.length > 10 && (!message || gating.tools[tool].message === message), `${tool} shows the one message: ${gating.tools[tool].message}`);
+  for (const tool of ['select', 'pan', 'mark', 'wand', 'brush', 'lasso', 'cut', 'erase', 'exclude', 'include']) {
+    assert.equal(gating.tools[tool].active, true, tool + ' is available on a tiled section');
+    assert.equal(gating.tools[tool].message, '', tool + ' shows no message');
   }
-  for (const [action, text] of Object.entries(gating.actions)) assert.equal(text, gating.tools.wand.message, `${action} shows the same message`);
-  assert.equal(gating.carried, 'pan', 'a wand chosen on another section does not follow into a tiled one');
+  assert.equal(gating.tools.roi, true, 'the analysis area is available');
+  const message = await on.page.evaluate(() => window.ichantool.t('tiles.unavailable'));
+  for (const [action, text] of Object.entries(gating.actions)) assert.equal(text, message, `${action} shows the one message`);
+  assert.equal(gating.carried, 'wand', 'the wand chosen on another section stays selected in a tiled one');
   assert.equal(gating.unchanged, true, 'the refused tools changed nothing');
   assert.equal(gating.resValue, String(section.ds), 'the resolution control returns to the current value');
   // Card M8.4.16 step 2: a mask tile put in the page shows at full resolution over the pixel tiles and, reduced, in the working image at every
@@ -292,6 +290,96 @@ try {
   assert.equal(excluded.excluded, 1); assert.equal(excluded.excludedOut, 0); assert.equal(excluded.reducedExclude, 1);
   assert.equal(excluded.area, erased.area, 'exclusion does not change the object');
   assert.equal(included.excluded, 0); assert.equal(included.reducedExclude, 0);
+  // Card M8.4.16 step 6: lasso, scissors, merge, a class change that merges overlapping objects of one ichnotaxon, delete and the wand, with the
+  // real mouse at 1 screen pixel per source pixel (screen x, y is source x, 6000 + y), each checked against the labels in the tiles; delete is
+  // undone and redone. Expected areas follow from the rules of `polygonPixels` (pixel centres) and `splitPieces` (cut pixels join the piece on
+  // their left first).
+  const ops = await (async () => {
+    const page = on.page, box = await page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
+    const idle = () => page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.masksSettled(), { polling: 50, timeout: 60000 });
+    const path = async (tool, points, keys = []) => {
+      await page.evaluate((tool) => window.ichantool.setTool(tool), tool);
+      for (const key of keys) await page.keyboard.down(key);
+      await page.mouse.move(box.left + points[0][0], box.top + points[0][1]); await page.mouse.down();
+      for (let k = 1; k < points.length; k++) {
+        const [ax, ay] = points[k - 1], [bx, by] = points[k];
+        for (let q = 1; q <= 4; q++) await page.mouse.move(box.left + ax + ((bx - ax) * q) / 4, box.top + ay + ((by - ay) * q) / 4);
+      }
+      await page.mouse.up();
+      for (const key of keys) await page.keyboard.up(key);
+      await idle();
+    };
+    const state = () => page.evaluate(() => {
+      const s = window.ichantool.S.sections.at(-1), tiles = s.maskTiles, counted = {};
+      for (let row = 0; row < tiles.rows; row++) for (let col = 0; col < tiles.cols; col++) {
+        const labels = tiles.get(row, col)?.labels; if (!labels) continue;
+        for (const v of labels) if (v) for (const id of v > 0 ? [v] : s.stacks[-v]) counted[id] = (counted[id] || 0) + 1;
+      }
+      const objects = {};
+      for (const o of s.objects.values()) if (o.sbox) objects[o.id] = { area: o.area, sbox: o.sbox, cls: o.cls };
+      return { objects, counted, toast: document.getElementById('toast').textContent, undo: window.ichantool.S.undo.length };
+    });
+    await page.evaluate(() => { const { S } = window.ichantool; S.active = S.classes[0].id; S.overlap = true; S.selected = 0; S.multi.clear(); });
+    const start = await state();
+    await path('lasso', [[100, 520], [200, 520], [200, 580], [100, 580]]);
+    const lassoed = await state();
+    await path('cut', [[150, 500], [150, 600]]);
+    const cut = await state();
+    const pieces = Object.keys(cut.objects).filter((id) => !start.objects[id]).map(Number);
+    await page.evaluate((ids) => window.ichantool.mergeObjects(ids), pieces); await idle();
+    const merged = await state();
+    await page.evaluate(() => { const { S } = window.ichantool; S.active = S.classes[1].id; S.selected = 0; });
+    await path('lasso', [[180, 540], [260, 540], [260, 600], [180, 600]]);
+    const overlapped = await state();
+    const second = Object.keys(overlapped.objects).map(Number).find((id) => !merged.objects[id]);
+    await page.evaluate((id) => window.ichantool.assignClass(id, window.ichantool.S.classes[0].id), second); await idle();
+    const sameTaxon = await state();
+    // An operation that reads objects' boxes waits while statistics are being computed.
+    const kept = Object.keys(sameTaxon.objects).map(Number).find((id) => !start.objects[id]);
+    const busy = await page.evaluate((id) => { const s = window.ichantool.S.sections.at(-1); void s._statsRunner.queue([[0, 0]]);
+      window.ichantool.deleteObjects([id]); return { toast: document.getElementById('toast').textContent, expected: window.ichantool.t('tiles.busy'), still: s.objects.has(id) }; }, kept);
+    await idle();
+    await page.evaluate((id) => window.ichantool.deleteObjects([id]), kept); await idle();
+    const deleted = await state();
+    await page.click('#undoBtn'); await idle();
+    const undone = await state();
+    await page.click('#redoBtn'); await idle();
+    const redone = await state();
+    const count = await page.evaluate(() => window.ichantool.S.sections.at(-1).objects.size);
+    await page.evaluate(() => window.ichantool.setTool('wand'));
+    await page.mouse.click(box.left + 400, box.top + 650);
+    await page.waitForFunction((n) => window.ichantool.S.sections.at(-1).objects.size > n, { polling: 50, timeout: 60000 }, count);
+    await idle();
+    const wanded = await state();
+    const canvas = await page.evaluate(() => ({ w: document.getElementById('view').width, h: document.getElementById('view').height }));
+    return { start, lassoed, cut, pieces, merged, overlapped, second, sameTaxon, kept, busy, deleted, undone, redone, wanded, canvas };
+  })();
+  const fresh = (after, before) => Object.keys(after.objects).filter((id) => !before.objects[id]).map(Number);
+  const [lassoId] = fresh(ops.lassoed, ops.start);
+  assert.deepEqual(ops.lassoed.objects[lassoId], { area: 6000, sbox: [100, 6520, 199, 6579], cls: ops.lassoed.objects[lassoId].cls }, 'the lasso labels the source pixels whose centres are inside the polygon');
+  assert.equal(ops.lassoed.counted[lassoId], 6000);
+  assert.deepEqual(ops.pieces.length, 2, 'the scissors split the object in two: ' + JSON.stringify(ops.cut.objects));
+  assert.deepEqual(ops.pieces.map((id) => ops.cut.objects[id].area).sort(), [2880, 3120], 'left 49 + 3 cut columns, right 48 columns, 60 rows');
+  for (const id of ops.pieces) assert.equal(ops.cut.counted[id], ops.cut.objects[id].area);
+  const [mergedId] = fresh(ops.merged, ops.start);
+  assert.equal(fresh(ops.merged, ops.start).length, 1);
+  assert.equal(ops.merged.objects[mergedId].area, 6000, 'merging gives back the lassoed object');
+  assert.equal(ops.merged.counted[mergedId], 6000);
+  assert.equal(ops.overlapped.objects[ops.second].area, 4800);
+  assert.equal(ops.overlapped.counted[mergedId] + ops.overlapped.counted[ops.second], 10800, 'the second lasso overlaps the first on 20 x 40 pixels (another class)');
+  assert.deepEqual(fresh(ops.sameTaxon, ops.start), [ops.kept]);
+  assert.equal(ops.sameTaxon.objects[ops.kept].area, 10000, 'the same ichnotaxon: the two objects become one (their union)');
+  assert.equal(ops.sameTaxon.counted[ops.kept], 10000);
+  assert.deepEqual(ops.busy, { toast: ops.busy.expected, expected: ops.busy.expected, still: true }, 'delete waits while statistics are computed');
+  assert.equal(ops.deleted.objects[ops.kept], undefined); assert.equal(ops.deleted.counted[ops.kept], undefined, 'delete removes the object from the tiles');
+  assert.deepEqual(ops.undone.objects[ops.kept], ops.sameTaxon.objects[ops.kept], 'undo brings the object back as it was');
+  assert.equal(ops.undone.counted[ops.kept], 10000);
+  assert.equal(ops.redone.counted[ops.kept], undefined);
+  const [wandId] = fresh(ops.wanded, ops.redone);
+  assert.ok(wandId && ops.wanded.objects[wandId].area > 0 && ops.wanded.counted[wandId] === ops.wanded.objects[wandId].area, 'the wand labels the region it grows: ' + JSON.stringify(ops.wanded.objects[wandId]));
+  // The visible area is source x 0-619 (the whole width), y 6000 to 6000 + canvas height; its window is whole tiles of 512.
+  const wandBox = ops.wanded.objects[wandId].sbox, lastRow = Math.floor((6000 + ops.canvas.h - 1) / 512);
+  assert.ok(wandBox[0] >= 0 && wandBox[2] < 620 && wandBox[1] >= 11 * 512 && wandBox[3] < (lastRow + 1) * 512, 'the wand grows within the tiles of the visible area: ' + wandBox);
   // Card M8.4.16 step 4: the strokes reach the engine's store in the background. Then a stroke over six tiles, and the engine's coordinator
   // killed while they are on their way: the page's masks do not change, the program restarts the engine (once, automatically) and sends them
   // again, and the store then holds exactly what the page holds.
@@ -386,7 +474,7 @@ try {
   assert.ok(toasts.includes(messages[0]) && toasts.indexOf(messages[1], toasts.indexOf(messages[0])) > 0,
     'the failure of the round was shown, then its recovery: ' + JSON.stringify(toasts.slice(-4)));
   assert.deepEqual(on.errors, []);
-  console.log('Tiled sections: added through the interface, working image from the pyramid, not saved, reloaded, tools refused; full-resolution tiles drawn (' + drawn.probes.length + ' probes):', JSON.stringify(section));
+  console.log('Tiled sections: added through the interface, working image from the pyramid, not saved, reloaded, whole-image actions refused, every editing tool works; full-resolution tiles drawn (' + drawn.probes.length + ' probes):', JSON.stringify(section));
 } finally { await on.close(); }
 
 const off = await program(false);
