@@ -2903,7 +2903,8 @@ queued cancellation releases its pin. EOF on a private worker liveness pipe abor
 workers use CREATE_NO_WINDOW. The coordinator stays responsive to control requests; workers do not access
 project databases or save files. Engine failure never selects another scientific algorithm.
 
-Main's handshake/control deadline is 5 s; shutdown requests have a 1.5 s deadline and main forces termination
+Main's handshake deadline is 20 s (`START_TIMEOUT_MS`, card M8.4.26: a Python start took up to 4.7 s with every core busy; the
+performance gate of contract §7, ready within 5 s, is unchanged) and its control deadline 5 s; shutdown requests have a 1.5 s deadline and main forces termination
 if exit does not follow within a further 1.5 s. Forced termination ends the coordinator immediately. On Windows
 the coordinator belongs to a kill-on-close Job Object (`engine/lifetime.py`), so the operating system ends its
 workers with it; workers also stop when their private liveness pipe closes, and `taskkill /T` remains as a

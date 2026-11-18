@@ -23,6 +23,10 @@ const PYRAMID_BUDGET_BYTES = 50 * 2 ** 30;   // contract §8.4; the maintainer's
 const ANALYSIS_TIMEOUT_MS = 10 * 60 * 1000;
 
 const MAX_AUTOMATIC_RESTARTS = 1;
+// Card M8.4.26 (decided by the maintainer, 18 Nov 2026): the handshake has its own deadline. Starting Python took up to 4.7 s on a
+// computer with every core busy (once more than the 5 s of an ordinary request), which made the engine unavailable and used the one
+// automatic restart; idle it takes about 0.1 s.
+const START_TIMEOUT_MS = 20 * 1000;
 
 function unavailable() { return Object.assign(new Error('ENGINE_UNAVAILABLE'), { code: 'ENGINE_UNAVAILABLE' }); }
 
@@ -49,12 +53,12 @@ function terminateTree(child) {
 }
 
 class EngineClient {
-  constructor({ executable, script, version, runtimeId, timeoutMs = 5000, captureDiagnostics = false, pyramidDirectory = null, pyramidBudgetBytes = PYRAMID_BUDGET_BYTES,
+  constructor({ executable, script, version, runtimeId, timeoutMs = 5000, startTimeoutMs = START_TIMEOUT_MS, captureDiagnostics = false, pyramidDirectory = null, pyramidBudgetBytes = PYRAMID_BUDGET_BYTES,
     projectsDirectory = null }) {
     if (!path.isAbsolute(executable || '') || !path.isAbsolute(script || '') || !/^[0-9a-f]{64}$/.test(runtimeId || '')) throw unavailable();
     if (pyramidDirectory !== null && !path.isAbsolute(pyramidDirectory)) throw unavailable();
     if (projectsDirectory !== null && !path.isAbsolute(projectsDirectory)) throw unavailable();
-    this.options = { executable, script, version, runtimeId, timeoutMs, captureDiagnostics, pyramidDirectory, pyramidBudgetBytes, projectsDirectory };
+    this.options = { executable, script, version, runtimeId, timeoutMs, startTimeoutMs, captureDiagnostics, pyramidDirectory, pyramidBudgetBytes, projectsDirectory };
     this.child = null; this.state = 'stopped'; this.pending = new Map(); this.queue = []; this.writing = false;
     this.stderr = Buffer.alloc(0); this.handshake = null; this.session = null; this.partial = null;
   }
@@ -98,7 +102,7 @@ class EngineClient {
       this.rejectPending();
       this.child = null;
     });
-    this.starting = this.request('hello', { protocol: 1 }).then((result) => {
+    this.starting = this.request('hello', { protocol: 1 }, null, { timeoutMs: this.options.startTimeoutMs }).then((result) => {
       if (result.protocol !== 1 || result.engine_version !== version || result.runtime_id !== runtimeId || !Array.isArray(result.methods) || result.methods.some((method) => !ADVERTISED_METHODS.has(method))) throw unavailable();
       this.handshake = result; this.state = 'ready'; return result;
     }).catch((error) => { this.fail(child); throw error; });

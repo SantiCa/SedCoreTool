@@ -82,7 +82,7 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.26** (in progress: the download retries and the start evidence are in and passed on GitHub on `0fdd7bb`; waiting for the maintainer's answer on the start-up deadline, see the card; **model: most capable, effort medium**), the last of the four cards added on 18 November 2026 at the maintainer's request to fix the warnings of M8.4.22 before going on; then M8.4.17 (interval table of tiled sections; fast tier, effort medium). Cards M8.4.16 (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux), M8.4.22, M8.4.23, M8.4.24 and M8.4.25 (development gate; `tests` and *Desktop builds* passed on each commit) are done.
+- **Next step: M8.4.17** (interval table of tiled sections; **model: fast tier (Sonnet), effort medium**). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1357,7 +1357,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   build alone takes 31 ms for 2^20 objects (the tool now times only the build). Node: 5 new tests in `tests/app/tiledsync.test.mjs`, the 7 of
   M8.4.16 and M8.4.22 unchanged.
 
-##### M8.4.26 - Two intermittent GitHub failures: runtime downloads and an engine start on Windows — state: In progress (18 Nov 2026; waiting for the GitHub runs and a decision of the maintainer)
+##### M8.4.26 - Two intermittent GitHub failures: runtime downloads and an engine start on Windows — state: Done (18 Nov 2026, development gate; deadline decision (b) of the maintainer)
 
 - **Goal:** the two failures seen once each on GitHub stop costing reruns, without weakening any check: (a) *Desktop builds* on macOS,
   commit `d407763`: `npm run dist` failed because `tools/prepare_engine_runtime.py` lost a download of a pinned wheel (`TimeoutError: The read
@@ -1413,6 +1413,14 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   accept a rare rerun; (b) give the handshake its own, longer deadline in `desktop/engine.js` (also in the program, where a slow first start
   today shows the engine as unavailable and uses the one automatic restart); (c) lengthen only the tests' deadlines. Recommendation: (b),
   for example 20 s for the handshake only, because the program meets the same slow start on a busy computer.
+  **Answered by the maintainer on 18 November 2026: (b).** `EngineClient` has `startTimeoutMs` (default `START_TIMEOUT_MS` = 20 s) for the
+  handshake only; every other request keeps its deadline (5 s by default). New test: a fake engine that answers its handshake after 0.8 s
+  starts with ordinary requests limited to 0.3 s, and fails with "no handshake within the start deadline" when the start deadline is 0.3 s.
+  The `buffer.read` fixture test no longer depends on how fast Python starts, because its 1.5 s now applies only to its requests.
+  **After the fix (Windows, every core busy):** 20 runs of the engine tests, 280 starts, none failed, 202-1141 ms; `buffer.read` test passed
+  every time. *Desktop builds* with the download cache warm (commit `184ea3f`): cache hit on Windows, macOS and Linux, all passed. Full
+  checks on Windows: `npm test` 444 passed, typecheck, pytest 865 passed (9 skipped), `tests/e2e/desktop.mjs` with the engine experiment
+  off and on. Not run again on GitHub: the 20 Windows repetitions after the deadline change (the workflow runs by hand or when it changes).
 
 ##### M8.4.18 - Saving, reopening, backup and export of tiled sections — state: after M8.4.17
 

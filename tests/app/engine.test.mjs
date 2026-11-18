@@ -62,10 +62,10 @@ async function clientFixture(t, options = {}) {
     const exitedFirst = exited !== null && exited.atMs <= failedMs;
     await Promise.race([client.exited, new Promise((resolve) => setTimeout(resolve, 2000))]);
     const evidence = {
-      code: error?.code ?? null, failedMs, deadlineMs: client.options.timeoutMs, spawnError,
+      code: error?.code ?? null, failedMs, deadlineMs: client.options.startTimeoutMs, spawnError,
       reason: spawnError ? 'the process could not be started'
         : exitedFirst ? 'the process exited before its handshake'
-          : failedMs >= client.options.timeoutMs - 50 ? 'no handshake within the request deadline' : 'the handshake was refused or malformed',
+          : failedMs >= client.options.startTimeoutMs - 50 ? 'no handshake within the start deadline' : 'the handshake was refused or malformed',
       exit: exitedFirst ? exited : null, stderr: client.stderr.toString('utf8').split(/\r?\n/).filter(Boolean).slice(-20),
     };
     await record({ ok: false, ...evidence });
@@ -86,7 +86,7 @@ async function upload(client, data) {
   return handle;
 }
 
-test('a start that fails says why: the process exited first, or no handshake came within the deadline', { skip: !python }, async (t) => {
+test('a start that fails says why: the process exited first, or no handshake came within the start deadline', { skip: !python }, async (t) => {
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'engine-start-'));
   t.after(() => fs.rm(folder, { recursive: true, force: true }));
   const exits = path.join(folder, 'exits.py'), silent = path.join(folder, 'silent.py');
@@ -100,12 +100,27 @@ test('a start that fails says why: the process exited first, or no handshake cam
     assert.deepEqual(evidence.stderr, ['engine could not import its runtime']);
     return true;
   });
-  await assert.rejects(clientFixture(t, { script: silent, timeoutMs: 400 }), (error) => {
+  await assert.rejects(clientFixture(t, { script: silent, startTimeoutMs: 400 }), (error) => {
     const evidence = JSON.parse(error.message.replace('engine did not start: ', ''));
-    assert.equal(evidence.reason, 'no handshake within the request deadline');
+    assert.equal(evidence.reason, 'no handshake within the start deadline');
     assert.ok(evidence.failedMs >= 350 && evidence.deadlineMs === 400, JSON.stringify(evidence));
     return true;
   });
+});
+
+test('the handshake has its own deadline: a slow start succeeds although it takes longer than an ordinary request may', { skip: !python }, async (t) => {
+  const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'engine-slow-start-'));
+  t.after(() => fs.rm(folder, { recursive: true, force: true }));
+  const slow = path.join(folder, 'slow.py'), engine = path.dirname(script).replaceAll(path.sep, '/');
+  await fs.writeFile(slow, ['import sys, time', `sys.path.insert(0, ${JSON.stringify(engine)})`, 'from protocol import read_frame, strict_json, write_json',
+    'hello = strict_json(read_frame(sys.stdin.buffer)[1])', 'time.sleep(0.8)',   // a start slowed down, as on a busy computer
+    `write_json(sys.stdout.buffer, {"v": 1, "kind": "response", "session": hello["session"], "id": hello["id"], "op": "hello", "status": "ok", "result": {"protocol": 1, "engine_version": "test", "runtime_id": ${JSON.stringify(runtimeId)}, "methods": ["buffer.digest/1"], "limits": {}}})`,
+    'sys.stdin.buffer.read()', ''].join('\n'));
+  const client = await clientFixture(t, { script: slow, timeoutMs: 300 });   // ordinary requests: 0.3 s; the start: the default 20 s
+  assert.equal(client.status().state, 'ready');
+  assert.equal(client.options.startTimeoutMs, 20000);
+  await client.stop();
+  await assert.rejects(clientFixture(t, { script: slow, startTimeoutMs: 300 }), /no handshake within the start deadline/);
 });
 
 test('actual isolated Python transfers multiple bounded chunks and runs the diagnostic', { skip: !python }, async (t) => {
