@@ -26,7 +26,7 @@
  *   tiled?: {pyramid: string, level: number, levels: {level: number, width: number, height: number, rows: number, cols: number}[], channels: number, bits: number},
  *   maskTiles?: import('./tiledmasks.js').MaskTiles,
  *   _statsRunner?: import('./tiledit.js').TiledStatsRunner,
- *   _maskSync?: import('./tiledsync.js').MaskSync, _maskLoader?: import('./tiledsync.js').MaskLoader,
+ *   _maskSync?: import('./tiledsync.js').MaskSync, _maskLoader?: import('./tiledsync.js').MaskLoader, _undoTrimShown?: boolean,
  *   logVer: number, view: SectionView | null, crop: import('./core.js').Roi | null,
  *   filters: import('./imageproc.js').FilterSettings, _lc?: SectionCanvasCache | null,
  *   _lb?: SectionCanvasCache | null, file: SectionFile, objects: Map<number, TraceObject>, nextId: number, nextTraceOrder: number,
@@ -42,7 +42,8 @@
  *   src: Record<string, string>, ageText: string, user: Record<string, {d: number[], v: (number | null)[]}>,
  *   edits: Record<string, Record<string, CellEdit>>}} CoreState
  * @typedef {{s: SectionState, lm: (number | number[])[], ex: number[], nextId: number, sel: number,
- *   objs: Map<number, TraceObject | null>, group?: string, stackChanged?: boolean}} UndoStep
+ *   objs: Map<number, TraceObject | null>, group?: string, stackChanged?: boolean,
+ *   tiles?: import('./tiledundo.js').TileChanges}} UndoStep `tiles`: the mask tiles of a tiled edit (card M8.4.16 step 5)
  */
 /* Shared application state and small helpers (no DOM work at load time). */
 import { t } from './i18n.js';

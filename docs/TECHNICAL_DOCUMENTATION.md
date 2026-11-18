@@ -163,6 +163,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `tilecache.js` | Which tiles of a tiled section the viewer needs (card M8.4.15): the level for a zoom (`levelForZoom`: the coarsest with at least one level pixel per screen pixel), the visible tiles plus one ring, nearest the centre first, a coarser cached tile to draw while one is missing (`coarserCover`), a 256 MiB least-recently-used cache that keeps the tiles on screen (`TileCache`) and batched requests, 16 tiles each, two at a time, dropping tiles no longer wanted (`TileScheduler`, keys prefixed per pyramid); where a tile goes on screen (`tilePlacement`) | Yes |
 | `tiledmasks.js` | Masks of tiled sections in the page (card M8.4.16): the cache of level-0 mask tiles (`MaskTiles`: all-zero layers kept as nothing, tiles changed and not acknowledged by the engine never dropped, pinned tiles kept, clean tiles dropped least recently used first beyond 128 MiB), the reduced copy in the working image (`reduceTile`), and the mask layer painted over pixel tiles (`overlayLayout`, `axisMap`, `paintOverlay`) | Yes |
 | `tiledit.js` | Editing the masks of tiled sections (card M8.4.16): the edit window (`EditWindow`: whole level-0 mask tiles as flat arrays, written back tile by tile; `windowRange`, `WINDOW_TILES`) and object statistics kept per tile and summed per object (`tileStats`, `TiledObjectStats`, `affectedTiles`, `TiledStatsRunner`) | Yes |
+| `tiledundo.js` | Undo and redo of tiled edits (card M8.4.16 step 5): copies of the mask tiles an edit changed, taken before its first write and swapped with the page's tiles (`TileChanges`); the 64 MiB budget of those copies (`trimTileHistory`) | Yes |
 | `tiledsync.js` | Sending the masks of tiled sections to the engine's store (card M8.4.16): rounds of staged version, dirty tiles and tables, commit and acknowledgement, retried after a failure (`MaskSync`); reading back tiles the page dropped (`MaskLoader`); the tables as bytes (`maskTables`) | Yes |
 | `maskchanges.js` | Which rows of each section's label and exclusion masks changed since the engine last received them: `createMaskChanges` (mark, take, restore, mark all) and `indexRangeOfPairs` (the pixels named by an edit-history list). A hint for the engine path, never a proof (§26.2) | Yes |
 | `sectionanalysis.js` | Analysis of one section without the DOM: effective class of each object, class-index table, row counts (cached per section), interval bins with no-data padding, ages and manual indices (§3.2), plus the builders of the engine method's input snapshot and reference result columns (`buildIntervalSnapshot`, `referenceColumns`), the revision key of a section's calculation (`analysisRevision`) and the conversion of engine result columns to `s.bins` (`resultToBins`). `app.js::analyze` passes the project state in | Yes |
@@ -3090,8 +3091,8 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   written (its end points plus the radius and one pixel) is copied back into the tiles, which become dirty, and into the working image's reduced
   copy. A window of more than 96 tiles is refused with "zoom in to edit" (at a canvas of 710 x 757 that happens between 1 screen pixel per 3 and
   per 8 source pixels). The window is kept between strokes while nothing else wrote the tiles. A stroke near the edge of the window is cut at
-  it. Tiled strokes keep no pixel log and have no undo yet (undo by tile copies is step 5), and unused overlap stacks of tiled sections are not
-  reclaimed (that scans the whole label image). Clicking with Select reads the full-resolution label when its tile is in the page.
+  it. Tiled strokes keep no pixel log (their undo keeps tile copies, below), and unused overlap stacks of tiled sections are not reclaimed (that
+  scans the whole label image; undo relies on it, since a restored tile may hold any stack code used before). Clicking with Select reads the full-resolution label when its tile is in the page.
 - **Object statistics of tiled sections** (`tiledit.js`): `objectStats` reads a pixel's labels and colours up to 3 pixels away, so the
   statistics of a tile's pixels (`tileStats`) are computed on arrays padded by 3 pixels from the neighbouring tiles, with the image's real
   edges passed as `bounds` (pixels beyond them are never an object's neighbour or part of its surrounding contrast), then moved into source
@@ -3111,6 +3112,15 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   statistics need them (a stroke over a tile not read back yet asks to try again in a moment). The edit window pins its tiles, and writes a layer
   the tile does not hold as a whole. Until card M8.4.18 the project record does not name the stored version, so closing the program still loses
   a tiled section.
+- **Undo and redo of tiled edits** (`tiledundo.js`, `commitTiledOp` and `swapTiledStep` in `app.js`; card M8.4.16 step 5): a stroke or an
+  exclusion rectangle on a tiled section is one step of the usual Undo/Redo history. Instead of a pixel log the step keeps a copy of each mask tile
+  (both layers; an all-zero layer is kept as nothing) as it was just before the edit first wrote it. Undo and redo swap those copies with the
+  page's tiles, which become unacknowledged edits and reach the store as in step 4 (also while the engine is down); the working image's reduced
+  copy is updated, the objects' records are restored as for any edit, and their statistics are recomputed from the tiles swapped and their
+  neighbours. A step counts the larger of its two states; the steps of the whole history share 64 MiB (`UNDO_TILE_BYTES`), beyond which the
+  oldest steps are dropped (whole groups; the newest step is always kept, up to the 96 tiles of an edit window) and the user is told once per
+  section ("The oldest Undo steps were dropped…"). The history keeps at most 30 steps, as for every section. A step whose tiles the page
+  dropped (clean tiles beyond 128 MiB) asks to try again while they are read back, and changes nothing until then.
 - **Measured on Windows (card M8.4.16 step 3,** [evidence](validation/M8.4.16-step3-viewer-rgb8g-windows.json)**,** `rgb8g`, `ds` 32, canvas
   710 x 757, real mouse): input to the next frame during a stroke, p95, 23.9 ms (1 screen pixel per source pixel, brush size 10 = radius 320
   source pixels), 18.4 ms (size 3) and 31.8 ms (1 screen pixel per 3 source pixels, size 10, painting over dense masks), against 33 ms; the first

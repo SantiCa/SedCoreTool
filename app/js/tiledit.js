@@ -84,10 +84,12 @@ export class EditWindow {
   }
   /**
    * Copy a rectangle of the window (window pixels, inclusive) back into the tiles, which become dirty. Returns the tiles written.
+   * `capture(row, col)` is called before a tile is written (the undo step copies it there, card M8.4.16 step 5).
    * @param {{x0: number, y0: number, x1: number, y1: number}} rect
+   * @param {(row: number, col: number) => void} [capture]
    * @returns {[number, number][]}
    */
-  writeBack(rect) {
+  writeBack(rect, capture) {
     const x0 = Math.max(0, Math.floor(rect.x0)), y0 = Math.max(0, Math.floor(rect.y0));
     const x1 = Math.min(this.w - 1, Math.ceil(rect.x1)), y1 = Math.min(this.h - 1, Math.ceil(rect.y1));
     const written = /** @type {[number, number][]} */ ([]);
@@ -95,6 +97,7 @@ export class EditWindow {
     const tiles = this.tiles;
     for (let row = Math.floor((y0 + this.oy) / TILE); row <= Math.floor((y1 + this.oy) / TILE); row++) {
       for (let col = Math.floor((x0 + this.ox) / TILE); col <= Math.floor((x1 + this.ox) / TILE); col++) {
+        capture?.(row, col);
         const entry = tiles.get(row, col), tx = col * TILE - this.ox, ty = row * TILE - this.oy;
         const part = { x0: Math.max(x0, tx), x1: Math.min(x1, tx + TILE - 1, this.w - 1), y0: Math.max(y0, ty), y1: Math.min(y1, ty + TILE - 1, this.h - 1) };
         // A layer the tile does not hold (all zeros, or a tile no longer in the page) is copied whole: the window is the truth for its tiles.

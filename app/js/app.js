@@ -31,6 +31,7 @@ import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlac
 import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks.js';
 import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, windowRange } from './tiledit.js';
 import { MaskLoader, MaskSync, maskTables } from './tiledsync.js';
+import { TileChanges, trimTileHistory } from './tiledundo.js';
 import { renderData } from './datatab.js';
 import { frameRatio, panelPrefs, savePanels } from './panels.js';
 import { addRecordFromTable, defaultLogView, lastLog, mode, renderLog, renderLogPanel, renderRecList, scheduleLog, sectionCanvas, navigationPreviewCanvas, clearNavigationPreviews, setMode } from './columns.js';
@@ -447,7 +448,8 @@ function putMaskTile(s, row, col, labels, exclude) {
    edit window (decision A: the visible level-0 mask tiles plus a margin of the brush radius, as flat arrays), seen through `windowSection`;
    what each pointer move wrote is copied back into the tiles and into the working image's reduced masks. The window refuses beyond
    WINDOW_TILES tiles with "zoom in to edit" (decision B). Object statistics are recomputed per tile afterwards from the level-0 pixels
-   (`tiledStatsRunner`). Tiled strokes keep no pixel log: their undo, by tile copies, is step 5. */
+   (`tiledStatsRunner`). Tiled strokes keep no pixel log: their undo step keeps a copy of each tile before its first write (step 5,
+   `tiledundo.js`). */
 const NO_PIXEL_LOG = /** @type {any} */ ({ push() { return 0; }, length: 0 });
 const canvasSize = () => { const c = /** @type {HTMLCanvasElement} */ (view); return { w: c.width, h: c.height }; };
 let editWindow = null;                                   // one window for the page (up to 120 MiB), kept while it stays current
@@ -479,6 +481,7 @@ function startTiledStroke(s, p, e, tool) {
   const win = tiledEditWindow(s, visible, Math.max(1, Math.ceil(radius / TILE)));
   if (!win) return;
   const op = beginOp(s); op.mode = tool; op.lm = NO_PIXEL_LOG; op.ex = NO_PIXEL_LOG; op.win = win; op.section = s; op.radius = radius;
+  op.tiles = new TileChanges(s.maskTiles);
   const at = { x: p.x * ds - win.ox, y: p.y * ds - win.oy };
   if (tool === 'brush') {
     const under = topAt(win.labelAt(p.x * ds, p.y * ds) ?? 0, s.stacks);
@@ -501,8 +504,8 @@ function moveTiledStroke(p) {
 
 /** Copy what a stroke segment from a to b (window pixels) may have written back into the tiles and the reduced masks. */
 function tiledWriteBack(op, a, b) {
-  const s = op.section, r = op.radius + 1;
-  for (const [row, col] of op.win.writeBack({ x0: Math.min(a.x, b.x) - r, y0: Math.min(a.y, b.y) - r, x1: Math.max(a.x, b.x) + r, y1: Math.max(a.y, b.y) + r })) {
+  const s = op.section, r = op.radius + 1, capture = (row, col) => op.tiles.capture(row, col);
+  for (const [row, col] of op.win.writeBack({ x0: Math.min(a.x, b.x) - r, y0: Math.min(a.y, b.y) - r, x1: Math.max(a.x, b.x) + r, y1: Math.max(a.y, b.y) + r }, capture)) {
     const entry = s.maskTiles.get(row, col);
     reduceTile(s, s.ds, row, col, entry?.labels || null, entry?.exclude || null);
   }
@@ -517,8 +520,9 @@ function tiledExcludeRect(s, r, mode) {
   if (!win) { requestRender(); return; }
   const value = mode === 'exclude' ? 1 : 0;
   for (let y = rect.y0 - win.oy; y < rect.y1 - win.oy; y++) win.exclude.fill(value, y * win.w + rect.x0 - win.ox, y * win.w + rect.x1 - win.ox);
-  const op = { section: s, win, radius: 0 };
+  const op = beginOp(s); op.section = s; op.win = win; op.radius = 0; op.tiles = new TileChanges(s.maskTiles);
   tiledWriteBack(op, { x: rect.x0 - win.ox, y: rect.y0 - win.oy }, { x: rect.x1 - 1 - win.ox, y: rect.y1 - 1 - win.oy });
+  commitTiledOp(op);
   afterChange(s);
 }
 
@@ -530,7 +534,33 @@ function finishTiledStroke(op) {
     const changed = e.x1 >= e.x0 ? affectedTiles(s.maskTiles, { x0: e.x0 + op.win.ox, y0: e.y0 + op.win.oy, x1: e.x1 + op.win.ox, y1: e.y1 + op.win.oy }) : [];
     void tiledStatsRunner(s).queue(changed, op.touched);
   }
+  commitTiledOp(op);
   afterChange(s);
+}
+
+/* Undo and redo of tiled edits (card M8.4.16 step 5, decision C): a step keeps the tiles the edit changed as they were before it
+   (`TileChanges`), and undo or redo swaps them with the page's tiles; the copies of all steps share UNDO_TILE_BYTES, beyond which the oldest
+   steps are dropped. The objects' records are kept as for other edits (`objs`); their statistics are recomputed from the swapped tiles. */
+function commitTiledOp(op) {
+  const s = op.section, step = { s, group: '', lm: [], ex: [], objs: op.objs, nextId: op.nextId, sel: op.sel, tiles: op.tiles.seal() };
+  for (const id of op.touched) rememberTrace(step, id);
+  for (const [id, previous] of step.objs) if (!previous && !s.objects.has(id)) step.objs.delete(id);
+  if (step.tiles.empty && !step.objs.size) return;
+  S.redo.length = 0;
+  S.undo.push(step);
+  trimEditHistory(S.undo);
+  if (trimTileHistory(S.undo) && !s._undoTrimShown) { s._undoTrimShown = true; toast(t('tiles.undoTrimmed'), 9000); }
+  updateHistoryButtons();
+}
+
+function swapTiledStep(op) {
+  const s = op.s, around = new Map();
+  for (const [row, col] of op.tiles.swap()) {
+    const entry = s.maskTiles.get(row, col);
+    reduceTile(s, s.ds, row, col, entry?.labels || null, entry?.exclude || null);
+    for (const [r, c] of affectedTiles(s.maskTiles, { x0: col * TILE, y0: row * TILE, x1: (col + 1) * TILE - 1, y1: (row + 1) * TILE - 1 })) around.set(r * s.maskTiles.cols + c, [r, c]);
+  }
+  void tiledStatsRunner(s).queue([...around.values()], op.objs.keys());
 }
 
 /** Object statistics of a tiled section, per tile and from the level-0 pixels (card M8.4.16 step 3); bounding boxes also in working pixels. */
@@ -960,8 +990,10 @@ function redo() { replayEditHistory(S.redo, S.undo, true); }
  */
 function replayEditHistory(from, to, forward) {
   const last = from.at(-1);
-  if (!last || drag?.type === 'paint') return;
+  if (!last || drag?.type === 'paint' || drag?.type === 'tpaint') return;
   const { s, group } = last;
+  const missing = last.tiles?.missing() || [];
+  if (missing.length) { void maskLoader(s).want(missing).catch(() => {}); toast(t('tiles.loadingMasks')); return; }   // tiles the page dropped
   if (s !== sec()) selectSection(S.sections.indexOf(s));
   S.multi.clear();
   do {
@@ -978,9 +1010,12 @@ function replayEditHistory(from, to, forward) {
  */
 function swapEditStep(op, forward) {
   const s = op.s;
-  swapHistoryPixels(s.labels, s.exclude, op.lm, op.ex, s.stacks, op.stackChanged ? six(s) : null, forward);
-  reportWrittenRows(op);
-  if (op.stackChanged) compactSectionStacks(s);
+  if (op.tiles) swapTiledStep(op);
+  else {
+    swapHistoryPixels(s.labels, s.exclude, op.lm, op.ex, s.stacks, op.stackChanged ? six(s) : null, forward);
+    reportWrittenRows(op);
+    if (op.stackChanged) compactSectionStacks(s);
+  }
   swapHistoryTraces(op);
   [s.nextId, op.nextId] = [op.nextId, s.nextId];
   [S.selected, op.sel] = [op.sel, S.selected];

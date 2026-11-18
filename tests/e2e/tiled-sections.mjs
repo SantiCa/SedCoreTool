@@ -332,6 +332,11 @@ try {
     `(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*server.py*' -and $_.CommandLine -like '*projects-dir*' } | Where-Object { $p = $_; $chain = $p.ParentProcessId; $hit = $false; for ($k = 0; $k -lt 6 -and $chain; $k++) { if ($chain -eq ${on.pid}) { $hit = $true; break }; $chain = (Get-CimInstance Win32_Process -Filter "ProcessId=$chain").ParentProcessId }; $hit } | Select-Object -First 1).ProcessId`],
     { encoding: 'utf8', windowsHide: true }).trim());
   assert.ok(coordinator > 0, 'the engine coordinator of this program was found');
+  // Card M8.4.16 step 5: the stroke is undone while the engine is down and redone after it is back; each state reaches the store exactly.
+  const objectsNow = () => on.page.evaluate(() => [...window.ichantool.S.sections.at(-1).objects.values()].map((o) => [o.id, o.area, String(o.sbox)]));
+  const withLayers = (page) => Object.fromEntries(Object.entries(page).filter(([, layers]) => layers[0] || layers[1]));
+  await on.page.waitForFunction(() => window.ichantool.tiledStatsIdle(), { polling: 100, timeout: 60000 });
+  const objectsBefore = await objectsNow();
   const putsBefore = await on.page.evaluate(() => window.ichantool.S.sections.at(-1)._maskSync.puts);
   await on.page.mouse.move(box.left + 500, box.top + 40); await on.page.mouse.down();
   for (let y = 40; y <= 900; y += 20) await on.page.mouse.move(box.left + 500 + (y % 40), box.top + y);
@@ -353,16 +358,30 @@ try {
       return Array.from(tiles.get(row, col).labels || []).reduce((a, v, i) => (a + v * (i % 9973 + 1)) % 1e9, 0) === sum; });
   }, before);
   assert.equal(kept, true, 'the page keeps its masks when the engine dies');
+  await on.page.click('#undoBtn');                                       // while the engine is down
   await on.page.waitForFunction(() => window.ichantool.masksSettled(), { polling: 200, timeout: 120000 });
   const midway = await on.page.evaluate(() => { const sync = window.ichantool.S.sections.at(-1)._maskSync; return { running: !!sync.running, manifest: sync.manifest }; });
   const resent = await storeMatchesPage();
   assert.ok(!resent.error, 'the restarted engine answers: ' + JSON.stringify(resent.error));
   assert.equal(resent.dirty, 0);
-  assert.notEqual(resent.manifest, settled.manifest);
   assert.equal(manifestAtKill, settled.manifest, 'the engine was killed before the round committed');
   assert.equal(midway.running, false);
-  assert.deepEqual(resent.stored, resent.page, 'after the restart the store holds exactly the page\'s masks, the stroke included');
-  for (const key of Object.keys(before)) assert.ok(resent.page[key]?.[0], `tile ${key} of the stroke is stored`);
+  assert.deepEqual(resent.stored, resent.page, 'after the restart the store holds exactly the page\'s masks');
+  assert.deepEqual(withLayers(resent.page), withLayers(settled.page), 'the undone stroke is gone from the page and from the store');
+  await on.page.waitForFunction(() => window.ichantool.tiledStatsIdle(), { polling: 100, timeout: 60000 });
+  assert.deepEqual(await objectsNow(), objectsBefore, 'the objects and their statistics are those before the stroke');
+  await on.page.click('#redoBtn');
+  await on.page.waitForFunction(() => window.ichantool.masksSettled() && window.ichantool.tiledStatsIdle(), { polling: 200, timeout: 120000 });
+  const redone = await storeMatchesPage();
+  assert.deepEqual(redone.stored, redone.page, 'after the redo the store holds exactly the page\'s masks, the stroke included');
+  assert.notEqual(redone.manifest, resent.manifest);
+  const again = await on.page.evaluate(async (keys) => {
+    const tiles = window.ichantool.S.sections.at(-1).maskTiles, out = {};
+    for (const key of keys) { const [row, col] = key.split('.').map(Number); out[key] = Array.from(tiles.get(row, col)?.labels || []).reduce((a, v, i) => (a + v * (i % 9973 + 1)) % 1e9, 0); }
+    return out;
+  }, Object.keys(before));
+  assert.deepEqual(again, before, 'the redo gives back the stroke exactly');
+  assert.notDeepEqual(await objectsNow(), objectsBefore);
   const messages = await on.page.evaluate(() => [window.ichantool.t('tiles.masksUnsent'), window.ichantool.t('tiles.masksSent')]);
   assert.ok(toasts.includes(messages[0]) && toasts.indexOf(messages[1], toasts.indexOf(messages[0])) > 0,
     'the failure of the round was shown, then its recovery: ' + JSON.stringify(toasts.slice(-4)));

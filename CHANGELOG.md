@@ -20,6 +20,12 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.16, step 5: strokes and exclusion rectangles on tiled sections can be undone and redone; each step keeps the mask tiles it changed
+  as they were before (copied on the first write) and undo and redo swap them, within 64 MiB for the whole history (the oldest steps are dropped
+  beyond it, with a message) (`app/js/tiledundo.js`). `tests/e2e/tiled-sections.mjs` now undoes the stroke while the engine is down and redoes it
+  after the restart: the page and the store hold exactly the state before the stroke, then exactly the stroke, and the objects and their
+  statistics come back as they were; Node tests for the copies, the swap, reading back dropped tiles and the budget. Strokes on the 8 GiB fixture
+  with the copies: input to next frame p95 22.7-31.1 ms against 33 ms ([evidence](docs/validation/M8.4.16-step5-viewer-rgb8g-windows.json)).
 - Card M8.4.16, step 4: the masks of tiled sections are sent to the engine's store in the background after each change and kept in the page
   until the store acknowledges them; if the engine dies on the way they are sent again after its automatic restart (`app/js/tiledsync.js`; the
   page reaches the store through `desktop/tile-ipc.js`; the program starts the engine with `--projects-dir`). Tiles the page dropped to save
