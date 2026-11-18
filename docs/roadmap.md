@@ -82,7 +82,7 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.18** (saving, reopening, backup and export of tiled sections; **model: most capable tier (Opus), effort high**: saving, backup and recovery). Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
+- **Next step: M8.4.18a** (save and reopen tiled sections on the same computer; **model: most capable tier (Opus), effort high**), after the maintainer answers decisions D1-D4 written above the four cards M8.4.18a-d (design session of 18 November 2026). Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1525,20 +1525,119 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   checks on Windows: `npm test` 444 passed, typecheck, pytest 865 passed (9 skipped), `tests/e2e/desktop.mjs` with the engine experiment
   off and on. Not run again on GitHub: the 20 Windows repetitions after the deadline change (the workflow runs by hand or when it changes).
 
-##### M8.4.18 - Saving, reopening, backup and export of tiled sections — state: after M8.4.17
+##### M8.4.18 - Saving, reopening, backup and export of tiled sections — split into M8.4.18a-d by the design session of 18 Nov 2026
 
-- **Goal:** projects with tiled sections save, reopen, back up and export without ever losing the last good save, with old projects unchanged.
-- **Read first:** `app/js/storage.js`, `writeProjectFolder` and the save path in `app.js`; `app/js/exportio.js`; ARCHITECTURE §3.4 rule 4 and decision 3.
-- **Model:** most capable, effort high (saving, backup and recovery; a versioned extension of the project format).
-- **Change and acceptance (the earlier summary, now with decisions 3 and 8):** the project record of a tiled section names the store format version,
-  the manifest hash and the source identity (a versioned extension of the project format; older projects open unchanged; a build without tiled-section
-  support refuses the section visibly); save order of rule 4 (tiles, manifest by temporary file and atomic rename, then the record); folder backup
-  copies mask tiles by hash (incremental); the source is referenced by path, size and SHA-256, with an option to copy it into the project, and a
-  missing or moved source is located by the user and verified by SHA-256 (the masks stay usable without the source, the pixels do not); streamed
-  export of masks and images. Failure tests: disk full, interrupted save, partial cache, engine killed; each keeps the last good save. Multi-gigabyte
-  projects reopen with unchanged source bytes, masks and results.
+The summary written on 16 November (record naming the store version, the manifest and the source; save order of rule 4; incremental folder backup;
+the source by path, size and SHA-256 with an option to copy it; a missing source located by the user; streamed export; failure tests) is four
+deliveries, each with its own failure tests. Facts from the code that shape them: (1) the mask store **never deletes anything** today: every
+background round of `MaskSync` writes a manifest, and old manifests and tiles stay forever (`store/masks.py` has no removal); (2) the renderer never
+sees a path (contract §8.1), so the source's path must be remembered by the main process, not by the project record; (3) `zip.js` has no ZIP64 and
+refuses packages above 4 GiB, while the masks of one `rgb8g`-sized section can exceed that; (4) after reopening, the interval table of M8.4.17 needs
+every non-empty tile counted once, which means reading them back. Decisions D1-D4 below are proposals the maintainer answers before M8.4.18a starts.
 
-##### M8.4.19 - Milestone gate of part C — state: after M8.4.18
+- **D1, saving while the engine cannot take the edits:** the save writes everything else and keeps, for that section, the last manifest the store
+  acknowledged *with all its edits* (never a newer one that misses some); the section shows "unsaved changes" and the save is retried; closing the
+  program warns, as today for a failed save. *Alternative:* the whole save fails.
+- **D2, a project with tiled sections opened without the engine** (browser build, standalone file, engine experiment off): the section is shown as
+  a placeholder that says what it needs, its record is kept byte for byte on every later save, and nothing that would change it is allowed.
+  *Alternative:* the project does not open.
+- **D3, copying the source into the project:** not by default; an action per section copies it into `<user data>/projects/<project>/sources/` (with
+  the size shown first); the copy is used when the original is missing. *Alternatives:* always copy; never copy.
+- **D4, packages (`.sedcoretool`) with tiled sections:** the package holds the masks (tiles and manifest) and the source's identity, and the source
+  itself only when the user ticks it; this needs ZIP64 in `zip.js` (own code, no dependency). *Alternative:* packages refuse tiled sections and only
+  the folder backup carries them.
+
+##### M8.4.18a - Save and reopen tiled sections on the same computer — state: after D1-D2 are answered
+
+- **Goal:** a tiled section survives closing and reopening the program, with exactly the masks, objects and interval table it had, and the store
+  does not grow without bound; no failure loses the last good save.
+- **Read first:** this card and D1-D2; ARCHITECTURE §3.4 rule 4 and decisions 3, 7, 9; contract §8.7; `app/js/storage.js` (`putProject`,
+  `getProject`); in `app.js`: `serSection`, `serialize` (the line that leaves tiled sections out), `loadSection`, `saveToDB`, `flushSave`,
+  `addTiledSection`, `maskSync`, `maskLoader`, `tiledCounts`; `app/js/tiledsync.js`; `src/sedcoretool/store/masks.py`; `desktop/tile-ipc.js`.
+- **Change:** `app.js` (a `tiled` part in the section record; save and load paths), `tiledsync.js` (a way to wait until the store holds every
+  edit), `store/masks.py` and `engine/server.py` (operation `mask.retain`), `desktop/tile-ipc.js` and `preload.js` (the new operation; the
+  source path remembered by the main process), contract §8.7, TECHNICAL_DOCUMENTATION (the record), tests.
+- **Do not touch:** the record of every other section (old projects open and save byte for byte as before); the stored format of tiles and
+  manifests (version 2); the pyramid format; `legacy/`.
+- **Model:** most capable, effort high (saving and recovery, a versioned extension of the project format).
+- **Steps:**
+  1. *The record.* A tiled section is saved like any section, without `labels`, `exclude` and `stacks` arrays (they are in the store), plus
+     `tiled: {version: 1, store: 2, manifest, width, height, source: {sha256, size, name}, level}`; `stacks` is saved as its table (the store's
+     `stack_offsets`/`stack_members` already hold it) and objects as today (with `st`). The project format version is raised only if an older build
+     would misread the record; an older build that does not know `tiled` must refuse the section visibly (check what V0.151 does with it and record it).
+  2. *Saving.* `saveToDB` first asks every tiled section's `MaskSync` for a settled state (all edits acknowledged) with a deadline; the record names
+     that manifest. If a section cannot settle (D1), its previous record is kept, the section is marked unsaved and the save of everything else
+     goes on; the save state shows it. The store already writes tiles, then the manifest atomically (contract §8.7), so rule 4's order holds: the
+     record is written last.
+  3. *Retention.* New engine operation `mask.retain {project, keep: [manifest, ...]}` deletes every manifest of the project not listed and every tile
+     no remaining manifest uses, and never one a staged version uses. The page calls it after a successful save, with the manifests of the saved
+     records plus the current acknowledged ones. Interrupted half-way it leaves only unreferenced files behind (tested by killing the engine).
+  4. *The source path.* The main process keeps `<user data>/projects/<project>/sources.json` ({sha256 -> last path, size}), written atomically when a
+     tiled section is added; the renderer still never sees it.
+  5. *Reopening.* `loadSection` of a tiled section: the pyramid by its SHA-256 if it is in the cache; otherwise built again from the remembered path
+     after checking size and SHA-256 (the identity record avoids rereading an unchanged file); if neither is available, the section opens with its
+     masks, objects and table and a grey image that says the picture is missing (located by M8.4.18b). The masks come from the manifest (`MaskLoader`),
+     the counts of M8.4.17 are rebuilt by reading the non-empty tiles back once, with progress, and the table appears when they are all counted.
+  6. *Without the engine (D2):* the section is a placeholder and its record is written back unchanged.
+- **Tests:** Node: record round trip (all fields); an old project with no tiled section saves byte for byte as before; a save while `MaskSync` cannot
+  settle keeps the previous record (D1); `mask.retain` (Python): keeps listed manifests and their tiles, removes the rest, never a staged version's
+  tiles, interrupted retention leaves a readable store. Desktop: add a tiled section, edit, save, close, reopen: identical masks (as the M8.4.16 step 8
+  block compares them), objects and interval table; kill the engine before a save: the previous save opens; delete the pyramid cache: rebuilt from
+  the source; move the source and delete the cache: grey image, masks and table intact. Measure the reopening of an `rgb8g`-sized section with 3 % and
+  10 % of its tiles holding masks (time to the first frame and to the table).
+- **Done when:** the desktop round trip is exact; every failure case keeps the last good save; the store holds only retained manifests after a save;
+  the reopening times are recorded; development gate.
+
+##### M8.4.18b - A missing or moved source; copying the source into the project — state: after M8.4.18a and D3
+
+- **Goal:** a tiled section whose source moved can be pointed at the file again, accepted only when its SHA-256 matches; and the user can copy the
+  source into the project so it no longer depends on the original.
+- **Read first:** M8.4.18a as built; D3; contract §8.1-§8.3 (sources, identity record); `desktop/tile-ipc.js` (`register`), `desktop/main.js` (file dialogs).
+- **Change:** `desktop/main.js`, `tile-ipc.js`, `preload.js` (locate and copy operations), `app.js` and `i18n.js` (the grey image's button and the
+  per-section copy action), contract §8, tests.
+- **Do not touch:** the record of M8.4.18a; the pyramid and mask formats.
+- **Model:** most capable, effort medium (verified file identity; disk space).
+- **Steps:** (1) "Locate the image": a file dialog in the main process; the engine hashes the chosen file (progress, cancel); a different SHA-256 is
+  refused with a message that shows both sizes; a match updates `sources.json` and rebuilds the pyramid if needed. (2) "Copy the image into the project":
+  shows the size and the free space first; copies to `sources/<sha256>` through a temporary file, verifies the SHA-256, then renames; a full disk
+  leaves no partial file. The copy is preferred to the original when both exist. (3) Deleting a project deletes its copies; a copy shared by two
+  projects is kept until the last one goes.
+- **Tests:** a moved file is accepted; another file of the same size is refused; a copy interrupted by a full disk (simulated) leaves nothing; the
+  copy is used when the original is deleted; desktop end-to-end of both actions.
+- **Done when:** both actions work in the desktop with verified identity, and every failure leaves the previous state; development gate.
+
+##### M8.4.18c - Folder backup and restore of tiled sections — state: after M8.4.18a
+
+- **Goal:** the folder backup (`writeProjectFolder`) carries tiled sections incrementally, and a project restored from it on another computer opens
+  with identical masks.
+- **Read first:** `writeProjectFolder`, `openProjectFolder` and the backup scheduling in `app.js`; M8.4.18a as built; contract §8.7.
+- **Change:** `app.js` (backup and restore), `desktop/tile-ipc.js`, `preload.js`, `engine/server.py`, `store/masks.py` (operations to export a
+  manifest's files into a folder the user chose and to import them with verification), contract §8.7, tests.
+- **Do not touch:** the backup of other sections and its history rotation; the store format.
+- **Model:** most capable, effort high (backup and recovery).
+- **Steps:** (1) The backup folder of a project gets `tiles/<sha256>` files and `manifests/<sha256>.json`, copied only when missing (by name, which is
+  the hash) and verified after writing; the history files of the backup keep naming their manifests, so an old `historial/<date>.json` still opens.
+  (2) Restoring imports the tiles of the named manifest into the store, verifying every SHA-256 before use; a missing or corrupt tile refuses the
+  section with its position, never a partial section. (3) The source follows D3: a copy in the project is backed up; otherwise only its identity.
+- **Tests:** incremental backup copies only new tiles; a corrupt tile in the backup is refused at restore; a restore on an empty store (another
+  computer, simulated by another user-data folder) opens identically; an interrupted backup leaves the previous backup openable.
+- **Done when:** backup and restore round trip exactly on the desktop, with the failure cases above; development gate.
+
+##### M8.4.18d - Packages with tiled sections — state: after M8.4.18c and D4
+
+- **Goal:** a `.sedcoretool` package can carry tiled sections as D4 decides, streamed, without loading a whole image or mask into memory.
+- **Read first:** `app/js/zip.js`; `projectForExport`, the package import path in `app.js`; M8.4.18c as built.
+- **Change:** `zip.js` (ZIP64 writer and reader), the export and import of packages in `app.js`, tests.
+- **Do not touch:** packages without tiled sections (byte for byte as today, so older builds keep reading them).
+- **Model:** most capable, effort high (a file format read by other builds, hostile input).
+- **Steps:** (1) ZIP64 in `zip.js` only when a size or offset needs it, with streaming CRC as today; reading checks every size and offset against the
+  file and the import limits. (2) Export writes the tiles and manifest of each tiled section from the store, streamed, and the source when D4 says so.
+  (3) Import goes through the restore of M8.4.18c.
+- **Tests:** a package above 4 GiB written and read back (generated, streamed, in a temporary folder); a package without tiled sections is byte for
+  byte unchanged; truncated and hostile ZIP64 records are refused without large allocations; desktop round trip.
+- **Done when:** the round trip is exact for a section whose masks exceed 4 GiB in the package; development gate.
+
+##### M8.4.19 - Milestone gate of part C — state: after M8.4.18d
 
 - **Model:** fast, effort low (running and recording the gate); the most capable with effort high for the decisions that follow it.
 - Windows, macOS and Linux on one commit (`tests` and *Desktop builds*, including the desktop end-to-end test with the engine experiment and the
