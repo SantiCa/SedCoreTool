@@ -92,6 +92,24 @@ test('tiles no longer wanted are not requested; failures free the tiles for a la
   assert.deepEqual(calls[2].positions, [[0, 0]]);
 });
 
+test('after a failed read the scheduler is not idle and asks again after a growing pause, until the tile arrives', async () => {
+  const { calls, fetch, answer } = deferredFetch(), pauses = [], waiting = [];
+  let retries = 0;
+  const scheduler = new TileScheduler({ fetch, cache: new TileCache(1e6), retryMs: [10, 20], wait: (ms, then) => { pauses.push(ms); waiting.push(then); },
+    onRetry: () => { retries++; scheduler.want(0, [[1, 1]]); } });
+  scheduler.want(0, [[1, 1]]);
+  calls[0].reject(new Error('ENGINE_UNAVAILABLE')); await new Promise((r) => setTimeout(r, 0));
+  assert.equal(scheduler.idle, false, 'a failed tile is not "done"');
+  waiting.shift()();                                          // the first pause ends: the view asks again
+  assert.equal(retries, 1); assert.deepEqual(calls[1].positions, [[1, 1]]);
+  calls[1].reject(new Error('ENGINE_UNAVAILABLE')); await new Promise((r) => setTimeout(r, 0));
+  waiting.shift()();
+  assert.deepEqual(pauses, [10, 20], 'the pause grows');
+  answer(calls[2]); await new Promise((r) => setTimeout(r, 0));
+  assert.equal(scheduler.idle, true);
+  assert.equal(scheduler.failures, 0);
+});
+
 test('a tile evicted by the cache is closed (its bitmap memory released)', async () => {
   const { calls, fetch, answer } = deferredFetch();
   const cache = new TileCache(25);                           // room for two tiles of 10 bytes

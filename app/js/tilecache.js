@@ -9,6 +9,7 @@ import { TILE } from './tiledsection.js';
 export const CACHE_BYTES = 256 * 2 ** 20;      // the page's tile budget (card M8.4.15, contract §8 limits)
 export const BATCH = 16;                       // tile.read takes at most 16 positions
 export const MAX_IN_FLIGHT = 2;                // batches requested at once
+export const RETRY_MS = [500, 1000, 2000, 5000];  // card M8.4.24: pauses before asking again after failed reads (the last repeats)
 
 /** @typedef {{width: number, height: number, rows: number, cols: number}} Level */
 /** @typedef {{x0: number, y0: number, x1: number, y1: number}} Rect */
@@ -127,16 +128,24 @@ export class TileCache {
 /**
  * Fetches the tiles the view wants, at most BATCH per request and MAX_IN_FLIGHT requests at a time. `want` replaces the list of wanted tiles:
  * tiles that are no longer wanted and not yet requested are dropped (the cancellation of obsolete requests); a batch already sent completes and
- * its tiles are cached anyway, which is cheap and often useful when panning back.
+ * its tiles are cached anyway, which is cheap and often useful when panning back. After a failed request the scheduler is not idle: it calls
+ * `onRetry` after a growing pause (`retryMs`), so the view asks again for what it still wants (card M8.4.24: before, a failed read left a
+ * coarser tile on screen, and the scheduler idle, until the user moved the view).
  */
 export class TileScheduler {
   /**
    * @param {{fetch: (k: number, positions: [number, number][]) => Promise<{row: number, col: number, value: any, bytes: number}[]>,
-   *   cache: TileCache, onLoaded?: (keys: string[]) => void, onError?: (error: any) => void, batch?: number, maxInFlight?: number, prefix?: string}} options
+   *   cache: TileCache, onLoaded?: (keys: string[]) => void, onError?: (error: any) => void, onRetry?: () => void, retryMs?: number[],
+   *   wait?: (ms: number, then: () => void) => any, batch?: number, maxInFlight?: number, prefix?: string}} options
    *   `prefix` keeps the keys of several pyramids apart in one shared cache (the page has one budget).
    */
-  constructor({ fetch, cache, onLoaded = () => {}, onError = () => {}, batch = BATCH, maxInFlight = MAX_IN_FLIGHT, prefix = '' }) {
+  constructor({ fetch, cache, onLoaded = () => {}, onError = () => {}, onRetry = () => {}, retryMs = RETRY_MS, wait = (ms, then) => setTimeout(then, ms),
+    batch = BATCH, maxInFlight = MAX_IN_FLIGHT, prefix = '' }) {
     this.fetch = fetch; this.cache = cache; this.onLoaded = onLoaded; this.onError = onError; this.batch = batch; this.maxInFlight = maxInFlight;
+    this.onRetry = onRetry; this.retryMs = retryMs; this.wait = wait;
+    /** Failed requests since the last successful one, and whether a retry is waiting. */
+    this.failures = 0;
+    this.retryPending = false;
     this.prefix = prefix;
     /** @type {{k: number, row: number, col: number}[]} */
     this.queue = [];
@@ -153,7 +162,13 @@ export class TileScheduler {
       .map(([row, col]) => ({ k, row, col }));
     this.pump();
   }
-  get idle() { return this.running === 0 && this.queue.length === 0; }
+  get idle() { return this.running === 0 && this.queue.length === 0 && !this.retryPending; }
+  scheduleRetry() {
+    if (this.retryPending) return;
+    this.retryPending = true;
+    const pause = this.retryMs[Math.min(this.failures - 1, this.retryMs.length - 1)];
+    this.wait(pause, () => { this.retryPending = false; this.onRetry(); });
+  }
   pump() {
     while (this.running < this.maxInFlight && this.queue.length) {
       const k = this.queue[0].k, batch = [];
@@ -168,8 +183,9 @@ export class TileScheduler {
           for (const dropped of this.cache.set(key, tile.value, tile.bytes, this.protect)) dropped?.close?.();
           loaded.push(key);
         }
+        this.failures = 0;
         this.onLoaded(loaded);
-      }, (error) => this.onError(error)).finally(() => {
+      }, (error) => { this.failures++; this.onError(error); this.scheduleRetry(); }).finally(() => {
         keys.forEach((key) => this.inFlight.delete(key));
         this.running--;
         this.pump();

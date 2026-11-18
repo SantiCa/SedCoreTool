@@ -82,7 +82,7 @@ Updated 16 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.24** (the intermittent viewer probe; **model: most capable, effort medium**), then M8.4.25 (sending the tables without a pause; most capable, medium) and M8.4.26 (two intermittent GitHub failures: runtime downloads and an engine start on Windows; most capable, medium), all four added on 18 November 2026 at the maintainer's request to fix the warnings of M8.4.22 before going on; then M8.4.17 (interval table of tiled sections). Cards M8.4.16 (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux) and M8.4.22 (development gate) are done.
+- **Next step: M8.4.25** (sending the tables of a tiled section without a pause; **model: most capable, effort medium**), then M8.4.26 (two intermittent GitHub failures: runtime downloads and an engine start on Windows; most capable, medium), all four added on 18 November 2026 at the maintainer's request to fix the warnings of M8.4.22 before going on; then M8.4.17 (interval table of tiled sections). Cards M8.4.16 (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux) and M8.4.22 (development gate) are done.
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1288,7 +1288,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   to `app/js/i18n.js` stops `tiled-sections.mjs` in 0.4 s with `differs js/i18n.js` and the `prepare.js` command. `tests/app/preflight.test.mjs`
   (4 tests on temporary folders). It does not replace the program's own runtime check, which is unchanged.
 
-##### M8.4.24 - The intermittent viewer probe of the tiled-sections test — state: Ready (added 18 Nov 2026 at the maintainer's request)
+##### M8.4.24 - The intermittent viewer probe of the tiled-sections test — state: Done (18 Nov 2026, development gate; added at the maintainer's request)
 
 - **Goal:** the failure seen once on 18 November 2026 in `tests/e2e/tiled-sections.mjs` ("drawn pixel = source pixel" at screen 230, 570:
   drawn 106, 79, 35 against source 14, 14, 14, just after the runtime was rebuilt; the next two runs passed) is explained and fixed, in the
@@ -1305,6 +1305,23 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   (4) fix it and run the block again as many times with no failure.
 - **Tests:** the repeated runs of step 2 and 4, recorded with their counts; `npm test`.
 - **Done when:** the cause is named in the roadmap and the block passes every repeated run after the fix; development gate on Windows.
+- *As built — causes found:* (1) **A test fault (reproduced):** the probe took source pixels up to the last column of the analysis area, where
+  the viewer draws its dashed border (`#e0995a`, dashes 6 and gaps 4) over the image; a probe on a dash failed. Repetition 3 of the first run
+  failed with screen 224, 153, 90, exactly `#e0995a`, on the last column; the probe now stays one pixel inside every edge of the area. The colour
+  of the incident of 18 November (106, 79, 35 at screen 230, 570) is not exactly that colour and its view could not be reconstructed, so it is
+  not proven to be the same cause; the repetitions found no other. (2) **A program fault (found while making the failure visible):** after a
+  failed tile read the scheduler was *idle* with the tile still missing and nothing asked again, so the viewer showed a coarser tile until the
+  user moved, and the test, which waited for *idle*, read that stand-in. Now `TileScheduler` stays busy and calls `onRetry` after growing pauses
+  (0.5, 1, 2, then 5 s) until the tile arrives. (3) **A program fault (found by killing the engine during the repetitions):** tile reads never
+  asked for the one automatic restart of the engine (card M8.4.7), which only the mask sends and the analysis did; with only the viewer using
+  the engine it stayed down. Now a failed tile read calls the same `recoverEngine` as the mask sends.
+  The test now fails explicitly when the visible tiles are not loaded within 30 s (before, it went on after 10 s without saying so), keeps a
+  screenshot and the tile's state when a probe fails, and can repeat the probe (`SEDCORETOOL_PROBE_REPEAT=n`, with the tile cache emptied each
+  time; `SEDCORETOOL_PROBE_LOAD=1` keeps every CPU core busy; `SEDCORETOOL_PROBE_KILL=1` kills the coordinator before the fifth repetition and
+  then stops the test, because the rest needs the one restart).
+  **Runs after the fix (Windows):** 30 repetitions with a kill (all passed; tiles loaded in 60-151 ms, 626 ms after the kill), 10 more with a
+  kill (all passed; 584 ms after it), 30 under full CPU load (all passed; 48-163 ms) followed by the whole test (passed). Not repeated: a cold
+  start right after rebuilding the runtime, on GitHub.
 
 ##### M8.4.25 - Sending the tables of a tiled section without a pause — state: Ready (added 18 Nov 2026 at the maintainer's request)
 

@@ -100,21 +100,33 @@ try {
   // Zoomed to one screen pixel per source pixel, the viewer draws level-0 tiles: screen pixels equal the source's pixels at the same place.
   await on.page.setViewport({ width: 1600, height: 1000 });
   await on.page.evaluate(() => new Promise((r) => setTimeout(r, 300)));
-  const drawn = await on.page.evaluate(async () => {
+  // Card M8.4.24: the probe is a function, so it can be repeated (SEDCORETOOL_PROBE_REPEAT=n) with the tile cache emptied each time; a wait that
+  // never completes fails here instead of reading a coarser stand-in tile, and a failed probe keeps its evidence.
+  const probe = (fraction = 1 / 3) => on.page.evaluate(async (fraction) => {
     const { S } = window.ichantool, s = S.sections.at(-1), canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('view'));
     const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     // Working pixel (vx, vy) at the top left, integer, so source pixel (vx * ds + sx, vy * ds + sy) is at screen (sx, sy).
-    const vx = Math.floor(s.w / 2 - canvas.width / s.ds / 2), vy = Math.floor(s.h / 3);
+    const vx = Math.floor(s.w / 2 - canvas.width / s.ds / 2), vy = Math.floor(s.h * fraction);
     S.view = { x: vx, y: vy, zoom: s.ds };
+    const started = performance.now();
     window.ichantool.requestRender(); await frame();
-    for (let i = 0; i < 400 && !window.ichantool.tilesIdle(); i++) await new Promise((r) => setTimeout(r, 25));
+    let waits = 0;
+    for (; waits < 1200 && !window.ichantool.tilesIdle(); waits++) await new Promise((r) => setTimeout(r, 25));
+    const waitedMs = Math.round(performance.now() - started), completed = window.ichantool.tilesIdle();
     window.ichantool.requestRender(); await frame();
     // Probes: source pixels that differ from the working image at the same place, so only a drawn level-0 tile can show them.
     const ctx = canvas.getContext('2d'), probes = [], left = 160;   // left of this: the strip and the ruler
-    const X0 = vx * s.ds + left, Y0 = vy * s.ds, X1 = Math.min(s.full.w, s.roi.x1 * s.ds, vx * s.ds + canvas.width), Y1 = Math.min(s.full.h, vy * s.ds + canvas.height);
+    // Card M8.4.24: never on the first or last source row or column of the analysis area, where the viewer draws its dashed border (#e0995a,
+    // dashes of 6 and gaps of 4 pixels) over the image: a probe there failed whenever it met a dash (found by repeating the probe).
+    const X0 = Math.max(vx * s.ds + left, s.roi.x0 * s.ds + 1), Y0 = Math.max(vy * s.ds, s.roi.y0 * s.ds + 1);
+    const X1 = Math.min(s.full.w, s.roi.x1 * s.ds - 1, vx * s.ds + canvas.width), Y1 = Math.min(s.full.h, s.roi.y1 * s.ds - 1, vy * s.ds + canvas.height);
     const row = Math.floor((Y0 + Y1) / 2 / 512), tiles = {};
     for (let col = Math.floor(X0 / 512); col * 512 < X1; col++) {
-      const read = await window.corantoolDesktop.tiles.read(s.tiled.pyramid, 0, [[row, col]]);
+      let read = await window.corantoolDesktop.tiles.read(s.tiled.pyramid, 0, [[row, col]]);
+      for (let k = 0; k < 120 && read.error; k++) {          // the reference read waits for an engine that is restarting (repetitions with kills)
+        await new Promise((r) => setTimeout(r, 250)); read = await window.corantoolDesktop.tiles.read(s.tiled.pyramid, 0, [[row, col]]);
+      }
+      if (read.error) throw new Error('reference tile read: ' + JSON.stringify(read.error));
       tiles[col] = new Uint8Array(read.ok.bytes.buffer || read.ok.bytes, read.ok.bytes.byteOffset || 0, read.ok.bytes.byteLength);
     }
     const sourceAt = (X, Y) => { const at = ((Y % 512) * 512 + (X % 512)) * s.tiled.channels, b = tiles[Math.floor(X / 512)]; return s.tiled.channels === 1 ? [b[at], b[at], b[at]] : [...b.subarray(at, at + 3)]; };
@@ -128,10 +140,50 @@ try {
         probes.push({ sx, sy, screen: [...ctx.getImageData(sx, sy, 1, 1).data.subarray(0, 3)], source, working });
       }
     }
-    return { probes, level: s.tiled.level, canvas: [canvas.width, canvas.height], view: S.view, roi: s.roi, w: s.w };
-  });
-  assert.ok(drawn.probes.length >= 10, 'probes where full resolution differs from the working image: ' + JSON.stringify(drawn));
-  for (const probe of drawn.probes) assert.deepEqual(probe.screen, probe.source, 'drawn pixel = source pixel at ' + JSON.stringify(probe));
+    const bad = probes.find((p) => p.screen.some((v, i) => v !== p.source[i]));
+    const evidence = bad ? window.ichantool.tileState(0, Math.floor((bad.sy + vy * s.ds) / 512), Math.floor((bad.sx + vx * s.ds) / 512)) : null;
+    return { probes, level: s.tiled.level, canvas: [canvas.width, canvas.height], view: S.view, roi: s.roi, w: s.w, waitedMs, completed, evidence };
+  }, fraction);
+  const checkProbe = async (drawn, label) => {
+    assert.ok(drawn.completed, `${label}: the visible tiles were loaded within 30 s (waited ${drawn.waitedMs} ms): ` + JSON.stringify(drawn.evidence));
+    assert.ok(drawn.probes.length >= 10, 'probes where full resolution differs from the working image: ' + JSON.stringify(drawn));
+    if (drawn.evidence) {
+      const shot = path.join(os.tmpdir(), `sedcoretool-probe-${process.pid}-${Date.now()}.png`);
+      await on.page.screenshot({ path: shot });
+      console.log(`${label}: probe failed; screenshot ${shot}; tile state ${JSON.stringify(drawn.evidence)}; waited ${drawn.waitedMs} ms`);
+    }
+    for (const p of drawn.probes) assert.deepEqual(p.screen, p.source, `${label}: drawn pixel = source pixel at ` + JSON.stringify({ ...p, evidence: drawn.evidence }));
+  };
+  const drawn = await probe();
+  await checkProbe(drawn, 'probe');
+  const repeat = Number(process.env.SEDCORETOOL_PROBE_REPEAT || 0);
+  if (repeat) {
+    // Repetitions for card M8.4.24: the tile cache emptied before each; with SEDCORETOOL_PROBE_LOAD=1 every CPU core busy meanwhile; with
+    // SEDCORETOOL_PROBE_KILL=1 the engine's coordinator killed before the fifth probe, so tile reads fail until the automatic restart.
+    const burners = process.env.SEDCORETOOL_PROBE_LOAD === '1'
+      ? os.cpus().map(() => spawn(process.execPath, ['-e', 'for(;;){}'], { stdio: 'ignore', windowsHide: true })) : [];
+    const timesMs = [];
+    try {
+      for (let n = 1; n <= repeat; n++) {
+        await on.page.evaluate(() => window.ichantool.clearTiles());
+        if (process.env.SEDCORETOOL_PROBE_KILL === '1' && n === 5) {          // once: the program restarts the engine once per session
+          const coordinator = Number(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+            `(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*server.py*' -and $_.CommandLine -like '*projects-dir*' } | Where-Object { $p = $_; $chain = $p.ParentProcessId; $hit = $false; for ($k = 0; $k -lt 6 -and $chain; $k++) { if ($chain -eq ${on.pid}) { $hit = $true; break }; $chain = (Get-CimInstance Win32_Process -Filter "ProcessId=$chain").ParentProcessId }; $hit } | Select-Object -First 1).ProcessId`],
+            { encoding: 'utf8', windowsHide: true }).trim());
+          if (coordinator > 0) process.kill(coordinator, 'SIGKILL');
+        }
+        const again = await probe(0.2 + (n % 7) * 0.08);
+        timesMs.push(again.waitedMs);
+        await checkProbe(again, `repetition ${n}`);
+      }
+    } finally { for (const burner of burners) burner.kill(); }
+    console.log(`Viewer probe repeated ${repeat} times, all passed; wait for the tiles (ms):`, JSON.stringify(timesMs));
+    if (process.env.SEDCORETOOL_PROBE_KILL === '1') {   // the one automatic restart is used up: the rest of the test needs it, so stop here
+      console.log('SEDCORETOOL_PROBE_KILL=1: the one automatic restart of the engine was used; the rest of the test is not run in this mode.');
+      await on.close();
+      process.exit(on.errors.length ? 1 : 0);
+    }
+  }
   // A tool that decodes the source refuses with a message instead of reading gigabytes.
   const refused = await on.page.evaluate(async () => {
     const { S } = window.ichantool, s = S.sections.at(-1);

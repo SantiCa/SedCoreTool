@@ -3153,7 +3153,8 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   the visible part of the analysis area are drawn over it, clipped to that area, with nearest-pixel scaling and edges rounded to whole screen pixels
   (no seams). Tile `(k, row, col)` covers working pixels from `col · 512 · 2^(k − level)`; padding beyond the level's size is not drawn. Each tile
   becomes an 8-bit RGBA `ImageBitmap` (`tileRgba`: grey copied to R, G and B; 16-bit samples shown by their high byte, `v >>> 8`, as the working
-  image; alpha 255 unless the source has alpha). The visible tiles plus one ring are requested nearest the centre first; while a tile is missing,
+  image; alpha 255 unless the source has alpha). After a failed read the scheduler asks again after 0.5, 1, 2, then every 5 s, and asks for the
+  automatic engine restart of card M8.4.7 (card M8.4.24). The visible tiles plus one ring are requested nearest the centre first; while a tile is missing,
   the nearest coarser cached tile finer than the working image is drawn in its place, otherwise the working image stays visible (never blank).
   One cache serves the page (256 MiB of bitmaps, least recently used dropped first, never a tile on screen; dropped bitmaps are closed); keys
   carry the pyramid id. Tiles are drawn only while the working image under them shows source pixels too: no filter (or "show original").

@@ -23,7 +23,7 @@
  *   units: import('./core.js').DepthUnit, roi: import('./core.js').Roi, labels: Int32Array, exclude: Uint8Array,
  *   stacks: import('./core.js').StackTable, bins: SectionBin[], orig: Uint8ClampedArray | null,
  *   orig16?: Uint16Array | null, enh: Uint8ClampedArray | null, ds: number, rot: number,
- *   tiled?: {pyramid: string, level: number, levels: {level: number, width: number, height: number, rows: number, cols: number}[], channels: number, bits: number},
+ *   tiled?: {pyramid: string, level: number, levels: {level: number, width: number, height: number, rows: number, cols: number}[], channels: number, bits: number, errorShown?: boolean, lastError?: string},
  *   maskTiles?: import('./tiledmasks.js').MaskTiles,
  *   _statsRunner?: import('./tiledit.js').TiledStatsRunner,
  *   _maskSync?: import('./tiledsync.js').MaskSync, _maskLoader?: import('./tiledsync.js').MaskLoader, _undoTrimShown?: boolean,

@@ -425,7 +425,12 @@ function tileScheduler(s) {
   };
   scheduler = new TileScheduler({ fetch, cache: tileCache, prefix: tiled.pyramid + '/',
     onLoaded: () => { if (sec()?.tiled === tiled) requestRender(); },
-    onError: (error) => { if (!tiled.errorShown) { tiled.errorShown = true; toast(error.message || String(error), 9000); } } });
+    onRetry: () => { if (sec()?.tiled === tiled) requestRender(); },     // the view asks again for the tiles it still wants
+    onError: (error) => {
+      tiled.lastError = error.message || String(error);
+      if (!tiled.errorShown) { tiled.errorShown = true; toast(tiled.lastError, 9000); }
+      void recoverEngine().catch(() => {});                // the retry then reads from the restarted engine
+    } });
   tileSchedulers.set(tiled.pyramid, scheduler);
   return scheduler;
 }
@@ -789,6 +794,13 @@ function tiledStatsRunner(s) {
   return s._statsRunner;
 }
 
+/** After a failed engine request: ask for the one automatic restart of the engine (card M8.4.7) when it is not ready. Used by the mask sends
+ *  and, since card M8.4.24, by the tile reads of the viewer, which before never asked for it and failed until another part of the program did. */
+async function recoverEngine() {
+  const desktopEngine = /** @type {any} */ (window).corantoolDesktop?.engine;
+  if (desktopEngine && (await desktopEngine.status()).state !== 'ready') await desktopEngine.restart({ automatic: true });
+}
+
 /* Sending the masks of a tiled section to the engine's store (card M8.4.16 step 4): `MaskSync` sends the dirty tiles and the tables after
    each change and acknowledges them only after `mask.commit`; after a failure it keeps them and tries again, first asking for the one
    automatic restart of the engine (card M8.4.7). `MaskLoader` reads back the tiles the page dropped. */
@@ -825,10 +837,7 @@ function maskSync(s) {
     discard: (staged) => bridgeResult(TILES.maskDiscard(staged)),
   };
   let failing = false, limited = false;
-  const recover = async () => {
-    const desktopEngine = /** @type {any} */ (window).corantoolDesktop.engine;
-    if ((await desktopEngine.status()).state !== 'ready') await desktopEngine.restart({ automatic: true });
-  };
+  const recover = recoverEngine;
   s._maskSync = new MaskSync({ tiles: s.maskTiles, api, tables: () => maskTables(s, S.classes), sha256: hexDigest, recover,
     onState: ({ state, error }) => {
       if (state === 'limit' && !limited) { limited = true; toast(t('tiles.storeLimit', { field: error.field, n: error.limit }), 12000); }
@@ -5001,6 +5010,9 @@ const startupReady = startup();
 // Exposed for automated tests.
 window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, needPixels, requestRender, setTool, renderSectionForm, t, tilesIdle: () => [...tileSchedulers.values()].every((q) => q.idle),
   putMaskTile: (row, col, labels, exclude) => putMaskTile(sec(), row, col, labels, exclude),   // end-to-end tests of tiled masks (card M8.4.16)
+  clearTiles: () => { for (const bitmap of tileCache.clear()) bitmap?.close?.(); requestRender(); },   // repeated viewer probes (card M8.4.24)
+  tileState: (k, row, col) => { const s = sec(), scheduler = s?.tiled && tileSchedulers.get(s.tiled.pyramid), key = s?.tiled ? s.tiled.pyramid + '/' + tileKey(k, row, col) : '';   // evidence when a probe fails (card M8.4.24)
+    return { cached: tileCache.has(key), inFlight: !!scheduler?.inFlight.has(key), idle: !!scheduler?.idle, failures: scheduler?.failures ?? 0, lastError: s?.tiled?.lastError ?? null }; },
   tiledStatsIdle: () => S.sections.every((q) => !q._statsRunner || q._statsRunner.idle),
   masksSettled: () => S.sections.every((q) => !q.maskTiles || !q._maskSync || q._maskSync.settled), mergeObjects, deleteObjects, selectSection, forceTiledSections: (on) => { forceTiled = !!on; },
   saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };
