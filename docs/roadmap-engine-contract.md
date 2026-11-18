@@ -531,7 +531,7 @@ every argument again, lets a page use only the staged versions it began (at most
 uploads each as a committed buffer (§3), names them in `mask.commit` and releases them. The page sends with `app/js/tiledsync.js` (`MaskSync`;
 before a round it checks the limits above with `tableLimit` and, beyond one, sends nothing, says so once and waits for the next change):
 after a change, a round begins a staged version on the last acknowledged manifest, sends each dirty tile (both layers, copied just before they
-are sent) and the four tables, and commits; a tile is acknowledged only if it did not change after its copy was taken. A failed round
+are sent) and the tables whose content changed since the last acknowledged manifest (all of them for the first; card M8.4.25), and commits; a tile is acknowledged only if it did not change after its copy was taken. A failed round
 acknowledges nothing, discards its staged version and is tried again (pauses of 1, 2, 5, 15, then 30 s), after asking for the one automatic
 restart of the engine (card M8.4.7) when the engine is not ready. Clean tiles the page dropped are read back with `mask.read`
 (`MaskLoader`).

@@ -3118,9 +3118,14 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   identifier that table does not hold) and `object_confidence` (`f64`, a non-finite value stored as 0); 20 bytes per object, at most
   1,048,576 objects. The classes go as JSON, the overlap stacks as the CSR tables of §4. The engine checks the columns against each other and
   the classes table before writing anything. Before a round the page checks the limits; beyond one it sends nothing, shows "This large
-  section exceeds a limit of the engine's store…" once and waits for the next change, keeping the masks in the page. Building the tables
-  takes about 9 ms for 65,536 objects and 0.24 s for 1,048,576 (once per round, on the page's thread;
-  [measurement](validation/M8.4.22-mask-tables.json)). Version 1 manifests (objects as JSON) are refused with `UNSUPPORTED_INPUT`.
+  section exceeds a limit of the engine's store…" once and waits for the next change, keeping the masks in the page. Version 1 manifests
+  (objects as JSON) are refused with `UNSUPPORTED_INPUT`. A round sends only the groups of tables whose content may have changed since the
+  stored version (card M8.4.25; all of them for the first version): the objects group (the four columns and the classes) after an edit of
+  objects or classes, a new or removed object, or a changed prediction; the stacks group after a new overlap stack or a compaction. Brush and
+  eraser strokes, the exclusion rectangle and statistics updates send no table unless one of these checks finds a change. A group that is
+  sent is built in slices of about 8 ms between which the page runs (`buildMaskTables`, `SLICE_MS`), and built again if it changes meanwhile;
+  the build takes about 31 ms of the page's thread for 1,048,576 objects, longest task 8.2 ms
+  ([measurement](validation/M8.4.25-mask-rounds.json)).
 - **Wand, lasso, scissors and object operations on tiled sections** (`planWindows`, `pinRanges`, `toWindowRect`, `windowRgba` in `tiledit.js`;
   `tiledPlan` and the following functions in `app.js`; card M8.4.16 step 6): each runs today's function (`regionGrow`, `polygonPixels`,
   `splitPieces`, `subPx`, `renameId`, `sameTaxonGroups`) on edit windows of whole level-0 tiles and copies back what it wrote, at full

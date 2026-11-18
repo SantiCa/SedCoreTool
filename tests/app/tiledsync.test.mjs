@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { MaskSync, MaskLoader, maskTables, tableLimit, MAX_OBJECTS } from '../../app/js/tiledsync.js';
+import { MaskSync, MaskLoader, maskTables, buildMaskTables, classesText, tableLimit, MAX_OBJECTS } from '../../app/js/tiledsync.js';
 import { MaskTiles, LABEL_BYTES, EXCLUDE_BYTES } from '../../app/js/tiledmasks.js';
 import { TILE } from '../../app/js/tiledsection.js';
 
@@ -144,6 +144,121 @@ test('tableLimit: 2^20 objects pass, one more is refused in the page; a round be
   over = false;
   await sync.request();
   assert.ok(sync.settled, 'below the limit again, the next change sends everything');
+});
+
+// Card M8.4.25: only the groups of tables that changed are sent; the page's checks find what an edit marked "tiles only" may still carry.
+const CLASSES = [{ id: 'a', name: 'Burrow', counts: true }, { id: 'b', name: 'Other', counts: true }];
+function pageSection() {
+  return { objects: new Map([[1, { id: 1, cls: 'a', pred: null, conf: 0 }], [2, { id: 2, cls: null, pred: 'b', conf: 0.5 }]]), stacks: [null], nextId: 3 };
+}
+/** A sync wired as app.js wires it: real table building in slices, and the same cheap checks. */
+function pageSync(s, classes, tiles, store, extra = {}) {
+  let seen = null;
+  const changed = () => {
+    const now = { classes: classesText(classes), objects: s.objects.size, nextId: s.nextId, stacks: s.stacks, stackCount: s.stacks.length };
+    const groups = [];
+    if (!seen || now.classes !== seen.classes || now.objects !== seen.objects || now.nextId !== seen.nextId) groups.push('objects');
+    if (!seen || now.stacks !== seen.stacks || now.stackCount !== seen.stackCount) groups.push('stacks');
+    seen = now;
+    return groups;
+  };
+  return new MaskSync({ tiles, api: store.api, sha256: sha, ...instant, pause: async () => {}, changed,
+    tables: (groups, pause) => buildMaskTables(s, classes, groups, pause, { sliceMs: 0 }), ...extra });
+}
+const sentTables = (store, manifest) => Object.keys(store.manifests.get(manifest).tables).sort();
+const OBJECT_TABLES = ['classes', 'object_class', 'object_confidence', 'object_ids', 'object_predicted'];
+
+test('the first round sends every table; a round with only tile changes sends none', async () => {
+  const s = pageSection(), tiles = new MaskTiles({ width: 512, height: 512 }), store = fakeStore(), sync = pageSync(s, CLASSES, tiles, store);
+  tiles.set(0, 0, labelsWith(1), null);
+  await sync.request([]);
+  assert.deepEqual(sentTables(store, sync.manifest), [...OBJECT_TABLES, 'stack_members', 'stack_offsets'].sort(), 'no base yet: everything');
+  tiles.set(0, 0, labelsWith(2), null);
+  await sync.request([]);                                                   // a stroke on existing objects
+  assert.deepEqual(sentTables(store, sync.manifest), [], 'the base keeps every table');
+  assert.ok(sync.settled);
+  s.objects.get(1).area = 99;                                               // statistics alone
+  await sync.request([]);
+  assert.deepEqual(sentTables(store, sync.manifest), []);
+});
+
+test('a class change sends the object columns and the classes; a new object and a new stack are found though the edit said "tiles only"', async () => {
+  const s = pageSection(), classes = CLASSES.map((c) => ({ ...c })), tiles = new MaskTiles({ width: 512, height: 512 }), store = fakeStore();
+  const sync = pageSync(s, classes, tiles, store);
+  await sync.request();
+  s.objects.get(1).cls = 'b';                                               // reclassified: the editing code asks for the objects
+  await sync.request(['objects']);
+  assert.deepEqual(sentTables(store, sync.manifest), OBJECT_TABLES);
+  assert.deepEqual([...new Int32Array(store.manifests.get(sync.manifest).tables.object_class.buffer)], [1, -1]);
+  classes[1].name = 'Renamed';                                              // a class edit that asked for nothing
+  await sync.request([]);
+  assert.deepEqual(sentTables(store, sync.manifest), OBJECT_TABLES, 'the classes text changed');
+  s.objects.set(3, { id: 3, cls: null, pred: null, conf: 0 }); s.nextId = 4;   // a stroke that began a new trace
+  await sync.request([]);
+  assert.deepEqual(sentTables(store, sync.manifest), OBJECT_TABLES);
+  s.stacks.push([1, 3]);                                                    // a stroke that overlapped two traces
+  await sync.request([]);
+  assert.deepEqual(sentTables(store, sync.manifest), ['stack_members', 'stack_offsets']);
+  s.stacks = [null];                                                        // stacks compacted (a new array)
+  await sync.request([]);
+  assert.deepEqual(sentTables(store, sync.manifest), ['stack_members', 'stack_offsets']);
+  assert.equal(store.manifests.get(sync.manifest).tables.stack_members, null);
+  s.objects.delete(3);                                                      // removed by the statistics (no area left)
+  await sync.request([]);
+  assert.deepEqual(sentTables(store, sync.manifest), OBJECT_TABLES);
+  assert.ok(sync.settled);
+});
+
+test('after a failed round, every group not acknowledged is sent again with the tiles', async () => {
+  for (const failing of ['begin', 'put', 'commit']) {
+    const s = pageSection(), tiles = new MaskTiles({ width: 512, height: 512 }), store = fakeStore(), sync = pageSync(s, CLASSES, tiles, store);
+    await sync.request();
+    s.objects.get(2).pred = 'a';
+    tiles.set(0, 0, labelsWith(7), null);
+    store.failOn = failing;
+    await sync.request(['objects']);
+    assert.ok(sync.settled, failing);
+    const stored = store.manifests.get(sync.manifest);
+    assert.deepEqual(sentTables(store, sync.manifest), OBJECT_TABLES, `${failing}: the objects again`);
+    assert.deepEqual([...new Int32Array(stored.tables.object_predicted.buffer)], [-1, 0], failing);
+    assert.equal(new Int32Array(stored.tiles.get('0.0').labels.buffer)[7], 7, failing);
+  }
+});
+
+test('buildMaskTables: the same bytes as maskTables, in slices; built again when the objects change between two slices', async () => {
+  const s = { objects: new Map(), stacks: [null, [1, 2]] };
+  for (let id = 1; id <= 10000; id++) s.objects.set(id, { id, cls: id % 3 ? 'a' : null, pred: id % 3 ? null : 'b', conf: id % 3 ? 0 : 0.5 });
+  let pauses = 0;
+  const sliced = await buildMaskTables(s, CLASSES, ['objects', 'stacks'], async () => { pauses++; }, { sliceMs: 0 });
+  assert.ok(pauses >= 2, 'the page ran between slices');
+  assert.deepEqual(sliced, maskTables(s, CLASSES));
+  assert.deepEqual(Object.keys(maskTables(s, CLASSES, ['stacks'])).sort(), ['stack_members', 'stack_offsets']);
+  let first = true;
+  const changed = await buildMaskTables(s, CLASSES, ['objects'], async () => {
+    if (first) { first = false; s.objects.set(10001, { id: 10001, cls: null, pred: null, conf: 0 }); }   // a new trace during the build
+  }, { sliceMs: 0 });
+  assert.equal(changed.object_ids.length / 4, 10001, 'built again from the start, with the new object');
+  assert.deepEqual(changed, maskTables(s, CLASSES, ['objects']));
+});
+
+test('a group changed while it is being built is built again before anything is sent; a removed section stops building', async () => {
+  const s = pageSection(), tiles = new MaskTiles({ width: 512, height: 512 }), store = fakeStore();
+  let builds = 0, sync;
+  sync = pageSync(s, CLASSES, tiles, store, { tables: async (groups, pause) => {
+    builds++;
+    const tables = maskTables(s, CLASSES, groups);
+    if (builds === 2) { s.objects.get(1).cls = 'b'; sync.mark(['objects']); }   // reclassified during the build
+    await pause();
+    return tables;
+  } });
+  await sync.request();
+  await sync.request(['objects']);
+  assert.equal(builds, 3, 'the build that saw the change is dropped');
+  assert.deepEqual([...new Int32Array(store.manifests.get(sync.manifest).tables.object_class.buffer)], [1, -1]);
+  assert.equal(store.calls.filter((c) => c === 'begin').length, 2, 'nothing was sent for the dropped build');
+  const stopping = pageSync(s, CLASSES, tiles, fakeStore(), { tables: async (groups, pause) => { stopping.stop(); await pause(); return {}; } });
+  await stopping.request();
+  assert.equal(stopping.manifest, null);
 });
 
 test('MaskLoader: tiles the page dropped are read back once, and a read never replaces an edit', async () => {

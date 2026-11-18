@@ -20,6 +20,10 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.25: the background sending of a large section's masks now sends only the tables that changed (objects with classes, or overlap
+  stacks); a stroke that changed no object sends none, and when the tables are needed they are built in slices of about 8 ms, so the window
+  does not pause (2^20 objects: 0.01 ms after such a stroke, longest task 8.2 ms after a class change;
+  [measurement](docs/validation/M8.4.25-mask-rounds.json)). Predictions changed by the classifier are now sent as well.
 - Card M8.4.24: the intermittent failure of the viewer probe in `tests/e2e/tiled-sections.mjs` came from probes on the dashed border of the
   analysis area (the test now stays inside it). Two faults of the large-section viewer found on the way are fixed: after a failed tile read it
   now asks again with growing pauses instead of leaving a coarser tile on screen until the view moves, and a failed tile read now asks for the

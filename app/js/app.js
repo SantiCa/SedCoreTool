@@ -30,7 +30,7 @@ import { assembleLevel, imageDimensions, levelPositions, proxyLevel, tileRgba, T
 import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlacement, tileRange, tilesByDistance } from './tilecache.js';
 import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks.js';
 import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, windowRange, planWindows, pinRanges, toWindowRect, windowRgba } from './tiledit.js';
-import { MaskLoader, MaskSync, maskTables } from './tiledsync.js';
+import { MaskLoader, MaskSync, buildMaskTables, classesText } from './tiledsync.js';
 import { TileChanges, trimTileHistory } from './tiledundo.js';
 import { renderData } from './datatab.js';
 import { frameRatio, panelPrefs, savePanels } from './panels.js';
@@ -535,7 +535,7 @@ function tiledExcludeRect(s, r, mode) {
   const op = beginOp(s); op.section = s; op.win = win; op.radius = 0; op.tiles = new TileChanges(s.maskTiles);
   tiledWriteBack(op, { x: rect.x0 - win.ox, y: rect.y0 - win.oy }, { x: rect.x1 - 1 - win.ox, y: rect.y1 - 1 - win.oy });
   commitTiledOp(op);
-  afterChange(s);
+  afterChange(s, TILES_ONLY);
 }
 
 function finishTiledStroke(op) {
@@ -547,7 +547,7 @@ function finishTiledStroke(op) {
     void tiledStatsRunner(s).queue(changed, op.touched);
   }
   commitTiledOp(op);
-  afterChange(s);
+  afterChange(s, TILES_ONLY);
 }
 
 /* Undo and redo of tiled edits (card M8.4.16 step 5, decision C): a step keeps the tiles the edit changed as they were before it
@@ -787,7 +787,7 @@ function tiledStatsRunner(s) {
       if (o.emb && (a.n !== o.area || String(box) !== String(o.bbox))) o.emb = null;   // V0.17: the trace changed
       o.area = a.n; o.bbox = box; o.sbox = [a.x0, a.y0, a.x1, a.y1]; o.stats = a; o.feat = features(a, ppu);
     }
-    afterChange(s);
+    afterChange(s, TILES_ONLY);
   };
   s._statsRunner = new TiledStatsRunner({ tiles: s.maskTiles, stats, stacks: () => s.stacks, fetchRgba, onUpdate,
     loadMasks: (positions) => maskLoader(s).want(positions), onError: (error) => toast(error.message || String(error), 9000) });
@@ -838,7 +838,19 @@ function maskSync(s) {
   };
   let failing = false, limited = false;
   const recover = recoverEngine;
-  s._maskSync = new MaskSync({ tiles: s.maskTiles, api, tables: () => maskTables(s, S.classes), sha256: hexDigest, recover,
+  // Card M8.4.25: cheap checks for table changes that an edit marked "tiles only" may still carry (a new or removed object, a new overlap
+  // stack) and for class edits, which do not always ask for a round: a group found changed is sent with the next round.
+  let seen = null;
+  /** @returns {('objects' | 'stacks')[]} */
+  const changed = () => {
+    const now = { classes: classesText(S.classes), objects: s.objects.size, nextId: s.nextId, stacks: s.stacks, stackCount: s.stacks?.length ?? 0 };
+    const groups = /** @type {('objects' | 'stacks')[]} */ ([]);
+    if (!seen || now.classes !== seen.classes || now.objects !== seen.objects || now.nextId !== seen.nextId) groups.push('objects');
+    if (!seen || now.stacks !== seen.stacks || now.stackCount !== seen.stackCount) groups.push('stacks');
+    seen = now;
+    return groups;
+  };
+  s._maskSync = new MaskSync({ tiles: s.maskTiles, api, tables: (groups, pause) => buildMaskTables(s, S.classes, groups, pause), changed, sha256: hexDigest, recover,
     onState: ({ state, error }) => {
       if (state === 'limit' && !limited) { limited = true; toast(t('tiles.storeLimit', { field: error.field, n: error.limit }), 12000); }
       if (state === 'failed' && !failing) { failing = true; toast(t('tiles.masksUnsent'), 9000); }
@@ -1228,7 +1240,10 @@ function swapEditStep(op, forward) {
   [S.selected, op.sel] = [op.sel, S.selected];
 }
 
-function afterChange(s) { if (s.maskTiles && TILES) void maskSync(s).request(); s._mv = (s._mv || 0) + 1; s.logVer = (s.logVer || 0) + 1; markDirty(); scheduleLog(); rebuildLUT(s); scheduleLearn(); scheduleAnalysis(); renderClasses(); renderObject(); requestRender(); scheduleEmbed(s); }
+/** Which tables of a tiled section an edit may have changed (card M8.4.25): none, when only mask tiles changed. */
+const TILES_ONLY = Object.freeze([]);
+/** @param {any} s @param {Iterable<'objects' | 'stacks'>} [tables] the groups of stored tables the edit may have changed; all by default */
+function afterChange(s, tables = undefined) { if (s.maskTiles && TILES) void maskSync(s).request(tables); s._mv = (s._mv || 0) + 1; s.logVer = (s.logVer || 0) + 1; markDirty(); scheduleLog(); rebuildLUT(s); scheduleLearn(); scheduleAnalysis(); renderClasses(); renderObject(); requestRender(); scheduleEmbed(s); }
 
 /* pixel-set edits from wand and lasso */
 function applyPixels(pixels, mode) {
@@ -1666,15 +1681,18 @@ function learnNow() {
   clf = clfs[active];
   const idOf = (name) => S.classes.find((c) => c.name === name)?.id || null;
   for (const s of S.sections) {
-    for (const o of s.objects.values()) {
+    let predicted = false;                             // a stored predicted class or confidence changed (card M8.4.25)
+    for (const o of /** @type {Iterable<any>} */ (s.objects.values())) {   // also the learning fields (novel, _pv, _pf, emb)
       const x = xOf(o);
-      if (o.cls || !x) { o.pred = null; o.conf = 0; o.novel = false; o._pv = 0; continue; }
+      if (o.cls || !x) { if ((o.pred ?? null) !== null || o.conf !== 0) predicted = true; o.pred = null; o.conf = 0; o.novel = false; o._pv = 0; continue; }
       const xi = visionOn() ? o.emb : o.feat;
       if (o._pv === modelVer && o._pf === xi) continue;   // V0.2: prediction still valid
       o._pv = modelVer; o._pf = xi;
-      const p = clf.predict(x);
-      o.pred = p?.y ? idOf(p.y) : null; o.conf = o.pred ? p.conf : 0; o.novel = !!p?.novel;
+      const p = clf.predict(x), pred = p?.y ? idOf(p.y) : null, conf = pred ? p.conf : 0;
+      if (pred !== o.pred || conf !== o.conf) predicted = true;
+      o.pred = pred; o.conf = conf; o.novel = !!p?.novel;
     }
+    if (predicted) void s._maskSync?.request(['objects']);   // a section never sent sends every table in its first round anyway
     rebuildLUT(s);
   }
   saveAllModel();

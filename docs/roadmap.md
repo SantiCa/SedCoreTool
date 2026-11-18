@@ -82,7 +82,7 @@ Updated 16 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.25** (sending the tables of a tiled section without a pause; **model: most capable, effort medium**), then M8.4.26 (two intermittent GitHub failures: runtime downloads and an engine start on Windows; most capable, medium), all four added on 18 November 2026 at the maintainer's request to fix the warnings of M8.4.22 before going on; then M8.4.17 (interval table of tiled sections). Cards M8.4.16 (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux) and M8.4.22 (development gate) are done.
+- **Next step: M8.4.26** (two intermittent GitHub failures: runtime downloads and an engine start on Windows; **model: most capable, effort medium**), the last of the four cards added on 18 November 2026 at the maintainer's request to fix the warnings of M8.4.22 before going on; then M8.4.17 (interval table of tiled sections). Cards M8.4.16 (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux) and M8.4.22 (development gate) are done.
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1323,7 +1323,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   kill (all passed; 584 ms after it), 30 under full CPU load (all passed; 48-163 ms) followed by the whole test (passed). Not repeated: a cold
   start right after rebuilding the runtime, on GitHub.
 
-##### M8.4.25 - Sending the tables of a tiled section without a pause — state: Ready (added 18 Nov 2026 at the maintainer's request)
+##### M8.4.25 - Sending the tables of a tiled section without a pause — state: Done (18 Nov 2026, development gate; added at the maintainer's request)
 
 - **Goal:** the masks of a tiled section with many objects are sent without a visible pause: today every round builds all tables on the page's
   thread (9 ms for 65,536 objects, 0.24 s for 1,048,576; [measurement](validation/M8.4.22-mask-tables.json)), even when only tiles changed.
@@ -1342,6 +1342,20 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   stack tables; after a failed round everything that was not acknowledged is sent again (tables included); the M8.4.16 tests unchanged.
   Desktop: `tests/e2e/tiled-sections.mjs` unchanged.
 - **Done when:** the measurements of step 3 are met and recorded; development gate on Windows.
+- *As built:* `MaskSync` keeps a version per group (`objects`: the four columns with `classes`; `stacks`: `stack_offsets` and `stack_members`)
+  and the version the store acknowledged; a round sends only the groups not acknowledged (all of them while there is no stored version), and a
+  failed round acknowledges none. `request(groups)` raises the versions it names (all by default, so every edit not marked otherwise still sends
+  every table); app.js marks only three edits as "tiles only": brush and eraser strokes, the exclusion rectangle and the statistics updates.
+  What those may still carry is found at the start of every round by cheap checks (`changed`): a different count of objects or `nextId` (a new
+  or removed trace), a different `s.stacks` array or length (a new overlap stack or a compaction), and a different classes text (class edits,
+  which do not always ask for a round). Predictions changed by the classifier (`learnNow`, which never asked for a round) now ask for the
+  objects group. Step 2: building in slices between macrotasks (`buildMaskTables`, about `SLICE_MS` = 8 ms each) was chosen over a worker,
+  because the measured build is 31 ms and a worker would need a copy of the objects; a slice that finds its group changed starts again before
+  anything is sent. **Measured** ([evidence](validation/M8.4.25-mask-rounds.json), Windows, Node 22, 2^20 objects): after a stroke that changed
+  no object the round's table part takes 0.01 ms of the page's thread (target under 5 ms); after a class change the longest task is 8.2 ms
+  (target under 16 ms; 25-33 ms of thread time in 4-5 tasks). The 0.24 s of the M8.4.22 record included creating the synthetic objects; the
+  build alone takes 31 ms for 2^20 objects (the tool now times only the build). Node: 5 new tests in `tests/app/tiledsync.test.mjs`, the 7 of
+  M8.4.16 and M8.4.22 unchanged.
 
 ##### M8.4.26 - Two intermittent GitHub failures: runtime downloads and an engine start on Windows — state: Ready (added 18 Nov 2026 at the maintainer's request)
 
