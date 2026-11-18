@@ -82,7 +82,7 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: complete the card M8.4.17** (interval table of tiled sections), which is **blocked** until a design session answers the seven points written under it; **model for that: most capable tier (Opus), effort high**; the implementation afterwards is the fast tier (Sonnet), effort medium. The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
+- **Next step: M8.4.17** (interval table of tiled sections), rewritten by the design session of 18 November 2026 around **decision F** (the page counts tiled sections tile by tile into class-independent row histograms; the engine does not count), **which waits for the maintainer's approval**; then **model: fast tier (Sonnet), effort medium**. The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1208,40 +1208,95 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   applied twice across an engine failure); **exact equality**: a small image opened both ways (whole and forced tiled) with the same scripted edit
   sequence gives identical labels, exclusion, objects and stacks.
 
-##### M8.4.17 - Interval table of tiled sections — state: Blocked (incomplete card, 18 Nov 2026)
+##### M8.4.17 - Interval table of tiled sections — state: Ready once the maintainer approves decision F (card rewritten by the design session of 18 Nov 2026)
 
-- **Goal:** the interval table of a tiled section, by decision 7: the engine counts each tile's rows, the page bins them as today.
-- **Read first:** `src/sedcoretool/methods/section_intervals.py` (`parse`, `_counts`) and `kernels/counting.py` (`object_row_counts`);
-  `app/js/core.js` (`rowCounts`, `binRows`); `app/js/sectionanalysis.js` (the `_rc` cache); ARCHITECTURE D11; contract §4 and §7.
-- **Change:** an engine method `section.row_counts/1` (inputs: the manifest hash, the objects, classes and stack tables, and the settings that change
-  counts: ROI, prediction rules, candidate counting; output: the row counts of the ROI as `u32le[rows, 2 + classes]`, and for an update only the
-  rows of the touched tiles); a per-tile cache in the worker keyed by tile hash and table/settings hashes; the page fills `_rc` from it and keeps
-  `binRows` as today.
-- **Model:** fast, effort medium (bounded, checked by exact equality and measured targets).
-- **Acceptance:** exact equality with `section.intervals/1` and with today's JavaScript path on images that fit in memory, including objects and
-  overlaps crossing tile seams, exclusion, a ROI not aligned with tiles and fractional intervals; interval table after an edit touching at most
-  4 tiles p95 <= 150 ms; interval-size change for all sections p95 <= 300 ms (re-binning only); a settings change that changes effective
-  classes recounts every tile: measured on `rgb8g`, shown with progress and cancellable (no target yet: report it).
-- **Blocked (18 Nov 2026, found by an implementing session on the fast tier before writing code; AGENTS §6 "does not redesign"):** the card has
-  no *Steps*, *Tests*, *Do not touch* or *Done when*, and it was written before M8.4.16 and M8.4.22 changed what it assumes. Decisions the
-  design session must take (most capable tier, effort high), each checked against the code:
-  1. **Inputs.** Since M8.4.22 the objects, classes and stack tables are stored *in the manifest* (contract §8.7), so "inputs: the manifest hash,
-     the objects, classes and stack tables" would send twice what the store already holds. Decide: the method reads everything from the manifest.
-     Then the worker must read the store, which it cannot do today: a job (`method_worker.py`) holds only paths of committed buffers.
-  2. **The 150 ms target against the background send.** The engine counts from the *stored* version, but the page stores edits in rounds that begin
-     `MaskSync.delayMs` = 300 ms after the change. As written, "interval table after an edit touching at most 4 tiles p95 <= 150 ms" cannot be met
-     from the store; decide whether the page sends the touched tiles with the request, or what the target measures.
-  3. **Where the per-tile cache lives.** The worker is replaced after any crash and serves one job at a time (`section.analyze` queues four);
-     a cache in its memory is lost then, and an edit waits behind a running full recount. Decide the owner, the budget and the key.
-  4. **Protocol surface outside the card's *Change* list.** A new method touches `ADVERTISED_METHODS` and `OPERATIONS` in `desktop/engine.js`,
-     `desktop/engine-ipc.js`, `desktop/tile-ipc.js`/`preload.js` (if main-process only) and contract §4, §5 and §8; `tests/app/engine.test.mjs`
-     asserts the advertised list exactly. Decide the name, whether it is a `section.analyze` method or a store operation, and the result format
-     ("only the rows of the touched tiles").
-  5. **Progress and cancel.** The card asks for both on a full recount, but the contract says progress events of analyses "are not sent yet".
-  6. **The page.** `computeSectionBins` is synchronous and reads `s.labels`, which a tiled section does not have; decide how an asynchronous
-     result enters `s.bins` and `_rc`, and what happens to a result that arrives after a newer edit.
-  7. **Tests and fixtures.** Name the oracle for "exact equality with `section.intervals/1` and today's JavaScript path" (the `forceTiledSections`
-     hook of step 8 gives tiled sections of images that fit in memory) and the `rgb8g` fixture for the timings.
+- **Goal:** a tiled section has its interval table, counted on the full-resolution mask tiles, equal to what `section.intervals/1` gives on the
+  same masks assembled whole, and fast enough for the targets of contract §7.
+- **Decision F (design session of 18 Nov 2026; proposal, the maintainer approves or changes it before this card starts).** *The page counts
+  tiled sections, tile by tile, into row histograms that do not depend on classes; the engine does not count.* This revises ARCHITECTURE §3.4
+  decision 7 ("the engine counts the rows of each tile") and the line "row counts per tile" of the store's contents; rule D11 = D and rule 8
+  (the interval table may stay in JavaScript, with the Python method as the reference) are kept. Why, from the code as it is after M8.4.16-M8.4.26:
+  1. *The engine cannot meet the edit target.* It would count the stored version, and the page stores an edit in a round that starts 300 ms
+     after it (`MaskSync.delayMs`) and then sends tiles and commits; contract §7 asks p95 <= 150 ms from the analysis request to the table.
+     In the page, every tile an edit changes is already in memory (dirty tiles are never dropped).
+  2. *Class changes need no tile at all.* A histogram per tile row of `(label, pixels)` pairs (label = object id, or a negative overlap-stack
+     code) plus the valid pixels of the row is independent of classes, predictions and settings. A change of effective classes (a
+     reclassification, a new prediction, include predictions, the threshold, candidate counting, a class that stops counting) is a new
+     aggregation of the histograms, with no read and no recount; the old acceptance line "recounts every tile" becomes "re-aggregates".
+  3. *Nothing new crosses a process boundary.* No engine method, no change of `ADVERTISED_METHODS`, `OPERATIONS`, the IPC files or contract §3-§8,
+     no cache in the replaceable worker; the seven points of the earlier "Blocked" note are answered by not needing them (inputs, the cache's owner,
+     protocol, progress of an engine job) or below (the page, the fixtures).
+  4. *The same pattern already runs:* `TiledObjectStats` keeps per-tile contributions of every object and `TiledStatsRunner` recomputes queued
+     tiles between frames and reads dropped tiles back (`loadMasks`); the histograms follow it.
+  *Alternatives considered:* (A) the card as first written: the engine counts tiles from the store and caches per tile; fails reason 1 and needs
+  a new method, protocol and a cache that survives worker replacement. (B) The page sends the touched tiles with an engine request: the round trip
+  alone measured p95 85 ms (M8.4.21) before any counting or binning, and the tiles would cross the process boundary twice.
+  *What stays Python:* the reference. Every tiled fixture below is checked by the existing Python test of `section.intervals/1`, and the Python
+  API and command line are unchanged.
+- **Definitions (to be written in TECHNICAL_DOCUMENTATION with the code):**
+  - *Analysis area in source pixels:* `sourceRoi(s)` as `app.js` already defines it: `x0 * ds`, `y0 * ds`, `min(x1 * ds, width)`, `min(y1 * ds, height)`
+    (half-open). For `ds = 1` it is the ROI itself.
+  - *Rows per centimetre for the bins:* `pxPerCm` of `sectiondepth.js` applied to the source area (`(y1 - y0)` of the source area over the depth span),
+    so `binRows` gets source rows and `top`/`bottom` unchanged. Ages, manual indices and no-data padding work on depths as today.
+  - *Histogram of tile (row, col):* for each source row of the tile inside the source area, the valid pixels (not excluded) among the tile's
+    columns inside the area, and the `(label, count)` pairs of nonzero labels among those valid pixels. Rows outside the area are not kept.
+  - *Aggregation:* for each row, `bio` adds `count` for an object label whose effective class counts, and for a stack code whose members include at
+    least one counted class; `cls[c]` adds `count` once for each distinct counted class (the rule of `core.js rowCounts`, V0.20). Sums over the
+    tiles of a row give exactly `rowCounts` of the assembled masks; integers only, so equality is exact.
+- **Read first:** this card; ARCHITECTURE §3.4 (rules 4, 5, 8 and decisions 7 and 9); `app/js/core.js` (`rowCounts`, `binRows`, `binEdge`);
+  `app/js/sectionanalysis.js` (`computeSectionBins`, `effectiveClassIndex`); `app/js/sectiondepth.js`; `app/js/tiledit.js` (`TiledObjectStats`,
+  `TiledStatsRunner`, `affectedTiles`); `app/js/tiledmasks.js` (`MaskTiles`: states, dirty and dropped tiles); in `app/js/app.js`: `sourceRoi`,
+  `analyze`/`analyzeAll` (the two `s.tiled` lines that leave the table empty), `tiledStatsRunner`, `finishTiledStroke`, `finishTiledOp`,
+  `tiledExcludeRect`, `swapTiledStep`, `compactSectionStacks`; `tools/make_interval_fixtures.mjs` and its README; `tests/e2e/tiled-sections.mjs`
+  (the exact-equality block of M8.4.16 step 8); contract §7 (the interactive targets and scenarios (a) and (b)).
+- **Change:** new pure module `app/js/tiledcounts.js` (no DOM; added to `ORDER` in `tools/build_standalone.py` after `tiledit.js`);
+  `app/js/sectionanalysis.js` (the binning half of `computeSectionBins` as a function of row counts, shared by both paths); the small part of
+  `app/js/app.js` that queues tiles and publishes the table; `app/js/i18n.js` (ES/EN) for the messages; `tools/make_interval_fixtures.mjs` and the new
+  fixtures; new `tools/measure_tiled_counts.mjs`; tests; ARCHITECTURE §3.4 (decision 7 and the store's contents line, rewritten as decision F);
+  TECHNICAL_DOCUMENTATION (the definitions above, and §1.4 for the new file); CHANGELOG.
+- **Do not touch:** the engine, the IPC files and contract §3-§8; `core.js rowCounts`/`binRows` and the whole-image path (the 44 committed fixtures
+  must regenerate unchanged with `--check`); the stored format; the undo, sending and loading of mask tiles; `legacy/`.
+- **Model:** fast tier (Sonnet), effort medium: bounded, every step checked by exact equality or a measurement. Stop and ask if a target of step 8
+  is missed.
+- **Steps:**
+  1. *Stack codes must never be renumbered on a tiled section.* `compactSectionStacks` rewrites `s.labels` and renumbers the stack table; on a tiled
+     section the tiles would keep the old codes. Check whether any tiled path reaches it (the four call sites); if one can, skip compaction for tiled
+     sections (the stack tables are bounded by `MAX_STACK_BYTES`, card M8.4.22) and add a test that a tiled overlap edit leaves `s.stacks` entries
+     unchanged. Histograms rely on a stack code meaning the same members for the life of the section.
+  2. `tiledcounts.js`: `tileRowHistogram(entry, row, col, area, width, height)` (an empty or never-written tile is computed from the area alone,
+     without reading anything) returning typed arrays (rows, valid per row, CSR of `(label, count)` per row); class `TiledRowCounts` with
+     `replaceTile(tile, histogram)`, `drop(tile)`, `bytes`, and `rowCounts({effClass, nClasses, stacks, area})` returning the `RowCounts` shape of
+     `core.js` for the source area. Keep section totals by row up to date when a tile is replaced (subtract the old contribution, add the new; exact
+     integers) for the current effective classes, and aggregate from all histograms only when the effective classes, the stack table or the area's rows
+     change. Budget `COUNT_HISTOGRAM_BYTES` = 64 MiB; beyond it the table is not computed and the page says so once (`tiles.countLimit`), never a
+     partial table.
+  3. `sectionanalysis.js`: split `computeSectionBins` into the row counts and `binsFromRowCounts(s, counts, project, depthSection)`; the whole-image
+     path calls it with today's arguments (fixtures `--check` unchanged).
+  4. `app.js`: one `TiledRowCounts` per tiled section. Queue the tiles an edit changed with the same positions given to the statistics runner (strokes,
+     wand, lasso, scissors, object operations, exclusion rectangle, undo and redo) and count them when the analysis runs (after the existing 100 ms
+     grouping), reading the tiles from `MaskTiles` (they are in memory). A change of the analysis area's columns re-counts only the tile columns its
+     old and new edges cross and the columns entering it; tiles the page dropped are read back with `MaskLoader` first, between frames, with progress in
+     the status line and a cancel that leaves the previous table marked as stale. Until every tile of the area has a histogram the table shows its
+     pending state, never a partial one. Replace the two lines that set `s.bins = []` for tiled sections.
+  5. Fixtures: add tiled cases to `tools/make_interval_fixtures.mjs`, built on images larger than one tile (for example 1,300 x 1,100 and 600 x 2,100)
+     whose `expected` comes from the tiled path and whose `inputs` are the assembled masks: objects and overlaps crossing tile seams (both directions),
+     exclusion crossing seams, an area not aligned with tiles, an empty tile inside the area, fractional intervals, predictions included and not. A
+     Node test asserts that each tiled `expected` equals the whole-image calculation on the same inputs; the existing Python test then checks them.
+  6. Property test (Node): random masks with stacks and exclusion on random sizes across seams and random areas: the tiled aggregation equals
+     `rowCounts` exactly; after random tile edits with incremental totals it still does; after a change of effective classes too.
+  7. Desktop: in `tests/e2e/tiled-sections.mjs`, the exact-equality block of M8.4.16 step 8 also compares the interval table (every column of the
+     published bins) of the whole section and of the tiled section at factor 1, after edits that cross seams, an exclusion and a class change.
+  8. Measure (`tools/measure_tiled_counts.mjs` in Node on a synthetic section of `rgb8g`'s size, 8,192 x 349,526 = 10,928 tiles, with masks in a
+     stated fraction of the tiles; and in the desktop on the `rgb8g` fixture when it is present): interval table after an edit touching at most 4
+     tiles p95 <= 150 ms (scenario (b) of contract §7: from the analysis request to the published table, 60 edits); interval-size change for all
+     sections p95 <= 300 ms (scenario (a)); a change of effective classes (re-aggregation) and a change of the area's columns that reads tiles back:
+     reported, with the progress and cancel of step 4; memory of the histograms for the measured masks, and the worst case of the budget.
+- **Tests:** `tests/app/tiledcounts.test.mjs` (steps 2, 5, 6), the stack test of step 1, `node tools/make_interval_fixtures.mjs --check`, the Python
+  test of `section.intervals/1` on the new fixtures, `npm test`, typecheck, pytest, `tests/e2e/tiled-sections.mjs`, `tests/e2e/desktop.mjs` with the
+  engine experiment off and on.
+- **Done when:** decision F is approved and written into ARCHITECTURE; the tiled table equals the whole one on every new fixture and in the desktop
+  block; the two targets of step 8 are met and recorded with the reported numbers; development gate on Windows, and `tests` and *Desktop builds*
+  passed on the pushed commit.
 
 ##### M8.4.22 - Objects table of tiled sections beyond 4 MiB — state: Done (18 Nov 2026, development gate); decision approved by the maintainer on 18 Nov 2026 as written
 
