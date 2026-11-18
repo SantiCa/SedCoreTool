@@ -82,7 +82,7 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.18b** (a missing or moved source; copying the source into the project; **model: most capable tier (Opus), effort medium**). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate). Its three findings have cards, in this order after M8.4.18b: M8.4.27 (the store folder follows its project: delete, copy under a new identifier, a missing stored version; Opus, high), M8.4.28 (object operations right after reopening; Opus, medium), M8.4.29 (reopening from a cache instead of every tile; Opus, high; decision G waits for the maintainer); then M8.4.18c, M8.4.18d, M8.4.19. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
+- **Next step: M8.4.27** (the store folder follows its project: delete, copy under a new identifier, a missing stored version; **model: most capable tier (Opus), effort high**). M8.4.18b is done (a moved image is located by its SHA-256 and can be copied into the project; development gate). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate). Its three findings have cards, in this order after M8.4.18b: M8.4.27 (the store folder follows its project: delete, copy under a new identifier, a missing stored version; Opus, high), M8.4.28 (object operations right after reopening; Opus, medium), M8.4.29 (reopening from a cache instead of every tile; Opus, high; decision G waits for the maintainer); then M8.4.18c, M8.4.18d, M8.4.19. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1612,7 +1612,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   the library leaves its folder in the store (`<user data>/projects/<id>/`) (card M8.4.27); (3) the reopening reads every stored tile through the
   engine once, which is most of the 4.6-10.8 s (card M8.4.29).
 
-##### M8.4.18b - A missing or moved source; copying the source into the project — state: after M8.4.18a (D3 answered: copy only on request)
+##### M8.4.18b - A missing or moved source; copying the source into the project — state: Done (18 Nov 2026, development gate; D3 answered: copy only on request)
 
 - **Goal:** a tiled section whose source moved can be pointed at the file again, accepted only when its SHA-256 matches; and the user can copy the
   source into the project so it no longer depends on the original.
@@ -1629,6 +1629,27 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 - **Tests:** a moved file is accepted; another file of the same size is refused; a copy interrupted by a full disk (simulated) leaves nothing; the
   copy is used when the original is deleted; desktop end-to-end of both actions.
 - **Done when:** both actions work in the desktop with verified identity, and every failure leaves the previous state; development gate.
+- *As built (18 Nov 2026):* `pyramid.build` takes `expect` (contract §8.5): a file with another SHA-256 is refused once it is known (from the
+  identity record or after hashing), before any pyramid is built or removed to make room. The main process (`desktop/tile-ipc.js`) has `locate`
+  (another size is refused without reading the file), `copySource` (`desktop/source-copy.js`: temporary file, hashed while written, renamed only
+  with the saved size and SHA-256; refused when less than 1 GiB would stay free) and `sourceInfo`; `reopen` tries the project's copy before the
+  remembered original, both with `expect`; `sources.json` entries gain `name` and `copy` (contract §8.7). The page's panel is a new controller,
+  `app/js/tiledsource.js`; `app.js` only wires it and opens a located section again from its saved record (`reopenLocated`). Differences from the
+  text above: (1) the file is chosen with the page's file input, as when adding an image (the preload passes its path to the main process, which
+  issues a token), not with a dialog of the main process: the same path and the same checks; (2) the copy is hashed as it is written, not read
+  back after writing; (3) a section locked because its image is missing now also locks its name, depths, analysis area and resolution (before, a
+  rename was accepted and then lost, because a save writes the saved record of a locked section); (4) step 3 (deleting copies with the project)
+  moved to M8.4.27. Tests: Python 2 (`expect` refused through the identity record and after hashing, with nothing built or removed; the request
+  through the coordinator) plus a validation case; Node 4 (`tests/app/source-copy.test.mjs`: the verified copy, a full disk simulated after the
+  first 4 MiB and a cancellation leave no file, another or a longer file is refused; locate refuses another size unread and another SHA-256 before
+  building, accepts the moved file and remembers its place; the copy is used when the original and the cache are gone, an altered copy is not;
+  the 1 GiB reserve); desktop (`tests/e2e/tiled-sections.mjs`): on the locked section the form offers "Locate", a file of the same size with
+  other bytes is refused and nothing is built, the moved file unlocks the section identical to the saved one (masks, objects with statistics,
+  table), "Copy" asks with size and free space, the copy is the image byte for byte, and with the original and the pyramid gone the section
+  reopens from the copy, identical. Not done: the time to hash and copy an 8 GiB source (the hashing is the build's stage `hash`, about 7 s for
+  8 GiB in M8.4.15); a real full disk; macOS and Linux. **Finding:** deleting a class sets `cls` to null in the sections of the open core, but a locked section
+  saves its saved record, so the deleted class's id stays in that record until the section is opened with its image and saved again.
+  Checks on Windows (18 Nov 2026): `pytest` 878 passed, 9 skipped; `npm test` 457 passed (the packaging test first failed: the new module was missing from the installer's file list and the package check, both fixed); typecheck, `sync_version --check` and Ruff passed; `tests/e2e/desktop.mjs` with the engine experiment off and on and `tests/e2e/tiled-sections.mjs` passed.
 
 ##### M8.4.27 - The store folder follows its project — state: after M8.4.18b (written 18 Nov 2026 for finding 2 of M8.4.18a)
 

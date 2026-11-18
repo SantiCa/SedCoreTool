@@ -165,6 +165,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `tiledit.js` | Editing the masks of tiled sections (card M8.4.16): the edit window (`EditWindow`: whole level-0 mask tiles as flat arrays, written back tile by tile; `windowRange`, `WINDOW_TILES`) and object statistics kept per tile and summed per object (`tileStats`, `TiledObjectStats`, `affectedTiles`, `TiledStatsRunner`) | Yes |
 | `tiledundo.js` | Undo and redo of tiled edits (card M8.4.16 step 5): copies of the mask tiles an edit changed, taken before its first write and swapped with the page's tiles (`TileChanges`); the 64 MiB budget of those copies (`trimTileHistory`) | Yes |
 | `tiledcounts.js` | Row counts of tiled sections (card M8.4.17): the histogram of each tile (`tileHistogram`), their sum under the current classes (`TiledRowCounts`) and the queue that counts changed tiles between frames (`TiledCountsRunner`); no DOM |
+| `tiledsource.js` | The original image of a tiled section in the section form (card M8.4.18b): where it is, "Locate the image…" and "Copy the image into the project", through `window.corantoolDesktop.tiles` (`createTiledSourcePanel`); `sizeText` | — |
 | `tiledsync.js` | Sending the masks of tiled sections to the engine's store (card M8.4.16): rounds of staged version, dirty tiles and tables, commit and acknowledgement, retried after a failure (`MaskSync`); reading back tiles the page dropped (`MaskLoader`); the tables as bytes (`maskTables`) | Yes |
 | `maskchanges.js` | Which rows of each section's label and exclusion masks changed since the engine last received them: `createMaskChanges` (mark, take, restore, mark all) and `indexRangeOfPairs` (the pixels named by an edit-history list). A hint for the engine path, never a proof (§26.2) | Yes |
 | `sectionanalysis.js` | Analysis of one section without the DOM: effective class of each object, class-index table, row counts (cached per section), interval bins with no-data padding, ages and manual indices (§3.2), plus the builders of the engine method's input snapshot and reference result columns (`buildIntervalSnapshot`, `referenceColumns`), the revision key of a section's calculation (`analysisRevision`) and the conversion of engine result columns to `s.bins` (`resultToBins`). `app.js::analyze` passes the project state in | Yes |
@@ -221,7 +222,7 @@ engine process: framing, staged buffers, coordinator and isolated worker; §26.2
 `format.py`, `tiles.py`, `source.py`, `pyramid.py`, `identity.py`; and its mask tiles: `masks.py`; §26.4).
 
 Desktop program (`desktop/`): `main.js` (window, `app://` protocol and IPC), `preload.js` (narrow
-`window.corantoolDesktop` bridge), `tile-ipc.js` and `tile-reader.js` (tiled sections, §26.4), `engine.js`, `engine-ipc.js`, `engine-protocol.js` and `engine-runtime.js` (engine process
+`window.corantoolDesktop` bridge), `tile-ipc.js`, `tile-reader.js` and `source-copy.js` (tiled sections and the verified copy of their sources, §26.4), `engine.js`, `engine-ipc.js`, `engine-protocol.js` and `engine-runtime.js` (engine process
 client, page bridge, framing and bundled-runtime verification; §26.2–§26.3), `runtime-lock.json` (pinned runtime artifacts;
 §26.3), `trainer.js` and `model-store.js` (U-Net training and model generations; §9.3), `diagnostics.js` (§26.1)
 and `scripts/` (preparation, build and package checks).
@@ -3133,6 +3134,17 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   found…"). Without the engine (browser, standalone file, engine experiment off) a tiled section is a grey placeholder without masks or table, nothing
   in it can be changed, and its record is saved back exactly as it was read (decision D2). Folder backups and packages leave tiled sections out
   until cards M8.4.18c and M8.4.18d.
+- **The original image of a tiled section** (`tiledsource.js`; `desktop/tile-ipc.js` and `desktop/source-copy.js`; card M8.4.18b; contract §8.7).
+  The section form shows, for a tiled section, whether the project holds its own copy of the original image, whether the original is still where it
+  was added, or that it is missing (with its size). *Locate the image…* (shown when neither the copy nor the original is there) takes a file the user
+  chooses: a file of another size is refused without being read, one of the same size is hashed by the engine and refused unless its SHA-256 is the
+  saved one ("That file is not the original image of this section (…; the original is …)"), before any view is built. An accepted file becomes the
+  remembered source of the section in this project; a section that was locked because its image was missing is then opened again from its saved
+  record, with its pixels, and can be edited. While a section is locked its name, depths, analysis area and working resolution cannot be changed
+  either (its saved record is what a save writes). *Copy the image into the project* (shown when the original is there) first asks, with the
+  image's size and the free space; the copy goes to the project's folder, through a temporary file, hashed as it is written, and gets its name only
+  when its size and SHA-256 are the saved ones; less than 1 GiB left free after the copy refuses it before it starts, and a full disk, a
+  cancellation or another file leaves nothing. When the section is reopened and its views are gone, the copy is used before the original.
 - **Stored tables of tiled sections** (`maskTables`, `tableLimit` in `tiledsync.js`; `src/sedcoretool/store/masks.py`; card M8.4.22; contract
   §8.7, manifest version 2): the objects go to the store as four little-endian columns in the order of the section's objects: `object_ids`
   (`u32`), `object_class` and `object_predicted` (`i32`, the index of the class in the project's classes table, -1 for none or for an
@@ -3219,7 +3231,8 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   verified tiles of pyramids the page built, through the engine. `desktop/tile-reader.js` reads the store in the main process; it serves only the
   measurement option `SEDCORETOOL_TILE_DELIVERY=direct`.
 - **Tests:** `tests/test_store_source.py`, `tests/test_store_pyramid.py`, `tests/test_engine_store.py` (Python), the tile-store tests of
-  `tests/app/engine.test.mjs` (the desktop client and the real engine) and `tests/app/tile-ipc.test.mjs` (the bridge and the reader).
+  `tests/app/engine.test.mjs` (the desktop client and the real engine), `tests/app/tile-ipc.test.mjs` (the bridge and the reader) and
+  `tests/app/source-copy.test.mjs` (locating a moved source, the verified copy into the project).
 
 ## 27. Offline single file
 

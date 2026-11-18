@@ -709,7 +709,50 @@ try {
   const viewBox = await on.page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
   await on.page.mouse.move(viewBox.left + 300, viewBox.top + 300); await on.page.mouse.down(); await on.page.mouse.move(viewBox.left + 340, viewBox.top + 300); await on.page.mouse.up();
   assert.equal(await on.page.evaluate((index) => window.ichantool.S.sections[index].nextId, lockedIndex), nextBefore, 'a locked section is not edited');
-  fs.renameSync(moved, lossless);
+  // Card M8.4.18b: the section's form says the image is missing and offers to locate it. Another file of the same size is refused by its SHA-256
+  // (nothing built); the moved file is accepted and the section opens with its pixels, unlocked and identical to the saved one. Then the image is
+  // copied into the project, and with the original and the pyramid gone the section is reopened from the copy.
+  const panel = (want) => on.page.evaluate(async (want) => {
+    const read = () => ({ hidden: document.getElementById('secSource').hidden, note: document.getElementById('secSourceNote').textContent,
+      locate: !document.getElementById('secLocateLabel').hidden, copy: !document.getElementById('secCopySource').hidden });
+    for (let i = 0; i < 200 && !(read().note && read().locate === want.locate && read().copy === want.copy); i++) await new Promise((r) => setTimeout(r, 50));
+    return read();
+  }, want);
+  let shown = await panel({ locate: true, copy: false });
+  assert.ok(!shown.hidden && shown.locate && !shown.copy && /no se encuentra|cannot be found/i.test(shown.note), 'missing image: locate offered: ' + JSON.stringify(shown));
+  const impostor = lossless + '.other.png', bytes = fs.readFileSync(moved);
+  bytes[bytes.length - 5] ^= 0xff;                                        // same size, other bytes (in the last chunk's checksum)
+  fs.writeFileSync(impostor, bytes);
+  const toastsBefore = toasts.length;
+  await (await on.page.$('#secLocate')).uploadFile(impostor);
+  const refusedText = () => toasts.slice(toastsBefore).find((text) => /no es la imagen original|not the original image/i.test(text));
+  for (let i = 0; i < 1200 && !refusedText(); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.ok(refusedText(), 'another file is refused: ' + JSON.stringify(toasts.slice(toastsBefore)));
+  assert.equal(await on.page.evaluate(() => window.ichantool.S.sections.find((q) => q.id === window.__tiledId).frozen), 'source', 'still locked');
+  assert.ok(!fs.existsSync(path.join(on.profile, 'pyramids', pyramid)), 'nothing was built from the other file');
+  fs.rmSync(impostor);
+  await (await on.page.$('#secLocate')).uploadFile(moved);
+  await on.page.waitForFunction(() => { const s = window.ichantool.S.sections.find((q) => q.id === window.__tiledId); return s && !s.frozen && window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle(); }, { timeout: 240000, polling: 100 });
+  const locatedIndex = await sameAsSaved('located');
+  assert.equal(await on.page.evaluate((index) => window.ichantool.S.sections[index].orig.subarray(0, 400).every((v, i) => (i % 4 === 3 ? v === 255 : v === 128)), locatedIndex), false, 'the located section shows its image');
+  assert.equal(await on.page.evaluate(() => /** @type {HTMLInputElement} */ (document.getElementById('secName')).disabled), false, 'the located section can be edited');
+  shown = await panel({ locate: false, copy: true });
+  assert.ok(shown.copy && /sigue en su sitio|still in its place/i.test(shown.note), 'the original is found again; copy offered: ' + JSON.stringify(shown));
+  const project = await on.page.evaluate(() => window.ichantool.storeProject());
+  let asked = '';
+  on.page.once('dialog', (dialog) => { asked = dialog.message(); });          // accepted by the handler of `program()`
+  await on.page.click('#secCopySource');
+  shown = await panel({ locate: false, copy: false });
+  assert.match(asked, /libre|free/i, 'the size and the free space are shown first');
+  assert.ok(/propia copia|own copy/i.test(shown.note), 'the project holds a copy: ' + JSON.stringify(shown));
+  const copies = fs.readdirSync(path.join(on.profile, 'projects', project, 'sources'));
+  assert.deepEqual(copies, [pyramid + '.png'], 'one copy, named by its SHA-256');
+  assert.ok(fs.readFileSync(path.join(on.profile, 'projects', project, 'sources', copies[0])).equals(fs.readFileSync(moved)), 'the copy is the image');
+  fs.renameSync(moved, moved + '.away');
+  fs.rmSync(path.join(on.profile, 'pyramids', pyramid), { recursive: true, force: true });
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false }, 'reopened from the copy');
+  await sameAsSaved('from the copy');
+  fs.renameSync(moved + '.away', lossless);
   // D1: the engine cannot take the last edits: the rest is saved and the section keeps its saved version.
   assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
   const d1 = await on.page.evaluate(async () => {
@@ -733,7 +776,7 @@ try {
   await sameAsSaved('after D1');
   // D2: the same project in a program without tiled sections: a placeholder whose record is saved back byte for byte.
   projectRecord = await on.page.evaluate(async () => { const { getProject } = await import(new URL('js/storage.js', location.href).href); return JSON.parse(JSON.stringify(await getProject(window.ichantool.S.id))); });
-  console.log('Saving and reopening: identical masks, objects and table after a reopen, a rebuilt pyramid and a missing source (grey, locked); D1 keeps the saved version');
+  console.log('Saving and reopening: identical masks, objects and table after a reopen, a rebuilt pyramid and a missing source (grey, locked); the moved image located (another file refused), copied into the project and reopened from the copy; D1 keeps the saved version');
   fs.rmSync(lossless, { force: true });
   console.log('Exact equality, whole against tiled at factor 1:', whole.runs.length, 'label runs,', whole.exRuns.length, 'exclusion runs,', whole.objects.length, 'objects,', whole.usedStacks.length, 'overlap sets');
   assert.deepEqual(on.errors, []);

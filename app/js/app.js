@@ -33,6 +33,7 @@ import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedT
 import { MaskLoader, MaskSync, buildMaskTables, classesText } from './tiledsync.js';
 import { TiledRowCounts, TiledCountsRunner, tileHistogram } from './tiledcounts.js';
 import { TileChanges, trimTileHistory } from './tiledundo.js';
+import { createTiledSourcePanel } from './tiledsource.js';
 import { renderData } from './datatab.js';
 import { frameRatio, panelPrefs, savePanels } from './panels.js';
 import { addRecordFromTable, defaultLogView, lastLog, mode, renderLog, renderLogPanel, renderRecList, scheduleLog, sectionCanvas, navigationPreviewCanvas, clearNavigationPreviews, setMode } from './columns.js';
@@ -957,9 +958,9 @@ function drawTiles(s, cw, ch) {
 }
 
 /** A small modal with the pyramid's progress and a Cancel button. */
-function tileBuildDialog(name, onCancel) {
+function tileBuildDialog(name, onCancel, title = t('tiles.building', { n: name })) {
   const dlg = document.createElement('dialog');
-  dlg.innerHTML = `<div style="display:grid;gap:10px;min-width:340px"><h3 style="margin:0">${esc(t('tiles.building', { n: name }))}</h3>
+  dlg.innerHTML = `<div style="display:grid;gap:10px;min-width:340px"><h3 style="margin:0">${esc(title)}</h3>
     <progress id="tbProgress" max="1" value="0" style="width:100%"></progress><span class="note" id="tbStage"></span>
     <div class="row" style="justify-content:flex-end"><button class="btn" id="tbCancel">${esc(t('cl.cancel'))}</button></div></div>`;
   document.body.appendChild(dlg);
@@ -974,6 +975,21 @@ function tileBuildDialog(name, onCancel) {
     },
     close() { dlg.close(); dlg.remove(); },
   };
+}
+
+/* Card M8.4.18b: the original image of a tiled section (locate it when it moved, copy it into the project); see tiledsource.js. A section
+   locked because its image was missing is opened again from its saved record once the image is found (it cannot have changed meanwhile). */
+const tiledSource = createTiledSourcePanel({ bridge: TILES, project: () => storeProject(S.id), toast,
+  progressDialog: (title, onCancel) => tileBuildDialog('', onCancel, title), onLocated: reopenLocated });
+async function reopenLocated(s) {
+  const core = S.cores.find((c) => c.sections.includes(s));
+  if (!core || !s._savedRecord) return;
+  await busy(async () => {
+    const fresh = await loadTiledSection(s._savedRecord);
+    s._maskSync?.stop(); discardEditHistory(s);
+    core.sections[core.sections.indexOf(s)] = fresh;
+    if (core.id === S.curCore) selectSection(S.sections.indexOf(fresh));
+  });
 }
 
 /** Test hook (card M8.4.16 step 8): add every image as a tiled section at full resolution, to compare it with the same image opened whole. */
@@ -2868,8 +2884,10 @@ function renderSectionForm() {
     && s.bottom > s.top && Object.hasOwn(UNIT_TO_CM, s.units));
   $('secSel').innerHTML = S.sections.map((x, k) => `<option value="${k}" ${k === S.cur ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
   for (const id of ['secName', 'secTop', 'secBottom', 'secUnits', 'secDel', 'roiBtn', 'roiReset', 'rotL', 'rotR', 'detectBtn', 'clearCand', 'secRes', 'resAll']) $(id).disabled = !s;
-  if (!s) return;
-  if (s.frozen === 'engine') for (const id of ['secName', 'secTop', 'secBottom', 'secUnits', 'roiBtn', 'roiReset', 'rotL', 'rotR', 'detectBtn', 'clearCand', 'secRes', 'resAll']) /** @type {HTMLInputElement} */ ($(id)).disabled = true;   // kept byte for byte (D2)
+  if (!s) { void tiledSource.render(null); return; }
+  // kept byte for byte (D2), or locked until its image is located (card M8.4.18a-b): its saved record is what a save writes
+  if (s.frozen) for (const id of ['secName', 'secTop', 'secBottom', 'secUnits', 'roiBtn', 'roiReset', 'rotL', 'rotR', 'detectBtn', 'clearCand', 'secRes', 'resAll']) /** @type {HTMLInputElement} */ ($(id)).disabled = true;
+  void tiledSource.render(s);
   if (s.tiled && TILED_BLOCKED_TOOLS.has(S.tool)) setTool('pan');   // a tool chosen on another section does not follow into a tiled one
   $('secName').value = s.name; $('secTop').value = s.top; $('secBottom').value = s.bottom; $('secUnits').value = s.units;
   const ppu = pxPerCm(s);

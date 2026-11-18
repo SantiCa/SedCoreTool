@@ -37,6 +37,10 @@ contextBridge.exposeInMainWorld('corantoolDesktop', {
     maskInfo: (project, manifest, start) => ipcRenderer.invoke('tiles:maskInfo', project, manifest, start),
     rememberSource: (project, pyramid) => ipcRenderer.invoke('tiles:rememberSource', project, pyramid),
     reopen: (project, pyramid, key) => ipcRenderer.invoke('tiles:reopen', project, pyramid, key),
+    // Card M8.4.18b: a moved source located again (a File the user chose, sent as its path), and a copy of the source into the project.
+    sourceInfo: (project, pyramid) => ipcRenderer.invoke('tiles:sourceInfo', project, pyramid),
+    locate: (project, pyramid, size, token, key) => ipcRenderer.invoke('tiles:locate', project, pyramid, size, token, key),
+    copySource: (project, pyramid, key) => ipcRenderer.invoke('tiles:copySource', project, pyramid, key),
   },
   diagnostics: {
     status: () => ipcRenderer.invoke('diagnostics:status'),

@@ -172,7 +172,7 @@ test('card M8.4.18a: the source of a saved section is remembered per project, an
   await ipc.call(1, 'build', token, randomUUID());
   assert.deepEqual(await ipc.call(1, 'rememberSource', 'p1', pyramid), { ok: { remembered: true } });
   const record = JSON.parse(fs.readFileSync(path.join(projects, 'p1', 'sources.json'), 'utf8'));
-  assert.deepEqual(record, { format: 'sedcoretool.sources', version: 1, sources: { [pyramid]: { path: file, size: 6 } } });
+  assert.deepEqual(record, { format: 'sedcoretool.sources', version: 1, sources: { [pyramid]: { path: file, size: 6, name: 'core.tif' } } });
   assert.deepEqual(await ipc.call(3, 'rememberSource', 'p1', pyramid), { error: { code: 'INVALID_REQUEST', field: 'pyramid' } }, 'only a page that built it');
   // a new page (the program reopened): the pyramid is not cached any more, so it is built again from the remembered file
   const progress = [];

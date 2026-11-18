@@ -206,12 +206,13 @@ if (process.versions.electron) {
     if (!enabled) return;
     const bridge = createTileIpc({ engine, pyramidRoot: path.join(app.getPath('userData'), 'pyramids'), projectsRoot: path.join(app.getPath('userData'), 'projects'),
       delivery: process.env.SEDCORETOOL_TILE_DELIVERY === 'direct' ? 'direct' : 'engine' });
+    const WITH_PROGRESS = { build: 1, reopen: 2, locate: 4, copySource: 2 };   // operation -> index of its key among the page's arguments
     for (const name of bridge.OPERATIONS) {
       ipcMain.handle(`tiles:${name}`, (event, ...args) => {
         if (!fromApp(event) || event.senderFrame !== event.sender.mainFrame) throw new Error('forbidden');
-        if (name === 'build' || name === 'reopen') {
-          const sender = event.sender, key = name === 'build' ? args[1] : args[2];
-          return bridge.call(sender.id, name, ...args.slice(0, name === 'build' ? 2 : 3), (progress) => { if (!sender.isDestroyed()) sender.send('tiles:progress', key, progress); });
+        if (Object.hasOwn(WITH_PROGRESS, name)) {
+          const sender = event.sender, at = WITH_PROGRESS[name], key = args[at];
+          return bridge.call(sender.id, name, ...args.slice(0, at + 1), (progress) => { if (!sender.isDestroyed()) sender.send('tiles:progress', key, progress); });
         }
         return bridge.call(event.sender.id, name, ...args);
       });

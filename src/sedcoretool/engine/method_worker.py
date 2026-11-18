@@ -95,7 +95,8 @@ def run_pyramid(job, Cancelled, MethodError):
 
     try:
         result = PYRAMID.build(Path(job['path']), Path(job['root']), name=job['name'], budget=job['budget'], compressor=job['compressor'],
-                               keep=job['keep'], cancelled=Path(job['cancel_path']).exists, progress=progress)
+                               keep=job['keep'], cancelled=Path(job['cancel_path']).exists, progress=progress,
+                               expect=job.get('expect'))
     except Cancelled:
         return {'cancelled': True}
     except MethodError as error:

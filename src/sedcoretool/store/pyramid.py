@@ -128,9 +128,12 @@ def is_disk_full(error: OSError) -> bool:
     return error.errno in DISK_FULL or getattr(error, 'winerror', None) in WINDOWS_DISK_FULL
 
 
-def build(path: Path, root: Path, *, name: str, budget: int, compressor=None, keep=(), cancelled=lambda: False, progress=lambda *_: None) -> dict:
+def build(path: Path, root: Path, *, name: str, budget: int, compressor=None, keep=(), cancelled=lambda: False, progress=lambda *_: None,
+          expect: str | None = None) -> dict:
     """Build (or reuse) the pyramid of ``path`` in ``root``. Returns ``{pyramid, width, height, channels, bits, levels, reused, disk_bytes}``.
 
+    ``expect``: the SHA-256 the file must have (card M8.4.18b, locating a moved source); another one raises ``UNSUPPORTED_INPUT``
+    (``source.sha256``) as soon as it is known, before anything is built or any pyramid is removed to make room.
     Raises ``Cancelled`` or ``MethodError``; in every failure the partial folder is removed."""
     path, root = Path(path), Path(root)
     if compressor not in (None, fmt.ZLIB):
@@ -141,6 +144,8 @@ def build(path: Path, root: Path, *, name: str, budget: int, compressor=None, ke
     key = identity.file_key(path)
     sample = identity.sample_digest(path, key['size'])
     known = identity.lookup(root, key, sample)
+    if expect is not None and known is not None and known != expect:
+        raise MethodError('UNSUPPORTED_INPUT', 'source.sha256')
     if known is not None and (root / known).is_dir():
         try:
             existing = fmt.read_description(root / known)
@@ -151,6 +156,8 @@ def build(path: Path, root: Path, *, name: str, budget: int, compressor=None, ke
             pass
     sha256, size = source_digest(path, cancelled, progress)
     identity.remember(root, key, sample, sha256)
+    if expect is not None and sha256 != expect:
+        raise MethodError('UNSUPPORTED_INPUT', 'source.sha256')
     final = root / sha256
     if final.is_dir():
         try:

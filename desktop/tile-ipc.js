@@ -6,10 +6,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
 const { TileReader } = require('./tile-reader');
+const { copyVerified, freeBytes } = require('./source-copy');
 
 const MAX_SOURCES_PER_PAGE = 64, MAX_BUILDS_PER_PAGE = 4, MAX_STAGED_PER_PAGE = 8, MAX_CHUNK = 1048576;
 // Card M8.4.18a: the main process remembers where the source of each tiled section was, per project; the page never sees it.
 const SOURCES_FILE = 'sources.json', MAX_REMEMBERED_SOURCES = 4096, MAX_RETAINED = 1024;
+// Card M8.4.18b: copies of sources inside the project, named by their SHA-256 and the original extension; the disk keeps 1 GiB free.
+const SOURCES_DIR = 'sources', COPY_NAME = /^[0-9a-f]{64}(\.[a-z0-9]{1,8})?$/, COPY_RESERVE = 2 ** 30;
+const copyName = (sha256, name) => sha256 + ((/\.[A-Za-z0-9]{1,8}$/.exec(name)?.[0] || '').toLowerCase());
 // Mask tiles and tables (contract §8.7, card M8.4.16 step 4); the engine checks all of this again.
 const LAYER_BYTES = { labels: 1048576, exclude: 262144 };
 const PROJECT = /^[a-z0-9_-]{1,64}$/, SECTION = /^[A-Za-z0-9_-]{1,64}$/;
@@ -75,6 +79,7 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
   const builds = new Map();             // `${owner}/${key}` -> engine request id
   const staged = new Map();             // staged mask version (engine UUID) -> owner page
   const builtFrom = new Map();          // pyramid (source SHA-256) -> {path, size} of the file it was built from in this session
+  const copies = new Map();             // `${owner}/${key}` -> AbortController of a copy into the project (card M8.4.18b)
 
   const ownedStaging = (owner, id) => {
     if (typeof id !== 'string' || !UUID.test(id) || staged.get(id) !== owner) reject('INVALID_REQUEST', 'staged');
@@ -100,6 +105,42 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
   const owned = (owner, pyramid) => {
     if (typeof pyramid !== 'string' || !SHA256.test(pyramid) || !pyramids.get(owner)?.has(pyramid)) reject('INVALID_REQUEST', 'pyramid');
   };
+  const own = (owner, pyramid) => { if (!pyramids.has(owner)) pyramids.set(owner, new Set()); pyramids.get(owner).add(pyramid); };
+  const checkKey = (owner, key) => { if (typeof key !== 'string' || !UUID.test(key) || builds.has(`${owner}/${key}`) || copies.has(`${owner}/${key}`)) reject('INVALID_REQUEST', 'key'); };
+  const sourcesFile = (project) => path.join(projectsRoot, project, SOURCES_FILE);
+  /** This project's record of a source: `{path, size, name?, copy?}` or null. */
+  const remembered = (project, pyramid) => (projectsRoot ? readSources(sourcesFile(project)).sources[pyramid] || null : null);
+  /** Change this project's record of a source (written atomically; the oldest entries beyond the limit are dropped). */
+  function updateSource(project, pyramid, fields) {
+    const file = sourcesFile(project), record = readSources(file), entry = { ...(record.sources[pyramid] || {}), ...fields };
+    delete record.sources[pyramid];
+    record.sources[pyramid] = entry;
+    const names = Object.keys(record.sources);
+    for (const name of names.slice(0, Math.max(0, names.length - MAX_REMEMBERED_SOURCES))) delete record.sources[name];
+    writeAtomically(file, JSON.stringify(record));
+  }
+  /** A file that is still there with the saved size, or null. */
+  const sameSize = (file, size) => {
+    try { const stat = typeof file === 'string' && path.isAbsolute(file) ? fs.statSync(file) : null; return stat?.isFile() && stat.size === size ? file : null; } catch { return null; }
+  };
+  /** The project's own copy of a source (card M8.4.18b), when it is there with the saved size. */
+  const copyOf = (project, entry) => (entry && typeof entry.copy === 'string' && COPY_NAME.test(entry.copy)
+    ? sameSize(path.join(projectsRoot, project, SOURCES_DIR, entry.copy), entry.size) : null);
+  /** Build the pyramid of `file` only if its SHA-256 is `pyramid`: 'built', 'reused', 'changed' (another file) or 'cancelled'. */
+  async function buildExpected(owner, key, file, pyramid, name, onProgress) {
+    const promise = engine.request('pyramid.build', { path: file, name, expect: pyramid }, null, { onEvent: onProgress });
+    builds.set(`${owner}/${key}`, promise.requestId);
+    try {
+      const result = await promise;
+      if (result?.cancelled) return 'cancelled';
+      if (result?.pyramid !== pyramid) return 'changed';
+      own(owner, pyramid);
+      return result.reused ? 'reused' : 'built';
+    } catch (error) {
+      if (error?.code === 'UNSUPPORTED_INPUT' && error.field === 'source.sha256') return 'changed';
+      throw error;
+    } finally { builds.delete(`${owner}/${key}`); }
+  }
 
   const operations = {
     /** A file the user chose; the main process passes its path. Returns an opaque token and what the page may show. */
@@ -117,7 +158,7 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
     async build(owner, token, key, onProgress = () => {}) {
       const source = typeof token === 'string' && UUID.test(token) ? sources.get(token) : null;
       if (!source || source.owner !== owner) reject('INVALID_REQUEST', 'token');
-      if (typeof key !== 'string' || !UUID.test(key) || builds.has(`${owner}/${key}`)) reject('INVALID_REQUEST', 'key');
+      checkKey(owner, key);
       if ([...builds.keys()].filter((name) => name.startsWith(`${owner}/`)).length >= MAX_BUILDS_PER_PAGE) reject('BUSY');
       const promise = engine.request('pyramid.build', { path: source.path, name: source.name }, null, { onEvent: onProgress });
       builds.set(`${owner}/${key}`, promise.requestId);
@@ -128,13 +169,14 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
           levels: result.levels, reused: result.reused };
         if (!SHA256.test(clean.pyramid) || ![clean.width, clean.height, clean.levels].every((n) => Number.isSafeInteger(n) && n > 0)
             || ![1, 3, 4].includes(clean.channels) || ![8, 16].includes(clean.bits) || typeof clean.reused !== 'boolean') reject('INTERNAL', 'build');
-        if (!pyramids.has(owner)) pyramids.set(owner, new Set());
-        pyramids.get(owner).add(clean.pyramid);
+        own(owner, clean.pyramid);
         builtFrom.set(clean.pyramid, { path: source.path, size: source.size });
         return clean;
       } finally { builds.delete(`${owner}/${key}`); }
     },
     async cancel(owner, key) {
+      const copy = typeof key === 'string' ? copies.get(`${owner}/${key}`) : undefined;
+      if (copy) { copy.abort(); return { state: 'cancelling' }; }
       const id = typeof key === 'string' ? builds.get(`${owner}/${key}`) : undefined;
       if (!id) return { state: 'already_terminal' };
       return engine.request('job.cancel', { request_id: id });
@@ -224,37 +266,83 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
       if (!projectsRoot) reject('UNSUPPORTED_METHOD');
       const from = builtFrom.get(pyramid);
       if (!from) return { remembered: false };
-      const file = path.join(projectsRoot, project, SOURCES_FILE), record = readSources(file);
-      delete record.sources[pyramid];
-      record.sources[pyramid] = { path: from.path, size: from.size };
-      const names = Object.keys(record.sources);
-      for (const name of names.slice(0, Math.max(0, names.length - MAX_REMEMBERED_SOURCES))) delete record.sources[name];
-      writeAtomically(file, JSON.stringify(record));
+      updateSource(project, pyramid, { path: from.path, size: from.size, name: displayName(from.path) });   // the name the copy keeps
       return { remembered: true };
     },
     /**
      * Make a saved section's pyramid readable by this page: the cached pyramid if the engine still has it; otherwise built again from the
-     * file remembered for this project, accepted only if its SHA-256 is the saved one. `{available: false}` when neither is possible.
+     * project's copy of the source (card M8.4.18b) or else the file remembered for this project, each accepted only if its SHA-256 is the
+     * saved one (checked by the engine before it builds anything). `{available: false}` when none is possible.
      */
     async reopen(owner, project, pyramid, key, onProgress = () => {}) {
       checkProject(project);
       if (typeof pyramid !== 'string' || !SHA256.test(pyramid)) reject('INVALID_REQUEST', 'pyramid');
-      if (typeof key !== 'string' || !UUID.test(key) || builds.has(`${owner}/${key}`)) reject('INVALID_REQUEST', 'key');
-      const own = () => { if (!pyramids.has(owner)) pyramids.set(owner, new Set()); pyramids.get(owner).add(pyramid); };
-      try { await (reader ? reader.describe(pyramid) : engine.request('pyramid.info', { pyramid })); own(); return { available: true, rebuilt: false }; } catch { /* not in the cache */ }
-      const from = projectsRoot ? readSources(path.join(projectsRoot, project, SOURCES_FILE)).sources[pyramid] : null;
-      let stat = null;
-      try { stat = from && typeof from.path === 'string' && path.isAbsolute(from.path) ? fs.statSync(from.path) : null; } catch { stat = null; }
-      if (!stat?.isFile() || stat.size !== from.size) return { available: false, rebuilt: false };
-      const promise = engine.request('pyramid.build', { path: from.path, name: displayName(from.path) }, null, { onEvent: onProgress });
-      builds.set(`${owner}/${key}`, promise.requestId);
-      try {
-        const result = await promise;
-        if (result?.cancelled) return { available: false, rebuilt: false, cancelled: true };
-        if (result?.pyramid !== pyramid) return { available: false, rebuilt: false, changed: true };   // the file at that path is another image now
-        own(); builtFrom.set(pyramid, { path: from.path, size: from.size });
+      checkKey(owner, key);
+      try { await (reader ? reader.describe(pyramid) : engine.request('pyramid.info', { pyramid })); own(owner, pyramid); return { available: true, rebuilt: false }; } catch { /* not in the cache */ }
+      const entry = remembered(project, pyramid);
+      const candidates = [copyOf(project, entry), sameSize(entry?.path, entry?.size)].filter(Boolean);
+      let changed = false;
+      for (const file of candidates) {
+        const outcome = await buildExpected(owner, key, file, pyramid, entry.name || displayName(entry.path || file), onProgress);
+        if (outcome === 'cancelled') return { available: false, rebuilt: false, cancelled: true };
+        if (outcome === 'changed') { changed = true; continue; }               // the file at that path is another image now
+        builtFrom.set(pyramid, { path: file, size: entry.size });
         return { available: true, rebuilt: true };
-      } finally { builds.delete(`${owner}/${key}`); }
+      }
+      return { available: false, rebuilt: false, ...(changed ? { changed: true } : {}) };
+    },
+    /** What the main process knows about a saved section's source, for the page to show (never a path): whether the project holds a copy,
+     *  whether the remembered original is there with the saved size, and the free space of the disk that holds the projects. */
+    async sourceInfo(owner, project, pyramid) {
+      checkProject(project);
+      if (typeof pyramid !== 'string' || !SHA256.test(pyramid)) reject('INVALID_REQUEST', 'pyramid');
+      if (!projectsRoot) reject('UNSUPPORTED_METHOD');
+      const entry = remembered(project, pyramid), from = builtFrom.get(pyramid);
+      const original = !!(sameSize(entry?.path, entry?.size) || sameSize(from?.path, from?.size));
+      return { copied: !!copyOf(project, entry), original, size: entry?.size ?? from?.size ?? null, free: freeBytes(projectsRoot) };
+    },
+    /** Card M8.4.18b: the user chose `token` as the moved source of a saved section; accepted only with the saved size and SHA-256. */
+    async locate(owner, project, pyramid, size, token, key, onProgress = () => {}) {
+      checkProject(project);
+      if (typeof pyramid !== 'string' || !SHA256.test(pyramid)) reject('INVALID_REQUEST', 'pyramid');
+      if (!Number.isSafeInteger(size) || size < 1) reject('INVALID_REQUEST', 'size');
+      const source = typeof token === 'string' && UUID.test(token) ? sources.get(token) : null;
+      if (!source || source.owner !== owner) reject('INVALID_REQUEST', 'token');
+      checkKey(owner, key);
+      if (!projectsRoot) reject('UNSUPPORTED_METHOD');
+      if (source.size !== size) return { matched: false, size: source.size };   // another file: not even hashed
+      const outcome = await buildExpected(owner, key, source.path, pyramid, source.name, onProgress);
+      if (outcome === 'cancelled') return { cancelled: true };
+      if (outcome === 'changed') return { matched: false, size: source.size };
+      builtFrom.set(pyramid, { path: source.path, size: source.size });
+      updateSource(project, pyramid, { path: source.path, size: source.size });               // the remembered name stays the original's
+      return { matched: true, rebuilt: outcome === 'built' };
+    },
+    /**
+     * Card M8.4.18b (D3): copy the source of a pyramid this page has open into the project (`sources/<sha256>.<ext>`), verified on the way;
+     * refused when the disk would keep less than 1 GiB free. `{copied: true}` or `{cancelled: true}`.
+     */
+    async copySource(owner, project, pyramid, key, onProgress = () => {}) {
+      checkProject(project);
+      owned(owner, pyramid);
+      checkKey(owner, key);
+      if (!projectsRoot) reject('UNSUPPORTED_METHOD');
+      const entry = remembered(project, pyramid);
+      if (copyOf(project, entry)) return { copied: true };
+      const session = builtFrom.get(pyramid);
+      const from = sameSize(session?.path, session?.size) ? session : sameSize(entry?.path, entry?.size) ? entry : null;
+      if (!from) reject('UNSUPPORTED_INPUT', 'source');
+      const folder = path.join(projectsRoot, project, SOURCES_DIR), free = freeBytes(projectsRoot);
+      if (free !== null && free < from.size + COPY_RESERVE) reject('LIMIT_EXCEEDED', 'disk');
+      fs.mkdirSync(folder, { recursive: true });
+      const name = copyName(pyramid, entry?.name || displayName(from.path)), controller = new AbortController();
+      copies.set(`${owner}/${key}`, controller);
+      try {
+        const result = await copyVerified({ from: from.path, to: path.join(folder, name), sha256: pyramid, size: from.size, onProgress, signal: controller.signal });
+        if (result.cancelled) return { cancelled: true };
+      } finally { copies.delete(`${owner}/${key}`); }
+      updateSource(project, pyramid, { path: from.path, size: from.size, name: entry?.name || displayName(from.path), copy: name });
+      return { copied: true };
     },
     async maskRead(owner, project, manifest, layer, positions) {
       checkProject(project);
@@ -276,6 +364,7 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
       for (const [token, source] of sources) if (source.owner === owner) sources.delete(token);
       pyramids.delete(owner);
       for (const name of [...builds.keys()]) if (name.startsWith(`${owner}/`)) builds.delete(name);
+      for (const [name, controller] of copies) if (name.startsWith(`${owner}/`)) { controller.abort(); copies.delete(name); }
       for (const [id, page] of staged) if (page === owner) { staged.delete(id); engine.request('mask.discard', { staged: id }).catch(() => {}); }
     },
     OPERATIONS: Object.keys(operations),

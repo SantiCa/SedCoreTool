@@ -146,6 +146,7 @@ def test_store_requests_are_validated(engine, tmp_path):
         ('pyramid.build', {'path': str(tmp_path), 'name': 'x'}, 'UNSUPPORTED_INPUT', 'source'),
         ('pyramid.build', {'path': str(source_png(tmp_path, seed=1)), 'name': '../x'}, 'INVALID_REQUEST', 'name'),
         ('pyramid.build', {'path': str(source_png(tmp_path, seed=1)), 'name': 'x', 'extra': 1}, 'INVALID_REQUEST', None),
+        ('pyramid.build', {'path': str(source_png(tmp_path, seed=1)), 'name': 'x', 'expect': 'F' * 64}, 'INVALID_REQUEST', 'expect'),
         ('pyramid.info', {'pyramid': 'f' * 64}, 'INVALID_REQUEST', 'pyramid'),
         ('pyramid.info', {'pyramid': '../' + pyramid[3:]}, 'INVALID_REQUEST', 'pyramid'),
         ('tile.read', {'pyramid': pyramid, 'level': 3, 'positions': [[0, 0]]}, 'INVALID_REQUEST', 'level'),
@@ -163,6 +164,21 @@ def test_store_requests_are_validated(engine, tmp_path):
         if field:
             assert response['error']['details'] == {'field': field}
         assert binary == []
+
+
+def test_a_build_that_expects_another_sha256_is_refused(engine, tmp_path):
+    """Card M8.4.18b: locating a moved source sends the saved SHA-256 as ``expect``; another file ends the job with an error."""
+    coordinator, session = engine()
+    source = source_png(tmp_path)
+    pyramid = build(coordinator, session, source)[0]['result']['pyramid']
+    for path, expect, outcome in ((source_png(tmp_path, seed=1), pyramid, ('UNSUPPORTED_INPUT', 'source.sha256')), (source, pyramid, None)):
+        item = request(session, 'pyramid.build', {'path': str(path), 'name': 'source.png', 'expect': expect})
+        coordinator.receive(item)
+        response = wait(coordinator, item['id'])[0]
+        if outcome:
+            assert response['status'] == 'error' and (response['error']['code'], response['error']['details']['field']) == outcome
+        else:
+            assert response['result']['pyramid'] == pyramid and response['result']['reused'] is True
 
 
 def test_an_altered_or_missing_tile_is_never_served(engine, tmp_path):

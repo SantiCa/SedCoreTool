@@ -148,6 +148,23 @@ def test_an_existing_pyramid_is_reused_and_a_changed_source_gets_a_new_one(tmp_p
     assert (tmp_path / "root" / first["pyramid"]).is_dir()                      # the old one stays, as a cache entry
 
 
+def test_a_located_source_with_another_sha256_is_refused_before_anything_is_built(tmp_path):
+    """Card M8.4.18b: ``expect`` is the saved SHA-256; another file is refused once hashed, and through the identity record without hashing."""
+    root, source = tmp_path / "root", small_source(tmp_path)
+    first = pyr.build(source, root, name="image.png", budget=50 * GiB)
+    assert pyr.build(source, root, name="image.png", budget=50 * GiB, expect=first["pyramid"])["reused"] is True
+    other = small_source(tmp_path, name="other.png", seed=1)
+    stages = []
+    with pytest.raises(MethodError) as refused:
+        pyr.build(other, root, name="image.png", budget=50 * GiB, expect=first["pyramid"], progress=lambda stage, *_: stages.append(stage))
+    assert (refused.value.code, refused.value.field) == ("UNSUPPORTED_INPUT", "source.sha256")
+    assert set(stages) <= {"hash"} and sorted(item.name for item in pyramid_folders(root)) == [first["pyramid"]]   # nothing built or removed
+    stages.clear()
+    with pytest.raises(MethodError):                                            # hashed before: refused through the identity record
+        pyr.build(other, root, name="image.png", budget=50 * GiB, expect=first["pyramid"], progress=lambda stage, *_: stages.append(stage))
+    assert stages == []
+
+
 def pyramid_folders(folder):
     """What a build leaves in the root besides the identity record of card M8.4.15 (written once the source is hashed)."""
     return [item for item in folder.iterdir() if item.name != "identities.json"]

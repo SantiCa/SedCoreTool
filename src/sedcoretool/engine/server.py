@@ -237,12 +237,15 @@ class Coordinator:
         if self.pyramid_root is None:
             raise RequestError('UNSUPPORTED_METHOD')
         if operation == 'pyramid.build':
-            require_fields(payload, ('path', 'name'))
+            require_fields(payload, ('path', 'name', 'expect') if 'expect' in payload else ('path', 'name'))
             path, name = payload['path'], payload['name']
             if (not isinstance(path, str) or not 0 < len(path) <= MAX_PATH or '\x00' in path or not Path(path).is_absolute()):
                 raise RequestError('INVALID_REQUEST', 'path')
             if not isinstance(name, str) or not PYRAMID_NAME.fullmatch(name):
                 raise RequestError('INVALID_REQUEST', 'name')
+            expect = payload.get('expect')                       # card M8.4.18b: the SHA-256 a located source must have
+            if expect is not None and (not isinstance(expect, str) or not HEX64.fullmatch(expect)):
+                raise RequestError('INVALID_REQUEST', 'expect')
             if not Path(path).is_file():
                 raise RequestError('UNSUPPORTED_INPUT', 'source')
             if self.active is not None and len(self.jobs) >= 4:
@@ -384,7 +387,7 @@ class Coordinator:
         directory.mkdir(parents=True)
         payload = request['payload']
         job_file = directory / 'job.json'
-        job_file.write_text(json.dumps({'kind': 'pyramid.build', 'path': payload['path'], 'name': payload['name'],
+        job_file.write_text(json.dumps({'kind': 'pyramid.build', 'path': payload['path'], 'name': payload['name'], 'expect': payload.get('expect'),
                                         'root': str(self.pyramid_root), 'budget': self.pyramid_budget, 'compressor': self.pyramid_compressor,
                                         'keep': sorted(self.pyramids_used), 'cancel_path': str(directory / 'cancel'),
                                         'progress_path': str(directory / 'progress')}), encoding='utf-8')

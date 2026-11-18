@@ -16,7 +16,7 @@ const config = {
   appId: 'org.sedcoretool.app', productName: 'SedCoreTool', copyright: 'Santiago Casanova-Arenillas',
   extraMetadata: { version: n },
   artifactName: `SedCoreTool-${V}-\${os}-\${arch}.\${ext}`,
-  files: ['main.js', 'preload.js', 'trainer.js', 'model-store.js', 'diagnostics.js', 'engine.js', 'engine-ipc.js', 'engine-protocol.js', 'engine-runtime.js', 'tile-ipc.js', 'tile-reader.js', 'runtime-lock.json', 'web/**', 'build/icon.png', 'package.json'],
+  files: ['main.js', 'preload.js', 'trainer.js', 'model-store.js', 'diagnostics.js', 'engine.js', 'engine-ipc.js', 'engine-protocol.js', 'engine-runtime.js', 'tile-ipc.js', 'tile-reader.js', 'source-copy.js', 'runtime-lock.json', 'web/**', 'build/icon.png', 'package.json'],
   extraResources: [{ from: 'python', to: 'python' }, ...runtimeTargets.map((target) => ({ from: `runtime/${target}`, to: `engine-runtime/${target}` }))],
   directories: { output: 'dist', buildResources: 'build' },
   // The portable form is an archive of the application folder: the electron-builder `portable` target self-extracts
