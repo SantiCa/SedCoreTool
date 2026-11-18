@@ -358,3 +358,27 @@ def test_info_lists_the_tiles_of_a_version_in_pages(engine, monkeypatch):
     assert (second['positions'], second['next']) == ([2, 1, 1], None)
     assert value.error('mask.info', {'project': 'p1', 'manifest': version, 'start': -1}) == ('INVALID_REQUEST', 'start')
     assert value.error('mask.info', {'project': 'p1', 'manifest': '1' * 64, 'start': 0}) == ('INVALID_REQUEST', 'manifest')
+
+
+def test_a_retain_stopped_half_way_leaves_every_kept_version_readable(engine, monkeypatch):
+    """Manifests are deleted before blobs: a stop while blobs are being deleted leaves only unreferenced blobs behind."""
+    value = engine()
+    staged = begin(value)['staged']
+    put(value, staged, *labels_tile(3))
+    old = value.ok('mask.commit', {'staged': staged, 'tables': value.tables()})[0]['manifest']
+    staged = begin(value, old)['staged']
+    kept_tile = labels_tile(4)
+    put(value, staged, *kept_tile)
+    kept = value.ok('mask.commit', {'staged': staged, 'tables': {}})[0]['manifest']
+    original = Path.unlink
+    def stop_at_blobs(self, *args, **kwargs):
+        if self.parent.parent.name == 'blobs':
+            raise OSError('stopped')
+        return original(self, *args, **kwargs)
+    monkeypatch.setattr(Path, 'unlink', stop_at_blobs)
+    assert value.error('mask.retain', {'project': 'p1', 'keep': [kept]})[0] == 'INTERNAL'
+    monkeypatch.setattr(Path, 'unlink', original)
+    fresh = masks.MaskStore(Path(value.coordinator.projects_root) / 'p1' / 'tiles')
+    assert fresh.read_tile(kept, 'labels', 0, 0) == kept_tile[0]
+    assert stored_names(value)[0] == {kept}
+    assert value.ok('mask.retain', {'project': 'p1', 'keep': [kept]})[0]['removed']['blobs'] >= 1, 'a later retain removes what was left'

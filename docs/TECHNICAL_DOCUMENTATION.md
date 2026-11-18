@@ -3112,8 +3112,27 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   automatic restart of card M8.4.7, and tries again (1, 2, 5, 15, then every 30 s) until the store has them ("…are now in the engine's
   store"). Clean tiles beyond 128 MiB may be dropped from the page; they are read back from the store when the viewer, a stroke or the
   statistics need them (a stroke over a tile not read back yet asks to try again in a moment). The edit window pins its tiles, and writes a layer
-  the tile does not hold as a whole. Until card M8.4.18 the project record does not name the stored version, so closing the program still loses
-  a tiled section.
+  the tile does not hold as a whole.
+- **Saving and reopening tiled sections** (`serTiledSection`, `settleTiledSections`, `retainStore`, `loadTiledSection`, `placeholderSection` in
+  `app.js`; `desktop/tile-ipc.js`; card M8.4.18a; contract §8.7). *Record:* a tiled section is saved like any section without its `labels` and
+  `exclude` arrays, with its overlap stacks as they are (never renumbered) and with `file: {name, type, tiled: true}` and
+  `tiled: {version: 1, store: 2, manifest, width, height, level, source: {sha256, size, name}}`; `manifest` is a stored version that holds every edit
+  of the section. A project that has a tiled section is written as format version 6; every other project stays version 5, unchanged. A build of
+  version 5 (V0.151 and earlier) does not open a version 6 project: decoding the tiled record's missing image throws, the load reports that it failed
+  and nothing is written (read from its code, not run; a newer version is also opened read-only).
+  *Saving:* each tiled section's sync must first be settled (every tile and table acknowledged by the store); the record is built at that moment, so
+  masks, objects and stacks are one state. A section that does not settle within 15 s keeps its last saved record, the rest of the project is saved,
+  the save state stays "unsaved" and the page says so once ("The latest edits of a large section have not reached the engine's store yet…"); the next
+  save tries again (decision D1 of card M8.4.18). The store writes tiles, then the manifest atomically, and the record is written last (ARCHITECTURE
+  §3.4 rule 4). After a successful save the page asks the store to keep only the versions its saved records name and the current acknowledged ones
+  (`mask.retain`). *Reopening:* the pyramid is taken from the engine's cache, or built again from the file the main process remembered for the project
+  (`sources.json`), accepted only if its SHA-256 is the saved one; the working image is read from it at the saved level. The stored version's tiles are
+  listed (`mask.info`) and each is read back once, for the reduced copy of the masks and the row counts of card M8.4.17; the objects come from the
+  record with their saved statistics, which are then computed again from the tiles and pixels in the background. Without the pyramid and the file the
+  section opens with a grey image, its masks, objects and interval table, and cannot be edited ("The original image of this large section cannot be
+  found…"). Without the engine (browser, standalone file, engine experiment off) a tiled section is a grey placeholder without masks or table, nothing
+  in it can be changed, and its record is saved back exactly as it was read (decision D2). Folder backups and packages leave tiled sections out
+  until cards M8.4.18c and M8.4.18d.
 - **Stored tables of tiled sections** (`maskTables`, `tableLimit` in `tiledsync.js`; `src/sedcoretool/store/masks.py`; card M8.4.22; contract
   §8.7, manifest version 2): the objects go to the store as four little-endian columns in the order of the section's objects: `object_ids`
   (`u32`), `object_class` and `object_predicted` (`i32`, the index of the class in the project's classes table, -1 for none or for an

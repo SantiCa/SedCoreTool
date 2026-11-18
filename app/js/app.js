@@ -31,7 +31,7 @@ import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlac
 import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks.js';
 import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, windowRange, planWindows, pinRanges, toWindowRect, windowRgba } from './tiledit.js';
 import { MaskLoader, MaskSync, buildMaskTables, classesText } from './tiledsync.js';
-import { TiledRowCounts, TiledCountsRunner } from './tiledcounts.js';
+import { TiledRowCounts, TiledCountsRunner, tileHistogram } from './tiledcounts.js';
 import { TileChanges, trimTileHistory } from './tiledundo.js';
 import { renderData } from './datatab.js';
 import { frameRatio, panelPrefs, savePanels } from './panels.js';
@@ -127,7 +127,7 @@ async function sectionBlob(s) {
 }
 /** Working image of a section at factor k (crop and rotation applied). */
 async function decodeWorking(s, k) {
-  if (s.tiled) throw new Error(t('tiles.unavailable'));   // its source may be gigabytes: never decoded whole (card M8.4.15)
+  if (s.tiled || s.frozen) throw new Error(t(s.frozen ? 'tiles.frozen.' + s.frozen : 'tiles.unavailable'));   // its source may be gigabytes: never decoded whole (card M8.4.15)
   let { w, h, rgba, rgba16, fw, fh } = await decodeBytes(await sectionBlob(s), s.file.name, s.file.type, { k, crop: s.crop });
   for (let r = 0; r < ((s.rot % 4) + 4) % 4; r++) { rgba = rotate90(rgba, w, h, 4, 1); if (rgba16) rgba16 = rotate90(rgba16, w, h, 4, 1); [w, h] = [h, w]; }
   if (!s.full) s.full = { w: fw, h: fh };
@@ -386,7 +386,7 @@ const TILES = /** @type {any} */ (window).corantoolDesktop?.tiles?.enabled === t
    Every tool of the toolbar works on a tiled section since card M8.4.16 step 6; detection, crop, rotation, resolution and filters, which are
    not tools of the toolbar, need the whole image (M8.5) and refuse where they are started. */
 const TILED_BLOCKED_TOOLS = new Set();
-function tiledRefused(s) { if (!s?.tiled) return false; toast(t('tiles.unavailable')); return true; }
+function tiledRefused(s) { if (!s?.tiled && !s?.frozen) return false; toast(t(s.frozen ? 'tiles.frozen.' + s.frozen : 'tiles.unavailable')); return true; }
 
 /** The working image of a tiled section: its proxy level of the pyramid, read through the engine in batches of 16 verified tiles. */
 async function tiledWorkingImage(tiled) {
@@ -588,6 +588,7 @@ const sourceBox = (o) => (o?.sbox ? { x0: o.sbox[0], y0: o.sbox[1], x1: o.sbox[2
 
 /** The windows of an operation on these source rectangles, or null after telling the user why it cannot run now. */
 function tiledPlan(s, rects, { boxes = true, tooLarge = 'tiles.boxTooLarge' } = {}) {
+  if (s.frozen) { toast(t('tiles.frozen.' + s.frozen)); return null; }   // card M8.4.18a: a section without its pixels is not edited
   const runner = s._statsRunner;
   if (boxes && ((runner && (!runner.idle || runner.failed.size)) || rects.some((r) => !r))) { void runner?.retry(); toast(t('tiles.busy')); return null; }
   const plan = planWindows(s.maskTiles, rects);
@@ -927,6 +928,7 @@ function drawMaskOverlay(s, k, rect, viewWidth, viewHeight) {
  * the working image. A tile not loaded yet is drawn from the nearest finer-than-working level already cached, else the working image shows.
  */
 function drawTiles(s, cw, ch) {
+  if (s.tiled.missing) return;                               // card M8.4.18a: no pyramid and no source; the grey working image stays
   const tiled = s.tiled, levels = tiled.levels, { x: vx, y: vy, zoom: z } = S.view, ds = s.ds, roi = s.roi, scheduler = tileScheduler(s);
   const k = levelForZoom(levels, z / ds);
   if (k >= tiled.level || !tilesShowSource(s)) { scheduler.want(k, []); return; }
@@ -993,7 +995,7 @@ async function addTiledSection(file) {
   // The working image: the finest level within the size limit whose memory also fits (card H6).
   let level = forceTiled ? 0 : proxyLevel(info.levels, (S.settings.maxMP || 8) * 1e6);
   while (!forceTiled && level < info.levels.length - 1 && workingBytes(info.levels[level].width, info.levels[level].height, info.bits === 16) > WORKING_MEMORY_LIMIT) level++;
-  const tiled = { pyramid: built.ok.pyramid, level, levels: info.levels, channels: info.channels, bits: info.bits };
+  const tiled = { pyramid: built.ok.pyramid, level, levels: info.levels, channels: info.channels, bits: info.bits, source: { name: registered.ok.name, size: registered.ok.size } };
   const working = await tiledWorkingImage(tiled);
   const s = newSection({ name: file.name.replace(/\.[^.]+$/, ''), file: { name: file.name, type: file.type, tiled: true }, w: working.w, h: working.h,
     orig: working.rgba, orig16: working.rgba16, ds: 2 ** level, full: { w: info.width, h: info.height } });
@@ -1004,6 +1006,8 @@ async function addTiledSection(file) {
   if (prev) { s.units = prev.units; s.top = prev.bottom; s.bottom = prev.bottom + (prev.bottom - prev.top); s.detect = /** @type {any} */ ({ ...prev.detect }); }
   S.sections.push(s);
   selectSection(S.sections.length - 1, true); markDirty();
+  // Card M8.4.18a: the main process remembers, for this project, which file the pyramid came from (the page never sees the path).
+  void TILES.rememberSource(storeProject(S.id), tiled.pyramid).then((r) => { if (r?.error) console.warn('rememberSource', r.error); });
   toast(t('tiles.added', { w: info.width, h: info.height, k: 2 ** level }), 9000);
   return true;
 }
@@ -1777,6 +1781,8 @@ const engineAnalysis = engineBridge?.enabled === true ? createEngineAnalysis({ c
 } }) : null;
 /** Brings the bins of the sections up to date. Resolves when every section has a final state (always, without the engine). */
 export function analyzeSections(sections) {
+  for (const s of sections) if (s.frozen === 'engine') s.bins = [];   // a placeholder has no masks in this program (D2 of card M8.4.18)
+  sections = sections.filter((s) => s.frozen !== 'engine');
   const tiled = sections.filter((s) => s.tiled);
   for (const s of tiled) analyzeTiled(s);         // counted in the page from the full-resolution mask tiles (card M8.4.17), never from the reduced copy
   sections = sections.filter((s) => !s.tiled);
@@ -1786,6 +1792,7 @@ export function analyzeSections(sections) {
 
 export function analyze(s) {
   if (!s) return;
+  if (s.frozen === 'engine') { s.bins = []; return; }
   if (s.tiled) { analyzeTiled(s); return; }
   if (engineAnalysis) { void engineAnalysis.request(s); return; }   // asynchronous: the table shows a pending state until the engine answers
   const { bins, rowCache } = computeSectionBins(s, { classes: S.classes, settings: S.settings, ageModel: S.age.model });
@@ -1850,7 +1857,7 @@ function render() {
   const fill = s.lutFill, line = s.lutLine, sty = s.lutStyle, sel = S.selected, step = Math.max(1, Math.round(1 / z));
   const inSel = new Uint8Array(s.nextId + 1); for (const id of S.multi) if (id <= s.nextId) inSel[id] = 1;
   // A tiled section at fine zoom: inside the analysis area the masks are painted over the pixel tiles (drawTiles), so they are not mixed in here.
-  const masksOverTiles = !!(s.tiled && TILES && s.maskTiles && tilesShowSource(s) && levelForZoom(s.tiled.levels, z / s.ds) < s.tiled.level);
+  const masksOverTiles = !!(s.tiled && !s.tiled.missing && TILES && s.maskTiles && tilesShowSource(s) && levelForZoom(s.tiled.levels, z / s.ds) < s.tiled.level);
   const ixs = new Int32Array(cw);
   for (let sx = 0; sx < cw; sx++) ixs[sx] = Math.floor(vx + (sx + 0.5) / z);
   let o = 0;
@@ -2407,7 +2414,8 @@ view.addEventListener('pointerdown', (e) => {
   const p = toImg(e);
   if (e.button === 1 || S.tool === 'pan' || spaceDown) { drag = { type: 'pan', sx: e.clientX, sy: e.clientY, vx: S.view.x, vy: S.view.y }; return; }
   if (e.button !== 0) return;
-  const eh = edgeHit(s, p.sx, p.sy);
+  if (s.frozen && S.tool !== 'select') { toast(t('tiles.frozen.' + s.frozen)); return; }   // card M8.4.18a
+  const eh = !s.frozen && edgeHit(s, p.sx, p.sy);
   if (eh) { drag = { type: 'edge', which: eh }; return; }
   const tool = S.tool;
   // Selection: click selects; Shift/Ctrl+click adds or removes; dragging draws a box (Shift/Ctrl adds to the selection).
@@ -2861,6 +2869,7 @@ function renderSectionForm() {
   $('secSel').innerHTML = S.sections.map((x, k) => `<option value="${k}" ${k === S.cur ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
   for (const id of ['secName', 'secTop', 'secBottom', 'secUnits', 'secDel', 'roiBtn', 'roiReset', 'rotL', 'rotR', 'detectBtn', 'clearCand', 'secRes', 'resAll']) $(id).disabled = !s;
   if (!s) return;
+  if (s.frozen === 'engine') for (const id of ['secName', 'secTop', 'secBottom', 'secUnits', 'roiBtn', 'roiReset', 'rotL', 'rotR', 'detectBtn', 'clearCand', 'secRes', 'resAll']) /** @type {HTMLInputElement} */ ($(id)).disabled = true;   // kept byte for byte (D2)
   if (s.tiled && TILED_BLOCKED_TOOLS.has(S.tool)) setTool('pan');   // a tool chosen on another section does not follow into a tiled one
   $('secName').value = s.name; $('secTop').value = s.top; $('secBottom').value = s.bottom; $('secUnits').value = s.units;
   const ppu = pxPerCm(s);
@@ -3532,25 +3541,49 @@ function serSection(s) {
   };
 }
 
+/**
+ * The record of a tiled section (card M8.4.18a): like any section, without the mask arrays, which are in the engine's store under `manifest`, and
+ * with the overlap stacks as they are (a tiled section never renumbers them, card M8.4.17). `manifest` must hold every edit of the section.
+ */
+function serTiledSection(s, manifest) {
+  const o2 = (o) => ({ id: o.id, cls: o.cls, src: o.src, ...(o.nt ? { nt: 1 } : {}), ...(o.stats ? { st: o.stats } : {}), ...(o.cls && o._thumb ? { th: o._thumb } : {}), ...(o.emb ? { em: o.emb } : {}) });
+  return {
+    id: s.id, name: s.name, ds: s.ds, rot: 0, w: s.w, h: s.h, crop: null, full: s.full || null,
+    file: { name: s.file.name, type: s.file.type, tiled: true },
+    top: s.top, bottom: s.bottom, units: s.units, roi: s.roi, filters: s.filters, preset: s.preset, detect: s.detect, manual: s.manual,
+    nextId: s.nextId, objects: [...s.objects.values()].map(o2), stacks: s.stacks, marks: s.marks || [],
+    tiled: { version: 1, store: 2, manifest, width: s.maskTiles.width, height: s.maskTiles.height, level: s.tiled.level,
+      source: { sha256: s.tiled.pyramid, size: s.tiled.source?.size ?? null, name: s.tiled.source?.name ?? s.file.name } },
+  };
+}
+/** What a save writes for a section: today's record, a tiled section's prepared record, or a placeholder's record unchanged (D2). */
+function sectionRecord(q) {
+  if (q.frozen === 'engine') return q.placeholder;
+  if (q.tiled) return q._tiledRecord ?? q._savedRecord ?? null;   // never saved and not settled (D1): left out until it is
+  return serSection(q);
+}
+
 /** Project file, format v3: project → cores (images, imported data, records, age model, intervals by core id). */
 function serialize() {
   if (projectPreview) return projectPreview;
   const { cores: _c, ...geo } = S.geo;
+  const tiledInside = S.cores.some((c) => c.sections.some((q) => q.tiled || q.frozen === 'engine'));
   return {
-    app: APP, kind: 'project', version: FORMAT_VERSION, appVersion: VERSION, delivery: DELIVERY, saved: new Date().toISOString(),
+    app: APP, kind: 'project', version: tiledInside ? FORMAT_VERSION_TILED : FORMAT_VERSION, appVersion: VERSION, delivery: DELIVERY, saved: new Date().toISOString(),
     id: S.id, name: S.name, notes: S.notes, comments: S.comments || [], classes: S.classes, active: S.active, settings: S.settings, library: S.library,
     projectKind: S.kind || 'normal', multiSource: S.multiSource || null, models: projectModels(), finalTests: S.finalTests || [],
     geo, sheet: S.sheet, fig: S.fig, ...figTabsData(), curCore: S.curCore, plots: S.plots || [], plotCur: S.plotCur || 0,
     cores: S.cores.map((c) => ({
       id: c.id, name: c.name, lat: c.lat, lon: c.lon, waterDepth: c.waterDepth ?? null, units: c.units, source: c.source || null, notes: c.notes || '', holdout: c.holdout || undefined,
       imp: c.imp, user: c.user || {}, edits: c.edits && Object.keys(c.edits).length ? c.edits : undefined, records: c.records, logView: c.logView, age: { text: c.ageModel.text, units: c.ageModel.units, bacon: c.ageModel.bacon || undefined, center: c.ageModel.center || undefined },
-      sections: c.sections.filter((q) => !q.tiled).map((q) => serSection(q)),   // tiled sections are not saved yet (card M8.4.18)
+      sections: c.sections.map(sectionRecord).filter(Boolean),
     })),
   };
 }
 
 /** V0.1: a section is opened without decoding its picture; files from older versions are decoded once (sizes, object statistics). */
 async function loadSection(q) {
+  if (q.tiled) return TILES ? loadTiledSection(q) : placeholderSection(q);   // card M8.4.18a
   const f = q.file, legacy = !f.key;
   const file = legacy ? { name: f.name, type: f.type, blob: f.blob || new Blob([f.bytes ? new Uint8Array(f.bytes) : b64decode(f.b64)], { type: f.type || 'image/jpeg' }) } : { name: f.name, type: f.type, key: f.key, size: f.size };
   let w = q.w, h = q.h, orig = null, orig16 = null;
@@ -3588,8 +3621,88 @@ async function loadSection(q) {
 }
 let loadMigrated = false;
 
-/* V0.36: version 5 = trace overlaps (stacks, V0.20), cell edits (V0.35). A newer file opens read-only. */
-const FORMAT_VERSION = 5;
+const greyRgba = (w, h) => { const out = new Uint8ClampedArray(w * h * 4).fill(128); for (let i = 3; i < out.length; i += 4) out[i] = 255; return out; };
+const validTiledRecord = (r) => r && r.version === 1 && r.store === 2 && /^[0-9a-f]{64}$/.test(r.manifest || '') && /^[0-9a-f]{64}$/.test(r.source?.sha256 || '')
+  && Number.isSafeInteger(r.width) && r.width > 0 && Number.isSafeInteger(r.height) && r.height > 0 && Number.isSafeInteger(r.level) && r.level >= 0;
+const sectionFields = (q) => ({ id: q.id, rot: 0, crop: null, top: q.top, bottom: q.bottom, units: q.units, roi: q.roi, filters: q.filters, preset: q.preset,
+  detect: q.detect, manual: q.manual || [], nextId: q.nextId, marks: q.marks || [] });
+
+/** D2 of card M8.4.18: without the engine a tiled section is a grey placeholder, never edited, and its record is saved back unchanged. */
+function placeholderSection(q) {
+  const w = q.w, h = q.h;
+  const s = newSection({ name: q.name, file: { name: q.file.name, type: q.file.type, tiled: true }, w, h, orig: greyRgba(w, h), ds: q.ds || 1, full: q.full || null });
+  Object.assign(s, sectionFields(q), { nextId: q.nextId });
+  s.placeholder = q; s.frozen = 'engine';
+  return s;
+}
+
+/**
+ * A saved tiled section (card M8.4.18a): its pyramid from the engine's cache or built again from the remembered source (a grey image and no edits when
+ * neither is there), its masks from the stored version, every stored tile read back once for the reduced copy and the row counts, and the statistics
+ * of its objects computed again from the tiles in the background (saved ones are shown meanwhile).
+ */
+async function loadTiledSection(q) {
+  const rec = q.tiled, project = storeProject(S.id);
+  if (!validTiledRecord(rec)) throw new Error(t('load.badMask', { s: q.name || '?', k: 'tiled' }));
+  const key = crypto.randomUUID(), dialog = tileBuildDialog(q.file.name, () => { void TILES.cancel(key); });
+  const stop = TILES.onProgress((k, progress) => { if (k === key) dialog.update(progress); });
+  try {
+    const opened = await TILES.reopen(project, rec.source.sha256, key);
+    if (opened.error) throw new Error(t('tiles.err', { code: opened.error.code, field: opened.error.field || '' }));
+    let tiled, working;
+    if (opened.ok.available) {
+      const info = (await TILES.info(rec.source.sha256)).ok;
+      if (!info || info.width !== rec.width || info.height !== rec.height) throw new Error(t('load.badMask', { s: q.name || '?', k: 'tiled' }));
+      tiled = { pyramid: rec.source.sha256, level: rec.level, levels: info.levels, channels: info.channels, bits: info.bits, source: { name: rec.source.name, size: rec.source.size } };
+      working = await tiledWorkingImage(tiled);
+    } else {
+      tiled = { pyramid: rec.source.sha256, level: rec.level, levels: null, channels: 3, bits: 8, source: { name: rec.source.name, size: rec.source.size }, missing: true };
+      working = { w: q.w, h: q.h, rgba: greyRgba(q.w, q.h), rgba16: null };
+    }
+    const s = newSection({ name: q.name, file: { name: q.file.name, type: q.file.type, tiled: true }, w: working.w, h: working.h, orig: working.rgba,
+      orig16: working.rgba16, ds: q.ds || 1, full: q.full || { w: rec.width, h: rec.height } });
+    Object.assign(s, sectionFields(q));
+    s.tiled = tiled;
+    s.maskTiles = new MaskTiles({ width: rec.width, height: rec.height });
+    s.stacks = Array.isArray(q.stacks) ? q.stacks : [null]; s._six = null;
+    if (tiled.missing) s.frozen = 'source';
+    const ppu = pxPerCm(s) * s.ds;
+    for (const o of q.objects || []) {
+      const st = o.st || null, order = s.nextTraceOrder++;
+      s.objects.set(o.id, { id: o.id, order, cls: o.cls, src: o.src, nt: !!o.nt, pred: null, conf: 0, area: st?.n || 0, bbox: st ? [Math.floor(st.x0 / s.ds), Math.floor(st.y0 / s.ds), Math.floor(st.x1 / s.ds), Math.floor(st.y1 / s.ds)] : null,
+        sbox: st ? [st.x0, st.y0, st.x1, st.y1] : null, stats: st, feat: st ? features(st, ppu) : null, ...(o.th ? { _thumb: o.th } : {}), ...(o.em ? { emb: o.em } : {}) });
+    }
+    // The tiles of the stored version, then every one read back once: the reduced copy for the overview and the row counts (card M8.4.17).
+    const positions = /** @type {[number, number][]} */ ([]);
+    for (let start = 0; start !== null;) {
+      const page = await TILES.maskInfo(project, rec.manifest, start);
+      if (page.error) throw new Error(t('tiles.err', { code: page.error.code, field: page.error.field || '' }));
+      if (page.ok.section !== q.id || page.ok.width !== rec.width || page.ok.height !== rec.height) throw new Error(t('load.badMask', { s: q.name || '?', k: 'tiled' }));
+      for (let k = 0; k < page.ok.positions.length; k += 3) { const [row, col] = page.ok.positions.slice(k, k + 2); positions.push([row, col]); s.maskTiles.stored.add(s.maskTiles.index(row, col)); }
+      start = page.ok.next;
+    }
+    maskSync(s).manifest = rec.manifest;
+    s._savedRecord = q;
+    const { counts } = tiledCounts(s), area = sourceRoi(s);
+    counts.setArea(area);
+    for (let i = 0; i < positions.length; i += 16) {
+      dialog.update({ stage: 'masks', completed: i, total: positions.length });
+      const batch = positions.slice(i, i + 16);
+      await maskLoader(s).want(batch);
+      for (const [row, col] of batch) {
+        const entry = s.maskTiles.get(row, col);
+        reduceTile(s, s.ds, row, col, entry?.labels || null, entry?.exclude || null);
+        counts.commit(s.maskTiles.index(row, col), tileHistogram(entry, row, col, rec.width, rec.height, area.x0, area.x1));
+      }
+    }
+    if (!tiled.missing && positions.length) void tiledStatsRunner(s).queue(positions);   // only the tiles: an object without pixels is kept, as saved
+    return s;
+  } finally { stop(); dialog.close(); }
+}
+
+/* V0.36: version 5 = trace overlaps (stacks, V0.20), cell edits (V0.35). A newer file opens read-only. Card M8.4.18a: version 6 = a project with tiled
+   sections, written only when it has one, so every other project stays version 5 byte for byte. */
+const FORMAT_VERSION = 5, FORMAT_VERSION_TILED = 6;
 let readOnlyProject = false;
 let projectPreview = null;
 
@@ -3599,7 +3712,7 @@ async function loadProject(p) {
   blankStart = false;
   resetState(); loading = true; loadMigrated = false; clearTimeout(saveTimer);
   engineAnalysis?.releaseAll();   // the engine keeps the masks of the sections it analysed; the old project's are no longer needed
-  readOnlyProject = (p?.version || 0) > FORMAT_VERSION;   // V0.36: written by a newer SedCoreTool
+  readOnlyProject = (p?.version || 0) > FORMAT_VERSION_TILED;   // V0.36: written by a newer SedCoreTool
   try {
     p = upgradeProject(p);
     S.id = p.id || uid(); S.name = p.name || APP; S.notes = p.notes || ''; S.comments = p.comments || [];
@@ -3702,7 +3815,12 @@ async function saveToDB() {
     try {
       setSaveState('saving'); dirty = false;
       await storePendingImages();
+      const unsaved = await settleTiledSections();
       await putProject(projectMeta(), serialize());
+      for (const q of S.sections.length ? S.cores.flatMap((c) => c.sections) : []) if (q.tiled && q._tiledRecord) q._savedRecord = q._tiledRecord;
+      void retainStore();
+      if (unsaved) { dirty = true; if (!tiledUnsavedShown) { tiledUnsavedShown = true; toast(t('tiles.unsaved'), 12000); } }
+      else tiledUnsavedShown = false;
       try { await putLite(S.id, liteSnapshot()); } catch { /* lite index is optional */ }
       broadcast({ type: 'saved', id: S.id });
       if (saveCount++ % 10 === 0) checkQuota();   // V0.36
@@ -3717,6 +3835,41 @@ async function saveToDB() {
     }
   })();
   try { await savePromise; } finally { savePromise = null; }
+}
+/*
+ * Card M8.4.18a, D1: before a save, every tiled section's store must hold all of its edits. The record is built in the same moment the sync is found
+ * settled, so masks, objects and stacks are one state. A section that does not settle within the deadline keeps its last saved record and the save
+ * of everything else goes on; the project stays "unsaved" and the next save tries again. Returns how many sections did not settle.
+ */
+let tiledUnsavedShown = false, settleDeadlineMs = 15000;
+async function settleTiledSections(deadlineMs = settleDeadlineMs) {
+  const sections = S.cores.flatMap((c) => c.sections).filter((q) => q.tiled && q.maskTiles && !q.frozen);
+  let unsaved = 0;
+  await Promise.all(sections.map(async (q) => {
+    const sync = maskSync(q), until = performance.now() + deadlineMs;
+    q._tiledRecord = null;
+    if (!sync.settled) void sync.request([]);
+    for (;;) {
+      if (sync.settled) { q._tiledRecord = serTiledSection(q, sync.manifest); return; }
+      if (performance.now() > until) { unsaved++; return; }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }));
+  for (const q of S.cores.flatMap((c) => c.sections)) if (q.frozen === 'source') q._tiledRecord = q._savedRecord;   // nothing can change without pixels
+  return unsaved;
+}
+/** After a save: the store keeps only the versions the saved records name and the current ones (rule 4: the last good save stays until a newer one). */
+async function retainStore() {
+  if (!TILES) return;
+  const sections = S.cores.flatMap((c) => c.sections).filter((q) => q.tiled && q.maskTiles);
+  if (!sections.length) return;
+  const keep = new Set();
+  for (const q of sections) {
+    if (q._savedRecord?.tiled?.manifest) keep.add(q._savedRecord.tiled.manifest);
+    if (q._maskSync?.manifest) keep.add(q._maskSync.manifest);
+  }
+  const result = await TILES.maskRetain(storeProject(S.id), [...keep]).catch((error) => ({ error }));
+  if (result?.error) console.warn('retain', result.error);
 }
 /** V0.36: the daily copies are kept for 30 days; older ones only the first of each month, for 12 months. */
 async function rotateHistory(hist) {
@@ -4188,6 +4341,7 @@ async function projectImageSource(file, ranged = false) {
 /** Folder copies use immutable image names so a failed manifest write cannot change the previous save's images. */
 function projectForExport(d, prefix = '', immutableImages = false) {
   const p = JSON.parse(JSON.stringify(d, (k, v) => (v instanceof Blob ? undefined : v))), images = [];
+  for (const c of p.cores || [p]) if (Array.isArray(c.sections)) c.sections = c.sections.filter((q) => !q.tiled);   // their masks are in the store: cards M8.4.18c-d
   const src = new Map(); for (const c of d.cores || [{ sections: d.sections }]) for (const q of c.sections || []) src.set(q.id, q.file);
   for (const c of p.cores || [{ sections: p.sections }]) for (const q of c.sections || []) {
     const f = src.get(q.id) || q.file;
@@ -5072,6 +5226,8 @@ window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, read
   clearTiles: () => { for (const bitmap of tileCache.clear()) bitmap?.close?.(); requestRender(); },   // repeated viewer probes (card M8.4.24)
   tileState: (k, row, col) => { const s = sec(), scheduler = s?.tiled && tileSchedulers.get(s.tiled.pyramid), key = s?.tiled ? s.tiled.pyramid + '/' + tileKey(k, row, col) : '';   // evidence when a probe fails (card M8.4.24)
     return { cached: tileCache.has(key), inFlight: !!scheduler?.inFlight.has(key), idle: !!scheduler?.idle, failures: scheduler?.failures ?? 0, lastError: s?.tiled?.lastError ?? null }; },
+  saveNow: () => saveToDB(), storeProject: () => storeProject(S.id), settleDeadline: (ms) => { settleDeadlineMs = ms; },   // card M8.4.18a tests
+  stopMaskSync: () => sec()?._maskSync?.stop(), tiledSaved: () => S.cores.flatMap((c) => c.sections).filter((q) => q.tiled).map((q) => q._savedRecord?.tiled?.manifest ?? null),
   tiledCountsIdle: () => S.sections.every((q) => !q._counts || (!q._counts.runner.running && q._counts.counts.ready)),
   tiledCountsStats: () => { const q = sec()?._counts; return q ? { tiles: q.counts.hists.size, bytes: q.counts.bytes } : null; },
   tiledStatsIdle: () => S.sections.every((q) => !q._statsRunner || q._statsRunner.idle),

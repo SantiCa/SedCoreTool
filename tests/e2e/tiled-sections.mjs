@@ -43,7 +43,7 @@ async function program(tiled) {
   page.on('dialog', (dialog) => dialog.accept().catch(() => {}));
   await page.waitForFunction(() => !!window.ichantool, { timeout: 60000 });
   await page.waitForFunction(async () => (await window.corantoolDesktop.engine.status()).state === 'ready', { timeout: 90000 });
-  return { page, errors, pid: child.pid, async close() {
+  return { page, errors, pid: child.pid, profile, async close() {
     try { browser.disconnect(); } catch { /* ignore */ }
     if (child.exitCode === null) child.kill();
     await Promise.race([exited, sleep(15000)]);
@@ -54,6 +54,7 @@ async function program(tiled) {
 async function addImage(page) {
   await page.evaluate(() => document.getElementById('openTest').click());
   await page.waitForFunction(() => window.ichantool.S.sections.length === 6, { timeout: 120000 });
+  assert.equal(await page.evaluate(() => window.ichantool.serialize().version), 5, 'card M8.4.18a: a project without tiled sections stays format version 5');
   await (await page.$('#addImg')).uploadFile(image);
   await page.waitForSelector('#pcOk', { timeout: 30000 });
   await page.click('#pcOk');
@@ -61,6 +62,7 @@ async function addImage(page) {
   await page.waitForFunction(() => document.getElementById('busy').hidden, { timeout: 600000 });
 }
 
+let projectRecord = null;                             // card M8.4.18a: the saved project, opened again without tiled sections (D2)
 const on = await program(true);
 try {
   assert.equal(await on.page.evaluate(() => window.corantoolDesktop.tiles.enabled), true);
@@ -83,11 +85,14 @@ try {
   assert.ok(section.full.w * section.full.h > section.maxMP * 1e6, 'only images above the size limit are tiled');
   assert.ok(section.bins > 0 && !section.bioturbated, 'card M8.4.17: the interval table is counted from the full-resolution masks, which are empty: bins without any bioturbation');
   assert.ok(toasts.some((text) => text.includes(String(section.full.h))), 'the user is told what a tiled section is: ' + JSON.stringify(toasts));
-  const saved = await on.page.evaluate(() => {
+  const saved = await on.page.evaluate(async () => {
+    await window.ichantool.saveNow();                                    // card M8.4.18a: a tiled section is saved like the others
     const project = window.ichantool.serialize();
-    return project.cores.flatMap((core) => core.sections.map((q) => q.name));
+    return { names: project.cores.flatMap((core) => core.sections.map((q) => q.name)), version: project.version, manifests: window.ichantool.tiledSaved() };
   });
-  assert.equal(saved.length, 6, 'the tiled section is not saved; the six others are');
+  assert.equal(saved.names.length, 7, 'the tiled section is saved with the six others');
+  assert.equal(saved.version, 6, 'a project with a tiled section is format version 6');
+  assert.ok(saved.manifests.length === 1 && /^[0-9a-f]{64}$/.test(saved.manifests[0]), 'saved with its stored version: ' + JSON.stringify(saved.manifests));
   // Release the working image and ask for it again: it comes back from the pyramid, never from the source file.
   const reloaded = await on.page.evaluate(async () => {
     const { S } = window.ichantool, s = S.sections.at(-1), before = s.orig.slice(0, 4000);
@@ -650,6 +655,85 @@ try {
   assert.deepEqual(tiledClass.bins, wholeClass.bins, 'interval table after a class change');
   assert.notDeepEqual(tiledClass.bins, tiledTable.bins, 'the class change changed the table');
   console.log('Interval table, whole against tiled:', tiledTable.bins.length, 'bins identical; after a class change identical too');
+
+  // Card M8.4.18a: saving and reopening. The store keeps only the saved versions; the reopened section has the same masks, objects (with their
+  // statistics, computed again from the tiles) and table; without its pyramid it is built again from the source; without both it opens grey and locked.
+  await on.page.evaluate((index) => { window.__tiledId = window.ichantool.S.sections[index].id; }, tiledAt);   // the edited tiled section (both tiled sections are 620 wide)
+  const manifestsOnDisk = async () => {
+    const project = await on.page.evaluate(() => window.ichantool.storeProject());
+    const folder = path.join(on.profile, 'projects', project, 'tiles', 'manifests');
+    return fs.existsSync(folder) ? fs.readdirSync(folder).filter((f) => /^[0-9a-f]{64}\.json$/.test(f)).map((f) => f.slice(0, 64)).sort() : [];
+  };
+  const reopen = () => on.page.evaluate(async () => {
+    const { getProject } = await import(new URL('js/storage.js', location.href).href);
+    await window.ichantool.loadProject(await getProject(window.ichantool.S.id));
+    for (let i = 0; i < 2400 && !(window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle()); i++) await new Promise((r) => setTimeout(r, 50));
+    const s = window.ichantool.S.sections.find((q) => q.id === window.__tiledId);
+    return { frozen: s?.frozen ?? null, missing: !!s?.tiled?.missing, grey: s ? s.orig.subarray(0, 400).every((v, i) => (i % 4 === 3 ? v === 255 : v === 128)) : null };
+  });
+  const sameAsSaved = async (label) => {
+    const index = await on.page.evaluate(() => window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId));
+    const after = await dump(index), afterTable = await table(index);
+    assert.deepEqual(after.runs, beforeSave.runs, label + ': labels'); assert.deepEqual(after.exRuns, beforeSave.exRuns, label + ': exclusion');
+    assert.deepEqual(after.usedStacks, beforeSave.usedStacks, label + ': overlaps'); assert.equal(after.nextId, beforeSave.nextId, label + ': nextId');
+    assert.deepEqual(after.objects.map((o) => [o.id, o.cls, o.area, o.bbox]), beforeSave.objects.map((o) => [o.id, o.cls, o.area, o.bbox]), label + ': objects');
+    for (const [i, o] of beforeSave.objects.entries()) {             // recomputed from the tiles: equal, with the tolerance of the M8.4.16 block for three float sums
+      const got = after.objects[i].stats || {};
+      assert.deepEqual(Object.keys(got).sort(), Object.keys(o.stats || {}).sort(), label + `: statistics of ${o.id}`);
+      for (const key of Object.keys(o.stats || {})) {
+        if (['sL', 'sLL', 'rL'].includes(key)) assert.ok(Math.abs(got[key] - o.stats[key]) <= 1e-12 * Math.max(1, Math.abs(got[key]), Math.abs(o.stats[key])), `${label}: ${o.id} ${key}`);
+        else assert.deepEqual(got[key], o.stats[key], `${label}: ${o.id} stats.${key}`);
+      }
+    }
+    assert.deepEqual(afterTable.bins, beforeTable.bins, label + ': interval table');
+    return index;
+  };
+  const tiledIndex = await on.page.evaluate(() => window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId));
+  await on.page.evaluate(() => window.ichantool.saveNow());
+  const beforeSave = await dump(tiledIndex), beforeTable = await table(tiledIndex);
+  const savedManifests = await on.page.evaluate(() => window.ichantool.tiledSaved());
+  assert.deepEqual(await manifestsOnDisk(), [...new Set(savedManifests)].sort(), 'after a save the store holds only the saved versions');
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  await sameAsSaved('reopened');
+  const pyramid = await on.page.evaluate(() => window.ichantool.S.sections.find((q) => q.id === window.__tiledId).tiled.pyramid);
+  fs.rmSync(path.join(on.profile, 'pyramids', pyramid), { recursive: true, force: true });
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  assert.ok(fs.existsSync(path.join(on.profile, 'pyramids', pyramid, 'pyramid.json')), 'the pyramid was built again from the source');
+  await sameAsSaved('pyramid rebuilt');
+  const moved = lossless + '.moved';
+  fs.renameSync(lossless, moved);
+  fs.rmSync(path.join(on.profile, 'pyramids', pyramid), { recursive: true, force: true });
+  assert.deepEqual(await reopen(), { frozen: 'source', missing: true, grey: true }, 'no pyramid and no source: grey and locked');
+  const lockedIndex = await sameAsSaved('source missing');
+  const nextBefore = await on.page.evaluate((index) => { window.ichantool.S.cur = index; window.ichantool.selectSection(index); const before = window.ichantool.S.sections[index].nextId; window.ichantool.setTool('brush'); return before; }, lockedIndex);
+  const viewBox = await on.page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
+  await on.page.mouse.move(viewBox.left + 300, viewBox.top + 300); await on.page.mouse.down(); await on.page.mouse.move(viewBox.left + 340, viewBox.top + 300); await on.page.mouse.up();
+  assert.equal(await on.page.evaluate((index) => window.ichantool.S.sections[index].nextId, lockedIndex), nextBefore, 'a locked section is not edited');
+  fs.renameSync(moved, lossless);
+  // D1: the engine cannot take the last edits: the rest is saved and the section keeps its saved version.
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  const d1 = await on.page.evaluate(async () => {
+    const { S } = window.ichantool, index = S.sections.findIndex((q) => q.id === window.__tiledId), s = S.sections[index];
+    window.ichantool.selectSection(index);
+    const before = window.ichantool.tiledSaved();
+    window.ichantool.stopMaskSync();                                      // nothing reaches the store any more
+    window.ichantool.putMaskTile(2, 0, new Int32Array(512 * 512).fill(s.nextId - 1), null);
+    window.ichantool.settleDeadline(500);
+    S.name = S.name + ' (renamed)';
+    await window.ichantool.saveNow();
+    window.ichantool.settleDeadline(15000);
+    const { getProject } = await import(new URL('js/storage.js', location.href).href), stored = await getProject(S.id);
+    return { before, after: window.ichantool.tiledSaved(), name: stored.name, record: stored.cores.flatMap((c) => c.sections).filter((q) => q.tiled).map((q) => q.tiled.manifest) };
+  });
+  assert.deepEqual(d1.after, d1.before, 'D1: the section keeps its saved version');
+  assert.ok(d1.name.endsWith('(renamed)'), 'D1: the rest of the project was saved');
+  assert.ok(d1.record.includes(d1.before.find((m) => m)), 'D1: the stored record names the saved version');
+  assert.ok(toasts.some((text) => /almac|store/i.test(text)), 'D1: the user is told the large section was not saved');
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  await sameAsSaved('after D1');
+  // D2: the same project in a program without tiled sections: a placeholder whose record is saved back byte for byte.
+  projectRecord = await on.page.evaluate(async () => { const { getProject } = await import(new URL('js/storage.js', location.href).href); return JSON.parse(JSON.stringify(await getProject(window.ichantool.S.id))); });
+  console.log('Saving and reopening: identical masks, objects and table after a reopen, a rebuilt pyramid and a missing source (grey, locked); D1 keeps the saved version');
   fs.rmSync(lossless, { force: true });
   console.log('Exact equality, whole against tiled at factor 1:', whole.runs.length, 'label runs,', whole.exRuns.length, 'exclusion runs,', whole.objects.length, 'objects,', whole.usedStacks.length, 'overlap sets');
   assert.deepEqual(on.errors, []);
@@ -662,6 +746,18 @@ try {
   await addImage(off.page);
   const section = await off.page.evaluate(() => { const s = window.ichantool.S.sections.at(-1); return { tiled: !!s.tiled, ds: s.ds }; });
   assert.deepEqual(section.tiled, false, 'with the flag off the image takes today\'s path');
+  // D2 of card M8.4.18: the project saved with a tiled section opens here with a placeholder, and saving writes its record back byte for byte.
+  const d2 = await off.page.evaluate(async (record) => {
+    await window.ichantool.loadProject(record);
+    const s = window.ichantool.S.sections.find((q) => q.frozen === 'engine') || window.ichantool.S.cores.flatMap((c) => c.sections).find((q) => q.frozen === 'engine');
+    if (!s) return { placeholder: false };
+    window.ichantool.S.name = record.name + ' (other build)';
+    await window.ichantool.saveNow();
+    const { getProject } = await import(new URL('js/storage.js', location.href).href), stored = await getProject(record.id);
+    const tiledOf = (d) => d.cores.flatMap((c) => c.sections).filter((q) => q.tiled).map((q) => JSON.stringify(q));
+    return { placeholder: true, bins: s.bins.length, same: JSON.stringify(tiledOf(stored)) === JSON.stringify(tiledOf(record)), name: stored.name, version: stored.version };
+  }, projectRecord);
+  assert.deepEqual(d2, { placeholder: true, bins: 0, same: true, name: projectRecord.name + ' (other build)', version: 6 }, 'D2: placeholder, record unchanged, the rest saved');
   assert.deepEqual(off.errors, []);
-  console.log('Flag off: today\'s path (factor', section.ds + ')');
+  console.log('Flag off: today\'s path (factor', section.ds + '); a saved tiled section is a placeholder whose record is saved back unchanged');
 } finally { await off.close(); }

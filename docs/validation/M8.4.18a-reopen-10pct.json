@@ -1,0 +1,19 @@
+{
+  "date": "2026-11-18T16:41:39.012Z",
+  "computer": "Windows_NT 10.0.26300, AMD Ryzen 7 7700X 8-Core Processor, 31 GiB",
+  "fixture": "rgb8g.tif",
+  "fill": 0.1,
+  "addMs": 93080,
+  "painted": {
+    "tiles": 1126,
+    "objects": 13512
+  },
+  "reopen": {
+    "loadedMs": 10757,
+    "tableMs": 10794,
+    "statisticsMs": 133267,
+    "bins": 75,
+    "storedTiles": 1126
+  },
+  "note": "loadedMs: the project open (pyramid from the cache, tiles listed and read back once); tableMs: the interval table; statisticsMs: objects recomputed from tiles and pixels"
+}
