@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import http.client
 import json
 import os
 import platform
@@ -14,6 +15,8 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
@@ -26,6 +29,22 @@ MAX_EXPANDED = 2 * 1024**3
 MAX_MEMBERS = 50_000
 MAX_SOURCE_BYTES = 16 * 1024**2      # a pure-Python package copied from its source archive
 SOURCE_SUFFIXES = ('.py', '.pyi')
+# Card M8.4.26: a download that fails in transfer (timeout, dropped connection, truncated body, server error) is tried again after these
+# pauses, always into a new temporary file; bytes that arrive whole but do not match the lock are never tried again.
+DOWNLOAD_ATTEMPTS = 4
+DOWNLOAD_PAUSES_S = (2, 5, 15)
+DOWNLOAD_TIMEOUT_S = 30
+
+
+class TransferError(Exception):
+    """A download that ended before every locked byte arrived; worth another attempt."""
+
+
+def transfer_failed(error):
+    """True for failures of the transfer, which another attempt may not repeat; never for a verification failure (ValueError)."""
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code >= 500 or error.code in (408, 429)
+    return isinstance(error, (TransferError, OSError, http.client.HTTPException))
 
 
 def native_target():
@@ -50,7 +69,23 @@ def safe_relative(value):
     return path
 
 
-def download_artifact(artifact, cache, *, offline=False):
+def download_once(artifact, temporary, opener):
+    """One attempt: the bytes into `temporary`, then size and SHA-256 checked against the lock."""
+    request = urllib.request.Request(artifact['url'], headers={'User-Agent': 'SedCoreTool-runtime-builder'})
+    with opener(request, timeout=DOWNLOAD_TIMEOUT_S) as response, temporary.open('xb') as output:
+        length = 0
+        while block := response.read(1024**2):
+            length += len(block)
+            if length > artifact['size']:
+                raise ValueError('Download exceeds locked size')
+            output.write(block)
+    if length < artifact['size']:
+        raise TransferError(f'connection ended after {length} of {artifact["size"]} bytes')
+    if sha256_file(temporary) != artifact['sha256']:
+        raise ValueError(f'Download failed verification: {artifact["filename"]}')
+
+
+def download_artifact(artifact, cache, *, offline=False, opener=urllib.request.urlopen, sleep=time.sleep, log=None):
     filename = artifact['filename']
     if len(safe_relative(filename).parts) != 1 or not re.fullmatch('[0-9a-f]{64}', artifact['sha256']):
         raise ValueError('Invalid artifact descriptor')
@@ -67,22 +102,24 @@ def download_artifact(artifact, cache, *, offline=False):
         raise ValueError(f'Cached artifact failed verification: {filename}')
     if offline:
         raise ValueError(f'Artifact not cached: {filename}')
-    temporary = cache / f'.download-{uuid4().hex}'
-    try:
-        request = urllib.request.Request(artifact['url'], headers={'User-Agent': 'SedCoreTool-runtime-builder'})
-        with urllib.request.urlopen(request, timeout=30) as response, temporary.open('xb') as output:
-            length = 0
-            while block := response.read(1024**2):
-                length += len(block)
-                if length > artifact['size']:
-                    raise ValueError('Download exceeds locked size')
-                output.write(block)
-        if temporary.stat().st_size != artifact['size'] or sha256_file(temporary) != artifact['sha256']:
-            raise ValueError(f'Download failed verification: {filename}')
-        os.replace(temporary, target)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return target
+    log = log or (lambda message: print(message, file=sys.stderr, flush=True))
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        temporary = cache / f'.download-{uuid4().hex}'
+        try:
+            download_once(artifact, temporary, opener)
+            os.replace(temporary, target)
+            return target
+        except Exception as error:
+            if not transfer_failed(error):
+                raise
+            if attempt == DOWNLOAD_ATTEMPTS:
+                raise RuntimeError(f'Download of {filename} failed {DOWNLOAD_ATTEMPTS} times; last error: {error!r}') from error
+            pause = DOWNLOAD_PAUSES_S[min(attempt - 1, len(DOWNLOAD_PAUSES_S) - 1)]
+            log(f'Download of {filename} failed ({error!r}); trying again in {pause} s (attempt {attempt + 1} of {DOWNLOAD_ATTEMPTS})')
+            sleep(pause)
+        finally:
+            temporary.unlink(missing_ok=True)
+    raise AssertionError('unreachable')
 
 
 def extract_runtime(archive, destination):

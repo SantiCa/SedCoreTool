@@ -58,6 +58,13 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Prepare Electron smoke-test data
         run: npm run prepare-web -- --with-examples
+      # Card M8.4.26: the pinned downloads are kept between runs, keyed by the lock file, so most runs download nothing; every cached file is
+      # still checked against the lock's size and SHA-256 before use (tools/prepare_engine_runtime.py), and one that fails stops the build.
+      - name: Keep the runtime downloads between runs
+        uses: actions/cache@v6
+        with:
+          path: .venv/runtime-downloads
+          key: runtime-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/runtime-lock.json') }}
       - name: Prepare native scientific runtime
         run: npm run prepare-runtime
       - run: npm i --no-save --package-lock=false puppeteer-core@23

@@ -82,7 +82,7 @@ Updated 16 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.26** (two intermittent GitHub failures: runtime downloads and an engine start on Windows; **model: most capable, effort medium**), the last of the four cards added on 18 November 2026 at the maintainer's request to fix the warnings of M8.4.22 before going on; then M8.4.17 (interval table of tiled sections). Cards M8.4.16 (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux) and M8.4.22 (development gate) are done.
+- **Next step: M8.4.26** (in progress: the download retries and the start evidence are in; waiting for the GitHub runs and for the maintainer's answer on the start-up deadline, see the card; **model: most capable, effort medium**), the last of the four cards added on 18 November 2026 at the maintainer's request to fix the warnings of M8.4.22 before going on; then M8.4.17 (interval table of tiled sections). Cards M8.4.16 (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux) and M8.4.22 (development gate) are done.
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1357,7 +1357,7 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
   build alone takes 31 ms for 2^20 objects (the tool now times only the build). Node: 5 new tests in `tests/app/tiledsync.test.mjs`, the 7 of
   M8.4.16 and M8.4.22 unchanged.
 
-##### M8.4.26 - Two intermittent GitHub failures: runtime downloads and an engine start on Windows — state: Ready (added 18 Nov 2026 at the maintainer's request)
+##### M8.4.26 - Two intermittent GitHub failures: runtime downloads and an engine start on Windows — state: In progress (18 Nov 2026; waiting for the GitHub runs and a decision of the maintainer)
 
 - **Goal:** the two failures seen once each on GitHub stop costing reruns, without weakening any check: (a) *Desktop builds* on macOS,
   commit `d407763`: `npm run dist` failed because `tools/prepare_engine_runtime.py` lost a download of a pinned wheel (`TimeoutError: The read
@@ -1389,6 +1389,27 @@ invalidates a step. Measured inputs used here: M8.4.12/M8.4.21 (one-tile edit p9
 - **Tests:** the Python tests of step 1; `npm test`; one *Desktop builds* run on three systems with the cache cold and one with it warm.
 - **Done when:** step 1 is in place and tested; step 2 has run with its counts recorded; any fix of step 3 has its own test; development gate,
   plus the GitHub runs of the last test line.
+- *As built so far (18 Nov 2026):* (1) `download_artifact` tries a failed transfer again (`DOWNLOAD_ATTEMPTS` = 4, pauses 2, 5, 15 s; a
+  timeout, dropped connection, truncated body or HTTP 5xx/408/429), each into a new temporary file; bytes that arrive whole but differ from
+  the lock stop at once. Python tests with a local HTTP server: a dropped connection or a 503 then a good answer succeeds (one pause of 2 s);
+  wrong bytes stop after one request; four dropped connections stop with "failed 4 times; last error: TransferError…". *Desktop builds*
+  keeps `.venv/runtime-downloads` with `actions/cache@v6` (GitHub's own action; capability: most runs download nothing; alternative
+  considered: retries alone, which still download about 60 MB per system per run; cost for offline and desktop distribution: none, it
+  runs only on GitHub). (2) The engine tests' `clientFixture` now records, when a start fails, the reason (process could not start /
+  exited before its handshake / no handshake within the request deadline / handshake refused), time to failure against the deadline, exit
+  code and the last 20 lines of standard error, and with `SEDCORETOOL_ENGINE_START_LOG` every start; a new test provokes the first two
+  reasons. The workflow `engine-start.yml` runs the test file 20 times on `windows-latest` (on a push that changes it, or by hand).
+  **Measured locally (Windows, Ryzen 7 7700X):** idle, 20 runs of the file, 240 starts, none failed, 111-178 ms (median 137). With every
+  core busy (one Node loop per core), 32 runs, 384 starts: **one failed with "no handshake within the request deadline" after 5046 ms**
+  (deadline 5000, empty standard error), successful starts 248-4677 ms (median 559-720, 95th percentile 1228-1830). The same evidence fits
+  the GitHub incident: a slow Python start on a busy runner against the 5 s deadline of the first request. Also under load, the test "a
+  buffer.read answer that does not match its request…" failed in 9 of 12 runs, because it starts its fixture engines with its own 1.5 s
+  deadline. Neither deadline is changed (AGENTS §3.7): **question for the maintainer** below.
+- **Question for the maintainer (M8.4.26):** the engine start in the tests uses the client's 5 s request deadline for the handshake (1.5 s
+  in the `buffer.read` fixture test); under full CPU load starts took up to 4.7 s and one exceeded 5 s. Options: (a) keep the deadlines and
+  accept a rare rerun; (b) give the handshake its own, longer deadline in `desktop/engine.js` (also in the program, where a slow first start
+  today shows the engine as unavailable and uses the one automatic restart); (c) lengthen only the tests' deadlines. Recommendation: (b),
+  for example 20 s for the handshake only, because the program meets the same slow start on a busy computer.
 
 ##### M8.4.18 - Saving, reopening, backup and export of tiled sections — state: after M8.4.17
 

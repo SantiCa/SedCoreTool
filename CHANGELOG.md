@@ -20,6 +20,10 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.26: building the engine runtime tries a failed download again (up to 4 attempts, pauses of 2, 5 and 15 s; a file that does not
+  match the lock still stops the build at once), and *Desktop builds* keeps the verified downloads between runs. An engine test whose engine
+  does not start now says why (time against the deadline, exit code, last error lines), and a new manual workflow repeats the engine tests
+  on GitHub's Windows runner.
 - Card M8.4.25: the background sending of a large section's masks now sends only the tables that changed (objects with classes, or overlap
   stacks); a stroke that changed no object sends none, and when the tables are needed they are built in slices of about 8 ms, so the window
   does not pause (2^20 objects: 0.01 ms after such a stroke, longest task 8.2 ms after a class change;

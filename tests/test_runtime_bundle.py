@@ -67,6 +67,88 @@ def test_prune_refuses_to_follow_a_link_out_of_the_staging_directory(tmp_path):
     assert (outside / 'precious.txt').read_text() == 'keep'
 
 
+class FakeServer:
+    """A local HTTP server for card M8.4.26: each request takes the next behaviour of `plan` ('good', 'drop', 'wrong', 'error')."""
+
+    def __init__(self, data, plan):
+        import http.server
+        import threading
+        server = self
+        self.data, self.plan, self.requests = data, list(plan), 0
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                server.requests += 1
+                behaviour = server.plan.pop(0) if server.plan else 'good'
+                if behaviour == 'error':
+                    self.send_error(503)
+                    return
+                body = bytes(len(server.data)) if behaviour == 'wrong' else server.data
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body[:len(body) // 2] if behaviour == 'drop' else body)   # 'drop': the connection ends half way
+                self.close_connection = True
+
+        self.httpd = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def opener(self, request, timeout):
+        """Fetches from this server whatever trusted URL the builder asked for."""
+        import urllib.request
+        return urllib.request.urlopen(f'http://127.0.0.1:{self.httpd.server_address[1]}/artifact', timeout=timeout)
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def remote_artifact(data):
+    return {'filename': 'remote.whl', 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest(),
+            'url': 'https://files.pythonhosted.org/packages/test/remote.whl'}
+
+
+@pytest.mark.parametrize('failure', ['drop', 'error'])
+def test_a_failed_transfer_is_tried_again_and_the_good_answer_is_kept(tmp_path, failure):
+    data, pauses, messages = os.urandom(300_000), [], []
+    server = FakeServer(data, [failure, 'good'])
+    try:
+        target = builder.download_artifact(remote_artifact(data), tmp_path, opener=server.opener, sleep=pauses.append, log=messages.append)
+    finally:
+        server.close()
+    assert target.read_bytes() == data
+    assert server.requests == 2 and pauses == [2]
+    assert 'attempt 2 of 4' in messages[0]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['remote.whl'], 'no temporary file is left'
+
+
+def test_bytes_that_do_not_match_the_lock_stop_at_once(tmp_path):
+    data, pauses = os.urandom(5000), []
+    server = FakeServer(data, ['wrong', 'good'])
+    try:
+        with pytest.raises(ValueError, match='failed verification'):
+            builder.download_artifact(remote_artifact(data), tmp_path, opener=server.opener, sleep=pauses.append, log=lambda m: None)
+    finally:
+        server.close()
+    assert server.requests == 1 and pauses == []
+    assert list(tmp_path.iterdir()) == [], 'nothing is kept'
+
+
+def test_four_failed_transfers_stop_with_a_clear_message(tmp_path):
+    data, pauses = os.urandom(5000), []
+    server = FakeServer(data, ['drop'] * 4)
+    try:
+        with pytest.raises(RuntimeError, match=r'Download of remote\.whl failed 4 times; last error: TransferError'):
+            builder.download_artifact(remote_artifact(data), tmp_path, opener=server.opener, sleep=pauses.append, log=lambda m: None)
+    finally:
+        server.close()
+    assert server.requests == 4 and pauses == [2, 5, 15]
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_offline_download_requires_exact_cached_bytes_and_preserves_a_corrupt_cache(tmp_path):
     data = b'public synthetic archive'
     artifact = {'filename': 'public.tar.gz', 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest(),

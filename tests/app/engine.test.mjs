@@ -43,10 +43,35 @@ test('engine controls reject duplicate keys, malformed UTF-8, deep structures an
   assert.deepEqual(parseControl(Buffer.from('{"a":{"x":1},"b":{"x":2},"literal":"{\\\"x\\\":1}"}')).b, { x: 2 });
 });
 
+// Card M8.4.26: a start that fails explains itself (once on GitHub's Windows runner the engine was unavailable at start and the rerun passed).
+// The evidence: time from spawn to failure against the request deadline, whether the process exited first (code, signal) or failed to
+// spawn, and the last lines of its standard error. SEDCORETOOL_ENGINE_START_LOG=<file> also appends every start (JSON lines).
+const startLog = process.env.SEDCORETOOL_ENGINE_START_LOG;
 async function clientFixture(t, options = {}) {
-  const client = new EngineClient({ executable: python, script, version: 'test', runtimeId, ...options });
+  const client = new EngineClient({ executable: python, script, version: 'test', runtimeId, captureDiagnostics: true, ...options });
   t.after(() => client.stop());
-  await client.start();
+  const started = performance.now(), starting = client.start(), child = client.child;
+  let exited = null, spawnError = null;
+  child?.once('exit', (code, signal) => { exited ??= { code, signal, atMs: Math.round(performance.now() - started) }; });
+  child?.once('error', (error) => { spawnError ??= String(error?.message || error); });
+  const record = async (entry) => { if (startLog) await fs.appendFile(startLog, JSON.stringify({ test: t.name, platform: process.platform, ...entry }) + '\n'); };
+  try {
+    await starting;
+  } catch (error) {
+    const failedMs = Math.round(performance.now() - started);
+    const exitedFirst = exited !== null && exited.atMs <= failedMs;
+    await Promise.race([client.exited, new Promise((resolve) => setTimeout(resolve, 2000))]);
+    const evidence = {
+      code: error?.code ?? null, failedMs, deadlineMs: client.options.timeoutMs, spawnError,
+      reason: spawnError ? 'the process could not be started'
+        : exitedFirst ? 'the process exited before its handshake'
+          : failedMs >= client.options.timeoutMs - 50 ? 'no handshake within the request deadline' : 'the handshake was refused or malformed',
+      exit: exitedFirst ? exited : null, stderr: client.stderr.toString('utf8').split(/\r?\n/).filter(Boolean).slice(-20),
+    };
+    await record({ ok: false, ...evidence });
+    throw Object.assign(new Error('engine did not start: ' + JSON.stringify(evidence)), { code: error?.code, cause: error });
+  }
+  await record({ ok: true, startMs: Math.round(performance.now() - started) });
   return client;
 }
 
@@ -60,6 +85,28 @@ async function upload(client, data) {
   await client.request('buffer.commit', { handle });
   return handle;
 }
+
+test('a start that fails says why: the process exited first, or no handshake came within the deadline', { skip: !python }, async (t) => {
+  const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'engine-start-'));
+  t.after(() => fs.rm(folder, { recursive: true, force: true }));
+  const exits = path.join(folder, 'exits.py'), silent = path.join(folder, 'silent.py');
+  await fs.writeFile(exits, "import sys\nsys.stderr.write('engine could not import its runtime\\n')\nsys.exit(3)\n");
+  await fs.writeFile(silent, 'import time\ntime.sleep(30)\n');
+  await assert.rejects(clientFixture(t, { script: exits }), (error) => {
+    const evidence = JSON.parse(error.message.replace('engine did not start: ', ''));
+    assert.equal(error.code, 'ENGINE_UNAVAILABLE');
+    assert.equal(evidence.reason, 'the process exited before its handshake');
+    assert.equal(evidence.exit.code, 3);
+    assert.deepEqual(evidence.stderr, ['engine could not import its runtime']);
+    return true;
+  });
+  await assert.rejects(clientFixture(t, { script: silent, timeoutMs: 400 }), (error) => {
+    const evidence = JSON.parse(error.message.replace('engine did not start: ', ''));
+    assert.equal(evidence.reason, 'no handshake within the request deadline');
+    assert.ok(evidence.failedMs >= 350 && evidence.deadlineMs === 400, JSON.stringify(evidence));
+    return true;
+  });
+});
 
 test('actual isolated Python transfers multiple bounded chunks and runs the diagnostic', { skip: !python }, async (t) => {
   const client = await clientFixture(t);

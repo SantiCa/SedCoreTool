@@ -88,6 +88,12 @@ In the program's developer console, `await window.corantoolDesktop.engine.status
 - Preparation runs `tools/check_engine_runtime.py` inside the new runtime (imports, a small analysis, image round
   trips). If you remove files from the runtime (`prune_runtime` in `tools/prepare_engine_runtime.py`) and that
   check fails, the files were needed.
+- **Downloads** (card M8.4.26): a pinned artifact whose transfer fails (timeout, dropped connection, truncated body,
+  HTTP 5xx, 408 or 429) is tried again up to 4 times in all, after pauses of 2, 5 and 15 s, each time into a new
+  temporary file; bytes that arrive whole but do not match the lock's size or SHA-256 stop the build at once. The
+  verified files stay in `.venv/runtime-downloads`; *Desktop builds* keeps that folder between runs (`actions/cache`,
+  keyed by system, architecture and the hash of `desktop/runtime-lock.json`), and every cached file is verified again
+  before use.
 - `desktop/runtime/`, `desktop/python/`, `desktop/web/`, `desktop/dist/` and `dist/` are generated and ignored by
   Git. Another checkout rebuilds them; never copy binaries between machines as a dependency source.
 
@@ -114,6 +120,7 @@ packaged resources. macOS and Linux packages are built by the *Desktop builds* G
 | `No module named pytest` | The shell picked another Python. Use the full path in §1 |
 | `npm` is blocked by the PowerShell execution policy | Use `npm.cmd` |
 | Engine tests time out when several suites run at once | CPU contention, measured in M8.2.3. Run suites one after another |
+| `ENGINE_UNAVAILABLE` at the start of an engine test | Read the evidence in the message (card M8.4.26): `reason`, `failedMs` against `deadlineMs`, `exit` and the last `stderr` lines. "no handshake within the request deadline" with an idle `stderr` means Python started too slowly (measured under full CPU load: starts up to 4.7 s against a 5 s deadline). `SEDCORETOOL_ENGINE_START_LOG=<file>` records every start; the *engine start repetitions* workflow runs the file 20 times on GitHub's Windows runner |
 | A commit message starts with a strange character, or Git treats the message as file names | Write the message to a file **without BOM** and use `git commit -F <file>`; do not pipe a PowerShell here-string into `git commit -F -` |
 | A measurement leaves `SedCoreTool.exe` or `python.exe` running | Close them before the next run: stale processes change timings and lock folders |
 | Timings jump between runs | Something else is using the disk or CPU. Measure with the computer otherwise idle and say so in the evidence |
