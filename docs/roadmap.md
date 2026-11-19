@@ -84,7 +84,9 @@ Updated 18 November 2026.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
 - **Next step: Q2** (the import panel and the readers: missing-value codes, Excel sheets and raw numbers, decimal separators, dropped rows,
   censored values with decision M; **model: most capable tier, effort medium**), then the order O approved on 19 November 2026 (second
-  council audit, below). **V0.152 can be published now** (decision J: after Q1 and Q4), when the maintainer asks. Q4 is done (CSV with 15
+  council audit, below). **V0.152** (decision J) was prepared on 20 Nov 2026 at the maintainer's request ("Publica la 0.152 y haz un release"):
+  full checks passed on the version commit (Windows: pytest 885 passed / 9 skipped, npm 478, typecheck, sync_version, ruff, standalone build,
+  runtime rebuilt, desktop.mjs off and on, tiled-sections.mjs); integration into `master` and the tag follow the GitHub checks. Q4 is done (CSV with 15
   significant digits; the core-column CSV with interval means, a gap limit, reversals marked; development gate), and the retries of card A2
   were brought forward. Q1 is done (deleting an ichnotaxon reaches every core, asks first, can be restored; orphaned labels repaired on opening;
   development gate). Full checks of Q4 and A2 (20 Nov 2026, Windows): `py -3.12 -m pytest -q` 885 passed / 9 skipped; `npm test` 478
