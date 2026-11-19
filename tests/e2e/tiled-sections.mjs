@@ -393,12 +393,15 @@ try {
     const second = Object.keys(overlapped.objects).map(Number).find((id) => !merged.objects[id]);
     await page.evaluate((id) => window.ichantool.assignClass(id, window.ichantool.S.classes[0].id), second); await idle();
     const sameTaxon = await state();
-    // An operation that reads objects' boxes waits while statistics are being computed.
+    // An operation that reads objects' boxes waits while their statistics are being computed, with the busy indicator, and then runs by itself
+    // (card M8.4.28; before, it refused with "try again in a moment").
     const kept = Object.keys(sameTaxon.objects).map(Number).find((id) => !start.objects[id]);
-    const busy = await page.evaluate((id) => { const s = window.ichantool.S.sections.at(-1); void s._statsRunner.queue([[0, 0]]);
-      window.ichantool.deleteObjects([id]); return { toast: document.getElementById('toast').textContent, expected: window.ichantool.t('tiles.busy'), still: s.objects.has(id) }; }, kept);
-    await idle();
-    await page.evaluate((id) => window.ichantool.deleteObjects([id]), kept); await idle();
+    const busy = await page.evaluate((id) => { const s = window.ichantool.S.sections.at(-1), runner = s._statsRunner; void runner.queue(runner.tilesFor(id));
+      window.ichantool.deleteObjects([id]); const indicator = document.getElementById('busy');
+      return { waiting: !indicator.hidden && indicator.textContent === window.ichantool.t('tiles.waiting'), still: s.objects.has(id) }; }, kept);
+    await page.waitForFunction((id) => !window.ichantool.S.sections.at(-1).objects.has(id), { polling: 50, timeout: 60000 }, kept); await idle();
+    busy.refused = await page.evaluate(() => document.getElementById('toast').textContent === window.ichantool.t('tiles.busy'));
+    busy.indicatorAfter = await page.evaluate(() => !document.getElementById('busy').hidden);
     const deleted = await state();
     await page.click('#undoBtn'); await idle();
     const undone = await state();
@@ -429,7 +432,7 @@ try {
   assert.deepEqual(fresh(ops.sameTaxon, ops.start), [ops.kept]);
   assert.equal(ops.sameTaxon.objects[ops.kept].area, 10000, 'the same ichnotaxon: the two objects become one (their union)');
   assert.equal(ops.sameTaxon.counted[ops.kept], 10000);
-  assert.deepEqual(ops.busy, { toast: ops.busy.expected, expected: ops.busy.expected, still: true }, 'delete waits while statistics are computed');
+  assert.deepEqual(ops.busy, { waiting: true, still: true, refused: false, indicatorAfter: false }, 'delete waits for its object\'s statistics, then runs by itself');
   assert.equal(ops.deleted.objects[ops.kept], undefined); assert.equal(ops.deleted.counted[ops.kept], undefined, 'delete removes the object from the tiles');
   assert.deepEqual(ops.undone.objects[ops.kept], ops.sameTaxon.objects[ops.kept], 'undo brings the object back as it was');
   assert.equal(ops.undone.counted[ops.kept], 10000);
@@ -821,6 +824,54 @@ try {
   for (let i = 0; i < 2400 && !(await on.page.evaluate(() => window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle())); i++) await new Promise((r) => setTimeout(r, 50));
   assert.equal(await on.page.evaluate(() => { const s = window.ichantool.S.sections.find((q) => q.id === window.__tiledId); return s ? s.frozen ?? null : 'absent'; }), null, 'the kept copy opens unlocked');
   await sameAsSaved('kept copy');
+  // Card M8.4.28 (on the kept copy, deleted below): reopened, an object spanning two tiles is deleted at once, without "try again": its tiles are
+  // computed first. Masks, objects and table then equal those of the same deletion made with every statistic current (undone, done again).
+  const toastsBeforeQuick = toasts.length, tBusy = await on.page.evaluate(() => window.ichantool.t('tiles.busy'));
+  const quick = await on.page.evaluate(async () => {
+    const { S } = window.ichantool, { getProject } = await import(new URL('js/storage.js', location.href).href);
+    await window.ichantool.loadProject(await getProject(S.id));
+    const index = S.sections.findIndex((q) => q.id === window.__tiledId), s = S.sections[index];
+    window.ichantool.selectSection(index);
+    const tile = (v) => Math.floor(v / 512), spans = (o) => o.stats && (tile(o.stats.x0) !== tile(o.stats.x1) || tile(o.stats.y0) !== tile(o.stats.y1));
+    const target = [...s.objects.values()].filter(spans).sort((a, b) => a.area - b.area)[0];
+    if (!target) return { target: null };
+    const waitingAtStart = s._statsRunner.pending.size, started = performance.now();
+    window.ichantool.deleteObjects([target.id]);
+    for (let i = 0; i < 2400 && s.objects.has(target.id); i++) await new Promise((r) => setTimeout(r, 25));
+    return { target: target.id, index, waitingAtStart, deleted: !s.objects.has(target.id), ms: Math.round(performance.now() - started), waitingAfter: s._statsRunner.pending.size };
+  });
+  assert.ok(quick.target, 'the saved section has an object spanning two tiles');
+  assert.ok(quick.waitingAtStart > 0 && quick.deleted, 'deleted while the reopening\'s tiles were waiting: ' + JSON.stringify(quick));
+  const sectionIdle = () => on.page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle() && window.ichantool.masksSettled(), { polling: 50, timeout: 240000 });
+  await sectionIdle();
+  const quickDump = await dump(quick.index), quickTable = await table(quick.index);
+  await on.page.click('#undoBtn');
+  await on.page.waitForFunction((id) => window.ichantool.S.sections.find((q) => q.id === window.__tiledId).objects.has(id), { polling: 50, timeout: 60000 }, quick.target);
+  await sectionIdle();
+  const atOnce = await on.page.evaluate((id) => { const s = window.ichantool.S.sections.find((q) => q.id === window.__tiledId); window.ichantool.deleteObjects([id]); return !s.objects.has(id); }, quick.target);
+  assert.ok(atOnce, 'with every statistic current the delete runs at once');
+  await sectionIdle();
+  const slowDump = await dump(quick.index), slowTable = await table(quick.index);
+  assert.deepEqual(quickDump, slowDump, 'masks and objects (with their statistics) equal those of the deletion made with every statistic current');
+  assert.deepEqual(quickTable.bins, slowTable.bins, 'interval table too');
+  assert.ok(!quickDump.objects.some((o) => o.id === quick.target));
+  // The same deletion after the page dropped the clean mask tiles: they are read back in the same wait, without "try again".
+  await on.page.click('#undoBtn');
+  await on.page.waitForFunction((id) => window.ichantool.S.sections.find((q) => q.id === window.__tiledId).objects.has(id), { polling: 50, timeout: 60000 }, quick.target);
+  await sectionIdle();
+  const tLoading = await on.page.evaluate(() => window.ichantool.t('tiles.loadingMasks'));
+  const dropped = await on.page.evaluate((id) => {
+    const s = window.ichantool.S.sections.find((q) => q.id === window.__tiledId), budget = s.maskTiles.budget;
+    s.maskTiles.budget = 0; const n = s.maskTiles.evict().length; s.maskTiles.budget = budget;
+    window.ichantool.deleteObjects([id]);
+    return { n, still: s.objects.has(id) };
+  }, quick.target);
+  assert.ok(dropped.n > 0 && dropped.still, 'mask tiles dropped, the delete waits for them: ' + JSON.stringify(dropped));
+  await on.page.waitForFunction((id) => !window.ichantool.S.sections.find((q) => q.id === window.__tiledId).objects.has(id), { polling: 50, timeout: 60000 }, quick.target);
+  await sectionIdle();
+  assert.deepEqual(await dump(quick.index), slowDump, 'the same result after reading the masks back');
+  assert.ok(!toasts.slice(toastsBeforeQuick).some((text) => text === tBusy || text === tLoading), 'never "try again"');
+  console.log('Reopened, an object spanning two tiles deleted at once (' + quick.ms + ' ms, ' + quick.waitingAtStart + ' tiles waiting at the start, ' + quick.waitingAfter + ' after): equal to the deletion with every statistic current');
   // (3) Deleting a project from the library deletes its folder, and only that one.
   const originalFolder = manifestFile.slice(0, manifestFile.indexOf(path.sep + 'tiles' + path.sep));
   await on.page.evaluate(async (id) => {

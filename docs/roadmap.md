@@ -82,7 +82,7 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.28** (object operations right after reopening a tiled section; **model: most capable tier (Opus), effort medium**). M8.4.27 is done (the store folder is deleted and copied with its project; a missing stored version locks its section; development gate). M8.4.18b is done (a moved image is located by its SHA-256 and can be copied into the project; development gate). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate). Its three findings have cards, in this order after M8.4.18b: M8.4.27 (the store folder follows its project: delete, copy under a new identifier, a missing stored version; Opus, high), M8.4.28 (object operations right after reopening; Opus, medium), M8.4.29 (reopening from a cache instead of every tile; Opus, high; decision G waits for the maintainer); then M8.4.18c, M8.4.18d, M8.4.19. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
+- **Next step: M8.4.31** (the store and the saves keep every committed version; **model: most capable tier, effort high**), then the order of the council audit below. M8.4.28 is done (an object operation right after reopening waits only for its own tiles: 387-397 ms instead of not finishing; development gate). M8.4.27 is done (the store folder is deleted and copied with its project; a missing stored version locks its section; development gate). M8.4.18b is done (a moved image is located by its SHA-256 and can be copied into the project; development gate). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate). Its three findings have cards, in this order after M8.4.18b: M8.4.27 (the store folder follows its project: delete, copy under a new identifier, a missing stored version; Opus, high), M8.4.28 (object operations right after reopening; Opus, medium), M8.4.29 (reopening from a cache instead of every tile; Opus, high; decision G waits for the maintainer); then M8.4.18c, M8.4.18d, M8.4.19. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1772,7 +1772,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   section; macOS and Linux.
   Checks on Windows (18 Nov 2026): `pytest` 881 passed, 9 skipped; `npm test` 462 passed; typecheck, `sync_version --check` and Ruff passed; `tests/e2e/desktop.mjs` with the engine experiment off and on and `tests/e2e/tiled-sections.mjs` passed. GitHub, earlier commits: `b3a80f2` (M8.4.18b) passed `tests` and *Desktop builds* on Windows, macOS and Linux; two runs of 18 Nov were cancelled because no macOS runner was available (nothing ran), and the rerun of `efc1ac4` passed.
 
-##### M8.4.28 - Object operations right after reopening a tiled section — state: after M8.4.27 (written 18 Nov 2026 for finding 1 of M8.4.18a)
+##### M8.4.28 - Object operations right after reopening a tiled section — state: Done (19 Nov 2026, development gate; written 18 Nov 2026 for finding 1 of M8.4.18a)
 
 - **Goal:** after a tiled section is reopened, an object operation (delete, merge, scissors, same-ichnotaxon groups) on an object waits only for
   that object's tiles instead of every tile of the section, and the statistics shown for an object are never a partial sum of its tiles.
@@ -1802,6 +1802,27 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   the reopening to a finished delete of one object spanning 2-4 tiles, at 3 % and 10 %. **Target, stated before measuring:** under 2 s in both cases
   (about 18 pixel tiles read); if missed, record it and ask.
 - **Done when:** the tests pass, the measurement is recorded against the target; development gate.
+- *As built (19 Nov 2026):* `tiledit.js`: `TiledStatsRunner` reports an object only when it is current (`isCurrent`: no tile under its box,
+  `tilesOf` given by the page from `o.sbox`, nor queued for it since its last report, `waitsFor`, is waiting, being computed or failed; an
+  object whose box is unknown is current only when nothing waits), keeps the others in `deferred`, and `prioritise(positions)` moves tiles to
+  the front and resolves after reporting; `tilesUnder`. `app.js`: `objectsReady` (delete, clearing candidates, merge, class change with the
+  merge of V0.30, scissors) and `waitThenRun` (busy indicator "Computing the objects concerned…", Escape cancels, the operation runs again if
+  the same section is open), `prioritiseObjects` after strokes and operations; `tiledPlan` checks only the objects' own tiles. **Found by the
+  measurement and fixed in the card:** with the statistics current, the delete was still refused with "Loading the masks of this area; try
+  again" because the page had dropped mask tiles under the object, and nothing ran it again (first run: not done after 18 min); `objectsReady`
+  now reads those tiles back in the same wait. Measured (`tools/measure_tiled_reopen.mjs`, field `deleteAtOnce`, an object over four tiles
+  deleted as soon as the project is open, `rgb8g`, Windows): **387 ms at 3 % (367 tiles waiting) and 397 ms at 10 % (1,129 waiting), target
+  under 2 s: met** ([3 %](validation/M8.4.28-reopen-3pct.json), [10 %](validation/M8.4.28-reopen-10pct.json)); the tool now saves the project
+  after the first reopening, because its painting hook (`putMaskTile`) does not compute statistics and objects saved without a box wait for
+  every tile. Tests: Node 6 (`tilesUnder`; an object over 4 tiles current right after them wherever they are queued; property test over 8
+  random queues and objects of 1-9 tiles: every published total equals the total over all tiles, exactly; prioritised tiles first; an
+  unknown box waits for everything; an edit beyond the box waits for its tiles); the same tests fail when every object counts as current.
+  Desktop (`tiled-sections.mjs`): a delete waits for its object's tiles and then runs by itself (it used to refuse); reopened, an object over
+  two tiles deleted at once while 7 tiles wait, masks, objects and table equal to the same deletion with every statistic current; the same
+  after the page dropped the clean mask tiles; never "try again". `app.js`: 5,301 lines before, 5,347 after (+46: wiring and the two wait
+  functions; they move out with M8.4.30). Full checks (Windows): `py -3.12 -m pytest -q` 881 passed / 9 skipped; `npm test` 467 passed;
+  typecheck (no new diagnostics); `sync_version.py --check`; `ruff check`; `desktop.mjs` with the engine off and on; `tiled-sections.mjs`. Incident: one run of `tiled-sections.mjs` failed at its first save (the tiled section left out by
+  the settle deadline, D1) while four review agents were reading the repository; the rerun passed; not reproduced. Not done: macOS, Linux.
 
 ##### M8.4.31 - The store and the saves keep every committed version — state: after M8.4.28 (council audit of 19 Nov 2026)
 

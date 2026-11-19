@@ -8,6 +8,8 @@
 // Object statistics stay exact at any size: they are kept per tile (`tileStats`: the contribution of the pixels of one tile, computed with the
 // 3-pixel neighbourhood that `objectStats` reads) and summed per object (`TiledObjectStats`); an edit recomputes only the tiles within 3 pixels
 // of what it changed (`affectedTiles`), from the level-0 pixels (`TiledStatsRunner`).
+// Card M8.4.28: an object's total is published only when it is *current*, when no tile its pixels may lie on is waiting or failed, so that
+// it is never the sum of part of its tiles; an operation that needs some objects moves their tiles to the front (`prioritise`).
 
 import { TILE } from './tiledsection.js';
 import { objectStats } from './imageproc.js';
@@ -186,6 +188,20 @@ export function affectedTiles(grid, rect) {
 }
 
 /**
+ * The tiles a source rectangle (half-open) lies on, without a margin, clamped to the grid.
+ * @param {{rows: number, cols: number}} grid @param {{x0: number, y0: number, x1: number, y1: number}} rect
+ * @returns {[number, number][]}
+ */
+export function tilesUnder(grid, rect) {
+  const out = /** @type {[number, number][]} */ ([]);
+  if (!(rect.x1 > rect.x0 && rect.y1 > rect.y0)) return out;
+  const row0 = Math.max(0, Math.floor(rect.y0 / TILE)), row1 = Math.min(grid.rows - 1, Math.floor((rect.y1 - 1) / TILE));
+  const col0 = Math.max(0, Math.floor(rect.x0 / TILE)), col1 = Math.min(grid.cols - 1, Math.floor((rect.x1 - 1) / TILE));
+  for (let row = row0; row <= row1; row++) for (let col = col0; col <= col1; col++) out.push([row, col]);
+  return out;
+}
+
+/**
  * Statistics accumulated in other coordinates, moved by (ox, oy): the sums of x, y and their products are those of x + ox and y + oy.
  * @param {TraceStats} a @param {number} ox @param {number} oy @returns {TraceStats}
  */
@@ -270,19 +286,23 @@ export class TiledObjectStats {
 /**
  * Recomputes the statistics of queued tiles one after another, between frames: it reads the level-0 pixels it needs (the tile and its
  * neighbours) through `fetchRgba`, keeps them in a small cache, reads the labels as they are when the tile's turn comes (so a later edit is
- * never undone by an older computation), and reports the objects whose totals changed.
+ * never undone by an older computation), and reports the objects whose totals changed once they are current (card M8.4.28): none of the
+ * tiles under the object's box (`tilesOf`) nor of the tiles queued for it since its last report is waiting, being computed or failed. An
+ * object that is not current keeps the values it had and is reported when it becomes current.
  */
 export class TiledStatsRunner {
   /**
    * @param {{tiles: MaskTiles, stats: TiledObjectStats, stacks: () => number[][],
    *   fetchRgba: (positions: [number, number][]) => Promise<(Uint8ClampedArray | Uint8Array)[]>,
    *   onUpdate: (ids: Set<number>) => void, onError?: (error: any) => void, cacheTiles?: number,
-   *   loadMasks?: (positions: [number, number][]) => Promise<void>}} options `loadMasks` brings back mask tiles the page dropped
-   *   (`MaskLoader.want`); a tile is never computed while it or a neighbour is not in the page.
+   *   loadMasks?: (positions: [number, number][]) => Promise<void>, tilesOf?: (id: number) => [number, number][] | null}} options
+   *   `loadMasks` brings back mask tiles the page dropped (`MaskLoader.want`); a tile is never computed while it or a neighbour is not in the
+   *   page. `tilesOf` gives the tiles an object's pixels may lie on as far as the page knows (its box), or null when it does not know: such
+   *   an object is current only when nothing is waiting.
    */
-  constructor({ tiles, stats, stacks, fetchRgba, onUpdate, onError = () => {}, cacheTiles = 48, loadMasks = async () => {} }) {
+  constructor({ tiles, stats, stacks, fetchRgba, onUpdate, onError = () => {}, cacheTiles = 48, loadMasks = async () => {}, tilesOf = () => [] }) {
     this.tiles = tiles; this.stats = stats; this.stacks = stacks; this.fetchRgba = fetchRgba; this.onUpdate = onUpdate; this.onError = onError;
-    this.loadMasks = loadMasks;
+    this.loadMasks = loadMasks; this.tilesOf = tilesOf;
     this.cacheTiles = cacheTiles;
     /** @type {Map<number, Uint8ClampedArray | Uint8Array>} */
     this.rgba = new Map();
@@ -294,16 +314,68 @@ export class TiledStatsRunner {
     this.ids = new Set();
     /** @type {Promise<void> | null} */
     this.running = null;
+    /** The tile being computed, or -1. */
+    this.computing = -1;
+    /** Tiles queued for an object since its last report (its new pixels may lie beyond its box). @type {Map<number, Set<number>>} */
+    this.waitsFor = new Map();
+    /** Objects whose totals changed but that are not current yet. @type {Set<number>} */
+    this.deferred = new Set();
+    /** @type {{positions: [number, number][], resolve: () => void}[]} */
+    this.waiters = [];
   }
   /** @param {[number, number][]} positions @param {Iterable<number>} [ids] */
   queue(positions, ids = []) {
-    for (const [row, col] of positions) this.pending.add(this.tiles.index(row, col));
+    const indices = positions.map(([row, col]) => this.tiles.index(row, col));
+    for (const tile of indices) this.pending.add(tile);
     if (positions.length) { for (const tile of this.failed) this.pending.add(tile); this.failed.clear(); }
-    for (const id of ids) this.ids.add(id);
+    for (const id of ids) {
+      this.ids.add(id);
+      let set = this.waitsFor.get(id);
+      if (!set) this.waitsFor.set(id, set = new Set());
+      for (const tile of indices) set.add(tile);
+    }
     if (!this.running) this.running = this.run().finally(() => { this.running = null; if (this.pending.size || this.ids.size) this.queue([]); });
     return this.running;
   }
   get idle() { return !this.running && !this.pending.size; }
+  /** Whether any of these tiles is waiting or being computed. @param {[number, number][]} positions */
+  pendingIn(positions) { return positions.some(([row, col]) => { const tile = this.tiles.index(row, col); return this.pending.has(tile) || this.computing === tile; }); }
+  /** Whether the computation of any of these tiles failed. @param {[number, number][]} positions */
+  failedIn(positions) { return positions.some(([row, col]) => this.failed.has(this.tiles.index(row, col))); }
+  /** The tiles an object waits for: under its box and queued for it since its last report; null when its box is not known. @param {number} id */
+  tilesFor(id) {
+    const box = this.tilesOf(id), queued = this.waitsFor.get(id);
+    if (!box && !queued) return null;
+    const cols = this.tiles.cols, out = [...(box || [])];
+    for (const tile of queued || []) out.push(/** @type {[number, number]} */ ([Math.floor(tile / cols), tile % cols]));
+    return out;
+  }
+  /** Whether an object's total is the sum over every tile its pixels lie on. @param {number} id */
+  isCurrent(id) {
+    const positions = this.tilesFor(id);
+    if (!positions) return !this.pending.size && this.computing < 0 && !this.failed.size;
+    return !this.pendingIn(positions) && !this.failedIn(positions);
+  }
+  /**
+   * Move these tiles to the front of the queue; resolves when none of them is waiting or being computed any more (computed or failed), after
+   * the objects that became current were reported.
+   * @param {[number, number][]} positions @returns {Promise<void>}
+   */
+  prioritise(positions) {
+    const front = positions.map(([row, col]) => this.tiles.index(row, col)).filter((tile) => this.pending.has(tile));
+    if (front.length) this.pending = new Set([...front, ...this.pending]);
+    if (!this.pendingIn(positions)) { this.publish(); return Promise.resolve(); }
+    if (!this.running) void this.queue([]);
+    return new Promise((resolve) => this.waiters.push({ positions, resolve }));
+  }
+  /** Report the objects that are current among those changed; keep the others for later. */
+  publish() {
+    const ready = new Set();
+    for (const id of [...this.ids, ...this.deferred]) if (this.isCurrent(id)) ready.add(id); else this.deferred.add(id);
+    this.ids = new Set();
+    for (const id of ready) { this.deferred.delete(id); this.waitsFor.delete(id); }
+    if (ready.size) this.onUpdate(ready);
+  }
   /** Compute again the tiles whose computation failed (for example once the engine is back). */
   retry() { return this.failed.size ? this.queue([...this.failed].map((i) => [Math.floor(i / this.tiles.cols), i % this.tiles.cols])) : Promise.resolve(); }
   async run() {
@@ -311,6 +383,7 @@ export class TiledStatsRunner {
     while (this.pending.size) {
       const tile = /** @type {number} */ (this.pending.values().next().value);
       this.pending.delete(tile);
+      this.computing = tile;
       const row = Math.floor(tile / cols), col = tile % cols;
       try {
         const around = /** @type {[number, number][]} */ ([]);
@@ -322,10 +395,13 @@ export class TiledStatsRunner {
           labelsAt: (r, c) => this.tiles.get(r, c)?.labels || null, rgbaAt: (r, c) => this.rgba.get(r * cols + c) || null }, row, col));
         for (const id of changed) this.ids.add(id);
       } catch (error) { this.failed.add(tile); this.onError(error); }
-      if (!this.pending.size || this.ids.size > 256) { const ids = this.ids; this.ids = new Set(); if (ids.size) this.onUpdate(ids); }
+      this.computing = -1;
+      const done = this.waiters.filter((w) => !this.pendingIn(w.positions));
+      if (!this.pending.size || this.ids.size > 256 || done.length) this.publish();
+      if (done.length) { this.waiters = this.waiters.filter((w) => !done.includes(w)); for (const w of done) w.resolve(); }
       await new Promise((resolve) => setTimeout(resolve, 0));         // let the page draw and take input between tiles
     }
-    if (this.ids.size) { const ids = this.ids; this.ids = new Set(); this.onUpdate(ids); }
+    this.publish();
   }
   /** The level-0 pixels of a tile and of its neighbours that hold image. @param {number} row @param {number} col */
   async loadPixels(row, col) {

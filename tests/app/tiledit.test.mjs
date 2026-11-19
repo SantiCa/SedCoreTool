@@ -1,7 +1,7 @@
 // Card M8.4.16 step 3: the edit window of tiled sections and object statistics kept per tile.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EditWindow, windowRange, affectedTiles, tileStats, TiledObjectStats, TiledStatsRunner, shiftStats, WINDOW_TILES } from '../../app/js/tiledit.js';
+import { EditWindow, windowRange, affectedTiles, tileStats, TiledObjectStats, TiledStatsRunner, shiftStats, tilesUnder, WINDOW_TILES } from '../../app/js/tiledit.js';
 import { MaskTiles } from '../../app/js/tiledmasks.js';
 import { objectStats } from '../../app/js/imageproc.js';
 import { TILE } from '../../app/js/tiledsection.js';
@@ -135,4 +135,106 @@ test('TiledStatsRunner: recomputes queued tiles from the labels as they are when
   await pending;
   assert.equal(stats.total(4).n, 120);
   assert.ok(runner.idle);
+});
+
+// Card M8.4.28: an object's total is published only once every tile its pixels lie on is computed; an operation moves its objects' tiles first.
+/** A section of rows x cols tiles with rectangles of objects (later ones drawn over earlier ones), and a runner whose `tilesOf` is each
+ *  rectangle's tiles, as the page gives each object's saved box. */
+function rectSection(rows, cols, rects, { order = null, log = null } = {}) {
+  const width = cols * TILE, height = rows * TILE, whole = new Int32Array(width * height);
+  for (const r of rects) for (let y = r.y0; y < r.y1; y++) whole.fill(r.id, y * width + r.x0, y * width + r.x1);
+  const tiles = loadTiles(width, height, { labels: whole, exclude: new Uint8Array(width * height) }), stats = new TiledObjectStats(), published = [];
+  if (order) { const replace = stats.replaceTile.bind(stats); stats.replaceTile = (tile, m) => { order.push(tile); return replace(tile, m); }; }
+  const boxes = new Map(rects.map((r) => [r.id, r]));
+  const runner = new TiledStatsRunner({ tiles, stats, stacks: () => [[]], fetchRgba: async (positions) => positions.map(() => new Uint8ClampedArray(N * 4).fill(80)),
+    onUpdate: (ids) => { for (const id of ids) published.push({ id, total: stats.total(id) }); log?.(ids); },
+    tilesOf: (id) => (boxes.has(id) ? tilesUnder(tiles, boxes.get(id)) : null) });
+  const all = /** @type {[number, number][]} */ ([]);
+  for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) all.push([row, col]);
+  return { tiles, stats, runner, published, all, whole, width, height };
+}
+/** Totals over every tile, computed directly. */
+function fullTotals(section) {
+  const full = new TiledObjectStats(), rgba = new Uint8ClampedArray(N * 4).fill(80);
+  const source = { width: section.width, height: section.height, stacks: [[]], labelsAt: (r, c) => section.tiles.get(r, c)?.labels || null, rgbaAt: () => rgba };
+  for (const [row, col] of section.all) full.replaceTile(row * section.tiles.cols + col, tileStats(source, row, col));
+  return full;
+}
+
+test('tilesUnder: the tiles a half-open rectangle lies on, without a margin', () => {
+  const grid = { rows: 3, cols: 4 };
+  assert.deepEqual(tilesUnder(grid, { x0: 0, y0: 0, x1: TILE, y1: TILE }), [[0, 0]]);
+  assert.deepEqual(tilesUnder(grid, { x0: TILE - 1, y0: TILE, x1: TILE + 1, y1: TILE + 1 }), [[1, 0], [1, 1]]);
+  assert.deepEqual(tilesUnder(grid, { x0: 5, y0: 5, x1: 5, y1: 9 }), [], 'an empty rectangle lies on no tile');
+  assert.equal(tilesUnder(grid, { x0: -10, y0: -10, x1: 99 * TILE, y1: 99 * TILE }).length, 12, 'clamped to the grid');
+});
+
+test('TiledStatsRunner: an object spanning 4 tiles is current right after its 4 tiles, wherever they are in the queue', async () => {
+  const object = { id: 7, x0: TILE - 40, y0: TILE - 30, x1: TILE + 50, y1: TILE + 60 };
+  const others = [{ id: 3, x0: 10, y0: 10, x1: 200, y1: 90 }, { id: 4, x0: 3 * TILE + 5, y0: 3 * TILE + 5, x1: 4 * TILE - 5, y1: 4 * TILE - 9 }];
+  const section = rectSection(4, 4, [object, ...others]), { runner, published, all } = section;
+  const mine = tilesUnder(section.tiles, object);
+  assert.equal(mine.length, 4);
+  const queued = [...all.filter(([r, c]) => !mine.some(([a, b]) => a === r && b === c)), ...mine];   // its tiles last
+  const finished = runner.queue(queued);
+  assert.ok(!runner.isCurrent(7));
+  await runner.prioritise(mine);
+  assert.ok(runner.isCurrent(7), 'current once its tiles are done');
+  assert.ok(runner.pendingIn(all), 'while other tiles still wait');
+  const reported = published.filter((p) => p.id === 7);
+  assert.equal(reported.length, 1, 'reported once, when it became current');
+  assert.deepEqual(reported[0].total, fullTotals(section).total(7));
+  await finished;
+  assert.ok(runner.idle && runner.isCurrent(4) && runner.isCurrent(3));
+});
+
+test('TiledStatsRunner: a published total always equals the total over all of the object\'s tiles (random queues, objects of 1-9 tiles)', async () => {
+  // Exact equality: `total` sums the same per-tile contributions in tile order, whatever order they were computed in.
+  for (let seed = 1; seed <= 8; seed++) {
+    const rnd = random(seed), rects = [];
+    for (let id = 1; id <= 6; id++) {
+      const spanX = 1 + Math.floor(rnd() * 3), spanY = 1 + Math.floor(rnd() * 3);
+      const x0 = Math.floor(rnd() * (3 - spanX + 1)) * TILE + Math.floor(rnd() * 100), y0 = Math.floor(rnd() * (3 - spanY + 1)) * TILE + Math.floor(rnd() * 100);
+      rects.push({ id, x0, y0, x1: Math.min(3 * TILE, x0 + (spanX - 1) * TILE + 50 + Math.floor(rnd() * 300)), y1: Math.min(3 * TILE, y0 + (spanY - 1) * TILE + 50 + Math.floor(rnd() * 300)) });
+    }
+    const section = rectSection(3, 3, rects), { runner, published, all } = section;
+    const shuffled = [...all].sort(() => rnd() - 0.5);
+    const finished = runner.queue(shuffled);
+    const asked = runner.prioritise(tilesUnder(section.tiles, rects[Math.floor(rnd() * rects.length)]));
+    await Promise.all([finished, asked]);
+    await runner.running;
+    const full = fullTotals(section);
+    for (const p of published) assert.deepEqual(p.total, full.total(p.id), `seed ${seed}, object ${p.id}`);
+    for (const id of full.tilesOf.keys()) assert.ok(published.some((p) => p.id === id), `seed ${seed}: object ${id} reported`);
+  }
+});
+
+test('TiledStatsRunner: prioritised tiles are computed before the rest; an object without a known box waits for everything', async () => {
+  const order = [], section = rectSection(4, 4, [{ id: 2, x0: 3 * TILE + 10, y0: 3 * TILE + 10, x1: 3 * TILE + 90, y1: 3 * TILE + 90 }], { order });
+  const { runner, all, tiles } = section;
+  const finished = runner.queue(all);
+  const late = [[3, 2], [3, 3]], ids = late.map(([r, c]) => tiles.index(r, c));
+  await runner.prioritise(/** @type {[number, number][]} */ (late));
+  const position = ids.map((i) => order.indexOf(i));
+  assert.ok(position.every((k) => k >= 0 && k <= 2), 'computed first (after at most the tile already under way): ' + position);
+  assert.ok(runner.pendingIn(all) && order.length < all.length, 'and before the rest');
+  runner.tilesOf = () => null;
+  assert.ok(!runner.isCurrent(2), 'a box not known: current only when nothing waits');
+  await finished;
+  assert.ok(runner.isCurrent(2));
+});
+
+test('TiledStatsRunner: an edit queued for an object makes it wait for those tiles too, beyond its box', async () => {
+  const section = rectSection(2, 4, [{ id: 5, x0: 10, y0: 10, x1: 100, y1: 100 }]), { runner, tiles } = section;
+  await runner.queue(section.all);
+  assert.ok(runner.isCurrent(5));
+  // The object grows into tile (1, 3), far from its saved box; the edit queues that tile for it.
+  const grown = new Int32Array(N); for (let y = 0; y < 20; y++) grown.fill(5, y * TILE, y * TILE + 20);
+  tiles.set(1, 3, grown, null);
+  const before = section.published.length, edited = runner.queue([[1, 3]], [5]);
+  assert.ok(!runner.isCurrent(5), 'waiting for the tile of the edit');
+  await edited;
+  const last = section.published.slice(before).filter((p) => p.id === 5).at(-1);
+  assert.equal(last.total.n, 90 * 90 + 400, 'the new total includes the new pixels');
+  assert.ok(runner.isCurrent(5));
 });

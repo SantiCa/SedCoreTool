@@ -162,7 +162,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `tiledsection.js` | Tiled sections (card M8.4.15): image sizes read from TIFF, JPEG and PNG headers (`imageDimensions`), the pyramid level that serves as a tiled section's working image (`proxyLevel`) and a level assembled from its tiles into RGBA (`assembleLevel`) and one tile as 8-bit RGBA for display (`tileRgba`) | Yes |
 | `tilecache.js` | Which tiles of a tiled section the viewer needs (card M8.4.15): the level for a zoom (`levelForZoom`: the coarsest with at least one level pixel per screen pixel), the visible tiles plus one ring, nearest the centre first, a coarser cached tile to draw while one is missing (`coarserCover`), a 256 MiB least-recently-used cache that keeps the tiles on screen (`TileCache`) and batched requests, 16 tiles each, two at a time, dropping tiles no longer wanted (`TileScheduler`, keys prefixed per pyramid); where a tile goes on screen (`tilePlacement`) | Yes |
 | `tiledmasks.js` | Masks of tiled sections in the page (card M8.4.16): the cache of level-0 mask tiles (`MaskTiles`: all-zero layers kept as nothing, tiles changed and not acknowledged by the engine never dropped, pinned tiles kept, clean tiles dropped least recently used first beyond 128 MiB), the reduced copy in the working image (`reduceTile`), and the mask layer painted over pixel tiles (`overlayLayout`, `axisMap`, `paintOverlay`) | Yes |
-| `tiledit.js` | Editing the masks of tiled sections (card M8.4.16): the edit window (`EditWindow`: whole level-0 mask tiles as flat arrays, written back tile by tile; `windowRange`, `WINDOW_TILES`) and object statistics kept per tile and summed per object (`tileStats`, `TiledObjectStats`, `affectedTiles`, `TiledStatsRunner`) | Yes |
+| `tiledit.js` | Editing the masks of tiled sections (card M8.4.16): the edit window (`EditWindow`: whole level-0 mask tiles as flat arrays, written back tile by tile; `windowRange`, `WINDOW_TILES`) and object statistics kept per tile and summed per object (`tileStats`, `TiledObjectStats`, `affectedTiles`, `tilesUnder`, `TiledStatsRunner`: published per object only when current, tiles prioritised for an operation, card M8.4.28) | Yes |
 | `tiledundo.js` | Undo and redo of tiled edits (card M8.4.16 step 5): copies of the mask tiles an edit changed, taken before its first write and swapped with the page's tiles (`TileChanges`); the 64 MiB budget of those copies (`trimTileHistory`) | Yes |
 | `tiledcounts.js` | Row counts of tiled sections (card M8.4.17): the histogram of each tile (`tileHistogram`), their sum under the current classes (`TiledRowCounts`) and the queue that counts changed tiles between frames (`TiledCountsRunner`); no DOM |
 | `tiledsource.js` | The original image of a tiled section in the section form (card M8.4.18b): where it is, "Locate the image…" and "Copy the image into the project", through `window.corantoolDesktop.tiles` (`createTiledSourcePanel`); `sizeText` | — |
@@ -3105,7 +3105,10 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   3 pixels of what it changed are recomputed one by one between frames from the level-0 pixels of the tile and its neighbours (read through the
   engine, 48 tiles cached) and the labels as they are at that moment (`TiledStatsRunner`). An object keeps `area` and `stats` in source pixels,
   `sbox` (source bounding box) and `bbox` in working pixels (`floor(source / ds)`); `feat` uses `pxPerCm(s) · ds` source pixels per centimetre.
-  An object left with no pixel is removed.
+  An object left with no pixel is removed. These values change only when the object is *current* (card M8.4.28): none of the tiles under its
+  `sbox` (`tilesUnder`, no margin) nor of the tiles queued for it since its last update is waiting, being computed or failed; an object whose
+  box is not known (no statistics saved) is current only when no tile waits. Until then it keeps its last current values (after a reopening,
+  the saved ones), so its total is never the sum of part of its tiles, and a save writes those values.
 - **Masks reach the engine's store in the background** (`tiledsync.js`, `desktop/tile-ipc.js`; card M8.4.16 step 4; contract §8.7): 300 ms after
   a change (a stroke, an exclusion rectangle, new statistics, a class), a round sends the dirty tiles and the objects, classes and stack tables as
   a new version on the last acknowledged one; the tiles become clean only after the commit, and only if they did not change meanwhile. If the
@@ -3194,7 +3197,12 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   object's source box (`sbox`), so the objects of one operation may lie anywhere in the section. A window has at most 96 tiles: a lasso or wand
   beyond it asks to zoom in, an object whose box is larger refuses ("This object is too large to edit at once…"). Every window of an operation
   is planned and its tiles pinned before anything is written; tiles the page dropped are read back first ("try again in a moment"); an
-  operation that reads objects' boxes waits until their statistics are current ("The objects of this large section are being computed…").
+  operation that reads objects' boxes needs its objects current (card M8.4.28): if they are not, their tiles move to the front of the queue
+  (`TiledStatsRunner.prioritise`), the busy indicator says "Computing the objects concerned in this large section first… (Esc cancels)", and the
+  operation runs once they are done (the mask tiles under their boxes that the page dropped are read back in the same wait), if the same
+  section is still open and Escape was not pressed; a tile of theirs whose computation failed
+  refuses it ("The objects of this large section are being computed; try again in a moment."). A stroke, the wand, the lasso, the scissors and
+  the object operations also move the tiles of the objects they touched to the front.
   Each operation is one undo step (tile copies, below). On a window these functions give exactly what they give on the whole image, shifted by
   the window's origin (`tests/app/tiledops.test.mjs`).
 - **Undo and redo of tiled edits** (`tiledundo.js`, `commitTiledOp` and `swapTiledStep` in `app.js`; card M8.4.16 step 5): a stroke or an

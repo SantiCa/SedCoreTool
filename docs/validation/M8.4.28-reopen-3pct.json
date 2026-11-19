@@ -1,0 +1,28 @@
+{
+  "date": "2026-11-18T23:47:09.262Z",
+  "computer": "Windows_NT 10.0.26300, AMD Ryzen 7 7700X 8-Core Processor, 31 GiB",
+  "fixture": "rgb8g.tif",
+  "fill": 0.03,
+  "addMs": 93552,
+  "painted": {
+    "tiles": 368,
+    "objects": 4369
+  },
+  "reopen": {
+    "loadedMs": 3319,
+    "tableMs": 3355,
+    "statisticsMs": 32123,
+    "bins": 75,
+    "storedTiles": 368
+  },
+  "deleteAtOnce": {
+    "openedMs": 2552,
+    "deleteMs": 387,
+    "deleted": true,
+    "tilesWaitingAtDelete": 367,
+    "tilesWaitingAfter": 366,
+    "refused": false,
+    "diagnosis": null
+  },
+  "note": "loadedMs: the project open (pyramid from the cache, tiles listed and read back once); tableMs: the interval table; statisticsMs: objects recomputed from tiles and pixels; deleteAtOnce: a second reopening, then the object over four tiles deleted at once (deleteMs: from the delete to the object gone, target under 2 s; refused: \"try again\" shown)"
+}

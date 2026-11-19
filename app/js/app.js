@@ -29,7 +29,7 @@ import { figTabsData, loadFigTabs, renderFigPanel, renderFigure, resetFigTabs, s
 import { assembleLevel, imageDimensions, levelPositions, proxyLevel, tileRgba, TILE } from './tiledsection.js';
 import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlacement, tileRange, tilesByDistance } from './tilecache.js';
 import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks.js';
-import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, windowRange, planWindows, pinRanges, toWindowRect, windowRgba } from './tiledit.js';
+import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, tilesUnder, windowRange, planWindows, pinRanges, toWindowRect, windowRgba } from './tiledit.js';
 import { MaskLoader, MaskSync, buildMaskTables, classesText } from './tiledsync.js';
 import { TiledRowCounts, TiledCountsRunner, tileHistogram } from './tiledcounts.js';
 import { TileChanges, trimTileHistory } from './tiledundo.js';
@@ -548,6 +548,7 @@ function finishTiledStroke(op) {
   if (op.mode === 'brush' || op.mode === 'erase') {
     const changed = e.x1 >= e.x0 ? affectedTiles(s.maskTiles, { x0: e.x0 + op.win.ox, y0: e.y0 + op.win.oy, x1: e.x1 + op.win.ox, y1: e.y1 + op.win.oy }) : [];
     void tiledStatsRunner(s).queue(changed, op.touched);
+    prioritiseObjects(s, op.touched);
   }
   commitTiledOp(op);
   afterChange(s, TILES_ONLY);
@@ -584,18 +585,61 @@ function swapTiledStep(op) {
    per object box (`o.sbox`), the lasso's box or the visible area for the wand, seen through `windowSection`; what it wrote is copied back into
    the tiles (copied first for undo) and the statistics of the tiles around it are recomputed. Every window of an operation is checked before
    anything is written: a box of more than WINDOW_TILES tiles refuses, tiles the page dropped are read back first, and an operation that reads
-   objects' boxes waits until their statistics are current ("try again in a moment"). */
+   objects' boxes needs their statistics current: it waits for their tiles (`objectsReady`, card M8.4.28) and refuses ("try again in a moment")
+   only when one of them could not be computed. */
 const sourceBox = (o) => (o?.sbox ? { x0: o.sbox[0], y0: o.sbox[1], x1: o.sbox[2] + 1, y1: o.sbox[3] + 1 } : null);
 
 /** The windows of an operation on these source rectangles, or null after telling the user why it cannot run now. */
 function tiledPlan(s, rects, { boxes = true, tooLarge = 'tiles.boxTooLarge' } = {}) {
   if (s.frozen) { toast(t('tiles.frozen.' + s.frozen)); return null; }   // card M8.4.18a: a section without its pixels is not edited
-  const runner = s._statsRunner;
-  if (boxes && ((runner && (!runner.idle || runner.failed.size)) || rects.some((r) => !r))) { void runner?.retry(); toast(t('tiles.busy')); return null; }
+  const runner = s._statsRunner, waiting = (r) => { const under = tilesUnder(s.maskTiles, r); return runner.pendingIn(under) || runner.failedIn(under); };
+  if (boxes && (rects.some((r) => !r) || (runner && rects.some(waiting)))) { void runner?.retry(); toast(t('tiles.busy')); return null; }
   const plan = planWindows(s.maskTiles, rects);
   if (plan.tooLarge) { toast(t(tooLarge, { n: WINDOW_TILES })); return null; }
   if (plan.missing.length) { void maskLoader(s).want(plan.missing).catch(() => {}); toast(t('tiles.loadingMasks')); return null; }
   return plan;
+}
+
+/* Card M8.4.28: after a reopening every stored tile waits for its statistics (about 0.1 s each). An operation on some objects does not wait
+   for all of them: their tiles go first, the busy indicator shows, and the operation runs again once they are done (Escape cancels). The
+   mask tiles under their boxes that the page dropped are read back in the same wait, instead of asking to try again. */
+let statsWait = null;
+/** True when the objects' statistics are current and their mask tiles are in the page; otherwise false, and `again` runs once they are
+ *  (unless a tile failed, a read failed or Escape was pressed). */
+function objectsReady(s, objs, again) {
+  if (s.frozen) return true;                                               // tiledPlan says why a locked section is not edited
+  const runner = s._statsRunner;
+  if (!runner || objs.every((o) => runner.isCurrent(o.id))) {
+    runner?.publish();                                                     // their totals, if still in the runner's batch
+    const plan = planWindows(s.maskTiles, objs.map(sourceBox).filter(Boolean));
+    return plan.tooLarge || !plan.missing.length || waitThenRun(s, () => maskLoader(s).want(plan.missing), again);   // tiledPlan says "too large"
+  }
+  const all = tilesUnder(s.maskTiles, { x0: 0, y0: 0, x1: s.maskTiles.width, y1: s.maskTiles.height });
+  const positions = objs.flatMap((o) => runner.tilesFor(o.id) || all);
+  if (runner.failedIn(positions)) { void runner.retry(); toast(t('tiles.busy')); return false; }
+  return waitThenRun(s, () => runner.prioritise(positions), again);
+}
+/** Show the busy indicator while `work()` runs, then run `again` if the same section is open and Escape was not pressed; always false. */
+function waitThenRun(s, work, again) {
+  if (statsWait) return false;                                             // one wait at a time
+  const wait = statsWait = { done: false }, indicator = $('busy');
+  const end = () => {
+    if (wait.done) return;
+    wait.done = true; statsWait = null;
+    indicator.hidden = true; indicator.textContent = t('busy');
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') end(); };
+  indicator.textContent = t('tiles.waiting'); indicator.hidden = false;
+  document.addEventListener('keydown', onKey, true);
+  work().then(() => { if (wait.done) return; end(); if (sec() === s) again(); },
+    (error) => { if (wait.done) return; end(); toast(error?.message || String(error), 9000); });
+  return false;
+}
+/** The tiles of the objects an edit touched go first, so that their statistics are current soon even while a reopening's tiles wait. */
+function prioritiseObjects(s, ids) {
+  const runner = tiledStatsRunner(s), positions = [...ids].flatMap((id) => runner.tilesFor(id) || []);
+  if (positions.length) void runner.prioritise(positions);
 }
 
 function tiledOp(s, group = '') {
@@ -630,7 +674,7 @@ function finishTiledOp(op, target = 0) {
   const s = op.section, around = new Map();
   if (target) op.touched.add(target);
   for (const r of op.boxes) for (const [row, col] of affectedTiles(s.maskTiles, { x0: r.x0, y0: r.y0, x1: r.x1 - 1, y1: r.y1 - 1 })) around.set(row * s.maskTiles.cols + col, [row, col]);
-  if (around.size) void tiledStatsRunner(s).queue([...around.values()], op.touched);
+  if (around.size) { void tiledStatsRunner(s).queue([...around.values()], op.touched); prioritiseObjects(s, op.touched); }
   commitTiledOp(op);
   afterChange(s);
 }
@@ -699,6 +743,7 @@ function splitTiled(s, pts) {
   else for (const i of cut) { const v = topAt(at(i), st); if (v) { id = v; break; } }
   const o = id && s.objects.get(id);
   if (!o) { toast(t('cut.none')); return; }
+  if (!objectsReady(s, [o], () => splitTiled(s, pts))) return;
   const rect = sourceBox(o), plan = tiledPlan(s, [rect]);
   if (!plan) return;
   const op = tiledOp(s), win = openEditWindow(op, plan.ranges[0]), b = toWindowRect(win, rect), inWindow = new Set();
@@ -795,7 +840,8 @@ function tiledStatsRunner(s) {
     }
     afterChange(s, TILES_ONLY);
   };
-  s._statsRunner = new TiledStatsRunner({ tiles: s.maskTiles, stats, stacks: () => s.stacks, fetchRgba, onUpdate,
+  const tilesOf = (id) => { const o = s.objects.get(id), box = sourceBox(o); return !o ? [] : box ? tilesUnder(s.maskTiles, box) : null; };
+  s._statsRunner = new TiledStatsRunner({ tiles: s.maskTiles, stats, stacks: () => s.stacks, fetchRgba, onUpdate, tilesOf,
     loadMasks: (positions) => maskLoader(s).want(positions), onError: (error) => toast(error.message || String(error), 9000) });
   return s._statsRunner;
 }
@@ -1334,7 +1380,7 @@ function paintPixels(op, pixels, mode, target) {
 function deleteObject(id) { deleteObjects([id]); }
 function deleteObjects(ids) {
   const s = sec(); if (!s) return;
-  if (s.maskTiles) { const objs = ids.map((id) => s.objects.get(id)).filter(Boolean); if (objs.length) deleteTiledObjects(s, objs); return; }
+  if (s.maskTiles) { const objs = ids.map((id) => s.objects.get(id)).filter(Boolean); if (objs.length && objectsReady(s, objs, () => deleteObjects(ids))) deleteTiledObjects(s, objs); return; }
   const objs = ids.map((id) => s.objects.get(id)).filter((o) => o?.bbox); if (!objs.length) return;
   const op = beginOp(s);
   for (const o of objs) {
@@ -1351,7 +1397,7 @@ function assignClass(id, clsId) { assignClassMany([id], clsId); }
 function assignClassMany(ids, clsId) {
   const s = sec(); if (!s) return;
   const objs = ids.map((id) => s.objects.get(id)).filter(Boolean); if (!objs.length) return;
-  if (s.maskTiles && !tiledPlan(s, objs.map(sourceBox))) return;   // the merge of V0.30 reads the objects' tiles
+  if (s.maskTiles && !(objectsReady(s, objs, () => assignClassMany(ids, clsId)) && tiledPlan(s, objs.map(sourceBox)))) return;   // the merge of V0.30 reads the objects' tiles
   const group = uid(), op = beginOp(s, group);
   for (const o of objs) {
     if (o.cls === clsId && o.pred === null && o.conf === 0) continue;
@@ -1408,7 +1454,7 @@ function mergeObjects(list, group = '') {
   const s = sec(); if (!s) return;
   const objs = list.map((id) => s.objects.get(id)).filter((o) => o?.bbox); if (objs.length < 2) return;
   const keep = mergeKeeper(objs), L = s.labels, st = s.stacks;   // V0.42: edit.js
-  if (s.maskTiles) { mergeTiledObjects(s, objs, keep, group); return; }
+  if (s.maskTiles) { if (objectsReady(s, objs, () => mergeObjects(list, group))) mergeTiledObjects(s, objs, keep, group); return; }
   const op = beginOp(s, group);
   for (const o of objs) {
     if (o === keep) continue;
@@ -1628,7 +1674,7 @@ async function detectSection(s) {
 
 function clearCandidates() {
   const s = sec(); if (!s) return;
-  if (s.maskTiles) { const cand = [...s.objects.values()].filter((o) => !o.cls); if (cand.length && deleteTiledObjects(s, cand)) $('detectStatus').textContent = ''; return; }
+  if (s.maskTiles) { const cand = [...s.objects.values()].filter((o) => !o.cls); if (cand.length && objectsReady(s, cand, clearCandidates) && deleteTiledObjects(s, cand)) $('detectStatus').textContent = ''; return; }
   const op = beginOp(s), cand = new Set([...s.objects.values()].filter((o) => !o.cls).map((o) => o.id));
   dropIds(op, cand);
   for (const id of cand) removeTrace(op, id);
