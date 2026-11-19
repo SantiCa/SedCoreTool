@@ -82,7 +82,8 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.31** (the store and the saves keep every committed version; **model: most capable tier, effort high**), then the order of the council audit below. M8.4.28 is done (an object operation right after reopening waits only for its own tiles: 387-397 ms instead of not finishing; development gate). M8.4.27 is done (the store folder is deleted and copied with its project; a missing stored version locks its section; development gate). M8.4.18b is done (a moved image is located by its SHA-256 and can be copied into the project; development gate). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate). Its three findings have cards, in this order after M8.4.18b: M8.4.27 (the store folder follows its project: delete, copy under a new identifier, a missing stored version; Opus, high), M8.4.28 (object operations right after reopening; Opus, medium), M8.4.29 (reopening from a cache instead of every tile; Opus, high; decision G waits for the maintainer); then M8.4.18c, M8.4.18d, M8.4.19. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
+- **Next step: M8.4.31** (the store and the saves keep every committed version; **model: most capable tier, effort high**), then **Q1**
+  (deleting an ichnotaxon), then the order O approved on 19 November 2026 (second council audit, below); V0.152 after Q1 and Q4 (decision J). M8.4.28 is done (an object operation right after reopening waits only for its own tiles: 387-397 ms instead of not finishing; development gate). M8.4.27 is done (the store folder is deleted and copied with its project; a missing stored version locks its section; development gate). M8.4.18b is done (a moved image is located by its SHA-256 and can be copied into the project; development gate). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate). Its three findings have cards, in this order after M8.4.18b: M8.4.27 (the store folder follows its project: delete, copy under a new identifier, a missing stored version; Opus, high), M8.4.28 (object operations right after reopening; Opus, medium), M8.4.29 (reopening from a cache instead of every tile; Opus, high; decision G waits for the maintainer); then M8.4.18c, M8.4.18d, M8.4.19. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -145,7 +146,9 @@ Updated 18 November 2026.
   - *Order recommended (decision O):* the data-integrity cards affect every user of the current version, flags or not, so they go before the
     rest of part C: **M8.4.31 and Q1 (P0)** → Q4 (with decision N) → Q2 → Q3 → M8.4.32 → M8.4.33 → M8.4.30 → Q5 → M8.4.29 → M8.4.34 →
     M8.4.18c → M8.4.18d → M8.4.19; F1, F2, U1-U3, U6 after M8.4.30; A1 before M8.5; Q6 alongside Q2-Q4 (their tests); Q7 and F3 later.
-  - **New decisions waiting for the maintainer:** **M** (card Q2): values below a detection limit (`<0.01`, `bdl`) stay empty, become half the
+  - **Approved by the maintainer on 19 November 2026 ("apruebo J, K, L, M, N, O y P"), as recommended:** J (V0.152; the design session
+    proposes it after Q1 and Q4, so that those fixes reach users), K, L, M, N, O and P. The text of each proposal stays below for reference.
+  - **Decisions (approved, see above):** **M** (card Q2): values below a detection limit (`<0.01`, `bdl`) stay empty, become half the
     limit or the limit (*recommended:* empty by default with a visible count, the other two per column); **N** (card Q4): CSV numbers written
     with 15 significant digits instead of six decimals, a change of export format (*recommended*); **O**: the order above (*recommended*);
     **P** (card Q4): the core-column CSV gets the gap limit of the cursor and an interval-mean mode (*recommended:* both, the mean as the
@@ -170,7 +173,7 @@ Updated 18 November 2026.
     S6 (validation protocol) can start at once in parallel, since it is mostly the maintainer's data work; S1 and S2 need decisions K and L
     and then go before M8.4.19, because the tiled path changes the resolution of analyses; U1-U3 after M8.4.30 (they touch the messages and
     dialogs that card moves); U4, U5 and D2 at any time on the fast tier.
-  - **Decisions waiting for the maintainer:** **K** (card S1): count only reviewed traces by default, with the unreviewed share shown next to
+  - **Decisions K and L (approved by the maintainer on 19 November 2026):** **K** (card S1): count only reviewed traces by default, with the unreviewed share shown next to
     every result (*recommended*; it changes the default results of new projects, existing projects keep their stored setting); **L** (card S2):
     detection sizes in millimetres (*recommended*; a project keeps its pixel values until the user converts it).
 - **Decisions of the audit of 19 November 2026: G, H, I and J approved by the maintainer the same day** ("apruebo G, H, I y J"), as recommended:
@@ -1880,7 +1883,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   holds only the saved versions after a final save.
 - **Done when:** the tests pass; development gate.
 
-##### M8.4.32 - The tiled tests run on GitHub on three systems — state: after M8.4.31 (council audit of 19 Nov 2026)
+##### M8.4.32 - The tiled tests run on GitHub on three systems — state: after Q3 (order O, approved 19 Nov 2026; council audit of 19 Nov 2026)
 
 - **Goal:** the milestone gate covers the tile store: `tests/e2e/tiled-sections.mjs` and `tests/e2e/interrupted-saves.mjs` run in the
   *Desktop builds* workflow on Windows, macOS and Linux, on a fixture generated in the job, and the Python tests of the store cannot skip
@@ -2151,13 +2154,13 @@ method works on regions of the tile store, never on a whole decoded raster.
 
 Written from the council audit (status block). Each card names its model; the science cards change results only where a decision says so.
 
-- [ ] **S1 - Unreviewed traces and the published numbers** (decision K). Default `countCandidates` and `includePred` off for new projects
+- [ ] **S1 - Unreviewed traces and the published numbers** (decision K, approved 19 Nov 2026). Default `countCandidates` and `includePred` off for new projects
       (existing projects keep their stored settings); the results table, the core column and every export show the share of the counted
       area that nobody reviewed, per interval and in total; the provenance lines of the CSV say both settings. *Model:* most capable, effort
       medium (changes default results). *Tests:* Node: a project with reviewed and unreviewed traces gives the unreviewed share exactly; an
       old project's stored settings are kept; Python parity of the counting with both settings. *Second council:* the breakdown
       (reviewed / predicted / unreviewed) is shown and exported whatever decision K says; only the change of defaults waits for K.
-- [ ] **S2 - Detection in physical units and resolution in the provenance** (decision L). `minArea`, the adaptive window radius and the
+- [ ] **S2 - Detection in physical units and resolution in the provenance** (decision L, approved 19 Nov 2026). `minArea`, the adaptive window radius and the
       contrast ring of the descriptors in millimetres (converted with each section's px/cm); the smallest resolvable trace diameter shown per
       section; a warning when it exceeds a user-set target; each section's working resolution (px/cm) and factor `k` in the exported provenance.
       First a measurement: bioturbation percentage against px/cm (k = 1-6) on the public U1385 images and on a tiled section, reported before
@@ -2222,7 +2225,8 @@ Written from the council audit (status block). Each card names its model; the sc
 - [ ] **Q2 - The import panel and the readers.** One import panel with a preview of the first rows as read and counts: missing-value codes
       (a configurable list, by default -999, -999.25, -9999), censored values (decision M), rows dropped and why (`parseAgeModelDetailed`,
       `coreFromRows`, `coresFromLongTable`, `intervalsFromTable`, which also reverses from > to silently, `buildSamples` with log of v ≤ 0),
-      decimal separator decided per column (today `1,250` in a tab-separated file reads as 1.25 and `0.500` with a decimal comma as 500),
+      decimal separator decided per column (decision M approved: censored values empty by default with a visible count, half the limit or the
+      limit per column); (today `1,250` in a tab-separated file reads as 1.25 and `0.500` with a decimal comma as 500),
       UTF-16 byte-order marks, a preamble before the header, repeated header names, rows longer than the header; Excel: the sheet chosen and
       raw numbers (`rawNumbers: true`). It interrupts only when something is ambiguous; otherwise a data report remains with "Undo import".
       *Model:* most capable, effort medium (data correctness). *Tests:* Q6 corpus and property tests.
@@ -2231,7 +2235,7 @@ Written from the council audit (status block). Each card names its model; the sc
       units and refuses or reports different age units and counts value conflicts (`mergeImp` and `buildMultiProject` move to a pure module
       with tests; cores are matched by identifier where they have one, not only by name); changing a section's unit asks whether to convert its
       depths or only correct the label. *Model:* most capable, effort medium (silent 10-100× errors). *Tests:* Node, per case.
-- [ ] **Q4 - Exports keep the data** (decisions N and P). Numbers in CSV with 15 significant digits, non-finite values as empty cells, the
+- [ ] **Q4 - Exports keep the data** (decisions N and P, approved 19 Nov 2026). Numbers in CSV with 15 significant digits, non-finite values as empty cells, the
       Python export the same (shared-definition rule); the core-column CSV (`windowCSV`) with the gap limit of the cursor and an interval-mean
       mode with the number of samples per cell, intervals outside the age model or reversed marked instead of dropped. *Model:* most capable,
       effort medium (export format and exported values change). *Tests:* exact expected files; the regression against version 2.1 stated before
@@ -2268,6 +2272,23 @@ Written from the council audit (status block). Each card names its model; the sc
 - [ ] **U6 - Detection over several cores.** A "Detect in…" dialog with cores and sections to tick, processed one after another within the
       memory budget of §22.3, cancellable (U1); the section selector shows each section's state (detected, traces to review, depth range).
       *Model:* fast tier, effort medium. After U1.
+- [ ] **Q8 - Data-sheet edits and small divergences.** Cell edits keyed by depth (`applyCellEdits`): edits left without a row after a new
+      import are counted and listed, duplicated depths are reported on import and an edit names its row unambiguously; the age model treats a
+      non-finite value the same in Python and JavaScript (today Python raises and JavaScript skips; shared-definition rule); a text cell that
+      starts with "-" is exported without a leading apostrophe when it is a number written as text, and the rule for formula-like cells is
+      documented. *Model:* fast tier, effort medium. *Tests:* Node and Python per case.
+- [ ] **A2 - What the program runs is kept apart from what it saves.** Runtime caches (`_lc`, `_lb`, `_counts`, `_maskSync`, `_maskLoader`,
+      `_statsRunner`, `_unet`, `_tiledRecord`, `_savedRecord`) move out of the section record into a `WeakMap` per section, so that a
+      serialiser can never write them; `settleTiledSections` waits for a promise from `MaskSync` instead of checking every 50 ms; one seeded
+      random generator instead of two (`learn.js` and `geo.js`, with the existing seeds giving the same sequences); renames in the main process
+      retry a transient `EPERM`/`EBUSY` on Windows (antivirus, cloud folders) before failing. *Model:* most capable, effort medium (saving).
+      After M8.4.30.
+- [ ] **A3 - Heavy work off the page's thread.** A job runner in a worker for the calculations that today block the page (multiproxy
+      classifiers, map interpolation, `buildSamples`, detection where it can be moved), cancellable, giving progress to U1's component; only
+      until each calculation moves to the engine (M8.5), then removed with it. *Model:* most capable, effort medium. After U1.
+- [ ] **F4 - Figures reproducible by script (later; with M8.5 slice d and M6.6).** The publication figures (core column, multiproxy,
+      sections, maps) produced from a project file or from exported data plus a style file by the Python package, with the same layout rules
+      as the program, so that a figure in a paper can be rebuilt without the interface. *Model:* most capable, effort high (design).
 - [ ] **U3 addition (second council):** labels of scope on settings (section, core, project), completed steps of the left panel folded, expert
       settings under "More options", the summaries of multiproxy's step headers copied to the other panels, a shortcut sheet opened with `?`,
       depths validated as typed with a message (today an invalid bottom reverts without explanation), buttons that a tiled section refuses
