@@ -3539,6 +3539,12 @@ The percentage difference comes from the JPEG decoder (§3.4), not from the meth
     core's age model; interpolated maps are exploratory; k-NN compares each sample with all training samples (slow
     with hundreds of thousands of samples); MDI importance is biased among correlated proxies; everything is computed
     on the user's computer.
+11. **Known defects, with cards in the roadmap** (found by the audits of 19 November 2026; each item is removed when its card is done):
+    deleting an ichnotaxon acts only on the open core's sections, so traces of other cores keep a class that no longer exists (Q1);
+    missing-value codes such as -999 are read as values (Q2); spreadsheets are read from their first sheet, with the numbers as the sheet
+    formats them (Q2); numbers in exported CSV files are rounded to six decimals, so values below 0.0000005 are written as 0 (Q4); the
+    core-column CSV interpolates records across gaps of any length (Q4); changing a section's unit does not convert its depths (Q3);
+    joined projects keep the first core's units (Q3); backups and packages leave tiled sections out (M8.4.33).
 
 ## 33. Reproducibility
 

@@ -118,6 +118,38 @@ Updated 18 November 2026.
   8. **Can we move to the next phases?** No. M8.5 needs the milestone gates of part C (M8.4.19) and part B (M8.4.11). Order recommended:
      M8.4.28 (finishing) → **M8.4.30** → M8.4.29 (needs decision G) → M8.4.18c → M8.4.18d → M8.4.19 (with decision I) → M8.4.20 → part B as
      decided by I → M8.5. Decisions G, H, I and J were approved the same day (below); J publishes V0.152 after M8.4.28.
+- **Second council audit of 19 November 2026** (the maintainer's prompt: four independent experts, a senior sedimentologist and
+  palaeoclimatologist, a scientific-software architect, a UX/UI specialist for complex technical software and a data-integrity and QA engineer,
+  read the repository without running anything, then critiqued the others anonymised and argued the trade-offs; the design session checked
+  the decisive claims in the code). **Confirmed in the code:** deleting an ichnotaxon (`classList` handler in `app.js`) acts only on the open
+  core's sections, with no confirmation and no undo, and leaves the traces of every other core with a class that no longer exists (P0); CSV
+  exports round to six decimals (`core.js::toCSV`, `toFixed(6)`: a mass susceptibility of 1e-8 is written as 0); the Excel reader reads only
+  the first sheet through `sheet_to_csv` without `rawNumbers` (`multiproxy.js`); missing-value codes (-999, -999.25, -9999) are read as values
+  (`log.js::num`); `Math.min(...array)` over whole series in about 30 places (a call-stack limit with long scanner records); changing a
+  section's unit relabels its depths without converting them. **Reported and not yet checked here:** joined projects keep the first core's
+  units without converting (`buildMultiProject`, `mergeImp`); the core-column CSV interpolates records across gaps of any length and drops
+  intervals outside the age model silently (`log.js`); splice overlaps differ between Python (`overlap`) and JavaScript (shared-definition rule);
+  rows dropped without a count in several readers; a corrupt `sources.json` replaced by an empty one; `tableview.js` listed as pure but using
+  the DOM; `presetAll`, `resAll`, rotation and deleting a data column without confirmation or undo; figures sized only in pixels, no PDF, no
+  embedded fonts, provenance without the multiproxy settings. **Debate (trade-offs agreed):** (1) rigour against fluency at import: one import
+  panel with a preview and counts that interrupts only for a real ambiguity (decimal separator, unknown units, missing-value codes, several
+  sheets) and otherwise leaves a data report with "Undo import"; (2) fidelity against speed in plots: decimate on screen (minimum and maximum
+  per pixel, which keeps peaks) and export at full resolution, saying so in the provenance; (3) confirmations against an expert's speed: undo
+  by domain and a recoverable deletion first, a dialog only for what cannot be undone or reaches other cores; defaults that change results
+  stay until the maintainer decides, and the breakdown of what a number contains is shown meanwhile.
+  - *Cards written or changed:* new Q1 (deleting an ichnotaxon, P0), Q2 (import panel and readers), Q3 (units), Q4 (exports keep the data),
+    Q5 (long series), Q6 (property tests and a corpus of real files), Q7 (splice overlaps), F1 (figures for publication), F2 (provenance of
+    every export), F3 (stratigraphic conventions, later), A1 (engine methods of core or project scope, before M8.5), U6 (detection over several
+    cores); changed: M8.4.30 (a JavaScript architecture test), S1 (the breakdown does not wait for decision K), S5, U1 (one long-task
+    component), U2 (the bulk actions it found), U3 (scope labels, collapsed steps, shortcut sheet), M8.5 (prerequisite A1, scikit-learn rule).
+  - *Order recommended (decision O):* the data-integrity cards affect every user of the current version, flags or not, so they go before the
+    rest of part C: **M8.4.31 and Q1 (P0)** → Q4 (with decision N) → Q2 → Q3 → M8.4.32 → M8.4.33 → M8.4.30 → Q5 → M8.4.29 → M8.4.34 →
+    M8.4.18c → M8.4.18d → M8.4.19; F1, F2, U1-U3, U6 after M8.4.30; A1 before M8.5; Q6 alongside Q2-Q4 (their tests); Q7 and F3 later.
+  - **New decisions waiting for the maintainer:** **M** (card Q2): values below a detection limit (`<0.01`, `bdl`) stay empty, become half the
+    limit or the limit (*recommended:* empty by default with a visible count, the other two per column); **N** (card Q4): CSV numbers written
+    with 15 significant digits instead of six decimals, a change of export format (*recommended*); **O**: the order above (*recommended*);
+    **P** (card Q4): the core-column CSV gets the gap limit of the cursor and an interval-mean mode (*recommended:* both, the mean as the
+    default for new exports, recorded in the provenance).
 - **Council audit of 19 November 2026** (at the maintainer's request: three independent reviewers, a software engineer, a sedimentologist
   with data-science training and an interface designer, read the repository without running anything, then critiqued each other's reports
   anonymised; the design session checked the disputed points in the code). It replaces the single-view "deep audit" written earlier the same
@@ -1889,7 +1921,10 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   runners, sends, reads and analysis of one section; `tiledproject.js` reopening, locks, store copy and delete), each receiving what it needs
   from `app.js` through one explicit context object (state, `toast`, `afterChange`, `requestRender`, the bridge); `app.js` wiring;
   `ORDER`; ARCHITECTURE §3.2 (the controller table and the stale "about 4,200 lines") and the source map; a check that fails when `app.js`
-  grows beyond a recorded ceiling (`tests/app/app-size.test.mjs`, ceiling lowered by each card that shrinks it).
+  grows beyond a recorded ceiling (`tests/app/app-size.test.mjs`, ceiling lowered by each card that shrinks it); second council: the same
+  test file checks the layer rules of ARCHITECTURE §3.2 for JavaScript as `tests/test_architecture.py` does for Python (no DOM globals in
+  the pure modules, no pure module importing a controller; `tableview.js` moves to the controllers' list or loses its DOM use) and reports
+  the import cycles between controllers.
 - **Do not touch:** any behaviour, message, saved field or test expectation; the pure modules; the whole-section path.
 - **Model:** most capable, effort medium (a large move through editing and saving code, where a wiring mistake could lose user work; checked
   by the existing exact tests).
@@ -2097,6 +2132,7 @@ method works on regions of the tile store, never on a whole decoded raster.
   - Lessons of M8.3, for every slice: the inputs are resident in the engine from the start (M8.4 services); the
     second card measures the matched timing of the first end-to-end path with the M8.4 tool, before any interface
     card (M8.3 found its 30-60 times slowdown only at its last card); each slice ends with a milestone gate.
+  - Second council of 19 November 2026: card A1 (engine methods of core or project scope) is a prerequisite of slices (a) and (d).
   - Council audit of 19 November 2026 (card S5): slice (c) uses an established library (scikit-learn) as the implementation or as the
     reference (AGENTS §3 item 9), standardises inside each fold, groups by core by default and selects the method with nested cross-validation;
     slice (d) averages over intervals when the grid step is coarser than a record's spacing, reports the effective sample size and adds
@@ -2119,7 +2155,8 @@ Written from the council audit (status block). Each card names its model; the sc
       (existing projects keep their stored settings); the results table, the core column and every export show the share of the counted
       area that nobody reviewed, per interval and in total; the provenance lines of the CSV say both settings. *Model:* most capable, effort
       medium (changes default results). *Tests:* Node: a project with reviewed and unreviewed traces gives the unreviewed share exactly; an
-      old project's stored settings are kept; Python parity of the counting with both settings.
+      old project's stored settings are kept; Python parity of the counting with both settings. *Second council:* the breakdown
+      (reviewed / predicted / unreviewed) is shown and exported whatever decision K says; only the change of defaults waits for K.
 - [ ] **S2 - Detection in physical units and resolution in the provenance** (decision L). `minArea`, the adaptive window radius and the
       contrast ring of the descriptors in millimetres (converted with each section's px/cm); the smallest resolvable trace diameter shown per
       section; a warning when it exceeds a user-set target; each section's working resolution (px/cm) and factor `k` in the exported provenance.
@@ -2143,13 +2180,17 @@ Written from the council audit (status block). Each card names its model; the sc
       *Model:* most capable, effort high (design). Can start at once; independent of M8.
 - [ ] **U1 - One status layer in every mode.** One busy and progress region (`role=status`, above the start screen), visible in every mode,
       with Cancel where the operation allows it, the starting button disabled while it runs, and a list of notices that keeps warnings and
-      errors until read (today one toast, replaced by the next, 3-12 s). *Model:* most capable, effort medium (error visibility of saving and
-      backups). After M8.4.30.
+      errors until read (today one toast, replaced by the next, 3-12 s). *Second council:* one long-task component replaces `busy()`
+      (progress, Escape to cancel, no second start while one runs; heavy work off the page's thread where it can be, as the filters' worker
+      already is), used by detection, a change of resolution, "Apply to all sections" and PNG export; the multiproxy progress bar is the model.
+      *Model:* most capable, effort medium (error visibility of saving and backups). After M8.4.30.
 - [ ] **U2 - Destructive actions.** One accessible confirmation dialog that names what is lost (with counts) and defaults to the safe button,
       used for: deleting a project (which also deletes its masks on disk), records, manual data columns, "Apply to all sections"; the import of
       a project that already exists offers Replace, Keep both and Cancel (today OK replaces and Cancel imports a copy); a recoverable deletion
-      (a trash or "undo the last deletion") for projects, records and columns. *Model:* most capable, effort high (editing that could lose user
-      work). After M8.4.30.
+      (a trash or "undo the last deletion") for projects, records and columns. *Second council:* also "Apply to all sections" (which
+      overwrites enhancement and detection), a change of resolution of all sections and rotation (both discard the undo history today) and
+      deleting a column of the data sheet; undo by domain (a command and its inverse) for data cells, interval layers and figure settings, so
+      that most actions need no dialog. *Model:* most capable, effort high (editing that could lose user work). After M8.4.30.
 - [ ] **U3 - Keyboard, focus and the accessibility claim.** The start screen as a real modal layer (workspace inert, focus moved and
       restored); the selected tab highlighted in the start-screen and model-dialog tab bars (`.htabs .btn[aria-selected=true]`, checked
       missing); control borders and the dark error colour at their contrast targets; a name for the image canvas; tab roles in multiproxy and
@@ -2168,6 +2209,69 @@ Written from the council audit (status block). Each card names its model; the sc
       exports; §4 labels the BI 0 and ii 5-6 limits as operational conventions; ARCHITECTURE no longer calls the tile store "planned" where it is
       built (with M8.4.30, which updates the `app.js` size). *Model:* fast tier, effort low (the flag of the last interval is a small code change
       with a test).
+
+### Cards of the second council (19 November 2026)
+
+- [ ] **Q1 - Deleting an ichnotaxon (P0).** Today the ✕ of a class acts on the open core's sections only, with no confirmation and no undo,
+      and discards the undo history; the traces of the other cores keep the deleted class's id. Change: the deletion reaches every core of the
+      project (`S.cores`), the confirmation names the number of labelled traces and examples in the whole project, the class is kept in a
+      recoverable list (or the deletion is one undo step); opening a project reports and repairs traces whose class does not exist (they
+      become unlabelled, counted in a message). The logic goes in a module (AGENTS §4), `app.js` wires it. *Model:* most capable, effort medium
+      (it can lose expert work). *Tests:* Node: two cores, delete a class used in both: no trace keeps its id; undo or restore brings every
+      label back; a saved project with orphaned ids opens repaired with the count.
+- [ ] **Q2 - The import panel and the readers.** One import panel with a preview of the first rows as read and counts: missing-value codes
+      (a configurable list, by default -999, -999.25, -9999), censored values (decision M), rows dropped and why (`parseAgeModelDetailed`,
+      `coreFromRows`, `coresFromLongTable`, `intervalsFromTable`, which also reverses from > to silently, `buildSamples` with log of v ≤ 0),
+      decimal separator decided per column (today `1,250` in a tab-separated file reads as 1.25 and `0.500` with a decimal comma as 500),
+      UTF-16 byte-order marks, a preamble before the header, repeated header names, rows longer than the header; Excel: the sheet chosen and
+      raw numbers (`rawNumbers: true`). It interrupts only when something is ambiguous; otherwise a data report remains with "Undo import".
+      *Model:* most capable, effort medium (data correctness). *Tests:* Q6 corpus and property tests.
+- [ ] **Q3 - Units.** External records declare their depth or age unit on import (proposed from the header, `mbsf` → m, confirmed with one
+      click), are converted with `UNIT_TO_CM`, and a record whose range does not overlap its core's is reported; joining projects converts
+      units and refuses or reports different age units and counts value conflicts (`mergeImp` and `buildMultiProject` move to a pure module
+      with tests; cores are matched by identifier where they have one, not only by name); changing a section's unit asks whether to convert its
+      depths or only correct the label. *Model:* most capable, effort medium (silent 10-100× errors). *Tests:* Node, per case.
+- [ ] **Q4 - Exports keep the data** (decisions N and P). Numbers in CSV with 15 significant digits, non-finite values as empty cells, the
+      Python export the same (shared-definition rule); the core-column CSV (`windowCSV`) with the gap limit of the cursor and an interval-mean
+      mode with the number of samples per cell, intervals outside the age model or reversed marked instead of dropped. *Model:* most capable,
+      effort medium (export format and exported values change). *Tests:* exact expected files; the regression against version 2.1 stated before
+      the change with its tolerance.
+- [ ] **Q5 - Long series.** A loop-based `extent()` in `core.js` instead of `Math.min(...array)` and `Math.max(...array)` (about 30 places;
+      behaviour-preserving, exact equality, a test with 10^6 values); plots and core-column curves decimated per pixel (minimum and maximum)
+      on screen, full resolution on export; the project's data record saved in parts with their own revision, so that a column width does
+      not rewrite every table (a reproducible save benchmark first, AGENTS §4). *Model:* most capable, effort medium.
+- [ ] **Q6 - Tests that find what examples miss.** Property-based tests (a test-only dependency, AGENTS §3 item 9: fast-check for Node,
+      Hypothesis for Python) for `parseTable`, `parseAgeModel`, `interpAge` against `interpolate_age`, `binRows` against `bin_edges`; a corpus
+      of 10-15 real laboratory files (scanner XRF, MSCL, IODP LIMS, Bacon output; public or anonymised); project files saved by old versions
+      (v1-v5) opened in a test; a corrupt `sources.json` set aside as `.corrupt-<date>` instead of being overwritten (`tile-ipc.js`).
+      *Model:* fast tier, effort medium.
+- [ ] **Q7 - Splice overlaps in both implementations.** The `overlap` option of the Python export (`keep`, `upper`, `error`) as a shared
+      definition in `core.js`, used by the core column and its CSV, with a parity test; today JavaScript keeps every overlapping interval.
+      *Model:* fast tier, effort medium (results of overlapping sections change only when the user picks another option).
+- [ ] **F1 - Figures for publication.** A pure `figsize.js`: journal widths in millimetres (about 84, 129, 174 mm and A4), font sizes in
+      points with a warning below 6 pt, PNG with a chosen resolution (300 or 600 dpi) and its `pHYs` chunk, overlays in PNG instead of JPEG,
+      an "original resolution" option; a PDF export designed so that it does not tie figures to Electron (ARCHITECTURE §3.3), fonts embedded
+      or text as paths for the final export; Okabe-Ito as the default categorical palette and a note against `rainbow`. *Model:* most capable,
+      effort medium. After M8.4.30.
+- [ ] **F2 - Provenance of every export.** `provenanceLines(kind, settings)` per kind of export: the multiproxy settings (step, gap limit,
+      logarithms, scaling, missing values, classifier, seed), map interpolation, enhancement and `noDataPad`, SHA-256 of the age-model text
+      and of each record file; a `<metadata>` block in every SVG; a reference epoch for ages (`ageRef`: BP 1950, b2k, CE) in the age model,
+      its labels and exports. Long settings may go to a sibling `*_provenance.json` referenced by its hash. *Model:* fast tier, effort medium.
+- [ ] **F3 - Stratigraphic conventions (later; after M8.5 slice d).** Lithology patterns (FGDC 2006) for interval categories, a grain-size
+      column, a secondary non-linear age axis beside depth, a track of dated levels with their errors, BI and ii per described layer as well as
+      per interval; a moving average with a window in axis units that stops at gaps (`plot.js`). Presentation in JavaScript; any new
+      calculation in Python (AGENTS §4). *Model:* most capable, effort high (design).
+- [ ] **A1 - Engine methods of core or project scope (before M8.5).** A design card: an operation `method.run` with a declared scope
+      (section, core, project), a revision key and two priorities (interactive, batch), operations registered in a table instead of the chain
+      of conditions in `engine/server.py`; the columnar `f64le` series format of the contract for tables; slices (d) and (a) first, because their
+      results end in publications and are not reproducible by script today. *Model:* most capable, effort high (design).
+- [ ] **U6 - Detection over several cores.** A "Detect in…" dialog with cores and sections to tick, processed one after another within the
+      memory budget of §22.3, cancellable (U1); the section selector shows each section's state (detected, traces to review, depth range).
+      *Model:* fast tier, effort medium. After U1.
+- [ ] **U3 addition (second council):** labels of scope on settings (section, core, project), completed steps of the left panel folded, expert
+      settings under "More options", the summaries of multiproxy's step headers copied to the other panels, a shortcut sheet opened with `?`,
+      depths validated as typed with a message (today an invalid bottom reverts without explanation), buttons that a tiled section refuses
+      disabled with the reason instead of refusing after the click.
 
 ## Small maintenance cards
 
