@@ -82,8 +82,9 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.31** (the store and the saves keep every committed version; **model: most capable tier, effort high**), then **Q1**
-  (deleting an ichnotaxon), then the order O approved on 19 November 2026 (second council audit, below); V0.152 after Q1 and Q4 (decision J). M8.4.28 is done (an object operation right after reopening waits only for its own tiles: 387-397 ms instead of not finishing; development gate). M8.4.27 is done (the store folder is deleted and copied with its project; a missing stored version locks its section; development gate). M8.4.18b is done (a moved image is located by its SHA-256 and can be copied into the project; development gate). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate). Its three findings have cards, in this order after M8.4.18b: M8.4.27 (the store folder follows its project: delete, copy under a new identifier, a missing stored version; Opus, high), M8.4.28 (object operations right after reopening; Opus, medium), M8.4.29 (reopening from a cache instead of every tile; Opus, high; decision G waits for the maintainer); then M8.4.18c, M8.4.18d, M8.4.19. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
+- **Next step: Q1** (deleting an ichnotaxon acts on the whole project, with confirmation and recovery; **model: most capable tier, effort
+  medium**), then the order O approved on 19 November 2026 (second council audit, below); V0.152 after Q1 and Q4 (decision J). M8.4.31 is
+  done (a store clean-up keeps every version committed since the one the page names; saves run one at a time; development gate). M8.4.28 is done (an object operation right after reopening waits only for its own tiles: 387-397 ms instead of not finishing; development gate). M8.4.27 is done (the store folder is deleted and copied with its project; a missing stored version locks its section; development gate). M8.4.18b is done (a moved image is located by its SHA-256 and can be copied into the project; development gate). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate). Its three findings have cards, in this order after M8.4.18b: M8.4.27 (the store folder follows its project: delete, copy under a new identifier, a missing stored version; Opus, high), M8.4.28 (object operations right after reopening; Opus, medium), M8.4.29 (reopening from a cache instead of every tile; Opus, high; decision G waits for the maintainer); then M8.4.18c, M8.4.18d, M8.4.19. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1859,7 +1860,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   typecheck (no new diagnostics); `sync_version.py --check`; `ruff check`; `desktop.mjs` with the engine off and on; `tiled-sections.mjs`. Incident: one run of `tiled-sections.mjs` failed at its first save (the tiled section left out by
   the settle deadline, D1) while four review agents were reading the repository; the rerun passed; not reproduced. Not done: macOS, Linux.
 
-##### M8.4.31 - The store and the saves keep every committed version — state: after M8.4.28 (council audit of 19 Nov 2026)
+##### M8.4.31 - The store and the saves keep every committed version — state: Done (19 Nov 2026, development gate; council audit of 19 Nov 2026)
 
 - **Goal:** a clean-up of the mask store can never delete a version the page committed, whatever the timing, and two saves never run at once.
 - **Why (checked in the code):** `saveToDB` starts `retainStore()` without waiting; `retainStore` names the saved version and
@@ -1882,6 +1883,31 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   (`tiled-sections.mjs`): continuous edits with a save every 200 ms for 20 s, then reopen: identical to the last saved state, the store
   holds only the saved versions after a final save.
 - **Done when:** the tests pass; development gate.
+- *As built (19 Nov 2026):* engine: the coordinator records, per store folder and section, the manifests it commits in order
+  (`session_commits`); `mask.retain` keeps those after the newest one its `keep` names (all of a section's when it names none) and shortens
+  each record to the newest named one (`recent_commits`; `MaskStore.retain(keep, protected, recent)`, a recent manifest already gone is
+  skipped); `mask.forget` drops the project's record; contract §8.7. Page: `singleflight.js` (one run at a time; a request made during a run
+  waits and runs again only if a revision changed after that run started) used by `saveToDB` with a change counter incremented by
+  `markDirty`. The revision, not `dirty`, decides because the desktop test showed that a save which cannot store a tiled section leaves the
+  project dirty and every waiting request repeated it until its 15 s deadline (88 queued requests: one save every 15 s). Tests: Python 4 (a
+  commit before a retain naming its parent survives with its tiles, and goes once named; two sections interleaved, each followed on its own;
+  after an engine restart only what is named stays; `mask.forget` clears the record); the M8.4.27 copy test now runs its retain of the first
+  project from a new engine process, which keeps its purpose (the copy is untouched). Node 5 (`tests/app/singleflight.test.mjs`: requests
+  during a save give one more save, never two at once, ending with the last state; nothing changed: no further save; 20 random interleavings;
+  a failed save is reported and the next one runs; a stuck save is not repeated by 20 waiting requests); two of them fail with the previous
+  algorithm. Desktop (`tiled-sections.mjs`): edits and saves overlapping for 20 s (176 edits, 88 saves requested, none awaited): after a final
+  save the store holds exactly the saved versions and the reopened masks are the last saved ones. **Test fixed on the way:** the engine-kill
+  step of card M8.4.16 failed four times in a row on this computer, also on the unchanged previous commit (`f3fa8ce`): a save started by the
+  earlier edits committed a round during the stroke (measured: two manifests during a 1.7 s stroke), depending on how long the process lookup
+  before it took; the step now saves and waits for the masks to settle right before the stroke and compares with the version from just before
+  it (the assertion is unchanged, its precondition is now deterministic). **Incident:** one run failed afterwards at the M8.4.27 step "the
+  deleted project's folder is gone" right after the new 20 s block; the next run passed whole; not diagnosed (the most likely cause is a
+  rename of the project folder refused for a moment on Windows after hundreds of files were written, for which card A2 adds a retry; the
+  program then shows "the folder was not deleted", no data is lost). `app.js`: 5,347 lines before, 5,352 after (the import, the counter and
+  the wiring). Full checks (Windows): `py -3.12 -m pytest -q` 885 passed / 9 skipped; `npm test` 472 passed; typecheck; `sync_version.py
+  --check`; `ruff check`; standalone build; `desktop.mjs` with the engine off and on; `tiled-sections.mjs` passed (after the fixes above).
+  Not done: macOS, Linux; a measured interleaving of a real commit and a real retain in the desktop program (the Python tests drive the
+  coordinator in that order deterministically).
 
 ##### M8.4.32 - The tiled tests run on GitHub on three systems — state: after Q3 (order O, approved 19 Nov 2026; council audit of 19 Nov 2026)
 
@@ -1895,6 +1921,8 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 - **Change:** a small generator of the test image (a few thousand pixels on a side, written by the test itself or a script in `tools/`);
   the two tests in *Desktop builds*; `SEDCORETOOL_REQUIRE_PYVIPS=1` in CI turns the skip into a failure; DEVELOPMENT.
 - **Model:** most capable, effort medium (CI on three systems; a broken workflow blocks every gate).
+- **Before it (19 Nov 2026):** the retry of a refused rename on Windows (part of card A2) should be done first, or the folder-deletion step of
+  `tiled-sections.mjs` may fail now and then (incident of M8.4.31).
 - **Tests:** the workflows themselves: one green run on three systems, and one deliberately failing run (a broken assertion on a scratch
   branch) that shows red.
 - **Done when:** both workflows pass on three systems with the two tests in them; development gate (it changes what the milestone gate means).

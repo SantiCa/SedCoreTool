@@ -401,7 +401,9 @@ def test_copy_puts_a_version_into_another_project_in_pages_and_its_manifest_last
     assert stored_names(value, 'p2') == stored_names(value, 'p1')
     for (row, col), tile in tiles.items():
         assert b''.join(value.ok('mask.read', {'project': 'p2', 'manifest': version, 'layer': 'labels', 'positions': [[row, col]]})[1]) == tile[0]
-    # a retain of the first project does not touch the copy
+    # a retain of the first project does not touch the copy (from a new engine process: card M8.4.31 keeps this session's commits)
+    value.close()
+    value = engine()
     value.ok('mask.retain', {'project': 'p1', 'keep': []})
     assert stored_names(value, 'p1')[0] == set() and stored_names(value, 'p2')[0] == {version}
     assert value.error('mask.copy', {'from': 'p2', 'to': 'p2', 'manifest': version, 'start': 0}) == ('INVALID_REQUEST', 'to')
@@ -436,3 +438,60 @@ def test_forget_drops_a_project_from_memory_and_waits_for_its_open_versions(engi
     assert 'p1' not in value.coordinator.mask_stores
     assert not any(key[0].parent.name == 'p1' for key in value.coordinator.mask_cache.items)
     assert value.error('mask.forget', {'project': '../p1'}) == ('INVALID_REQUEST', 'project')
+
+
+def commit_version(value, base, tile, section='s1', project='p1'):
+    staged = begin(value, base, project=project, section=section)['staged']
+    put(value, staged, *tile)
+    return value.ok('mask.commit', {'staged': staged, 'tables': value.tables() if base is None else {}})[0]['manifest']
+
+
+def test_retain_keeps_a_version_committed_after_the_ones_it_names(engine):
+    """Card M8.4.31: the page asks for a clean-up naming the version it knows while the engine has already committed the next one, whose
+    answer is still on its way: that version and its tiles stay; a clean-up naming it removes the older one as before."""
+    value = engine()
+    first, second_tile = commit_version(value, None, labels_tile(1)), labels_tile(2)
+    second = commit_version(value, first, second_tile)
+    removed = value.ok('mask.retain', {'project': 'p1', 'keep': [first]})[0]['removed']
+    manifests, blobs = stored_names(value)
+    assert manifests == {first, second} and removed['manifests'] == 0
+    assert second_tile[1] in blobs
+    assert value.ok('mask.read', {'project': 'p1', 'manifest': second, 'layer': 'labels', 'positions': [[0, 0]]})[1]
+    value.ok('mask.retain', {'project': 'p1', 'keep': [second]})
+    assert stored_names(value)[0] == {second}, 'once named, the older version goes'
+
+
+def test_retain_follows_each_section_on_its_own(engine):
+    """Commits of two sections interleave; the page names the newest version it knows of each. A section's newer commit survives even
+    when another section's commit came later, and versions before the named ones go."""
+    value = engine()
+    a1 = commit_version(value, None, labels_tile(1), section='s1')
+    b1 = commit_version(value, None, labels_tile(2), section='s2')
+    b2 = commit_version(value, b1, labels_tile(3), section='s2')        # its answer has not reached the page
+    a2 = commit_version(value, a1, labels_tile(4), section='s1')
+    value.ok('mask.retain', {'project': 'p1', 'keep': [a2, b1]})
+    assert stored_names(value)[0] == {a2, b1, b2}
+    value.ok('mask.retain', {'project': 'p1', 'keep': [a2, b2]})
+    assert stored_names(value)[0] == {a2, b2}
+
+
+def test_after_a_restart_retain_keeps_only_what_it_names(engine):
+    """A new engine process has committed nothing: retain removes every version the request does not name, as before card M8.4.31."""
+    value = engine()
+    first = commit_version(value, None, labels_tile(1))
+    second = commit_version(value, first, labels_tile(2))
+    value.close()
+    again = engine()
+    again.ok('mask.retain', {'project': 'p1', 'keep': [first]})
+    assert stored_names(again)[0] == {first}
+    assert second not in stored_names(again)[0]
+
+
+def test_a_forgotten_project_starts_without_a_session_record(engine):
+    value = engine()
+    first = commit_version(value, None, labels_tile(1))
+    commit_version(value, first, labels_tile(2))
+    value.ok('mask.forget', {'project': 'p1'})
+    assert value.coordinator.session_commits == {}
+    value.ok('mask.retain', {'project': 'p1', 'keep': [first]})
+    assert stored_names(value)[0] == {first}

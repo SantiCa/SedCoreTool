@@ -115,6 +115,9 @@ class Coordinator:
         self.masks = self.mask_cache = None
         self.mask_stores = {}
         self.stagings = {}
+        # Card M8.4.31: per store folder and section, the manifests committed by this process in order. `mask.retain` keeps those after the
+        # newest one its request names: the page may not have received a commit's answer yet when it asks for a clean-up.
+        self.session_commits = {}
         if self.projects_root is not None:
             self.masks = load_store()[2]
             self.projects_root.mkdir(parents=True, exist_ok=True)
@@ -293,6 +296,19 @@ class Coordinator:
             raise RequestError('INVALID_REQUEST', 'staged')
         return self.stagings[staged]
 
+    def recent_commits(self, store, keep) -> list:
+        """The manifests of this store committed in this session after the newest one ``keep`` names, section by section (all of a section's
+        when ``keep`` names none of them); each section's record is shortened to its newest named manifest and what follows."""
+        named = set(keep) if isinstance(keep, list) and all(isinstance(name, str) for name in keep) else set()
+        recent = []
+        for section, chain in self.session_commits.get(store.folder, {}).items():
+            positions = [k for k, name in enumerate(chain) if name in named]
+            start = positions[-1] + 1 if positions else 0
+            recent.extend(chain[start:])
+            if positions:
+                self.session_commits[store.folder][section] = chain[positions[-1]:]
+        return recent
+
     def mask_operation(self, request, data):
         if self.projects_root is None:
             raise RequestError('UNSUPPORTED_METHOD')
@@ -321,9 +337,14 @@ class Coordinator:
             require_fields(payload, ('staged', 'tables'))
             staging = self.staging(payload['staged'])
             try:
-                return {'manifest': staging.commit(self.mask_tables(payload['tables']))}
+                manifest = staging.commit(self.mask_tables(payload['tables']))
             finally:
                 del self.stagings[payload['staged']]          # closed also when the commit fails (contract §8.7)
+            chain = self.session_commits.setdefault(staging.store.folder, {}).setdefault(staging.section, [])
+            if manifest in chain:
+                chain.remove(manifest)                            # the same masks committed again: it is the newest now
+            chain.append(manifest)
+            return {'manifest': manifest}
         if operation == 'mask.discard':
             require_fields(payload, ('staged',))
             if not is_uuid(payload['staged']):
@@ -338,7 +359,7 @@ class Coordinator:
                 if staging.store is store:
                     protected |= {name for entry in staging.tiles.values() for name in (entry['labels'], entry['exclude']) if name}
                     protected |= {table['sha256'] for table in (staging.tables or {}).values() if table}
-            return {'removed': self.masks.write_or_disk_error(store.retain, payload['keep'], protected)}
+            return {'removed': self.masks.write_or_disk_error(store.retain, payload['keep'], protected, self.recent_commits(store, payload['keep']))}
         if operation == 'mask.info':
             require_fields(payload, ('project', 'manifest', 'start'))
             return self.mask_store(payload['project']).info(payload['manifest'], payload['start'])
@@ -355,6 +376,7 @@ class Coordinator:
                 raise RequestError('BUSY')
             store.forget()
             self.mask_stores.pop(payload['project'], None)
+            self.session_commits.pop(store.folder, None)
             return {}
         require_fields(payload, ('project', 'manifest', 'layer', 'positions'))      # mask.read
         store, layer, positions = self.mask_store(payload['project']), payload['layer'], payload['positions']

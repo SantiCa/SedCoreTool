@@ -163,6 +163,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `tilecache.js` | Which tiles of a tiled section the viewer needs (card M8.4.15): the level for a zoom (`levelForZoom`: the coarsest with at least one level pixel per screen pixel), the visible tiles plus one ring, nearest the centre first, a coarser cached tile to draw while one is missing (`coarserCover`), a 256 MiB least-recently-used cache that keeps the tiles on screen (`TileCache`) and batched requests, 16 tiles each, two at a time, dropping tiles no longer wanted (`TileScheduler`, keys prefixed per pyramid); where a tile goes on screen (`tilePlacement`) | Yes |
 | `tiledmasks.js` | Masks of tiled sections in the page (card M8.4.16): the cache of level-0 mask tiles (`MaskTiles`: all-zero layers kept as nothing, tiles changed and not acknowledged by the engine never dropped, pinned tiles kept, clean tiles dropped least recently used first beyond 128 MiB), the reduced copy in the working image (`reduceTile`), and the mask layer painted over pixel tiles (`overlayLayout`, `axisMap`, `paintOverlay`) | Yes |
 | `tiledit.js` | Editing the masks of tiled sections (card M8.4.16): the edit window (`EditWindow`: whole level-0 mask tiles as flat arrays, written back tile by tile; `windowRange`, `WINDOW_TILES`) and object statistics kept per tile and summed per object (`tileStats`, `TiledObjectStats`, `affectedTiles`, `tilesUnder`, `TiledStatsRunner`: published per object only when current, tiles prioritised for an operation, card M8.4.28) | Yes |
+| `singleflight.js` | One run at a time with at most one more run for the requests made meanwhile, if the revision changed (card M8.4.31): project saves | Yes |
 | `tiledundo.js` | Undo and redo of tiled edits (card M8.4.16 step 5): copies of the mask tiles an edit changed, taken before its first write and swapped with the page's tiles (`TileChanges`); the 64 MiB budget of those copies (`trimTileHistory`) | Yes |
 | `tiledcounts.js` | Row counts of tiled sections (card M8.4.17): the histogram of each tile (`tileHistogram`), their sum under the current classes (`TiledRowCounts`) and the queue that counts changed tiles between frames (`TiledCountsRunner`); no DOM |
 | `tiledsource.js` | The original image of a tiled section in the section form (card M8.4.18b): where it is, "Locate the image…" and "Copy the image into the project", through `window.corantoolDesktop.tiles` (`createTiledSourcePanel`); `sizeText` | — |
@@ -2202,6 +2203,8 @@ Implementation: `storage.js` and the *projects* block of `app.js`.
 ### 22.2 Automatic saving and its safety
 - Saving runs **1.5 s after any change**; the state is shown next to the project name. When the program opens, the
   last project used is opened.
+- Saves run one at a time (`singleflight.js`, card M8.4.31): a save requested while one is running waits for it and then runs once more
+  only if the project changed after that save started; several requests during one save give at most one more save.
 - Project metadata, project data and section updates/deletions share one IndexedDB read-write transaction.
   `storage.js::run` explicitly aborts it if queuing a request throws synchronously, including a structured-clone
   error after earlier requests were queued. Request failures and transaction aborts also reject the save; the
@@ -3129,7 +3132,8 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   the save state stays "unsaved" and the page says so once ("The latest edits of a large section have not reached the engine's store yet…"); the next
   save tries again (decision D1 of card M8.4.18). The store writes tiles, then the manifest atomically, and the record is written last (ARCHITECTURE
   §3.4 rule 4). After a successful save the page asks the store to keep only the versions its saved records name and the current acknowledged ones
-  (`mask.retain`). *Reopening:* the pyramid is taken from the engine's cache, or built again from the file the main process remembered for the project
+  (`mask.retain`); the engine also keeps every version it committed for a section after the newest one named, whose answer may still be on its
+  way to the page (card M8.4.31). *Reopening:* the pyramid is taken from the engine's cache, or built again from the file the main process remembered for the project
   (`sources.json`), accepted only if its SHA-256 is the saved one; the working image is read from it at the saved level. The stored version's tiles are
   listed (`mask.info`) and each is read back once, for the reduced copy of the masks and the row counts of card M8.4.17; the objects come from the
   record with their saved statistics, which are then computed again from the tiles and pixels in the background. Without the pyramid and the file the

@@ -360,10 +360,12 @@ class MaskStore:
         used.update(table['sha256'] for table in manifest['tables'].values() if table)
         return used
 
-    def retain(self, keep, protected: set[str]) -> dict:
+    def retain(self, keep, protected: set[str], recent=()) -> dict:
         """Delete every manifest not in ``keep`` and then every blob that no kept manifest names and ``protected`` (the blobs of open
-        staged versions) does not hold (card M8.4.18a). Every kept manifest must be readable, or nothing is deleted. Manifests go first, so a
-        stop half-way leaves only unreferenced blobs behind, never a manifest without its blobs. Returns the counts removed."""
+        staged versions) does not hold (card M8.4.18a). Every kept manifest must be readable, or nothing is deleted. ``recent`` are manifests
+        committed in this session after those the request names (card M8.4.31): kept too, with their blobs, when they are still on disk.
+        Manifests go first, so a stop half-way leaves only unreferenced blobs behind, never a manifest without its blobs. Returns the counts
+        removed."""
         if not isinstance(keep, list) or len(keep) > MAX_RETAINED or not all(isinstance(name, str) and HEX64.fullmatch(name) for name in keep):
             raise MaskError('INVALID_REQUEST', 'keep')
         used = set(protected)
@@ -372,7 +374,14 @@ class MaskStore:
                 used |= self.blobs_of(name)
             except MaskError as error:
                 raise MaskError(error.code, 'keep') from None
-        kept, removed = set(keep), {'manifests': 0, 'blobs': 0}
+        kept = set(keep)
+        for name in recent:
+            try:
+                used |= self.blobs_of(name)
+            except MaskError:
+                continue                                                  # gone already (the folder was forgotten): nothing to protect
+            kept.add(name)
+        removed = {'manifests': 0, 'blobs': 0}
         for path in sorted((self.folder / 'manifests').glob('*.json')):
             name = path.name[:-len('.json')]
             if HEX64.fullmatch(name) and name not in kept and not path.is_symlink():

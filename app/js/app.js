@@ -29,6 +29,7 @@ import { figTabsData, loadFigTabs, renderFigPanel, renderFigure, resetFigTabs, s
 import { assembleLevel, imageDimensions, levelPositions, proxyLevel, tileRgba, TILE } from './tiledsection.js';
 import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlacement, tileRange, tilesByDistance } from './tilecache.js';
 import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks.js';
+import { singleFlight } from './singleflight.js';
 import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, tilesUnder, windowRange, planWindows, pinRanges, toWindowRect, windowRgba } from './tiledit.js';
 import { MaskLoader, MaskSync, buildMaskTables, classesText } from './tiledsync.js';
 import { TiledRowCounts, TiledCountsRunner, tileHistogram } from './tiledcounts.js';
@@ -3906,44 +3907,48 @@ export function markDirty() {
   if (loading || VIEW_ONLY) return;
   blankStart = false;   // V0.2: work started without creating a project is saved as a new project
   scheduleFloat();
-  dirty = true; setSaveState(storageOK && !readOnlyProject ? 'dirty' : 'off');
+  dirty = true; changeCount++; setSaveState(storageOK && !readOnlyProject ? 'dirty' : 'off');
   clearTimeout(saveTimer); if (storageOK) saveTimer = setTimeout(saveToDB, 1500);
 }
 
-let savePromise = null, lastSaveError = null;
-/** Save the open project; saves never overlap (a new save waits for the one in progress). */
+let lastSaveError = null;
+/** Card M8.4.31: one save at a time; a request during a save makes one more save afterwards only if the project changed after that save
+ *  started (`singleflight.js`). Not `dirty`: a save that could not store a tiled section leaves the project dirty, and every waiting request
+ *  would repeat it until its deadline. */
+let changeCount = 0;
+const saves = singleFlight(saveOnce, () => changeCount);
 let blankStart = true;   // V31: nothing is saved until the user creates or opens a project
+/** Save the open project. */
 async function saveToDB() {
   if (blankStart || loading || readOnlyProject) return;   // V0.36: never during a load nor over a file of a newer version
   if (!S.id || !S.cores.length) return;   // V0.36: the initial state (before startup) is not a project
   if (!storageOK) return;
   clearTimeout(saveTimer);
-  if (savePromise) { await savePromise.catch(() => {}); if (!dirty && !savePromise) return; }
-  savePromise = (async () => {
-    const finishDiagnostic = diagnosticOperation('save');
-    try {
-      setSaveState('saving'); dirty = false;
-      await storePendingImages();
-      const unsaved = await settleTiledSections();
-      await putProject(projectMeta(), serialize());
-      for (const q of S.sections.length ? S.cores.flatMap((c) => c.sections) : []) if (q.tiled && q._tiledRecord) q._savedRecord = q._tiledRecord;
-      void retainStore();
-      if (unsaved) { dirty = true; if (!tiledUnsavedShown) { tiledUnsavedShown = true; toast(t('tiles.unsaved'), 12000); } }
-      else tiledUnsavedShown = false;
-      try { await putLite(S.id, liteSnapshot()); } catch { /* lite index is optional */ }
-      broadcast({ type: 'saved', id: S.id });
-      if (saveCount++ % 10 === 0) checkQuota();   // V0.36
-      try { localStorage.setItem('ichantool.last', S.id); } catch { /* storage blocked */ }
-      lastSaveError = null;
-      setSaveState(dirty ? 'dirty' : 'saved'); scheduleBackup();
-      finishDiagnostic();
-    } catch (e) {
-      dirty = true; lastSaveError = e; setSaveState('error'); console.error(e);
-      finishDiagnostic(e);
-      if (e?.name === 'QuotaExceededError') toast(t('save.quota'));
-    }
-  })();
-  try { await savePromise; } finally { savePromise = null; }
+  await saves.request();
+}
+async function saveOnce() {
+  const finishDiagnostic = diagnosticOperation('save');
+  try {
+    setSaveState('saving'); dirty = false;
+    await storePendingImages();
+    const unsaved = await settleTiledSections();
+    await putProject(projectMeta(), serialize());
+    for (const q of S.sections.length ? S.cores.flatMap((c) => c.sections) : []) if (q.tiled && q._tiledRecord) q._savedRecord = q._tiledRecord;
+    void retainStore();
+    if (unsaved) { dirty = true; if (!tiledUnsavedShown) { tiledUnsavedShown = true; toast(t('tiles.unsaved'), 12000); } }
+    else tiledUnsavedShown = false;
+    try { await putLite(S.id, liteSnapshot()); } catch { /* lite index is optional */ }
+    broadcast({ type: 'saved', id: S.id });
+    if (saveCount++ % 10 === 0) checkQuota();   // V0.36
+    try { localStorage.setItem('ichantool.last', S.id); } catch { /* storage blocked */ }
+    lastSaveError = null;
+    setSaveState(dirty ? 'dirty' : 'saved'); scheduleBackup();
+    finishDiagnostic();
+  } catch (e) {
+    dirty = true; lastSaveError = e; setSaveState('error'); console.error(e);
+    finishDiagnostic(e);
+    if (e?.name === 'QuotaExceededError') toast(t('save.quota'));
+  }
 }
 /*
  * Card M8.4.18a, D1: before a save, every tiled section's store must hold all of its edits. The record is built in the same moment the sync is found
@@ -4000,7 +4005,7 @@ async function checkQuota() {
 }
 let saveCount = 0;
 async function flushSave() {
-  if (savePromise) await savePromise;
+  if (saves.running) await saves.running;
   if (dirty) await saveToDB();
   if (backupPending) void backupNow();
 }
@@ -4017,7 +4022,7 @@ let closeOK = false;
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && dirty) saveToDB(); });
 window.addEventListener('pagehide', () => { if (dirty) saveToDB(); });
 window.addEventListener('beforeunload', (e) => {
-  if ((!dirty && !savePromise) || closeOK || readOnlyProject || blankStart) return;
+  if ((!dirty && !saves.running) || closeOK || readOnlyProject || blankStart) return;
   e.preventDefault(); e.returnValue = '';
   if (window.corantoolDesktop) desktopClose();
 });
@@ -4498,7 +4503,7 @@ async function restoreFiles(files) {
     if (p.id && existing.has(p.id)) {   // V0.8: the same project (work by turns): replace the local version or keep both
       const m = await getMeta(p.id).catch(() => null);
       if (confirm(t('bk.replaceAsk', { n: p.name || APP, a: m?.updated ? new Date(m.updated).toLocaleString() : '?', b: p.saved ? new Date(p.saved).toLocaleString() : '?' }))) {
-        if (p.id === S.id) { clearTimeout(saveTimer); if (savePromise) await savePromise; }
+        if (p.id === S.id) { clearTimeout(saveTimer); if (saves.running) await saves.running; }
         const old = await getProject(p.id).catch(() => null);
         if (old && storageOK) {   // V0.36: the local version is kept as a copy before it is replaced
           const id2 = uid(), name2 = `${old.name || APP} (${t('bk.previous')} ${new Date(m?.updated || Date.now()).toLocaleDateString()})`;

@@ -486,6 +486,11 @@ try {
   const objectsNow = () => on.page.evaluate(() => [...window.ichantool.S.sections.at(-1).objects.values()].map((o) => [o.id, o.area, String(o.sbox)]));
   const withLayers = (page) => Object.fromEntries(Object.entries(page).filter(([, layers]) => layers[0] || layers[1]));
   await on.page.waitForFunction(() => window.ichantool.tiledStatsIdle(), { polling: 100, timeout: 60000 });
+  // Nothing may be pending when the stroke starts: a save started by the earlier edits sends a round, and one that lands during the stroke
+  // commits before the stroke's own round (seen on 19 Nov 2026, depending on how long the process lookup above took).
+  await on.page.evaluate(() => window.ichantool.saveNow());
+  await on.page.waitForFunction(() => window.ichantool.masksSettled(), { polling: 100, timeout: 60000 });
+  const manifestBeforeStroke = await on.page.evaluate(() => window.ichantool.S.sections.at(-1)._maskSync.manifest);
   const objectsBefore = await objectsNow();
   const putsBefore = await on.page.evaluate(() => window.ichantool.S.sections.at(-1)._maskSync.puts);
   await on.page.mouse.move(box.left + 500, box.top + 40); await on.page.mouse.down();
@@ -514,7 +519,7 @@ try {
   const resent = await storeMatchesPage();
   assert.ok(!resent.error, 'the restarted engine answers: ' + JSON.stringify(resent.error));
   assert.equal(resent.dirty, 0);
-  assert.equal(manifestAtKill, settled.manifest, 'the engine was killed before the round committed');
+  assert.equal(manifestAtKill, manifestBeforeStroke, 'the engine was killed before the round committed');
   assert.equal(midway.running, false);
   assert.deepEqual(resent.stored, resent.page, 'after the restart the store holds exactly the page\'s masks');
   assert.deepEqual(withLayers(resent.page), withLayers(settled.page), 'the undone stroke is gone from the page and from the store');
@@ -872,6 +877,38 @@ try {
   assert.deepEqual(await dump(quick.index), slowDump, 'the same result after reading the masks back');
   assert.ok(!toasts.slice(toastsBeforeQuick).some((text) => text === tBusy || text === tLoading), 'never "try again"');
   console.log('Reopened, an object spanning two tiles deleted at once (' + quick.ms + ' ms, ' + quick.waitingAtStart + ' tiles waiting at the start, ' + quick.waitingAfter + ' after): equal to the deletion with every statistic current');
+  // Card M8.4.31: edits and saves overlap for 20 s (a tile changes every 100 ms, a save is requested every 200 ms without waiting for the
+  // previous one), so that clean-ups of the store run while versions are being committed. After a final save the store holds exactly the
+  // saved versions and the reopened section has the masks it had.
+  const race = await on.page.evaluate(async () => {
+    const { S } = window.ichantool, app = await import(new URL('js/app.js', location.href).href);
+    const index = S.sections.findIndex((q) => q.id === window.__tiledId), s = S.sections[index];
+    window.ichantool.selectSection(index);
+    const id = [...s.objects.keys()][0], until = performance.now() + 20000, requests = [];
+    let edits = 0;
+    while (performance.now() < until) {
+      const row = edits % s.maskTiles.rows, col = Math.floor(edits / s.maskTiles.rows) % s.maskTiles.cols, labels = new Int32Array(512 * 512);
+      const width = Math.min(512, s.maskTiles.width - col * 512), height = Math.min(1 + (edits % 50), s.maskTiles.height - row * 512);
+      for (let y = 0; y < height; y++) labels.fill(id, y * 512, y * 512 + width);   // a band inside the section whose height changes with every edit
+      window.ichantool.putMaskTile(row, col, labels, null);
+      app.markDirty();
+      if (edits++ % 2 === 1) requests.push(window.ichantool.saveNow());
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    await Promise.all(requests);
+    for (let k = 0; k < 600 && !window.ichantool.masksSettled(); k++) await new Promise((resolve) => setTimeout(resolve, 50));
+    await window.ichantool.saveNow();
+    return { edits, requests: requests.length, saved: window.ichantool.tiledSaved().filter(Boolean) };
+  });
+  assert.ok(race.edits >= 150 && race.requests >= 75, 'edits and saves overlapped: ' + JSON.stringify({ edits: race.edits, requests: race.requests }));
+  for (let i = 0; i < 100 && JSON.stringify(await manifestsOnDisk()) !== JSON.stringify([...new Set(race.saved)].sort()); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.deepEqual(await manifestsOnDisk(), [...new Set(race.saved)].sort(), 'after the final save the store holds exactly the saved versions');
+  const raceIndex = await on.page.evaluate(() => window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId));
+  const raceDump = await dump(raceIndex);
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false }, 'reopened after the race, unlocked');
+  const reopenedDump = await dump(await on.page.evaluate(() => window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId)));
+  assert.deepEqual([reopenedDump.runs, reopenedDump.exRuns], [raceDump.runs, raceDump.exRuns], 'the reopened masks are the last saved ones');
+  console.log(`Edits and saves overlapping for 20 s (${race.edits} edits, ${race.requests} saves requested): the store holds the saved versions and the reopened masks are the last saved ones`);
   // (3) Deleting a project from the library deletes its folder, and only that one.
   const originalFolder = manifestFile.slice(0, manifestFile.indexOf(path.sep + 'tiles' + path.sep));
   await on.page.evaluate(async (id) => {
