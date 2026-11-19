@@ -14,6 +14,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### For users
 
+- Deleting an ichnotaxon now asks first, saying how many traces and predictions in how many cores will become unclassified, and acts on every core of the project (before, only on the open core: the traces of the other cores kept a class that no longer existed). «Restore» under the class list brings it back while the project is open. A project saved with such traces is repaired when it opens, and the program says how many there were.
 - Two saves of a project can no longer run at the same time (a save requested during another now waits for it). With large "tiled" sections, a clean-up after a save could delete the masks the program had just stored, if editing and saving overlapped; the edits of that moment could then be missing after reopening. Fixed: the store keeps every version committed since the one the program knows.
 - Right after a large "tiled" section is opened, deleting, merging, cutting or reclassifying an object no longer asks you to try again in a minute or two: the program computes that object's part of the section first (the busy indicator shows; Esc cancels) and then does it. An object's area and statistics are no longer shown, or saved, half-computed while the section is being opened.
 - Deleting a project now also deletes, on this computer, the stored masks of its large "tiled" sections and the copies of their images. When a project is imported over a local version that has large sections and you keep both, the kept copy now has its own masks and opens as before (before, it could not be opened, and later saves could remove its masks). A large section whose stored masks are missing or damaged now opens locked, without them, instead of preventing the whole project from opening; the rest of the project can be edited and saved.
@@ -26,6 +27,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card Q1: `app/js/taxa.js` (`classUse`, `deleteClass`, `restoreClass`, `repairOrphanLabels`) with Node tests; the class deletion of `app.js` uses it and now marks the project changed and sends the objects table of tiled sections.
 - Card M8.4.31: `mask.retain` keeps the manifests the engine committed in this session after the newest one named, section by section (`Coordinator.recent_commits`, `MaskStore.retain(recent=...)`); project saves through `singleflight.js` with a revision counter; the desktop test edits and saves overlapping for 20 s, and its engine-kill step saves and settles right before the stroke (a save landing during the stroke made it fail on this computer, also on the previous commit).
 - Card M8.4.26: building the engine runtime tries a failed download again (up to 4 attempts, pauses of 2, 5 and 15 s; a file that does not
   match the lock still stops the build at once), and *Desktop builds* keeps the verified downloads between runs. An engine test whose engine

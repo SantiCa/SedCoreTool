@@ -82,9 +82,10 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: Q1** (deleting an ichnotaxon acts on the whole project, with confirmation and recovery; **model: most capable tier, effort
-  medium**), then the order O approved on 19 November 2026 (second council audit, below); V0.152 after Q1 and Q4 (decision J). M8.4.31 is
-  done (a store clean-up keeps every version committed since the one the page names; saves run one at a time; development gate). M8.4.28 is done (an object operation right after reopening waits only for its own tiles: 387-397 ms instead of not finishing; development gate). M8.4.27 is done (the store folder is deleted and copied with its project; a missing stored version locks its section; development gate). M8.4.18b is done (a moved image is located by its SHA-256 and can be copied into the project; development gate). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate). Its three findings have cards, in this order after M8.4.18b: M8.4.27 (the store folder follows its project: delete, copy under a new identifier, a missing stored version; Opus, high), M8.4.28 (object operations right after reopening; Opus, medium), M8.4.29 (reopening from a cache instead of every tile; Opus, high; decision G waits for the maintainer); then M8.4.18c, M8.4.18d, M8.4.19. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
+- **Next step: Q4** (exports keep the data: significant digits, the gap limit and interval means of the core-column CSV; decisions N and P;
+  **model: most capable tier, effort medium**), then the order O approved on 19 November 2026 (second council audit, below); V0.152 after Q4
+  (decision J). Q1 is done (deleting an ichnotaxon reaches every core, asks first, can be restored; orphaned labels repaired on opening;
+  development gate). M8.4.31 is done (a store clean-up keeps every version committed since the one the page names; saves run one at a time; development gate). M8.4.28 is done (an object operation right after reopening waits only for its own tiles: 387-397 ms instead of not finishing; development gate). M8.4.27 is done (the store folder is deleted and copied with its project; a missing stored version locks its section; development gate). M8.4.18b is done (a moved image is located by its SHA-256 and can be copied into the project; development gate). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate). Its three findings have cards, in this order after M8.4.18b: M8.4.27 (the store folder follows its project: delete, copy under a new identifier, a missing stored version; Opus, high), M8.4.28 (object operations right after reopening; Opus, medium), M8.4.29 (reopening from a cache instead of every tile; Opus, high; decision G waits for the maintainer); then M8.4.18c, M8.4.18d, M8.4.19. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1921,8 +1922,9 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 - **Change:** a small generator of the test image (a few thousand pixels on a side, written by the test itself or a script in `tools/`);
   the two tests in *Desktop builds*; `SEDCORETOOL_REQUIRE_PYVIPS=1` in CI turns the skip into a failure; DEVELOPMENT.
 - **Model:** most capable, effort medium (CI on three systems; a broken workflow blocks every gate).
-- **Before it (19 Nov 2026):** the retry of a refused rename on Windows (part of card A2) should be done first, or the folder-deletion step of
-  `tiled-sections.mjs` may fail now and then (incident of M8.4.31).
+- **Before it (19 Nov 2026):** the retries of a refused rename and of a refused removal on Windows (part of card A2: `fs.renameSync` and
+  `fs.rmSync` in `deleteProjectStore`) should be done first, or the folder-deletion step of `tiled-sections.mjs` fails now and then (incidents of
+  M8.4.31 and Q1: two failures in three runs).
 - **Tests:** the workflows themselves: one green run on three systems, and one deliberately failing run (a broken assertion on a scratch
   branch) that shows red.
 - **Done when:** both workflows pass on three systems with the two tests in them; development gate (it changes what the milestone gate means).
@@ -2243,13 +2245,30 @@ Written from the council audit (status block). Each card names its model; the sc
 
 ### Cards of the second council (19 November 2026)
 
-- [ ] **Q1 - Deleting an ichnotaxon (P0).** Today the ✕ of a class acts on the open core's sections only, with no confirmation and no undo,
+- [x] **Q1 - Deleting an ichnotaxon (P0).** Done 19 Nov 2026 (development gate); *As built* below. Today the ✕ of a class acts on the open core's sections only, with no confirmation and no undo,
       and discards the undo history; the traces of the other cores keep the deleted class's id. Change: the deletion reaches every core of the
       project (`S.cores`), the confirmation names the number of labelled traces and examples in the whole project, the class is kept in a
       recoverable list (or the deletion is one undo step); opening a project reports and repairs traces whose class does not exist (they
       become unlabelled, counted in a message). The logic goes in a module (AGENTS §4), `app.js` wires it. *Model:* most capable, effort medium
       (it can lose expert work). *Tests:* Node: two cores, delete a class used in both: no trace keeps its id; undo or restore brings every
       label back; a saved project with orphaned ids opens repaired with the count.
+      *As built (19 Nov 2026):* `app/js/taxa.js` (`classUse`, `deleteClass`, `restoreClass`, `repairOrphanLabels`); `app.js` wires it
+      (`deleteClassAsked`, `restoreDeletedClass`, `labelsChanged`; the repair at the end of `loadProject`, with a message and a save) and a
+      «Restore» button under the class list (`#clsRestore`, the last deletion first; cleared when another project is opened). Recovery is a
+      list kept while the project is open, not an undo step: the undo history is still discarded, because its steps hold traces labelled with
+      the deleted class (the question says so). The old deletion did not mark the project changed nor send the objects table of tiled sections;
+      it does now. Native `confirm()` until card U2 brings one confirmation dialog. Tests: Node 4 (`tests/app/taxa.test.mjs`: use counted over
+      every core; deleting a class used in two cores leaves no trace with its id and restoring gives back every label and prediction; a trace
+      labelled again or gone is left alone; orphaned labels repaired with their count, a second pass finds nothing). Checked once in the
+      desktop program with a script not kept (the test project split into two cores, a new class labelled in both): the question named 2
+      traces, 7 predictions and 2 cores, no trace kept the class, «Restore» brought back both labels and hid itself. `app.js`: 5,352 lines
+      before, 5,383 after (the three wiring functions and the button). Full checks (Windows): `py -3.12 -m pytest -q` 885 passed / 9 skipped;
+      `npm test` 476 passed; typecheck (one old diagnostic fewer); `sync_version.py --check`; `ruff check`; standalone build; `desktop.mjs`
+      with the engine off and on. `tiled-sections.mjs` failed at the M8.4.27 step "nothing left half-deleted": the incident of M8.4.31 again
+      (second time in three runs since its 20 s block of edits and saves runs just before), now with its cause visible: the folder was renamed to
+      `.deleting-*` and its removal failed (`deleteProjectStore` calls `fs.rmSync` without retries, `fs.renameSync` without retries; a file still
+      held for a moment on Windows makes them fail). Nothing of Q1 runs in that step. No data is lost (the program says the folder was not
+      deleted, and removes the remainder at its next start). The retries are part of card A2; bringing them forward is proposed to the maintainer.
 - [ ] **Q2 - The import panel and the readers.** One import panel with a preview of the first rows as read and counts: missing-value codes
       (a configurable list, by default -999, -999.25, -9999), censored values (decision M), rows dropped and why (`parseAgeModelDetailed`,
       `coreFromRows`, `coresFromLongTable`, `intervalsFromTable`, which also reverses from > to silently, `buildSamples` with log of v ≤ 0),

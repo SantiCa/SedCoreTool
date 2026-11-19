@@ -1085,12 +1085,14 @@ Object.assign(D.en, {
 Object.assign(D.es, {
   'gx.tip.markLayer': 'Capa en la que se dibujan los intervalos', 'gx.tip.markCat': 'Clase del intervalo que vas a dibujar',
   'gx.delCat': 'Eliminar esta clase', 'gx.delCatN': '¿Borrar y sus {n} intervalos?', 'gx.tip.catCount': 'Intervalos de esta clase en todos los sondeos',
+  'cls.delAsk': '¿Borrar el icnotaxón «{n}»? {t} trazas etiquetadas con él ({e} de ellas ejemplos) y {p} predicciones, en {c} testigos, quedarán sin clasificar. También se borra el historial de deshacer; podrás recuperar el icnotaxón con «Recuperar» mientras el proyecto siga abierto.', 'cls.restore': 'Recuperar «{n}»', 'cls.restored': '«{n}» recuperado: {k} etiquetas y predicciones vuelven a tenerlo.', 'cls.orphans': 'El proyecto tenía {t} trazas y {p} predicciones con un icnotaxón que ya no existe (borrado antes en otro testigo): ahora están sin clasificar.',
   'gx.delCls': 'Eliminar este icnotaxón (sus trazas quedan sin clasificar)', 'gx.fixedCls': 'Clase del programa: no se puede eliminar',
   'gx.noIvHere': 'No hay ningún intervalo a esa altura. Activa «Marcar intervalos» para dibujar uno.', 'gx.clickHint': 'Clic: editar el intervalo de esta altura',
 });
 Object.assign(D.en, {
   'gx.tip.markLayer': 'Layer in which intervals are drawn', 'gx.tip.markCat': 'Class of the interval you are about to draw',
   'gx.delCat': 'Delete this class', 'gx.delCatN': 'Delete it and its {n} intervals?', 'gx.tip.catCount': 'Intervals of this class in all cores',
+  'cls.delAsk': 'Delete the ichnotaxon «{n}»? {t} traces labelled with it ({e} of them examples) and {p} predictions, in {c} cores, will become unclassified. The undo history is cleared too; you can restore the ichnotaxon with «Restore» while the project stays open.', 'cls.restore': 'Restore «{n}»', 'cls.restored': '«{n}» restored: {k} labels and predictions have it again.', 'cls.orphans': 'The project had {t} traces and {p} predictions with an ichnotaxon that no longer exists (deleted earlier in another core): they are now unclassified.',
   'gx.delCls': 'Delete this ichnotaxon (its traces become unclassified)', 'gx.fixedCls': 'Built-in class: cannot be deleted',
   'gx.noIvHere': 'No interval at that level. Turn on “Mark intervals” to draw one.', 'gx.clickHint': 'Click: edit the interval at this level',
 });

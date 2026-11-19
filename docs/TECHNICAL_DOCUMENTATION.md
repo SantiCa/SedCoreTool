@@ -163,6 +163,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `tilecache.js` | Which tiles of a tiled section the viewer needs (card M8.4.15): the level for a zoom (`levelForZoom`: the coarsest with at least one level pixel per screen pixel), the visible tiles plus one ring, nearest the centre first, a coarser cached tile to draw while one is missing (`coarserCover`), a 256 MiB least-recently-used cache that keeps the tiles on screen (`TileCache`) and batched requests, 16 tiles each, two at a time, dropping tiles no longer wanted (`TileScheduler`, keys prefixed per pyramid); where a tile goes on screen (`tilePlacement`) | Yes |
 | `tiledmasks.js` | Masks of tiled sections in the page (card M8.4.16): the cache of level-0 mask tiles (`MaskTiles`: all-zero layers kept as nothing, tiles changed and not acknowledged by the engine never dropped, pinned tiles kept, clean tiles dropped least recently used first beyond 128 MiB), the reduced copy in the working image (`reduceTile`), and the mask layer painted over pixel tiles (`overlayLayout`, `axisMap`, `paintOverlay`) | Yes |
 | `tiledit.js` | Editing the masks of tiled sections (card M8.4.16): the edit window (`EditWindow`: whole level-0 mask tiles as flat arrays, written back tile by tile; `windowRange`, `WINDOW_TILES`) and object statistics kept per tile and summed per object (`tileStats`, `TiledObjectStats`, `affectedTiles`, `tilesUnder`, `TiledStatsRunner`: published per object only when current, tiles prioritised for an operation, card M8.4.28) | Yes |
+| `taxa.js` | The ichnotaxa of a project (card Q1): use of a class across cores, deleting it from every core and restoring it, repairing labels of classes that no longer exist | Yes |
 | `singleflight.js` | One run at a time with at most one more run for the requests made meanwhile, if the revision changed (card M8.4.31): project saves | Yes |
 | `tiledundo.js` | Undo and redo of tiled edits (card M8.4.16 step 5): copies of the mask tiles an edit changed, taken before its first write and swapped with the page's tiles (`TileChanges`); the 64 MiB budget of those copies (`trimTileHistory`) | Yes |
 | `tiledcounts.js` | Row counts of tiled sections (card M8.4.17): the histogram of each tile (`tileHistogram`), their sum under the current classes (`TiledRowCounts`) and the queue that counts changed tiles between frames (`TiledCountsRunner`); no DOM |
@@ -928,6 +929,13 @@ intact if it alone exceeds a limit. A new recorded edit discards Redo. Cropping,
 resolution and deleting a section discard its history in both directions. Deleting a class clears both
 directions for the active core because saved trace records may refer to that class. The history is kept
 in the active core session and never written to the project file.
+
+**Deleting an ichnotaxon** (`taxa.js`, card Q1) reaches every core of the project: each trace labelled with it, and each trace it was
+predicted for, becomes unclassified. When any trace uses it, the program asks first and says how many labelled traces (and how many of
+them are examples), predictions and cores are concerned. While the project stays open, «Restore «name»» under the class list puts the class
+back in its place and gives its label back to the traces that still exist and were not labelled again meanwhile (predictions the model has
+recomputed are left to the model). When a project opens, traces whose label or prediction names a class the project does not have (left by
+deletions made before this card, which reached the open core only) become unclassified, and the program says how many.
 
 After each edit, descriptors (§11) are recomputed only for the affected objects, inside the rectangle that contains
 them. Deleting traces only scans the union of their bounding rectangles (the whole image if one has no rectangle).
@@ -3544,7 +3552,6 @@ The percentage difference comes from the JPEG decoder (§3.4), not from the meth
     with hundreds of thousands of samples); MDI importance is biased among correlated proxies; everything is computed
     on the user's computer.
 11. **Known defects, with cards in the roadmap** (found by the audits of 19 November 2026; each item is removed when its card is done):
-    deleting an ichnotaxon acts only on the open core's sections, so traces of other cores keep a class that no longer exists (Q1);
     missing-value codes such as -999 are read as values (Q2); spreadsheets are read from their first sheet, with the numbers as the sheet
     formats them (Q2); numbers in exported CSV files are rounded to six decimals, so values below 0.0000005 are written as 0 (Q4); the
     core-column CSV interpolates records across gaps of any length (Q4); changing a section's unit does not convert its depths (Q3);

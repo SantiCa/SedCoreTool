@@ -30,6 +30,7 @@ import { assembleLevel, imageDimensions, levelPositions, proxyLevel, tileRgba, T
 import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlacement, tileRange, tilesByDistance } from './tilecache.js';
 import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks.js';
 import { singleFlight } from './singleflight.js';
+import { classUse, deleteClass, restoreClass, repairOrphanLabels } from './taxa.js';
 import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, tilesUnder, windowRange, planWindows, pinRanges, toWindowRect, windowRgba } from './tiledit.js';
 import { MaskLoader, MaskSync, buildMaskTables, classesText } from './tiledsync.js';
 import { TiledRowCounts, TiledCountsRunner, tileHistogram } from './tiledcounts.js';
@@ -2715,7 +2716,38 @@ function renderClasses() {
       <span class="cnt">${idMode() ? t('id.count', { n: S.sections.reduce((a, x) => a + (x.marks || []).filter((m) => m.cls === c.id).length, 0) }) : t('cls.counts', { n: nObj[c.id] || 0, e: nEx[c.id] || 0 })}</span>
       ${c.fixed ? `<span title="${esc(t('gx.fixedCls'))}"></span>` : `<button class="del" title="${esc(t('gx.delCls'))}" aria-label="${esc(t('gx.delCls'))}">✕</button>`}
     </li>`).join('');
+  const last = deletedClasses.at(-1);
+  $('clsRestore').hidden = !last;
+  if (last) $('clsRestore').textContent = t('cls.restore', { n: last.cls.name });
 }
+/* Card Q1: deleting an ichnotaxon reaches the traces of every core (`taxa.js`), asks first when traces use it, and can be undone while the
+   project is open («Restore»). The undo history is discarded as before: its steps hold traces labelled with the deleted class. */
+const deletedClasses = [];
+function deleteClassAsked(id) {
+  const c = clsById(id), use = classUse(S.cores, id);
+  if (!c || ((use.traces || use.predictions) && !confirm(t('cls.delAsk', { n: c.name, t: use.traces, e: use.examples, p: use.predictions, c: use.cores })))) return;
+  discardEditHistory();
+  const deleted = deleteClass(S, id);
+  if (S.active === id) S.active = 'undet';
+  deletedClasses.push(deleted);
+  labelsChanged(new Set(deleted.labels.map((label) => label.section)));
+}
+function restoreDeletedClass() {
+  const deleted = deletedClasses.pop();
+  if (!deleted) return;
+  discardEditHistory();
+  const { restored } = restoreClass(S, deleted);
+  labelsChanged(new Set(deleted.labels.map((label) => label.section)));
+  toast(t('cls.restored', { n: deleted.cls.name, k: restored }));
+}
+/** Traces of these sections changed their labels: the store of tiled sections, the colours, the save, the models and the tables follow. */
+function labelsChanged(sections) {
+  for (const q of sections) { if (q.maskTiles && TILES && !q.frozen) void maskSync(q).request(['objects']); q.logVer = (q.logVer || 0) + 1; }
+  for (const q of S.cores.flatMap((c) => c.sections)) rebuildLUT(q);
+  markDirty(); scheduleLearn(); scheduleAnalysis(); renderClasses(); renderObject(); requestRender();
+}
+$('clsRestore').addEventListener('click', restoreDeletedClass);
+
 /** Two-step confirmation for actions that cannot be undone: the first click arms the button (text and colour change) for 4 s. */
 export function armed(btn, msg) {
   if (!btn) return true;
@@ -2738,15 +2770,7 @@ $('clsShowAll').addEventListener('click', () => { S.settings.solo = false; setHi
 $('classList').addEventListener('click', (e) => {
   const li = e.target.closest('li'); if (!li) return;
   if (e.target.classList.contains('eye')) { S.settings.solo = false; const h = hiddenCls(), id = li.dataset.id; if (h.has(id)) h.delete(id); else h.add(id); setHidden(h); return; }
-  if (e.target.classList.contains('del')) {
-    const id = li.dataset.id;
-    discardEditHistory();
-    for (const s of S.sections) for (const o of s.objects.values()) { if (o.cls === id) o.cls = null; if (o.pred === id) o.pred = null; }
-    S.classes = S.classes.filter((c) => c.id !== id);
-    if (S.active === id) S.active = 'undet';
-    for (const s of S.sections) rebuildLUT(s);
-    scheduleLearn(); renderClasses(); requestRender(); return;
-  }
+  if (/** @type {HTMLElement} */ (e.target).classList.contains('del')) { deleteClassAsked(li.dataset.id); return; }
   if (e.target.tagName !== 'INPUT') setActive(li.dataset.id);
 });
 $('classList').addEventListener('input', (e) => {
@@ -3857,6 +3881,12 @@ async function loadProject(p) {
     finishDiagnostic(err);
     return false;
   } finally { loading = false; }
+  const orphans = repairOrphanLabels(S.cores, S.classes);   // card Q1: labels of a class deleted before deletions reached every core
+  if (orphans.traces || orphans.predictions) {
+    loadMigrated = true;
+    for (const q of /** @type {Set<any>} */ (orphans.sections)) if (q.maskTiles && TILES && !q.frozen) void maskSync(q).request(['objects']);
+    setTimeout(() => toast(t('cls.orphans', { t: orphans.traces, p: orphans.predictions }), 12000), 400);
+  }
   if (readOnlyProject) setTimeout(() => { setSaveState('off'); toast(t('load.newer', { v: p.delivery || p.version }), 10000); }, 300);
   if (projectPreview) readOnlyProject = true;
   const cur = S.cores.find((c) => c.id === p.curCore) || S.cores[0];
@@ -3873,6 +3903,7 @@ async function loadProject(p) {
 
 function resetState() {
   blankStart = false; clearTimeout(saveTimer);   // V0.36: a pending save of the previous project must not run afterwards
+  deletedClasses.length = 0;                     // card Q1: a deletion is undone only in its own project
   readOnlyProject = false; projectPreview = null; $('projectValidation').hidden = true;
   const maxMP = S.settings.maxMP || 8;
   S.id = uid(); S.name = t('proj.untitled'); S.notes = ''; S.comments = []; S.finalTests = [];
