@@ -346,14 +346,57 @@ export function toCSV(rows) {
   const formatCell = (value) => {
     if (value == null) return '';
     if (typeof value === 'number') {
-      // Integers already have the same representation after six-decimal rounding.
-      return String(Number.isInteger(value) ? value : +value.toFixed(6));
+      // Card Q4 (decision N): 15 significant digits, so that small values (a mass susceptibility of 1e-8) are kept and binary noise
+      // (0.30000000000000004) is not written; a value that is not a finite number is an empty cell.
+      if (!Number.isFinite(value)) return '';
+      return String(Number.isInteger(value) ? value : +value.toPrecision(15));
     }
     let text = String(value);
     if (/^[ \u00a0]*[\t\r\n]/.test(text) || /^[\s\u0000-\u001f]*[=+@\-＝＋－＠]/u.test(text)) text = "'" + text;
     return /[",;|\t\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   };
   return rows.map((row) => row.map(formatCell).join(',')).join('\n') + '\n';
+}
+
+/**
+ * The largest gap a record's values are interpolated across: 3 × the median spacing of its samples that have a value (card Q4; the rule of
+ * the cursor and of multiproxy resampling, `geo.js::autoGap`). Infinity with fewer than two distinct positions.
+ * @param {readonly (number | null)[]} xs @param {readonly (number | null)[]} ys @returns {number}
+ */
+export function seriesGap(xs, ys) {
+  const x = /** @type {number[]} */ (xs.filter((v, i) => v != null && ys[i] != null)).sort((a, b) => a - b);
+  const d = x.slice(1).map((v, i) => v - x[i]).filter((v) => v > 0).sort((a, b) => a - b);
+  return d.length ? 3 * d[d.length >> 1] : Infinity;
+}
+
+/**
+ * A record's samples sorted once (card Q4): `at(x)` is the linear interpolation at x, null outside the samples or across a gap wider than
+ * `maxGap`; `mean(lo, hi)` is the mean and the number of the samples with lo <= x < hi (`{mean: null, n: 0}` when there are none).
+ * @param {readonly (number | null)[]} xs @param {readonly (number | null)[]} ys @param {number} [maxGap]
+ */
+export function seriesSampler(xs, ys, maxGap = seriesGap(xs, ys)) {
+  const p = xs.map((x, i) => [x, ys[i]]).filter((q) => q[0] != null && q[1] != null && Number.isFinite(q[0]) && Number.isFinite(q[1]))
+    .sort((a, b) => /** @type {number} */ (a[0]) - /** @type {number} */ (b[0]));
+  const X = p.map((q) => /** @type {number} */ (q[0])), Y = p.map((q) => /** @type {number} */ (q[1]));
+  const first = (/** @type {number} */ v) => { let lo = 0, hi = X.length; while (lo < hi) { const m = (lo + hi) >> 1; if (X[m] < v) lo = m + 1; else hi = m; } return lo; };
+  return {
+    /** @param {number | null} x */
+    at(x) {
+      if (x == null || !X.length || x < X[0] || x > X[X.length - 1]) return null;
+      const i = first(x);
+      if (X[i] === x) return Y[i];
+      const lo = i - 1, hi = i;
+      if (X[hi] - X[lo] > maxGap) return null;
+      return Y[lo] + ((x - X[lo]) / (X[hi] - X[lo])) * (Y[hi] - Y[lo]);
+    },
+    /** @param {number | null} lo @param {number | null} hi */
+    mean(lo, hi) {
+      if (lo == null || hi == null) return { mean: null, n: 0 };
+      let sum = 0, n = 0;
+      for (let i = first(Math.min(lo, hi)); i < X.length && X[i] < Math.max(lo, hi); i++) { sum += Y[i]; n++; }
+      return { mean: n ? sum / n : null, n };
+    },
+  };
 }
 
 /** Run-length encoding for label/exclusion layers in project files: [value, run, value, run, ...].

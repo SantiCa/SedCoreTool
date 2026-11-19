@@ -17,11 +17,25 @@ const copyName = (sha256, name) => sha256 + ((/\.[A-Za-z0-9]{1,8}$/.exec(name)?.
 // Card M8.4.27: a deleted project's folder is first renamed to this prefix (never a store identifier), then removed; leftovers go at start.
 const DELETING = '.deleting-', MAX_COPIED_SOURCES = 1024;
 
+// Card A2 (brought forward on 19 Nov 2026): on Windows a file just written can stay held for a moment (antivirus, indexer), and a rename or
+// a removal fails with EPERM, EBUSY or EACCES; both are tried again a few times before the failure is reported.
+const TRANSIENT = new Set(['EPERM', 'EBUSY', 'EACCES', 'ENOTEMPTY']), RETRY_MS = [50, 100, 200, 400, 800, 1600];
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function renameRetrying(from, to) {
+  for (let attempt = 0; ; attempt++) {
+    try { fs.renameSync(from, to); return; } catch (error) {
+      if (!TRANSIENT.has(error?.code) || attempt >= RETRY_MS.length) throw error;
+      await pause(RETRY_MS[attempt]);
+    }
+  }
+}
+const removeTree = (folder) => fs.rmSync(folder, { recursive: true, force: true, maxRetries: RETRY_MS.length, retryDelay: 100 });
+
 /** Remove the folders a delete renamed but did not finish removing (the program stopped half-way). */
 function sweepDeleted(projectsRoot) {
   let names = [];
   try { names = fs.readdirSync(projectsRoot); } catch { return; }
-  for (const name of names) if (name.startsWith(DELETING)) fs.rmSync(path.join(projectsRoot, name), { recursive: true, force: true });
+  for (const name of names) if (name.startsWith(DELETING)) { try { removeTree(path.join(projectsRoot, name)); } catch { /* tried again at the next start */ } }
 }
 /** A new name for a copy of a source: a hard link when the file system allows it, otherwise a verified copy. */
 async function linkOrCopy(from, to, sha256, size, signal) {
@@ -374,8 +388,8 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
         // the engine is not running: it holds nothing of this project
       }
       const away = path.join(projectsRoot, DELETING + randomUUID());
-      fs.renameSync(folder, away);
-      fs.rmSync(away, { recursive: true, force: true });
+      await renameRetrying(folder, away);
+      removeTree(away);
       return { deleted: true };
     },
     /**

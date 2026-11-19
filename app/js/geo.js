@@ -1,6 +1,6 @@
 // SedCoreTool web — multi-proxy geochemical interpretation (no DOM).
 // Cores → resampled samples → labels (intervals + rules) → machine learning → classes per sample → maps.
-import { parseAgeModel, interpAge } from './core.js';
+import { parseAgeModel, interpAge, seriesGap } from './core.js';
 import { finiteStyleNumber, niceTicks } from './log.js';
 
 /* ───────── utilities ───────── */
@@ -130,10 +130,7 @@ export function featureSeries(core, name, ratios = []) {
 }
 
 /** Default largest gap bridged by resampling: 3 × the median spacing of the real (non-missing) samples of that series. */
-export function autoGap(xs, ys) {
-  const x = xs.filter((v, i) => v != null && ys[i] != null).sort((a, b) => a - b), d = x.slice(1).map((v, i) => v - x[i]).filter((v) => v > 0).sort((a, b) => a - b);
-  return d.length ? 3 * d[d.length >> 1] : Infinity;
-}
+export function autoGap(xs, ys) { return seriesGap(xs, ys); }   // card Q4: the rule lives in core.js, shared with the core-column CSV
 
 /** Linear resampling onto a grid; null outside the data range or across gaps wider than maxGap. */
 export function resample(xs, ys, grid, maxGap = Infinity) {

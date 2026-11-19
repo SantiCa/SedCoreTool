@@ -14,6 +14,8 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### For users
 
+- Exported CSV files now keep 15 significant digits: small values such as a mass susceptibility of 1e-8 were written as 0 (numbers were rounded to six decimals); a value that is not a number is now an empty cell instead of the text NaN or Infinity.
+- The CSV of the core column now writes each external record as the mean of its samples inside each interval, with their number (a new selector beside the button offers the previous value at the interval centre, which now stays empty across gaps wider than three times the record's usual spacing instead of inventing values). On the age axis it marks intervals where the age model is reversed and says how many intervals lie outside the model (before, they were left out silently).
 - Deleting an ichnotaxon now asks first, saying how many traces and predictions in how many cores will become unclassified, and acts on every core of the project (before, only on the open core: the traces of the other cores kept a class that no longer existed). «Restore» under the class list brings it back while the project is open. A project saved with such traces is repaired when it opens, and the program says how many there were.
 - Two saves of a project can no longer run at the same time (a save requested during another now waits for it). With large "tiled" sections, a clean-up after a save could delete the masks the program had just stored, if editing and saving overlapped; the edits of that moment could then be missing after reopening. Fixed: the store keeps every version committed since the one the program knows.
 - Right after a large "tiled" section is opened, deleting, merging, cutting or reclassifying an object no longer asks you to try again in a minute or two: the program computes that object's part of the section first (the busy indicator shows; Esc cancels) and then does it. An object's area and statistics are no longer shown, or saved, half-computed while the section is being opened.
@@ -27,6 +29,8 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card Q4: `core.js::toCSV` with 15 significant digits; `seriesGap` and `seriesSampler` in `core.js` (`geo.js::autoGap` uses `seriesGap`); `windowCSV` with `recordMode` and `model`, `compositeRows` marks `reversed` and counts `outside`; the frozen CSV reference test follows the new number rule.
+- Card A2 (brought forward): the main process tries a refused rename and removal of a project folder again (`deleteProjectStore`, `sweepDeleted`).
 - Card Q1: `app/js/taxa.js` (`classUse`, `deleteClass`, `restoreClass`, `repairOrphanLabels`) with Node tests; the class deletion of `app.js` uses it and now marks the project changed and sends the objects table of tiled sections.
 - Card M8.4.31: `mask.retain` keeps the manifests the engine committed in this session after the newest one named, section by section (`Coordinator.recent_commits`, `MaskStore.retain(recent=...)`); project saves through `singleflight.js` with a revision counter; the desktop test edits and saves overlapping for 20 s, and its engine-kill step saves and settles right before the stroke (a save landing during the stroke made it fail on this computer, also on the previous commit).
 - Card M8.4.26: building the engine runtime tries a failed download again (up to 4 attempts, pauses of 2, 5 and 15 s; a file that does not

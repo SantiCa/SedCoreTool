@@ -46,7 +46,10 @@ test('composite rows, SVG and CSV', () => {
     tracks: { total: true, species: true, BI: true, ii: true, manual: true }, records: [{ name: 'L*', color: '#000', pts: [[2, 1], [18, 3]] }] });
   assert.ok(svg.startsWith('<svg') && svg.includes('polyline') && svg.includes('>A<'));
   const csv = windowCSV({ rows, from: 0, to: 20, classes, records: [{ name: 'L*', axis: 'depth', x: [0, 2], y: [0, 4] }], units: 'm', ageUnits: 'ka' });
-  assert.equal(csv.split('\n')[1].split(',').at(-1), '1');
+  assert.deepEqual(csv.split('\n')[0].split(',').slice(-3), ['L* (mean)', 'L* (n)', 'note']);
+  assert.deepEqual(csv.split('\n')[1].split(',').slice(-3), ['0', '1', ''], 'card Q4: the mean of the samples in [0, 1) by default');
+  const point = windowCSV({ rows, from: 0, to: 20, classes, records: [{ name: 'L*', axis: 'depth', x: [0, 2], y: [0, 4] }], units: 'm', ageUnits: 'ka', recordMode: 'point' });
+  assert.deepEqual(point.split('\n')[1].split(',').slice(-2), ['1', ''], 'or the value at the centre');
 });
 
 test('downsample averages blocks', () => {
@@ -383,4 +386,25 @@ test('column and figure style form builders validate ndColor, ndLine and present
   assert.doesNotMatch(mapSvg, /<script|onload=/i);
   assert.match(mapSvg, new RegExp(`fill="${MAP_STYLE.bgColor}"`));
   assert.match(mapSvg, new RegExp(`fill="${MAP_STYLE.sea}"`));
+});
+
+test('card Q4: the core-column CSV averages records per interval, never interpolates across a gap, marks reversals and counts intervals outside the model', () => {
+  const bins = [0, 1, 2, 3].map((k) => ({ dTop: k, dBottom: k + 1, depth: k + 0.5, pct: 10, classPct: [10], BI: 2, ii: 3, BIm: null, iim: null }));
+  const classes = [{ name: 'A', color: '#f00', index: 0 }];
+  // samples every 0.1 between 0 and 1, then nothing until 3.5: the gap (2.5) is wider than three times the median spacing (0.3)
+  const x = [...Array.from({ length: 11 }, (_, k) => k / 10), 3.5], y = x.map((v) => v * 10);
+  const records = [{ name: 'XRF', axis: 'depth', x, y }];
+  const rows = compositeRows([{ name: 'S1', bins }], { axis: 'depth', model: null });
+  const lines = (csv) => csv.trim().split('\n').slice(1).map((line) => line.split(','));
+  const mean = lines(windowCSV({ rows, from: 0, to: 4, classes, records, units: 'cm', ageUnits: 'ka' }));
+  assert.deepEqual(mean.map((cells) => cells.slice(-3, -1)), [['4.5', '10'], ['10', '1'], ['', '0'], ['35', '1']], 'mean of the samples in [top, bottom) and their number');
+  const point = lines(windowCSV({ rows, from: 0, to: 4, classes, records, units: 'cm', ageUnits: 'ka', recordMode: 'point' }));
+  assert.deepEqual(point.map((cells) => cells.at(-2)), ['5', '', '', '35'], 'interpolated at the centre, empty across the gap; a sample at the centre is its own value');
+  // an age model with a reversal between 1 and 2 cm, ending at 3 cm: the last interval lies outside it
+  const model = { depth: [0, 1, 2, 3], age: [0, 10, 5, 20] };
+  const aged = compositeRows([{ name: 'S1', bins }], { axis: 'age', model });
+  assert.equal(aged.outside, 1);
+  const csv = windowCSV({ rows: aged, from: 0, to: 30, classes, records: [], units: 'cm', ageUnits: 'ka', model });
+  assert.deepEqual(lines(csv.split('#')[0]).map((cells) => cells.at(-1)), ['', 'age reversal', '']);
+  assert.match(csv, /# 1 intervals lie outside the age model and are not listed\n$/);
 });

@@ -1303,14 +1303,21 @@ ticks and labels are edited as described in §20.8.
 
 ### 15.7 Export
 - **SVG:** the same SVG as on screen (vector; images embedded as JPEG).
-- **CSV:** one row per interval in the window, with section, depths, age, percentages, BI, ii, manual indices and,
-  for each visible external series, its value **interpolated linearly** at the centre of the interval. Interpolation
-  is done on the record's own axis (depth or age) and is empty outside its range.
+- **CSV:** one row per interval in the window, with section, depths, age, percentages, BI, ii, manual indices, a column
+  for each visible external series and a `note` column (card Q4). The selector beside the button chooses how the series are written:
+  - **Interval mean** (default): the mean of the record's samples whose position lies in `[top, bottom)` of the interval, in the column
+    `<name> (mean)`, and their number in `<name> (n)`; empty, with `n` = 0, when no sample lies inside. A record on the age axis uses the
+    ages of the interval's top and bottom from the age model.
+  - **Value at the centre:** the record **interpolated linearly** at the centre of the interval (`<name> (interp.)`), on the record's own
+    axis; empty outside its range and when the two samples around the centre are farther apart than three times the record's median
+    spacing (`core.js::seriesGap`, the cursor's and multiproxy's rule); a sample exactly at the centre is its own value.
+  - On the age axis, `note` says `age reversal` for an interval whose top is older than its bottom in the age model; intervals with a top or
+    bottom outside the age model cannot be placed and are counted in a last line `# N intervals lie outside the age model and are not listed`.
 
 The core column changes no calculation: it shows the intervals of §3 on a common axis. The CSV with the records
-interpolated to the same intervals allows correlations to be computed elsewhere. Linear interpolation assumes that the
-external record varies smoothly between two measurements, so its resolution should be equal to or finer than the
-intervals.
+on the same intervals allows correlations to be computed elsewhere. The interval mean is the right summary when a record is sampled more
+finely than the intervals (a scanner record every millimetre against 1 cm intervals: the value at the centre would take one sample of ten);
+the value at the centre suits a record sampled about as finely as the intervals and varying smoothly between measurements.
 
 ---
 
@@ -2410,9 +2417,10 @@ The program ignores these `#` lines on table import. User-supplied delimiters an
 are escaped so they cannot open another field or row. CSV and Excel exporters prepend an apostrophe to text
 that starts with spreadsheet formula characters (`=`, `+`, `-`, `@`, including full-width equivalents), even after
 leading whitespace. Leading tabs and line breaks also trigger the escape. Numeric cells retain their numeric
-values. `core.js::toCSV` rounds noninteger numbers to six decimal places with `toFixed(6)`, converts the result
-back to a number and then to text, removing trailing zeroes. Integer numbers go directly to their string
-representation; numeric cells bypass text escaping and delimiter checks. Null and undefined cells are empty.
+values. `core.js::toCSV` writes noninteger numbers with 15 significant digits (`toPrecision(15)`, converted back to a number and
+then to text, which removes trailing zeroes: 1.234e-8 stays 1.234e-8 and 0.1 + 0.2 is written 0.3); numbers that are not finite (NaN,
+infinities) are empty cells (card Q4). Integer numbers go directly to their string representation; numeric cells bypass text escaping and
+delimiter checks. Null and undefined cells are empty. The Python package writes its CSV files with the full precision of `pandas`.
 Text fields with delimiters or line breaks are quoted in CSV. Excel section sheet names are normalised and
 made unique within the workbook. Tables are produced by the pure
 module `exportio.js` (`bioturbationTable`, `objectsTable`, `provenanceLines`/`withProvenance`, `ageModelText`,
@@ -3553,8 +3561,7 @@ The percentage difference comes from the JPEG decoder (§3.4), not from the meth
     on the user's computer.
 11. **Known defects, with cards in the roadmap** (found by the audits of 19 November 2026; each item is removed when its card is done):
     missing-value codes such as -999 are read as values (Q2); spreadsheets are read from their first sheet, with the numbers as the sheet
-    formats them (Q2); numbers in exported CSV files are rounded to six decimals, so values below 0.0000005 are written as 0 (Q4); the
-    core-column CSV interpolates records across gaps of any length (Q4); changing a section's unit does not convert its depths (Q3);
+    formats them (Q2); changing a section's unit does not convert its depths (Q3);
     joined projects keep the first core's units (Q3); backups and packages leave tiled sections out (M8.4.33).
 
 ## 33. Reproducibility

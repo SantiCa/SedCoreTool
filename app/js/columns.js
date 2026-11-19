@@ -554,7 +554,8 @@ $('logAll').addEventListener('click', () => { S.logView.from = S.logView.to = nu
 $('logSVGBtn').addEventListener('click', () => { if (lastLog) saveFile(`${safe(S.name)}_registro.svg`, lastLog.svg, 'image/svg+xml'); });
 $('logCSVBtn').addEventListener('click', () => {
   if (!lastLog) return;
-  saveFile(`${safe(S.name)}_registro.csv`, withProv(windowCSV({ rows: lastLog.rows, from: lastLog.from, to: lastLog.to, classes: lastLog.classes, records: lastLog.records, units: lastLog.base, ageUnits: S.age.units })), 'text/csv');
+  saveFile(`${safe(S.name)}_registro.csv`, withProv(windowCSV({ rows: lastLog.rows, from: lastLog.from, to: lastLog.to, classes: lastLog.classes, records: lastLog.records, units: lastLog.base, ageUnits: S.age.units,
+    recordMode: /** @type {HTMLSelectElement | null} */ ($('logCsvMode'))?.value === 'point' ? 'point' : 'mean', model: lastLog.model })), 'text/csv');   // card Q4
 });
 
 /* external records (CSV, TXT, Excel) */

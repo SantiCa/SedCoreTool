@@ -82,10 +82,14 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: Q4** (exports keep the data: significant digits, the gap limit and interval means of the core-column CSV; decisions N and P;
-  **model: most capable tier, effort medium**), then the order O approved on 19 November 2026 (second council audit, below); V0.152 after Q4
-  (decision J). Q1 is done (deleting an ichnotaxon reaches every core, asks first, can be restored; orphaned labels repaired on opening;
-  development gate). M8.4.31 is done (a store clean-up keeps every version committed since the one the page names; saves run one at a time; development gate). M8.4.28 is done (an object operation right after reopening waits only for its own tiles: 387-397 ms instead of not finishing; development gate). M8.4.27 is done (the store folder is deleted and copied with its project; a missing stored version locks its section; development gate). M8.4.18b is done (a moved image is located by its SHA-256 and can be copied into the project; development gate). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate). Its three findings have cards, in this order after M8.4.18b: M8.4.27 (the store folder follows its project: delete, copy under a new identifier, a missing stored version; Opus, high), M8.4.28 (object operations right after reopening; Opus, medium), M8.4.29 (reopening from a cache instead of every tile; Opus, high; decision G waits for the maintainer); then M8.4.18c, M8.4.18d, M8.4.19. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
+- **Next step: Q2** (the import panel and the readers: missing-value codes, Excel sheets and raw numbers, decimal separators, dropped rows,
+  censored values with decision M; **model: most capable tier, effort medium**), then the order O approved on 19 November 2026 (second
+  council audit, below). **V0.152 can be published now** (decision J: after Q1 and Q4), when the maintainer asks. Q4 is done (CSV with 15
+  significant digits; the core-column CSV with interval means, a gap limit, reversals marked; development gate), and the retries of card A2
+  were brought forward. Q1 is done (deleting an ichnotaxon reaches every core, asks first, can be restored; orphaned labels repaired on opening;
+  development gate). Full checks of Q4 and A2 (20 Nov 2026, Windows): `py -3.12 -m pytest -q` 885 passed / 9 skipped; `npm test` 478
+  passed; typecheck; `sync_version.py --check`; `ruff check`; standalone build; `desktop.mjs` with the engine off and on; `tiled-sections.mjs`
+  passed twice. M8.4.31 is done (a store clean-up keeps every version committed since the one the page names; saves run one at a time; development gate). M8.4.28 is done (an object operation right after reopening waits only for its own tiles: 387-397 ms instead of not finishing; development gate). M8.4.27 is done (the store folder is deleted and copied with its project; a missing stored version locks its section; development gate). M8.4.18b is done (a moved image is located by its SHA-256 and can be copied into the project; development gate). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate). Its three findings have cards, in this order after M8.4.18b: M8.4.27 (the store folder follows its project: delete, copy under a new identifier, a missing stored version; Opus, high), M8.4.28 (object operations right after reopening; Opus, medium), M8.4.29 (reopening from a cache instead of every tile; Opus, high; decision G waits for the maintainer); then M8.4.18c, M8.4.18d, M8.4.19. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
   [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
   Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
 - **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
@@ -1922,9 +1926,8 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 - **Change:** a small generator of the test image (a few thousand pixels on a side, written by the test itself or a script in `tools/`);
   the two tests in *Desktop builds*; `SEDCORETOOL_REQUIRE_PYVIPS=1` in CI turns the skip into a failure; DEVELOPMENT.
 - **Model:** most capable, effort medium (CI on three systems; a broken workflow blocks every gate).
-- **Before it (19 Nov 2026):** the retries of a refused rename and of a refused removal on Windows (part of card A2: `fs.renameSync` and
-  `fs.rmSync` in `deleteProjectStore`) should be done first, or the folder-deletion step of `tiled-sections.mjs` fails now and then (incidents of
-  M8.4.31 and Q1: two failures in three runs).
+- **Before it:** done on 20 Nov 2026 (the retries of card A2 and the race in the folder-deletion step of `tiled-sections.mjs`; two
+  consecutive runs passed after the fix).
 - **Tests:** the workflows themselves: one green run on three systems, and one deliberately failing run (a broken assertion on a scratch
   branch) that shows red.
 - **Done when:** both workflows pass on three systems with the two tests in them; development gate (it changes what the milestone gate means).
@@ -2282,11 +2285,20 @@ Written from the council audit (status block). Each card names its model; the sc
       units and refuses or reports different age units and counts value conflicts (`mergeImp` and `buildMultiProject` move to a pure module
       with tests; cores are matched by identifier where they have one, not only by name); changing a section's unit asks whether to convert its
       depths or only correct the label. *Model:* most capable, effort medium (silent 10-100× errors). *Tests:* Node, per case.
-- [ ] **Q4 - Exports keep the data** (decisions N and P, approved 19 Nov 2026). Numbers in CSV with 15 significant digits, non-finite values as empty cells, the
+- [x] **Q4 - Exports keep the data** (decisions N and P, approved 19 Nov 2026). Done 20 Nov 2026 (development gate); *As built* below. Numbers in CSV with 15 significant digits, non-finite values as empty cells, the
       Python export the same (shared-definition rule); the core-column CSV (`windowCSV`) with the gap limit of the cursor and an interval-mean
       mode with the number of samples per cell, intervals outside the age model or reversed marked instead of dropped. *Model:* most capable,
       effort medium (export format and exported values change). *Tests:* exact expected files; the regression against version 2.1 stated before
       the change with its tolerance.
+      *As built (20 Nov 2026):* `core.js::toCSV` writes 15 significant digits (`+v.toPrecision(15)`) and an empty cell for a value that is
+      not a finite number; `seriesGap` (the 3 × median-spacing rule, now also behind `geo.js::autoGap`) and `seriesSampler` (sorted once:
+      value at a point with the gap limit, mean and count over `[lo, hi)`) in `core.js`; `windowCSV` with `recordMode` (`mean` by default:
+      `<name> (mean)` and `<name> (n)`; `point`: `<name> (interp.)`) and `model` (ages of an interval's bounds for records on the age axis), a
+      `note` column (`age reversal`); `compositeRows` marks `reversed` and counts `outside`, which the CSV states in a last `#` line (intervals
+      outside the age model cannot be placed on the age axis, so they are counted rather than listed); a selector beside the CSV button. The
+      Python package already wrote full precision (pandas) and is unchanged. Tests: the frozen CSV reference follows the new number rule (a
+      requested format change); a new expected file for small values, binary noise, NaN and infinities; `windowCSV` mean, count, centre value,
+      a gap, a sample at the centre, a reversal and an interval outside the model; the comparison with version 2.1 passes unchanged.
 - [ ] **Q5 - Long series.** A loop-based `extent()` in `core.js` instead of `Math.min(...array)` and `Math.max(...array)` (about 30 places;
       behaviour-preserving, exact equality, a test with 10^6 values); plots and core-column curves decimated per pixel (minimum and maximum)
       on screen, full resolution on export; the project's data record saved in parts with their own revision, so that a column width does
@@ -2324,7 +2336,12 @@ Written from the council audit (status block). Each card names its model; the sc
       non-finite value the same in Python and JavaScript (today Python raises and JavaScript skips; shared-definition rule); a text cell that
       starts with "-" is exported without a leading apostrophe when it is a number written as text, and the rule for formula-like cells is
       documented. *Model:* fast tier, effort medium. *Tests:* Node and Python per case.
-- [ ] **A2 - What the program runs is kept apart from what it saves.** Runtime caches (`_lc`, `_lb`, `_counts`, `_maskSync`, `_maskLoader`,
+- [ ] **A2 - What the program runs is kept apart from what it saves.** *Brought forward on 20 Nov 2026 at the maintainer's request:* the
+      retries of a refused rename and removal (`desktop/tile-ipc.js`: `renameRetrying` on EPERM, EBUSY, EACCES, ENOTEMPTY with pauses of
+      50-1600 ms; `fs.rmSync` with `maxRetries`; `sweepDeleted` no longer stops at a folder it cannot remove yet), with a Node test (two
+      refusals then the rename; a lasting refusal reported and the folder left as it was). The repeated failure of the folder-deletion step of
+      `tiled-sections.mjs` was not caused by locks: the test checked for a `.deleting-*` folder between the rename and the end of the removal
+      (seen in one of three diagnostic runs); it now waits, within the same 10 s, until both are finished. The rest of A2 remains. Runtime caches (`_lc`, `_lb`, `_counts`, `_maskSync`, `_maskLoader`,
       `_statsRunner`, `_unet`, `_tiledRecord`, `_savedRecord`) move out of the section record into a `WeakMap` per section, so that a
       serialiser can never write them; `settleTiledSections` waits for a promise from `MaskSync` instead of checking every 50 ms; one seeded
       random generator instead of two (`learn.js` and `geo.js`, with the existing seeds giving the same sequences); renames in the main process

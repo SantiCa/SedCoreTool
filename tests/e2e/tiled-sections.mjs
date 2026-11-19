@@ -917,7 +917,10 @@ try {
     const button = /** @type {HTMLElement} */ (document.querySelector(`.pcard[data-id="${id}"] [data-act=del]`));
     button.click(); button.click();                                       // armed, then confirmed
   }, keptId);
-  for (let i = 0; i < 200 && fs.existsSync(keptFolder); i++) await new Promise((r) => setTimeout(r, 50));
+  // The folder is renamed first and removed afterwards: wait (the same 10 s) until both are finished, not only the rename (a check between
+  // the two found the renamed folder still being removed, 19 Nov 2026).
+  const deleting = () => fs.readdirSync(path.join(on.profile, 'projects')).some((name) => name.startsWith('.deleting-'));
+  for (let i = 0; i < 200 && (fs.existsSync(keptFolder) || deleting()); i++) await new Promise((r) => setTimeout(r, 50));
   assert.ok(!fs.existsSync(keptFolder), 'the deleted project\'s folder is gone');
   assert.ok(fs.existsSync(originalFolder), 'the other project\'s folder stays');
   assert.ok(!fs.readdirSync(path.join(on.profile, 'projects')).some((name) => name.startsWith('.deleting-')), 'nothing left half-deleted');

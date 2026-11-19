@@ -105,3 +105,26 @@ test('a failed copy of the versions writes no sources record', async (t) => {
   assert.deepEqual(await ipc.call(1, 'copyProjectStore', 'p1', 'p9', ['1'.repeat(64)], ['d'.repeat(64)], randomUUID()), { error: { code: 'INVALID_BUFFER' } });
   assert.ok(!fs.existsSync(path.join(projects, 'p9', 'sources.json')));
 });
+
+test('a rename and a removal refused for a moment (a file still held on Windows) are tried again; a lasting refusal is reported', async (t) => {
+  const projects = temporary(t), engine = recordingEngine(), ipc = createTileIpc({ engine, projectsRoot: projects });
+  const doomed = projectFolder(projects, 'p1');
+  const rename = fs.renameSync, remove = fs.rmSync;
+  let renames = 0, removals = 0;
+  t.after(() => { fs.renameSync = rename; fs.rmSync = remove; });
+  fs.renameSync = (...args) => { if (++renames <= 2) throw Object.assign(new Error('held'), { code: 'EPERM' }); return rename(...args); };
+  let retries = 0;
+  fs.rmSync = (folder, options) => { removals++; retries = options?.maxRetries ?? 0; return remove(folder, options); };
+  assert.deepEqual(await ipc.call(1, 'deleteProjectStore', 'p1'), { ok: { deleted: true } });
+  assert.equal(renames, 3, 'two refusals, then the rename');
+  assert.equal(removals, 1);
+  assert.ok(retries >= 3, 'the removal retries a held file');
+  assert.ok(!fs.existsSync(doomed));
+  assert.deepEqual(fs.readdirSync(projects), []);
+  projectFolder(projects, 'p2');
+  fs.rmSync = remove;
+  fs.renameSync = () => { throw Object.assign(new Error('held'), { code: 'EBUSY' }); };
+  const refused = await ipc.call(1, 'deleteProjectStore', 'p2');
+  assert.ok(refused.error, 'still refused after the retries: reported');
+  assert.ok(fs.existsSync(path.join(projects, 'p2')), 'and the folder is left as it was');
+});
