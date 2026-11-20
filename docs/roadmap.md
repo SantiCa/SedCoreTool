@@ -2372,11 +2372,47 @@ Written from the council audit (status block). Each card names its model; the sc
 - [ ] **Q7 - Splice overlaps in both implementations.** The `overlap` option of the Python export (`keep`, `upper`, `error`) as a shared
       definition in `core.js`, used by the core column and its CSV, with a parity test; today JavaScript keeps every overlapping interval.
       *Model:* fast tier, effort medium (results of overlapping sections change only when the user picks another option).
-- [ ] **F1 - Figures for publication.** A pure `figsize.js`: journal widths in millimetres (about 84, 129, 174 mm and A4), font sizes in
+- [ ] **F1 - Figures for publication.** *Replaced on 20 Nov 2026 by cards P1-P5 (publication layout, below), designed from the journals' artwork rules at the maintainer's request.* A pure `figsize.js`: journal widths in millimetres (about 84, 129, 174 mm and A4), font sizes in
       points with a warning below 6 pt, PNG with a chosen resolution (300 or 600 dpi) and its `pHYs` chunk, overlays in PNG instead of JPEG,
       an "original resolution" option; a PDF export designed so that it does not tie figures to Electron (ARCHITECTURE §3.3), fonts embedded
       or text as paths for the final export; Okabe-Ito as the default categorical palette and a note against `rainbow`. *Model:* most capable,
       effort medium. After M8.4.30.
+- **Publication layout of figures (cards P1-P5).** The maintainer asked on 20 November 2026 that figures can be chosen to come out "with
+  publication structure", laid out for an A4 scientific journal page. Design, journal comparison with sources, presets, interface and
+  architecture: [design-publication-figures.md](design-publication-figures.md). **Decisions waiting for the maintainer:** **S** the font of
+  publication figures (*recommended:* bundle Liberation Sans or Arimo, metric-compatible with Arial, about 1.2 MB, offline; the smallest
+  alternative embeds the bundled IBM Plex Sans, accepted everywhere but not the Arial/Helvetica that GSA, Nature and Copernicus name); **T**
+  the new optional saved fields `fig.publish` and `fig.plate` (a saved-format change, AGENTS §3 item 5; older versions ignore them). Order:
+  P1 at any time (pure, no saved field); P2-P5 after M8.4.30 and U1-U3, which move the dialogs and messages they use.
+- [ ] **P1 - Physical sizes, presets and PNG resolution.** Pure `figsize.js` (journal presets, `mmToPt`, `widthMm`, `pixelsFor`, the text,
+      line and raster audits, `panelLabel`, `fitWidths`, `OKABE_ITO`) and `pngmeta.js` (`crc32`, `withPhys`, `withText`); the PNG export can
+      save at a chosen DPI with its `pHYs` chunk. *Do not touch:* the builders, the default ×2 PNG, saved fields. *Model:* fast tier, effort
+      medium. *Tests:* `pixelsFor(170, 600) === 4016`, `pixelsFor(84, 600) === 1984`; `mmToPt(170)` = 481.89 ± 0.005; the PNG has `pHYs`
+      right after `IHDR` with 23622/23622, unit 1 and a valid CRC; `auditText` flags 6.9 pt for `generic` and accepts 7.0;
+      `panelLabel(1, 'paren') === '(b)'`. *Done when:* a PNG saved at 600 dpi reports 600 dpi in an image viewer.
+- [ ] **P2 - Publication mode: page frame, true-size preview and checks** (decision T). The switch Screen | Publication behind the flag
+      `figPublication`: journal preset, width, a white A4 page with column guides, the checks list. New controller `figpublish.js`. *Do not
+      touch:* screen-mode output (byte-identical SVG). *Model:* most capable, effort medium (new saved field). *Tests:* the exported SVG root
+      has `width="170mm"` and the matching viewBox; after "fit for print" every text measures ≥ 7 pt at 170 mm; a 900 px sections panel at
+      170 mm is reported below 300 ppi; screen SVG unchanged; `fig.publish` survives saving and reopening; served and standalone builds, flag
+      off and on.
+- [ ] **P3 - Print typography in the builders.** `log.js` (column, distribution), `plot.js`, `locmap.js`, `geo.js` maps and `figures.js` take
+      a `print` style in pt; their fixed sizes become relative to the body size; one builder per commit. *Do not touch:* measurements, CSV,
+      screen defaults. *Model:* fast tier, effort medium. *Tests:* with `print.body = 8` no `font-size` below 7; `fitWidths` keeps the order
+      and sums to the target within 0.01 pt; screen output byte-identical. *Done when:* every figure type passes P2's text check at 84 and
+      170 mm with the default preset.
+- [ ] **P4 - PDF, TIFF and provenance** (after decision S). Desktop PDF through an offscreen window and `printToPDF` (no new dependency;
+      origin-checked IPC with a size cap; the web build says it needs the desktop program); a TIFF writer with resolution tags; provenance in
+      every export (shared with F2); embedded images at their original resolution, as PNG. *Model:* most capable, effort high (IPC with
+      external input, packaging on three systems, a font asset). *Tests:* PDF MediaBox width 481.89 pt ± 0.5 (tolerance stated now because
+      Chromium rounds page sizes), every `/Font` embedded (`FontFile2`/`FontFile3`), a label's text extractable; TIFF tags 256 = 4016,
+      282/283 = 600/1, 296 = 2, decoding back to the same RGB in Node; SVG `<metadata>` with preset, width, DPI and version; an oversized SVG
+      refused visibly. *Done when:* the desktop end-to-end passes on three systems (milestone gate).
+- [ ] **P5 - Plates: several figures as the panels of one** (decision T). A "Plate" tab placing figure tabs in a grid with labels in the
+      preset's style, shared depth axes where they align and one caption; pure `figlayout.js`. *Model:* most capable, effort high (saved
+      format and layout contract). *Tests:* cells inside the frame with gaps ≥ 3 mm; unique ids after `scopeIds`; labels `A` for GSA, `(a)`
+      for Copernicus; the plate survives saving and reopening, a deleted child tab reported. *Done when:* a location map + core column +
+      distribution plate exports at 170 × 225 mm with every check green.
 - [ ] **F2 - Provenance of every export.** `provenanceLines(kind, settings)` per kind of export: the multiproxy settings (step, gap limit,
       logarithms, scaling, missing values, classifier, seed), map interpolation, enhancement and `noDataPad`, SHA-256 of the age-model text
       and of each record file; a `<metadata>` block in every SVG; a reference epoch for ages (`ageRef`: BP 1950, b2k, CE) in the age model,
