@@ -1989,6 +1989,8 @@ Object.assign(D.en, {
 Object.assign(D.es, { 'f.rankNoGain': 'Ningún realce supera con claridad a la imagen sin realce: se deja sin realce.' });
 Object.assign(D.en, { 'f.rankNoGain': 'No enhancement clearly beats the image without enhancement: none is applied.' });
 // V0.38
+Object.assign(D.es, { 'bk.leftOut': 'La copia o el paquete de «{p}» no incluye sus {n} secciones grandes por piezas ({s}): sus máscaras están solo en este ordenador. Se nombran en el archivo («left_out»).' });
+Object.assign(D.en, { 'bk.leftOut': 'The copy or package of «{p}» does not include its {n} large tiled sections ({s}): their masks are only on this computer. They are named in the file ("left_out").' });
 Object.assign(D.es, { 'mp.joined': '«{c}»: {v} tablas convertidas a las unidades del primer proyecto; {n} valores distintos en la misma profundidad (se conserva el del primero).' });
 Object.assign(D.en, { 'mp.joined': '«{c}»: {v} tables converted to the units of the first project; {n} different values at the same depth (the first one is kept).' });
 Object.assign(D.es, { 'sec.unitAsk': '¿Convertir las profundidades de la sección? Aceptar: {a}–{b} {u} pasan a ser {c}–{d} {v} (la misma posición). Cancelar: solo se corrige la unidad, y la sección queda en {a}–{b} {v}.' });

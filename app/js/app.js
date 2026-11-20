@@ -3807,7 +3807,9 @@ async function loadTiledSection(q) {
 async function deleteStoreOf(id, sections) {
   if (!TILES) return;
   for (const q of sections) q._maskSync?.stop();
-  await Promise.race([Promise.all(sections.map((q) => q._maskSync?.running?.catch(() => {}))), new Promise((r) => setTimeout(r, 3000))]);
+  // A round already on its way finishes (a stopped send starts no other) and closes its staged version; after many edits it can take more
+  // than the few seconds allowed before (seen on 20 Nov 2026: the folder stayed), so up to 60 s.
+  await Promise.race([Promise.all(sections.map((q) => q._maskSync?.running?.catch(() => {}))), new Promise((r) => setTimeout(r, 60000))]);
   for (let attempt = 0; attempt < 5; attempt++) {
     const result = await TILES.deleteProjectStore(storeProject(id));
     if (!result.error) return;
@@ -4347,6 +4349,7 @@ function renderBackupState() {
 async function writeProjectFolder(root, d) {
   const dir = await root.getDirectoryHandle(`${safe(d.name)}__${d.id}`, { create: true }), imgs = await dir.getDirectoryHandle('images', { create: true });
   const e = projectForExport(d, '', true);
+  tellLeftOut('folder', d.name, e.leftOut);                         // the automatic copy runs often: said once per session
   for (const im of e.images) {
     diagnosticEvent('operation.start', { operation: 'backup.image' });
     const name = im.path.slice('images/'.length);
@@ -4495,7 +4498,10 @@ async function projectImageSource(file, ranged = false) {
 /** Folder copies use immutable image names so a failed manifest write cannot change the previous save's images. */
 function projectForExport(d, prefix = '', immutableImages = false) {
   const p = JSON.parse(JSON.stringify(d, (k, v) => (v instanceof Blob ? undefined : v))), images = [];
-  for (const c of p.cores || [p]) if (Array.isArray(c.sections)) c.sections = c.sections.filter((q) => !q.tiled);   // their masks are in the store: cards M8.4.18c-d
+  // Tiled sections stay out (their masks are in the store: cards M8.4.18c-d); card M8.4.33: named in `left_out` and reported to the user.
+  const leftOut = (p.cores || [p]).flatMap((c) => (Array.isArray(c.sections) ? c.sections.filter((q) => q.tiled).map((q) => ({ core: c.name ?? null, section: q.name ?? q.id })) : []));
+  for (const c of p.cores || [p]) if (Array.isArray(c.sections)) c.sections = c.sections.filter((q) => !q.tiled);
+  if (leftOut.length) p.left_out = leftOut;
   const src = new Map(); for (const c of d.cores || [{ sections: d.sections }]) for (const q of c.sections || []) src.set(q.id, q.file);
   for (const c of p.cores || [{ sections: p.sections }]) for (const q of c.sections || []) {
     const f = src.get(q.id) || q.file;
@@ -4504,10 +4510,18 @@ function projectForExport(d, prefix = '', immutableImages = false) {
     images.push({ path: prefix + path, get: (ranged = false) => projectImageSource(f, ranged) });
     q.file = { name: f.name, type: f.type, path };
   }
-  return { json: p, images };
+  return { json: p, images, leftOut };
+}
+/** Card M8.4.33: the user is told which large tiled sections a backup or a package leaves out (once per project and kind in a session). */
+const leftOutTold = new Set();
+function tellLeftOut(kind, projectName, leftOut, always = false) {
+  if (!leftOut.length || (!always && leftOutTold.has(kind + '|' + projectName))) return;
+  leftOutTold.add(kind + '|' + projectName);
+  toast(t('bk.leftOut', { p: projectName || APP, n: leftOut.length, s: leftOut.slice(0, 4).map((q) => q.section).join(', ') }), 12000);
 }
 async function packageProjects(list) {
   const files = [];
+  for (const d of list) tellLeftOut('package', d.name, projectForExport(d).leftOut, true);   // card M8.4.33: before anything is written
   if (list.length === 1) { const e = projectForExport(list[0]); files.push({ name: 'project.json', data: JSON.stringify(e.json) }); for (const im of e.images) files.push({ name: im.path, data: await im.get() }); }
   else list.forEach((d, i) => { const e = projectForExport(d, `p${i + 1}/`); files.push({ name: `p${i + 1}/project.json`, data: JSON.stringify(e.json) }, ...e.images.map((im) => ({ name: im.path, lazy: im.get }))); });
   for (const f of files) if (f.lazy) { f.data = await f.lazy(); delete f.lazy; }
@@ -5368,6 +5382,8 @@ window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, read
   clearTiles: () => { for (const bitmap of tileCache.clear()) bitmap?.close?.(); requestRender(); },   // repeated viewer probes (card M8.4.24)
   tileState: (k, row, col) => { const s = sec(), scheduler = s?.tiled && tileSchedulers.get(s.tiled.pyramid), key = s?.tiled ? s.tiled.pyramid + '/' + tileKey(k, row, col) : '';   // evidence when a probe fails (card M8.4.24)
     return { cached: tileCache.has(key), inFlight: !!scheduler?.inFlight.has(key), idle: !!scheduler?.idle, failures: scheduler?.failures ?? 0, lastError: s?.tiled?.lastError ?? null }; },
+  objectsWaiting: () => !!statsWait,   // card M8.4.28: an object operation waits for its objects' tiles (tests)
+  exportedProject: () => projectForExport(serialize()).json, packageNow: async () => (await packageProjects([serialize()])).size,   // card M8.4.33 tests
   saveNow: () => saveToDB(), storeProject: (id = null) => storeProject(id ?? S.id), settleDeadline: (ms) => { settleDeadlineMs = ms; },   // card M8.4.18a tests
   stopMaskSync: () => sec()?._maskSync?.stop(), tiledSaved: () => S.cores.flatMap((c) => c.sections).filter((q) => q.tiled).map((q) => q._savedRecord?.tiled?.manifest ?? null),
   tiledCountsIdle: () => S.sections.every((q) => !q._counts || (!q._counts.runner.running && q._counts.counts.ready)),

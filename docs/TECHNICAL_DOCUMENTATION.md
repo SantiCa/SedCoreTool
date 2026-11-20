@@ -2293,6 +2293,9 @@ with **Import file…** on another computer. **Download full backup (all project
 (`settings.json`), named `sedcoretool_copia_<date>.sedcoretool`. Older `.corantool` packages and older JSON project
 files (with inline images) are still imported. Project identifiers are preserved on import unless the user chooses
 to restore a separate copy after an identifier conflict (§23.3). The library stores images separately from project metadata.
+Large tiled sections are not in packages or folder copies yet (their masks live in the store on this computer; cards M8.4.18c-d): the
+project in the package lists them in `left_out` (`[{core, section}]`, absent when there are none, so other packages are unchanged), and the
+program says so before writing (for every package; for the automatic folder copy, once per session) (card M8.4.33).
 
 Project ZIP import accepts classic stored and Deflate archives. It checks paths, directory and local headers,
 and declared uncompressed sizes before reading entries. Limits are 16 MiB for the central directory, 128 MiB
@@ -3586,7 +3589,7 @@ The percentage difference comes from the JPEG decoder (§3.4), not from the meth
     with hundreds of thousands of samples); MDI importance is biased among correlated proxies; everything is computed
     on the user's computer.
 11. **Known defects, with cards in the roadmap** (found by the audits of 19 November 2026; each item is removed when its card is done):
-    backups and packages leave tiled sections out (M8.4.33).
+    backups and packages leave tiled sections out; they say so and name them (`left_out`, card M8.4.33) until M8.4.18c-d carry them.
 
 ## 33. Reproducibility
 

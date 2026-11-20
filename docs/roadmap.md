@@ -1941,9 +1941,16 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   the lookup of the engine's process before it is killed, is `findCoordinator` (PowerShell on Windows, `ps` elsewhere). `tests/conftest.py`
   `require_pyvips()` replaces `pytest.importorskip("pyvips")` in the four tile-store test files; the tests workflow sets
   `SEDCORETOOL_REQUIRE_PYVIPS=1`, so a missing pyvips fails there instead of skipping. Local check: the four files pass in strict mode (63),
-  `tiled-sections.mjs` passes on Windows with the helper. Pending: the first run on three systems, and the deliberately failing run.
+  `tiled-sections.mjs` passes on Windows with the helper. **First run on GitHub (`5ee27c1`, run 44649801733): failed on all three systems,
+  in the test, not the program:** on macOS and Linux the first save left the new tiled section out (D1: its first mask round needs more than the
+  save's deadline on those machines); on Windows the scissors cut one piece where two were expected (an object operation now waits for its
+  objects' statistics and runs by itself afterwards, card M8.4.28, and the test's idle wait did not include that wait). Fixed in the test: the
+  first save waits for the masks to settle; the idle wait includes the page hook `objectsWaiting`. Found locally the same day and fixed in
+  the program (`deleteStoreOf`): a send round on its way after many edits could outlast the 3 s the delete gave it, so the project folder
+  stayed («the folder was not deleted»); the delete now lets it finish, up to 60 s, and the test's wait follows that bound. Pending: a green run
+  on three systems, and the deliberately failing run.
 
-##### M8.4.33 - Backups and packages say what they leave out — state: after M8.4.32 (council audit of 19 Nov 2026)
+##### M8.4.33 - Backups and packages say what they leave out — state: Done (20 Nov 2026, development gate; council audit of 19 Nov 2026)
 
 - **Goal:** until M8.4.18c and M8.4.18d carry tiled sections, a folder backup, a full backup or an exported package of a project with tiled
   sections tells the user, before writing, which sections it leaves out, and records them in the package.
@@ -1954,6 +1961,11 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 - **Tests:** desktop: a project with one tiled and one ordinary section: the backup and the package show the message, contain the ordinary
   section and name the tiled one in `left_out`; a project without tiled sections is byte-for-byte as today.
 - **Done when:** the tests pass; development gate.
+- *As built (20 Nov 2026):* `projectForExport` names the tiled sections it leaves out (`left_out: [{core, section}]`, only when there are
+  some) and returns them; `tellLeftOut` shows the message before a package is written (every time) and before the automatic folder copy
+  (once per project in a session, because that copy runs after every save). Tests: desktop (`tiled-sections.mjs`: the packaged project has the
+  six ordinary sections, no tiled one, one `left_out` entry, and the message is shown; `desktop.mjs`: a project without tiled sections has no
+  `left_out`). Two page hooks for the tests (`exportedProject`, `packageNow`). The full backup of every project uses the same function.
 
 ##### M8.4.30 - The tiled-section controller leaves `app.js` — state: after M8.4.33 (written by the audit of 19 Nov 2026, finding 1)
 

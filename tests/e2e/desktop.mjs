@@ -220,6 +220,7 @@ try {
   await p.waitForFunction(() => window.ichantool.S.sections.length === 6 && window.ichantool.S.sections.every((s) => s.objects.size > 0), { timeout: 90000 });
   await p.waitForFunction(() => document.getElementById('saveState').dataset.state === 'saved', { timeout: 30000 });
   const before = await p.evaluate(signature);
+  assert.equal(await p.evaluate(() => 'left_out' in window.ichantool.exportedProject()), false, 'card M8.4.33: a project without tiled sections is packaged as before');
   const engineOn = process.env.SEDCORETOOL_ENGINE_EXPERIMENT === '1';
   const parity = await p.evaluate(compareWithReference);
   assert.deepEqual(parity.mismatches, [], 'the interface shows the JavaScript reference');

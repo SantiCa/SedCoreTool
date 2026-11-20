@@ -106,12 +106,23 @@ try {
   assert.ok(section.full.w * section.full.h > section.maxMP * 1e6, 'only images above the size limit are tiled');
   assert.ok(section.bins > 0 && !section.bioturbated, 'card M8.4.17: the interval table is counted from the full-resolution masks, which are empty: bins without any bioturbation');
   assert.ok(toasts.some((text) => text.includes(String(section.full.h))), 'the user is told what a tiled section is: ' + JSON.stringify(toasts));
+  // The new section's first masks must have reached the store, or the save keeps it for the next one (D1): slower machines (GitHub, card
+  // M8.4.32) need more than the save's deadline for that first round.
+  await on.page.waitForFunction(() => window.ichantool.masksSettled(), { polling: 200, timeout: 240000 });
   const saved = await on.page.evaluate(async () => {
     await window.ichantool.saveNow();                                    // card M8.4.18a: a tiled section is saved like the others
     const project = window.ichantool.serialize();
     return { names: project.cores.flatMap((core) => core.sections.map((q) => q.name)), version: project.version, manifests: window.ichantool.tiledSaved() };
   });
   assert.equal(saved.names.length, 7, 'the tiled section is saved with the six others');
+  // Card M8.4.33: a package leaves the tiled section out, names it in `left_out` and tells the user before it is written.
+  const toastsBeforePackage = toasts.length;
+  const exported = await on.page.evaluate(async () => { const json = window.ichantool.exportedProject(); await window.ichantool.packageNow();
+    return { sections: json.cores.flatMap((c) => c.sections).length, leftOut: json.left_out, tiled: json.cores.flatMap((c) => c.sections).some((q) => q.tiled) }; });
+  assert.equal(exported.sections, 6, 'the six ordinary sections are packaged');
+  assert.equal(exported.tiled, false);
+  assert.equal(exported.leftOut?.length, 1, 'the tiled section is named in left_out: ' + JSON.stringify(exported.leftOut));
+  assert.ok(toasts.slice(toastsBeforePackage).some((text) => /secciones grandes por piezas|large tiled sections/.test(text)), 'the user is told: ' + JSON.stringify(toasts.slice(toastsBeforePackage)));
   assert.equal(saved.version, 6, 'a project with a tiled section is format version 6');
   assert.ok(saved.manifests.length === 1 && /^[0-9a-f]{64}$/.test(saved.manifests[0]), 'saved with its stored version: ' + JSON.stringify(saved.manifests));
   // Release the working image and ask for it again: it comes back from the pyramid, never from the source file.
@@ -374,7 +385,7 @@ try {
   // their left first).
   const ops = await (async () => {
     const page = on.page, box = await page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
-    const idle = () => page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.masksSettled(), { polling: 50, timeout: 60000 });
+    const idle = () => page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.masksSettled() && !window.ichantool.objectsWaiting(), { polling: 50, timeout: 60000 });
     const path = async (tool, points, keys = []) => {
       await page.evaluate((tool) => window.ichantool.setTool(tool), tool);
       for (const key of keys) await page.keyboard.down(key);
@@ -594,7 +605,7 @@ try {
       window.ichantool.requestRender();
     }, index);
     const box = await page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
-    const idle = () => page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.masksSettled(), { polling: 50, timeout: 60000 });
+    const idle = () => page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.masksSettled() && !window.ichantool.objectsWaiting(), { polling: 50, timeout: 60000 });
     const draw = async (tool, points) => {
       await page.evaluate((tool) => window.ichantool.setTool(tool), tool);
       await page.mouse.move(box.left + points[0][0], box.top + points[0][1]); await page.mouse.down();
@@ -937,7 +948,8 @@ try {
   // The folder is renamed first and removed afterwards: wait (the same 10 s) until both are finished, not only the rename (a check between
   // the two found the renamed folder still being removed, 19 Nov 2026).
   const deleting = () => fs.readdirSync(path.join(on.profile, 'projects')).some((name) => name.startsWith('.deleting-'));
-  for (let i = 0; i < 200 && (fs.existsSync(keptFolder) || deleting()); i++) await new Promise((r) => setTimeout(r, 50));
+  // The page first lets a send round on its way finish, up to 60 s (deleteStoreOf, 20 Nov 2026): the wait follows that bound.
+  for (let i = 0; i < 1400 && (fs.existsSync(keptFolder) || deleting()); i++) await new Promise((r) => setTimeout(r, 50));
   assert.ok(!fs.existsSync(keptFolder), 'the deleted project\'s folder is gone');
   assert.ok(fs.existsSync(originalFolder), 'the other project\'s folder stays');
   assert.ok(!fs.readdirSync(path.join(on.profile, 'projects')).some((name) => name.startsWith('.deleting-')), 'nothing left half-deleted');
