@@ -1,6 +1,6 @@
 // SedCoreTool web — multi-proxy geochemical interpretation (no DOM).
 // Cores → resampled samples → labels (intervals + rules) → machine learning → classes per sample → maps.
-import { parseAgeModel, interpAge } from './core.js';
+import { parseAgeModel, interpAge, seriesGap } from './core.js';
 import { finiteStyleNumber, niceTicks } from './log.js';
 
 /* ───────── utilities ───────── */
@@ -20,7 +20,6 @@ export function seededRandom(seed = 42) {
 }
 const mean = (a) => a.reduce((s, v) => s + v, 0) / a.length;
 const std = (a, m = mean(a)) => Math.sqrt(a.reduce((s, v) => s + (v - m) ** 2, 0) / a.length) || 1;
-const lerp = (xs, ys, x) => interpAge({ depth: xs, age: ys }, x);
 
 /* ───────── import ───────── */
 
@@ -99,16 +98,25 @@ export function coreAges(core) {
   return core.depth && m ? core.depth.map((d) => interpAge(m, d)) : null;
 }
 
-/** Convert a value between depth and age within one core (linear interpolation between its rows). */
-export function coreConvert(core, v, from, to, clamp = false) {
-  if (from === to || v == null) return v;
-  const ages = coreAges(core); if (!ages || !core.depth) return null;
-  const pairs = core.depth.map((d, i) => [d, ages[i]]).filter((p) => p[0] != null && p[1] != null);
-  if (!pairs.length) return null;
+/**
+ * Prepare the conversion of one core in one direction: the ages, the pairs and their order are built once, so converting many values (every sample of a
+ * grid) costs one interpolation each. Returns `(v, clamp = false) => number | null`; the result equals `coreConvert(core, v, from, to, clamp)`.
+ * Nothing is kept after the returned function is dropped, so edits to the core's arrays are seen by the next call to this function.
+ */
+export function coreConverter(core, from, to) {
+  if (from === to) return (v) => v;
+  const ages = coreAges(core);
+  const pairs = ages && core.depth ? core.depth.map((d, i) => [d, ages[i]]).filter((p) => p[0] != null && p[1] != null) : [];
+  if (!pairs.length) return (v) => (v == null ? v : null);
   const src = from === 'depth' ? 0 : 1, dst = 1 - src;
   pairs.sort((a, b) => a[src] - b[src]);
-  if (clamp) v = Math.min(pairs[pairs.length - 1][src], Math.max(pairs[0][src], v));
-  return lerp(pairs.map((p) => p[src]), pairs.map((p) => p[dst]), v);
+  const relation = { depth: pairs.map((p) => p[src]), age: pairs.map((p) => p[dst]) }, first = relation.depth[0], last = relation.depth[relation.depth.length - 1];
+  return (v, clamp = false) => (v == null ? v : interpAge(relation, clamp ? Math.min(last, Math.max(first, v)) : v));
+}
+
+/** Convert a value between depth and age within one core (linear interpolation between its rows). For many values use `coreConverter`. */
+export function coreConvert(core, v, from, to, clamp = false) {
+  return coreConverter(core, from, to)(v, clamp);
 }
 
 /* ───────── samples ───────── */
@@ -122,10 +130,7 @@ export function featureSeries(core, name, ratios = []) {
 }
 
 /** Default largest gap bridged by resampling: 3 × the median spacing of the real (non-missing) samples of that series. */
-export function autoGap(xs, ys) {
-  const x = xs.filter((v, i) => v != null && ys[i] != null).sort((a, b) => a - b), d = x.slice(1).map((v, i) => v - x[i]).filter((v) => v > 0).sort((a, b) => a - b);
-  return d.length ? 3 * d[d.length >> 1] : Infinity;
-}
+export function autoGap(xs, ys) { return seriesGap(xs, ys); }   // card Q4: the rule lives in core.js, shared with the core-column CSV
 
 /** Linear resampling onto a grid; null outside the data range or across gaps wider than maxGap. */
 export function resample(xs, ys, grid, maxGap = Infinity) {
@@ -156,6 +161,7 @@ export function buildSamples(cores, cfg) {
     const valid = xs.filter((v) => v != null); if (valid.length < 2) continue;
     const lo = Math.ceil(Math.min(...valid) / cfg.step) * cfg.step, hi = Math.max(...valid);
     const grid = []; for (let g = lo; g <= hi + 1e-9; g += cfg.step) grid.push(+g.toFixed(10));
+    const toDepth = coreConverter(core, 'age', 'depth'), toAge = coreConverter(core, 'depth', 'age');   // once per core, not once per sample
     const cols = F.map((name) => {
       const s = featureSeries(core, name, cfg.ratios); if (!s) return grid.map(() => null);
       return resample(xs, s, grid, cfg.maxGap ?? autoGap(xs, s));
@@ -167,8 +173,8 @@ export function buildSamples(cores, cfg) {
       // 'drop' (default): every variable must have a value. 'mean': at least one; the missing ones take the mean (0 after z-scoring).
       if (cfg.missing === 'mean' ? F.length && tv.every((v) => v == null) : tv.some((v) => v == null)) return;
       rows.push({ core: core.id ?? core.name, x: g, raw, t: tv,
-        depth: cfg.axis === 'depth' ? g : coreConvert(core, g, 'age', 'depth'),
-        age: cfg.axis === 'age' ? g : coreConvert(core, g, 'depth', 'age') });
+        depth: cfg.axis === 'depth' ? g : toDepth(g),
+        age: cfg.axis === 'age' ? g : toAge(g) });
     });
     if (rows.length) {
       const { mu, sd } = colStats(rows, F.length);
@@ -176,7 +182,16 @@ export function buildSamples(cores, cfg) {
     }
     if (LF.length) {
       const ivs = intervalsOnAxis((cfg.intervals || []).filter((q) => q.core === (core.id ?? core.name) && !q.auto), cfg.axis, core);
-      for (const r of rows) r.cat = LF.flatMap((l) => l.cats.map((c) => (ivs.some((q) => q.layer === l.id && (q.cat ?? q.label) === c.id && r.x >= q.from && r.x < q.to) ? 1 : 0)));
+      // "Some interval of this layer and category contains x" is "the lookup of that group finds one": one lookup per group instead of a scan of all intervals per sample.
+      const groups = new Map();
+      for (const q of ivs) {
+        if (!groups.has(q.layer)) groups.set(q.layer, new Map());
+        const byCat = groups.get(q.layer), cat = q.cat ?? q.label;
+        if (!byCat.has(cat)) byCat.set(cat, []);
+        byCat.get(cat).push(q);
+      }
+      const lookups = LF.map((l) => l.cats.map((c) => { const group = groups.get(l.id)?.get(c.id); return group ? createIntervalLookup(group) : null; }));
+      for (const r of rows) r.cat = lookups.flatMap((perCat) => perCat.map((look) => (look && look(r.x) ? 1 : 0)));
     }
     out.push(...rows);
   }
@@ -195,11 +210,13 @@ export function layerFeatureNames(layers) { return layers.flatMap((l) => l.cats.
 
 /** Intervals expressed on one axis of one core (converted with the core's depth–age relation when needed). */
 export function intervalsOnAxis(list, axis, core) {
+  const converters = new Map();                                    // one prepared conversion per source axis, not one per interval end
+  const convert = (from) => { if (!converters.has(from)) converters.set(from, coreConverter(core, from, axis)); return converters.get(from); };
   return list.map((q) => {
     if (q.axis === axis) return q;
     if (!core) return null;
     // Ends beyond the core's depth–age data are clamped to the first/last value (no extrapolation).
-    const a = coreConvert(core, q.from, q.axis, axis, true), b = coreConvert(core, q.to, q.axis, axis, true);
+    const a = convert(q.axis)(q.from, true), b = convert(q.axis)(q.to, true);
     return a == null || b == null || a === b ? null : { ...q, from: Math.min(a, b), to: Math.max(a, b) };
   }).filter(Boolean);
 }
@@ -304,8 +321,11 @@ export function labelSamples(samples, { intervals = [], rules = [], useRules = t
   const mine = intervals.filter((q) => !q.auto && (layer == null || q.layer === layer));
   const iv = mine.flatMap((q) => intervalsOnAxis([q], axis, byCore.get(q.core)));
   const rl = rules.filter((r) => layer == null || r.layer === layer);
+  const perCore = new Map();                                                   // intervals of each core in their original order: the first match still wins
+  for (const q of iv) { if (!perCore.has(q.core)) perCore.set(q.core, []); perCore.get(q.core).push(q); }
+  const lookup = new Map([...perCore].map(([core, list]) => [core, createIntervalLookup(list)]));
   return samples.map((s) => {
-    const hit = iv.find((q) => q.core === s.core && s.x >= q.from && s.x < q.to);
+    const hit = lookup.get(s.core)?.(s.x);
     if (hit) return { label: hit.cat ?? hit.label, source: 'interval' };
     if (useRules) for (const r of rl) if (r.enabled !== false && ruleMatches(r, s, features)) return { label: r.cat ?? r.label, source: 'rule' };
     return { label: null, source: null };

@@ -7,6 +7,7 @@ const { Trainer } = require('./trainer');
 const { DiagnosticsLog, diagnosticError, safeDiagnosticEvent } = require('./diagnostics');
 const { createEngineService } = require('./engine');
 const { createEngineIpc } = require('./engine-ipc');
+const { createTileIpc } = require('./tile-ipc');
 const path = require('node:path');
 const os = require('node:os');
 const { pathToFileURL } = require('node:url');
@@ -63,7 +64,9 @@ if (process.versions.electron) {
     sourceDirectory: app.isPackaged ? path.join(process.resourcesPath, 'python') : path.join(__dirname, 'python'),
     runtimeDirectory: app.isPackaged ? path.join(process.resourcesPath, 'engine-runtime') : path.join(__dirname, 'runtime'),
     lockPath: path.join(__dirname, 'runtime-lock.json'),
-    cacheFile: () => path.join(app.getPath('userData'), 'engine-runtime-verified.json'), version: app.isPackaged ? app.getVersion() : require('./package.json').version });
+    cacheFile: () => path.join(app.getPath('userData'), 'engine-runtime-verified.json'), version: app.isPackaged ? app.getVersion() : require('./package.json').version,
+    pyramidDirectory: () => path.join(app.getPath('userData'), 'pyramids'),     // the tile store's pyramid cache (contract §8.1)
+    projectsDirectory: () => path.join(app.getPath('userData'), 'projects') });  // project data of the tile store: mask tiles (contract §8.7)
 
   const heapMB = Math.max(2048, Math.min(32768, Math.floor((os.totalmem() / 2 ** 20) * 0.75)));
   app.commandLine.appendSwitch('js-flags', `--max-old-space-size=${heapMB}`);
@@ -95,6 +98,7 @@ if (process.versions.electron) {
     ipcMain.handle('engine:status', (event) => { if (!fromApp(event)) throw new Error('forbidden'); return engine.status(); });
     ipcMain.on('engine:enabled', (event) => { event.returnValue = fromApp(event) && engine.status().enabled === true; });
     setupEngineBridge();
+    setupTileBridge();
     void engine.start();
     await setupDiagnostics();
     createWindow();
@@ -182,6 +186,34 @@ if (process.versions.electron) {
     for (const name of bridge.OPERATIONS) {
       ipcMain.handle(`engine:${name}`, (event, ...args) => {
         if (!fromApp(event) || event.senderFrame !== event.sender.mainFrame) throw new Error('forbidden');
+        return bridge.call(event.sender.id, name, ...args);
+      });
+    }
+    app.on('web-contents-created', (_event, contents) => {
+      const owner = contents.id, leave = () => bridge.releasePage(owner);
+      contents.on('did-start-navigation', (details) => { if (details.isMainFrame && !details.isSameDocument) leave(); });
+      contents.on('render-process-gone', leave);
+      contents.on('destroyed', leave);
+    });
+  }
+
+  /* M8.4.15: tiled sections (contract §8), behind SEDCORETOOL_TILED_SECTIONS=1 and the engine experiment. A page registers a file the
+     user chose (the preload turns the File into its path), builds its pyramid with progress events and reads verified tiles; it never
+     sees a path. SEDCORETOOL_TILE_DELIVERY=direct makes the main process read the tiles itself (measurement of card M8.4.15, step 1). */
+  function setupTileBridge() {
+    const enabled = process.env.SEDCORETOOL_TILED_SECTIONS === '1' && engine.status().enabled === true;
+    ipcMain.on('tiles:enabled', (event) => { event.returnValue = fromApp(event) && enabled; });
+    if (!enabled) return;
+    const bridge = createTileIpc({ engine, pyramidRoot: path.join(app.getPath('userData'), 'pyramids'), projectsRoot: path.join(app.getPath('userData'), 'projects'),
+      delivery: process.env.SEDCORETOOL_TILE_DELIVERY === 'direct' ? 'direct' : 'engine' });
+    const WITH_PROGRESS = { build: 1, reopen: 2, locate: 4, copySource: 2, copyProjectStore: 4 };   // operation -> index of its key among the page's arguments
+    for (const name of bridge.OPERATIONS) {
+      ipcMain.handle(`tiles:${name}`, (event, ...args) => {
+        if (!fromApp(event) || event.senderFrame !== event.sender.mainFrame) throw new Error('forbidden');
+        if (Object.hasOwn(WITH_PROGRESS, name)) {
+          const sender = event.sender, at = WITH_PROGRESS[name], key = args[at];
+          return bridge.call(sender.id, name, ...args.slice(0, at + 1), (progress) => { if (!sender.isDestroyed()) sender.send('tiles:progress', key, progress); });
+        }
         return bridge.call(event.sender.id, name, ...args);
       });
     }

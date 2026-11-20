@@ -1,0 +1,87 @@
+{
+  "file": "rgb2g.tif",
+  "date": "2026-11-17T20:32:07.042Z",
+  "computer": "Windows 11, AMD Ryzen 7 7700X, 31 GiB (maintainer's computer)",
+  "viewport": "1440 x 900",
+  "firstRunSeconds": 4.58,
+  "section": {
+    "tiled": true,
+    "ds": 16,
+    "level": 4,
+    "w": 512,
+    "h": 5462,
+    "full": {
+      "w": 8192,
+      "h": 87382
+    },
+    "bits": 8,
+    "channels": 3
+  },
+  "firstUsefulViewMs": 809,
+  "cachedPanZoom": {
+    "frameCost": {
+      "n": 120,
+      "median": 6.3,
+      "p95": 8.4,
+      "max": 10.1
+    },
+    "frameInterval": {
+      "n": 119,
+      "median": 8.3,
+      "p95": 8.4,
+      "max": 12.6
+    }
+  },
+  "jumps": {
+    "firstFrameMs": {
+      "n": 20,
+      "median": 6.5,
+      "p95": 8.4,
+      "max": 8.6
+    },
+    "completeMs": {
+      "n": 20,
+      "median": 169.8,
+      "p95": 185.8,
+      "max": 186.5
+    },
+    "minImageShare": 1,
+    "incomplete": 0
+  },
+  "memory": {
+    "samples": 10,
+    "peakMiB": 1297
+  },
+  "targets": {
+    "firstUsefulViewMs": {
+      "target": 2000,
+      "value": 809,
+      "ok": true
+    },
+    "cachedFrameMedianMs": {
+      "target": 17,
+      "value": 6.3,
+      "ok": true
+    },
+    "cachedFrameP95Ms": {
+      "target": 33,
+      "value": 8.4,
+      "ok": true
+    },
+    "jumpFirstFrameShowsImage": {
+      "target": 1,
+      "value": 1,
+      "ok": true
+    },
+    "jumpCompleteP95Ms": {
+      "target": 250,
+      "value": 185.8,
+      "ok": true
+    },
+    "processTreePeakMiB": {
+      "target": 2048,
+      "value": 1297,
+      "ok": true
+    }
+  }
+}

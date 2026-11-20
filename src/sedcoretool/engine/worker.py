@@ -193,6 +193,24 @@ class MethodJob:
         self.cancel_path.unlink(missing_ok=True)
 
 
+class PyramidJob(MethodJob):
+    """``pyramid.build`` on the method worker. No fixed deadline: the coordinator stops it when its progress file has not changed for
+    ``stall_seconds`` (contract §8.4)."""
+
+    deadline = float('inf')
+    stall_seconds = 60
+
+    def accepts(self, result):
+        if not isinstance(result, dict):
+            return False
+        if set(result) == {'cancelled'}:
+            return result['cancelled'] is True
+        if set(result) == {'error'}:
+            error = result['error']
+            return isinstance(error, dict) and set(error) == {'code', 'field'} and isinstance(error['code'], str)
+        return set(result) == {'ok', 'pyramid'} and result['ok'] is True and isinstance(result['pyramid'], dict)
+
+
 def digest_file(source, cancel_path, output):
     digest, completed = hashlib.sha256(), 0
     with source.open('rb') as stream:

@@ -1,0 +1,118 @@
+{
+  "date": "2026-11-18T11:02:16.059Z",
+  "computer": "Windows_NT 10.0.26300, AMD Ryzen 7 7700X 8-Core Processor             , 31 GiB",
+  "node": "v22.23.4",
+  "limits": {
+    "objects": 1048576,
+    "stackBytes": 16777216
+  },
+  "objectTable": [
+    {
+      "objects": 1000,
+      "stacks": 0,
+      "bytes": {
+        "object_ids": 4000,
+        "object_class": 4000,
+        "object_predicted": 4000,
+        "object_confidence": 8000,
+        "classes": 301,
+        "stack_offsets": 8,
+        "stack_members": 0
+      },
+      "objectBytes": 20000,
+      "buildMs": 0,
+      "limit": null
+    },
+    {
+      "objects": 65536,
+      "stacks": 0,
+      "bytes": {
+        "object_ids": 262144,
+        "object_class": 262144,
+        "object_predicted": 262144,
+        "object_confidence": 524288,
+        "classes": 301,
+        "stack_offsets": 8,
+        "stack_members": 0
+      },
+      "objectBytes": 1310720,
+      "buildMs": 9,
+      "limit": null
+    },
+    {
+      "objects": 1048576,
+      "stacks": 0,
+      "bytes": {
+        "object_ids": 4194304,
+        "object_class": 4194304,
+        "object_predicted": 4194304,
+        "object_confidence": 8388608,
+        "classes": 301,
+        "stack_offsets": 8,
+        "stack_members": 0
+      },
+      "objectBytes": 20971520,
+      "buildMs": 241,
+      "limit": null
+    },
+    {
+      "objects": 1048577,
+      "stacks": 0,
+      "bytes": {
+        "object_ids": 4194308,
+        "object_class": 4194308,
+        "object_predicted": 4194308,
+        "object_confidence": 8388616,
+        "classes": 301,
+        "stack_offsets": 8,
+        "stack_members": 0
+      },
+      "objectBytes": 20971540,
+      "buildMs": 218,
+      "limit": {
+        "field": "objects",
+        "limit": 1048576
+      }
+    }
+  ],
+  "stackTables": [
+    {
+      "objects": 1000,
+      "stacks": 1000,
+      "bytes": {
+        "object_ids": 4000,
+        "object_class": 4000,
+        "object_predicted": 4000,
+        "object_confidence": 8000,
+        "classes": 301,
+        "stack_offsets": 4008,
+        "stack_members": 12000
+      },
+      "objectBytes": 20000,
+      "buildMs": 1,
+      "limit": null
+    },
+    {
+      "objects": 1000,
+      "stacks": 1000000,
+      "bytes": {
+        "object_ids": 4000,
+        "object_class": 4000,
+        "object_predicted": 4000,
+        "object_confidence": 8000,
+        "classes": 301,
+        "stack_offsets": 4000008,
+        "stack_members": 12000000
+      },
+      "objectBytes": 20000,
+      "buildMs": 272,
+      "limit": null
+    }
+  ],
+  "bytesPerObject": 20,
+  "largestObjectCount": 1048576,
+  "stacksWithinLimits": {
+    "byOffsets": 4194303,
+    "byMembersOf3": 1398101
+  }
+}

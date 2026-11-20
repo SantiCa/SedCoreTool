@@ -166,7 +166,7 @@ export async function decodeTiffBlocks(source, chooseArea, chooseFactor) {
     return { fw, fh, legacyBytes: fh * Math.ceil(fw * declaredBits / 8) + fw * fh * 4 };
   }
 
-  const area = chooseArea(fw, fh), k = chooseFactor(area.w, area.h);
+  const area = chooseArea(fw, fh), k = chooseFactor(area.w, area.h, bits);   // bits: the caller's memory estimate depends on 8 or 16 bits
   if (!Number.isInteger(k) || k < 1) throw new Error('Invalid TIFF reduction factor');
   const w = Math.floor(area.w / k), h = Math.floor(area.h / k), pixels = w * h;
   if (!w || !h || !Number.isSafeInteger(pixels)) throw new Error('Empty TIFF working area');
@@ -252,6 +252,18 @@ export async function decodeTiffBlocks(source, chooseArea, chooseFactor) {
     output[o + 2] = wide ? Math.round(b) : b;
     output[o + 3] = max;
   }
-  const rgba = wide ? Uint8ClampedArray.from(output, (sample) => sample >>> 8) : output;
+  const rgba = wide ? highBytes(/** @type {Uint16Array} */ (output)) : output;
   return { w, h, rgba, rgba16: wide ? output : null, k, fw, fh };
+}
+
+/**
+ * The 8-bit display copy of 16-bit samples: each sample's high byte. A plain loop on purpose (card H7): `Uint8ClampedArray.from(samples,
+ * mapFn)` builds a temporary array on the JavaScript heap, takes seconds and kills the page with a fatal out-of-memory error from about
+ * 112 million samples (a 28-megapixel 16-bit image), which no try/catch can stop.
+ * @param {Uint16Array} samples
+ */
+export function highBytes(samples) {
+  const out = new Uint8ClampedArray(samples.length);
+  for (let i = 0; i < samples.length; i++) out[i] = samples[i] >>> 8;
+  return out;
 }

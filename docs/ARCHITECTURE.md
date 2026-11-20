@@ -79,6 +79,7 @@ import, the code is in the wrong layer: move the code, do not break the rule.
 | Kernels (built, M8.3.3) | `kernels/` | Pure array functions: bin edges and sums, row/class counts from labels, layers and overlap stacks, tier classification, age interpolation | `numpy`, standard library | pandas, Pillow, file or network IO, environment variables, global state, anything from `engine/` or `methods/` |
 | Methods (built, M8.3.4) | `methods/` | One module per versioned method. Each has `NAME` (for example `"section.intervals/1"`), `parse(inputs) -> snapshot` that validates everything, and `run(snapshot, report, cancelled) -> dict` of named NumPy columns. `registry.py` maps names to modules | `kernels`, `numpy`, standard library | pandas, IO, transport details (frames, handles, sessions) |
 | Engine transport | `engine/` | `protocol.py` frames and strict JSON, `buffers.py` staged buffers, `server.py` coordinator, `worker.py` process wrappers (`DigestJob`; `MethodRunner`, the long-lived method worker, and `MethodJob`, one job on it) and the digest script, `specs.py` input tables, `method_worker.py` the script that runs a method, `lifetime.py` | Coordinator: standard library only. Only the script `method_worker.py` imports `numpy`, `kernels` and `methods` (it runs in its own process and registers the package without running its `__init__`, so pandas and Pillow are not loaded); nothing else may import it | The coordinator must never import NumPy or a method (start-up stays fast and control requests stay responsive). No scientific formulas in this layer |
+| Tile store (pixel pyramids built, M8.4.14; mask tiles stored, M8.4.16) | `store/` | `format.py` (layout, Zarr v2 metadata, `pyramid.json`), `tiles.py` (verified tile reads, cache) and `masks.py` (mask tiles, tables and manifests of tiled sections, contract §8.7), standard library only; `source.py` (sources read in bands with libvips) and `pyramid.py` (the band-by-band build); `identity.py` (the record that finds an existing pyramid without hashing its source again; standard library) | `format`/`tiles`/`masks`/`identity`: the standard library; `source`/`pyramid`: also `numpy`, `pyvips`, `methods.errors` | importing the engine or the public API; the coordinator imports only `format`, `tiles` and `masks`, the method worker the whole store |
 | Public API and CLI | `pipeline.py`, `indices.py`, `depth.py`, `io.py`, `segmentation.py`, `export.py`, `batch.py`, `cli.py`, `plotting.py` | The supported functions and commands. Adapters: validate user input, call kernels/methods, shape the output (DataFrame, CSV, LAS) | `kernels`, `methods`, pandas, Pillow | Starting the engine process; a second copy of a formula that exists in `kernels/` |
 | U-Net (optional) | `unet/` | Tiling, dataset, training, prediction, evaluation. Unchanged until M8.5 | its own optional dependencies | being imported by the base engine |
 
@@ -95,7 +96,7 @@ matching tier and the Python API the **last**; the kernel takes `precedence="fir
 
 | Kind | Rule | Examples |
 |---|---|---|
-| Pure modules | No `document`, `window` or DOM types; state arrives as arguments. Tested with Node in `tests/app/` | `core.js`, `sectiondepth.js`, `sectionanalysis.js`, `maskchanges.js`, `engineclient.js`, `engineanalysis.js`, `edit.js`, `imageproc.js`, `learn.js`, `log.js`, `geo.js`, `interp.js`, `locmap.js`, `plot.js`, `sheet.js`, `exportio.js`, `zip.js`, `unet.js`, `unetmodel.js`, `navpreview.js`, `figview.js`, `tableview.js` |
+| Pure modules | No `document`, `window` or DOM types; state arrives as arguments. Tested with Node in `tests/app/` | `core.js`, `sectiondepth.js`, `sectionanalysis.js`, `maskchanges.js`, `tiledsection.js`, `tilecache.js`, `tiledmasks.js`, `tiledit.js`, `tiledcounts.js`, `tiledsync.js`, `tiledundo.js`, `singleflight.js`, `taxa.js`, `engineclient.js`, `engineanalysis.js`, `edit.js`, `imageproc.js`, `learn.js`, `log.js`, `geo.js`, `interp.js`, `locmap.js`, `plot.js`, `sheet.js`, `exportio.js`, `zip.js`, `unet.js`, `unetmodel.js`, `navpreview.js`, `figview.js`, `tableview.js` |
 | State | The shared project state `S` and small helpers | `state.js` |
 | Controllers and views | Read and change `S`, call pure modules, build DOM/SVG, wire events | `app.js`, `columns.js`, `datatab.js`, `figures.js`, `multiproxy.js`, `panels.js`, `diagnostics.js` |
 | Storage | IndexedDB project library | `storage.js` |
@@ -148,7 +149,9 @@ Everything Electron-specific stays in `desktop/`.
 ### 3.4 Tile store for large images (planned, part C of M8.4)
 
 Chosen by the maintainer on 15 November 2026 (option A, decision D10) so that the program stays fluid with images of several
-gigabytes. **Not built.** Cards M8.4.12-M8.4.19 of the roadmap build it; every one of them follows these rules, and a card that
+gigabytes. **Pixel pyramids are built** by the engine since card M8.4.14 (contract §8: `pyramid.build`, `pyramid.info`, `tile.read`; not used by the
+interface yet); **mask tiles are stored** by the engine since card M8.4.16 (contract §8.7: `mask.begin`, `mask.put`, `mask.commit`,
+`mask.discard`, `mask.read`; not used by the interface yet); editing on tiles, counting and saving are not. Cards M8.4.12-M8.4.19 of the roadmap build it; every one of them follows these rules, and a card that
 needs to break one stops and asks.
 
 For each tiled section, the engine keeps on disk:
@@ -159,7 +162,7 @@ For each tiled section, the engine keeps on disk:
 - **mask tiles**: labels (`i32`) and exclusion (`u8`) at full resolution on the same tile grid, each stored under the SHA-256 of its
   bytes, and one **manifest** per saved version that lists the hashes for every tile position (no entry = an empty tile). The identity
   of a version is the SHA-256 of its manifest;
-- **row counts per tile**, if the engine computes the interval table (rule D11), so that an edit recounts only the tiles it touched.
+No row counts are stored: the page counts tiled sections itself (decision 7).
 
 Rules:
 
@@ -184,6 +187,54 @@ Rules:
 7. **Drawing** uses 2-D canvas drawing of tile images first. WebGL is used only if the viewer misses the frame target, and only by a
    decision of the maintainer (D9).
 8. **No scientific calculation is written in JavaScript for tiled sections**, except the interval table if rule D11 chose option D.
+
+**Design of part C (design session of 16 November 2026).** Detailed in roadmap cards M8.4.14-M8.4.19. Items marked *(maintainer)*
+are proposals with a default that the maintainer confirms or changes before the card that depends on them starts.
+
+1. **Which sections are tiled.** A section is tiled when its source has more pixels than the working-resolution limit
+   (`maxMP`, 8 megapixels by default: the point where today's path starts discarding detail, M8.4.13), the engine is available and the
+   flag of M8.4.15 is on. Every other section keeps today's path (rule 6).
+2. **Masks of a tiled section are at full resolution** (confirmed by the maintainer, 16 November 2026): labels and exclusion on level 0 of the pyramid, so the interval
+   table counts the source pixels. The resolution selector of today's path (`RES_FACTORS`) does not apply to tiled sections.
+3. **Two folders, chosen by the main process.** The pyramid is a cache keyed by the SHA-256 of the source file
+   (`<user data>/pyramids/<sha256>/`), shared by projects and deleted least-recently-used beyond a disk budget of 50 GiB (the default the maintainer
+   accepted on 16 November 2026); the pyramid of an open project is never deleted. Mask tiles, manifests and tables are **project data**
+   (`<user data>/projects/<project id>/tiles/`), never deleted by a budget, and included in backups (M8.4.18).
+4. **Decoding with libvips** (revised on 16 November 2026: the maintainer asked to add libraries when they make the program faster
+   and more stable). The engine reads source images with libvips through `pyvips` and `pyvips-binary` (libvips 8.18.7), which reads
+   regions of TIFF and BigTIFF (tiled, striped, all the usual compressions including JPEG-in-TIFF), streams JPEG and PNG in bands
+   without decoding them whole, and shrinks images fast. *Capability added:* region and band reads of every format the program accepts,
+   with bounded memory. *Smallest alternative considered:* a minimal TIFF reader written here with the scope of `app/js/tiff.js` (no
+   dependency, but no JPEG-in-TIFF, slower and new code to secure against hostile files); `tifffile` (0.3 MB) plus `imagecodecs` (19 MB).
+   *Cost:* about 8-9 MB per platform wheel (Windows x64, macOS arm64 and x86_64 from 10.15, Linux x86_64 with glibc 2.28 or newer, and
+   musl), plus `cffi` (`pycparser` turned out not to be needed); pinned with hashes in `desktop/runtime-lock.json` like the other packages,
+   so offline packaging is unchanged; the prepared Windows runtime grew by 19 MiB (measured in M8.4.14); libvips is LGPL-2.1-or-later (dynamically linked; licence texts shipped with the package). *Probe on the M8.4.13 fixtures
+   (16 November 2026, Windows, outside the program):* `rgb8g`, `deflate8g`, `strip2g` and `gray16_2g` opened in 6 ms, 512 x 512 regions
+   read in a median of 1.3-6.1 ms and **equal byte for byte to the generator's pixels** (8 regions each; one first read of the striped file
+   took 0.84 s); the 4,096 x 65,500 JPEG was streamed whole in 1.0 s. JPEG and PNG larger than 1 GiB decoded are refused with a message that
+   suggests TIFF (the maintainer's choice, 16 November 2026), although libvips could stream them.
+5. **Pyramid layout:** Zarr version 2 (one array per level, chunks of 512 x 512 x channels, C order, chunk keys `i.j.0`), compressor
+   either none or `zlib` level 1, chosen by a predeclared measurement in M8.4.14; levels are 2 x 2 integer means with round-half-up,
+   `(a + b + c + d + 2) // 4`; one extra file per level lists the SHA-256 of every tile (rule 3), which Zarr readers ignore.
+6. **Mask tiles** are stored under the SHA-256 of their uncompressed little-endian bytes (the file itself may be zlib-compressed);
+   all-zero tiles have no entry. A manifest (canonical JSON) lists the tile hashes and the hashes of the objects, classes and overlap
+   tables; its SHA-256 is the version identity.
+7. **Rule D11 = D, counted in the page (decision F of card M8.4.17, approved by the maintainer on 18 November 2026; it replaces "the engine
+   counts the rows of each tile"):** the page counts each tile it holds into a row histogram of `(label, pixels)` pairs and valid pixels, which does
+   not depend on classes; the interval table is the aggregation of the histograms under the current effective classes, binned with `core.js` as
+   today. An edit counts only the tiles it touched (they are in the page); a change of classes, predictions or settings only aggregates again; tiles
+   the page dropped keep their histograms and are read back only when the analysis area's columns change. The engine does not count tiled
+   sections: from the stored version it could not meet the 150 ms edit target of contract §7, because the page stores an edit in a round that starts
+   300 ms after it. The Python method `section.intervals/1` stays the reference through tiled parity fixtures.
+9. **A tiled section keeps a small working image** (decided while implementing M8.4.15, 17 November 2026): the finest pyramid level within the
+   maximum size when adding images, read through the engine. The rest of the program treats the section like a reduced section of today's path
+   (navigation, ruler, depth); the viewer draws full-resolution tiles over it when the zoom needs them. This replaces "no pixel or mask arrays in the
+   page" of the first design: about 130 places of the interface read a section's image or masks, and adapting all of them was not needed to show
+   tiles. Full-resolution masks (M8.4.16) and counting (M8.4.17) do not use the working image. Until M8.4.18 a tiled section is not saved, and
+   tools that would decode the source refuse with a message.
+8. **Tiled sections are a desktop feature.** The browser build and the standalone file show a visible message for them and never
+   open them partially. Until M8.5, tools that need the whole image (detection, filters, U-Net, enhancement that changes pixels,
+   rotation, cropping, change of working resolution) are disabled on tiled sections with a message; display contrast is allowed.
 
 ## 4. Path of one scientific request (built in M8.3)
 
@@ -305,12 +356,12 @@ Do not reopen these without the maintainer; build on them.
 | D1 | One local Python/NumPy scientific engine in a separate process; JavaScript keeps interface, editing and saving | 12 Nov 2026 |
 | D2 | Electron is the interface shell for now; protocol and methods stay shell-independent so it can be replaced after M8.6 | 12 Nov 2026 |
 | D3 | Private pipes with bounded binary frames; no HTTP server, no listening port | M8.1 |
-| D4 | A pinned CPython 3.12 runtime with NumPy, pandas and Pillow ships inside the program; no system Python, no downloads at run time, no silent fallback when it is invalid | M8.2.2 |
+| D4 | A pinned CPython 3.12 runtime with NumPy, pandas and Pillow (and libvips through `pyvips`, added by card M8.4.14: §3.4 decision 4) ships inside the program; no system Python, no downloads at run time, no silent fallback when it is invalid | M8.2.2 |
 | D5 | Every runtime file is verified at launch; a verified-identity record skips re-hashing while files are unchanged; unused files are pruned from the runtime | 12 Nov 2026 |
 | D6 | The Windows portable form is a ZIP of the program folder, not a self-extracting executable | 12 Nov 2026 |
 | D7 | The Python API and CLI call the same kernels and methods in-process; they are not clients of the engine process | M8.1 |
 | D8 | Python layering `kernels/` → `methods/` → `engine/` and public API (§3.1); `app.js` only shrinks (§3.2) | 12 Nov 2026 (design; first applied in M8.3) |
 | D9 | Rust kernels, GPU work, WebAssembly, another scientific engine or a UI rewrite are not part of M8; each needs measured need and its own authorised task | 12 Nov 2026 |
 | D10 | Large images and fluidity follow **option A**: the engine owns a tile store on disk (pixel pyramid, versioned mask tiles); the page shows tiles and edits the loaded ones (§3.4). Options considered and not chosen: B, one Rust core compiled for the engine and to WebAssembly for the page; C, a native Python and Qt interface; D, light interactive calculations kept in JavaScript. B and C stay possible later because of D12 | 15 Nov 2026 |
-| D11 | Where the interval table of a tiled section is computed is decided once by a measurement (card M8.4.12) against the rule in contract §7: the engine (A) if one tile's edit round trip plus the table's recomputation is p95 <= 100 ms, otherwise the page (D) with the Python method as reference and parity tests. **Outcome (card M8.4.12, 15 Nov 2026): D by the rule as measured** (one-tile edit p95 794 ms, median 72 ms, plus 238 ms to turn the row counts of a 349,526-row section into its table; the table time is a per-interval Python loop in `kernels/binning.sum_by_interval` that can be vectorised, which would change the outcome). See the [summary](validation/M8.4.12-round-trip-summary.md). **Measured again after vectorising the kernel (card M8.4.20, 16 Nov 2026): still D** (one-tile edit p95 84.7 ms over 60 samples, median 71.0 ms, no stall; table 34.8 ms; 84.7 + 34.8 = 119.5 ms > 100). D is accepted, on the maintainer's delegation, for the interactive interval table only; the rule was not changed; see the [summary](validation/M8.4.20-vectorised-kernel-summary.md) | 16 Nov 2026 |
+| D11 | Where the interval table of a tiled section is computed is decided once by a measurement (card M8.4.12) against the rule in contract §7: the engine (A) if one tile's edit round trip plus the table's recomputation is p95 <= 100 ms, otherwise the page (D) with the Python method as reference and parity tests. **Outcome (card M8.4.12, 15 Nov 2026): D by the rule as measured** (one-tile edit p95 794 ms, median 72 ms, plus 238 ms to turn the row counts of a 349,526-row section into its table; the table time is a per-interval Python loop in `kernels/binning.sum_by_interval` that can be vectorised, which would change the outcome). See the [summary](validation/M8.4.12-round-trip-summary.md). **Measured again after vectorising the kernel (card M8.4.21, 16 Nov 2026): still D** (one-tile edit p95 84.7 ms over 60 samples, median 71.0 ms, no stall; table 34.8 ms; 84.7 + 34.8 = 119.5 ms > 100). D is accepted, on the maintainer's delegation, for the interactive interval table only; the rule was not changed; see the [summary](validation/M8.4.21-vectorised-kernel-summary.md) | 16 Nov 2026 |
 | D12 | Data that may outlive the interface (the tile store, method inputs and results) uses documented, versioned formats that do not depend on the browser, IndexedDB or Electron; new scientific methods are written only in Python (§3.2 rule 1) | 15 Nov 2026 |

@@ -20,6 +20,7 @@ import os
 import queue
 import sys
 import threading
+import time
 import types
 from pathlib import Path
 
@@ -57,7 +58,50 @@ def load_modules():
 
     registry = load_registry()                                  # must come first: it makes ``sedcoretool.methods`` importable
     from sedcoretool.methods.errors import Cancelled, MethodError
+    try:                                                        # libvips (tile store, card M8.4.14): about 70 ms, loaded here for the same reason
+        from sedcoretool.store import pyramid, source
+        source.configure_libvips(int(os.environ.get('OMP_NUM_THREADS', '1')))
+    except ImportError:                                         # a development Python without pyvips: pyramid jobs then fail visibly
+        pyramid = None
+    global PYRAMID
+    PYRAMID = pyramid
     return np, registry, Cancelled, MethodError
+
+
+PYRAMID = None
+PROGRESS_INTERVAL = 0.1                                         # seconds: the coordinator sends at most ten events per second
+
+
+def run_pyramid(job, Cancelled, MethodError):
+    """``pyramid.build`` (contract §8.4): build or reuse a pyramid; progress goes to ``progress_path`` as JSON, replaced atomically."""
+    if PYRAMID is None:
+        return {'error': {'code': 'UNSUPPORTED_METHOD', 'field': 'pyramid'}}
+    progress_path = Path(job['progress_path'])
+    last = {'time': 0.0, 'stage': None}
+
+    def progress(stage, completed, total):
+        now = time.monotonic()
+        if stage == last['stage'] and now - last['time'] < PROGRESS_INTERVAL and completed < total:
+            return
+        temporary = progress_path.with_name(progress_path.name + '.tmp')
+        try:
+            temporary.write_text(json.dumps({'stage': stage, 'completed': completed, 'total': total}), encoding='utf-8')
+            os.replace(temporary, progress_path)
+        except OSError:
+            # On Windows the file cannot be replaced while the coordinator is reading it: skip this update, the next one follows.
+            # (Uncaught, this ended the worker in about one build in four when libvips ran with four threads.)
+            return
+        last.update(time=now, stage=stage)
+
+    try:
+        result = PYRAMID.build(Path(job['path']), Path(job['root']), name=job['name'], budget=job['budget'], compressor=job['compressor'],
+                               keep=job['keep'], cancelled=Path(job['cancel_path']).exists, progress=progress,
+                               expect=job.get('expect'))
+    except Cancelled:
+        return {'cancelled': True}
+    except MethodError as error:
+        return {'error': {'code': error.code, 'field': error.field}}
+    return {'ok': True, 'pyramid': result}
 
 
 TABLE_CACHE_ENTRIES = 64
@@ -85,6 +129,8 @@ def run(job_file, modules, memos=None):
     np, registry, Cancelled, MethodError = modules
 
     job = json.loads(Path(job_file).read_text(encoding='utf-8'))
+    if job.get('kind') == 'pyramid.build':
+        return run_pyramid(job, Cancelled, MethodError)
     cancel_path, output = Path(job['cancel_path']), Path(job['output_dir'])
     method = registry.get(job['method'])
     memo = None
@@ -121,10 +167,27 @@ def run(job_file, modules, memos=None):
             'packed': {'byte_length': offset, 'sha256': hashlib.sha256(packed.data).hexdigest(), 'layout': layout}}
 
 
-def read_commands(commands):
+def private_stdin():
+    """The command pipe, moved off file descriptor 0 for the reader thread alone; descriptor 0 and the Windows standard input handle
+    then point to the null device.
+
+    On Windows a thread blocked in a read of the stdin pipe made libvips crash with an access violation (exit code 0xC0000005) in
+    about one pyramid build in fourteen through the coordinator, and in every process of a stress test (card M8.4.14, 17 November 2026);
+    it is also what made importing NumPy hang (``load_modules``). With the pipe on a private descriptor, no library call can touch it."""
+    private = os.dup(0)
+    null = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(null, 0)
+    os.close(null)
+    if sys.platform == 'win32':
+        import ctypes
+        import msvcrt
+        ctypes.windll.kernel32.SetStdHandle(-10, msvcrt.get_osfhandle(0))   # STD_INPUT_HANDLE
+    return os.fdopen(private, 'rb', buffering=0)
+
+
+def read_commands(commands, stream):
     """Queue the job paths the coordinator sends. End of input means the coordinator is gone: stop at once, as the one-job
     workers did when the liveness pipe closed (the Windows Job Object normally ends the whole tree first)."""
-    stream = sys.stdin.buffer
     while (line := stream.readline()):
         commands.put(line.decode('utf-8').strip())
     os._exit(1)
@@ -133,7 +196,7 @@ def read_commands(commands):
 def serve(modules):
     """Answer jobs until the process is killed. The reader thread starts only after the imports (see ``load_modules``)."""
     commands = queue.Queue()
-    threading.Thread(target=read_commands, args=(commands,), daemon=True).start()
+    threading.Thread(target=read_commands, args=(commands, private_stdin()), daemon=True).start()
     memos = {}                                                  # per-method memory; lives and dies with this process
     while True:
         job_file = commands.get()

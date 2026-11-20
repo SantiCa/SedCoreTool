@@ -19,10 +19,12 @@ spec.loader.exec_module(builder)
 def test_lock_pins_complete_minimal_dependency_sets_for_each_supported_architecture():
     lock = json.loads(builder.LOCK.read_bytes())
     assert set(lock['targets']) == {'win32-x64', 'linux-x64', 'darwin-x64', 'darwin-arm64'}
-    assert set(lock['packages']) == {'numpy', 'pandas', 'Pillow', 'python-dateutil', 'pytz', 'tzdata', 'six'}
+    assert set(lock['packages']) == {'numpy', 'pandas', 'Pillow', 'python-dateutil', 'pytz', 'tzdata', 'six', 'pyvips', 'pyvips-binary', 'cffi'}
+    sources = {source['name']: source['version'] for source in lock['sources']}
+    assert sources == {'pyvips': lock['packages']['pyvips']}             # pure Python, published only as a source archive
     for target in lock['targets'].values():
-        assert {wheel['name']: wheel['version'] for wheel in target['wheels']} == lock['packages']
-        for artifact in [target['archive'], *target['wheels']]:
+        assert {wheel['name']: wheel['version'] for wheel in target['wheels']} | sources == lock['packages']
+        for artifact in [target['archive'], *target['wheels'], *lock['sources']]:
             assert len(artifact['sha256']) == 64
             assert 0 < artifact['size'] < 256 * 1024**2
             assert artifact['url'].startswith('https:')
@@ -63,6 +65,88 @@ def test_prune_refuses_to_follow_a_link_out_of_the_staging_directory(tmp_path):
     with pytest.raises(ValueError, match='prune'):
         builder.prune_runtime(staging, {'site_packages': 'python/Lib/site-packages'})
     assert (outside / 'precious.txt').read_text() == 'keep'
+
+
+class FakeServer:
+    """A local HTTP server for card M8.4.26: each request takes the next behaviour of `plan` ('good', 'drop', 'wrong', 'error')."""
+
+    def __init__(self, data, plan):
+        import http.server
+        import threading
+        server = self
+        self.data, self.plan, self.requests = data, list(plan), 0
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                server.requests += 1
+                behaviour = server.plan.pop(0) if server.plan else 'good'
+                if behaviour == 'error':
+                    self.send_error(503)
+                    return
+                body = bytes(len(server.data)) if behaviour == 'wrong' else server.data
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body[:len(body) // 2] if behaviour == 'drop' else body)   # 'drop': the connection ends half way
+                self.close_connection = True
+
+        self.httpd = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def opener(self, request, timeout):
+        """Fetches from this server whatever trusted URL the builder asked for."""
+        import urllib.request
+        return urllib.request.urlopen(f'http://127.0.0.1:{self.httpd.server_address[1]}/artifact', timeout=timeout)
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def remote_artifact(data):
+    return {'filename': 'remote.whl', 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest(),
+            'url': 'https://files.pythonhosted.org/packages/test/remote.whl'}
+
+
+@pytest.mark.parametrize('failure', ['drop', 'error'])
+def test_a_failed_transfer_is_tried_again_and_the_good_answer_is_kept(tmp_path, failure):
+    data, pauses, messages = os.urandom(300_000), [], []
+    server = FakeServer(data, [failure, 'good'])
+    try:
+        target = builder.download_artifact(remote_artifact(data), tmp_path, opener=server.opener, sleep=pauses.append, log=messages.append)
+    finally:
+        server.close()
+    assert target.read_bytes() == data
+    assert server.requests == 2 and pauses == [2]
+    assert 'attempt 2 of 4' in messages[0]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['remote.whl'], 'no temporary file is left'
+
+
+def test_bytes_that_do_not_match_the_lock_stop_at_once(tmp_path):
+    data, pauses = os.urandom(5000), []
+    server = FakeServer(data, ['wrong', 'good'])
+    try:
+        with pytest.raises(ValueError, match='failed verification'):
+            builder.download_artifact(remote_artifact(data), tmp_path, opener=server.opener, sleep=pauses.append, log=lambda m: None)
+    finally:
+        server.close()
+    assert server.requests == 1 and pauses == []
+    assert list(tmp_path.iterdir()) == [], 'nothing is kept'
+
+
+def test_four_failed_transfers_stop_with_a_clear_message(tmp_path):
+    data, pauses = os.urandom(5000), []
+    server = FakeServer(data, ['drop'] * 4)
+    try:
+        with pytest.raises(RuntimeError, match=r'Download of remote\.whl failed 4 times; last error: TransferError'):
+            builder.download_artifact(remote_artifact(data), tmp_path, opener=server.opener, sleep=pauses.append, log=lambda m: None)
+    finally:
+        server.close()
+    assert server.requests == 4 and pauses == [2, 5, 15]
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_offline_download_requires_exact_cached_bytes_and_preserves_a_corrupt_cache(tmp_path):
@@ -138,3 +222,71 @@ def test_failed_directory_promotion_restores_last_complete_runtime(tmp_path, mon
     assert (target / 'last-good').read_text() == 'old'
     assert (staging / 'next').read_text() == 'new'
     assert not list(tmp_path.glob('.previous-*'))
+
+
+def source_archive(path, entries):
+    """A .tar.gz whose entries are (name, bytes) for files, (name, None) for folders, or (name, 'link') for a symbolic link."""
+    with tarfile.open(path, 'w:gz') as archive:
+        for name, data in entries:
+            info = tarfile.TarInfo(name)
+            if data is None:
+                info.type = tarfile.DIRTYPE
+                archive.addfile(info)
+            elif data == 'link':
+                info.type, info.linkname = tarfile.SYMTYPE, '../../outside'
+                archive.addfile(info)
+            else:
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
+    return path
+
+
+SOURCE = {'name': 'pyvips', 'version': '3.2.0', 'package': 'pyvips'}
+
+
+def test_source_packages_copy_only_python_files_and_the_licence_with_metadata(tmp_path):
+    archive = source_archive(tmp_path / 'pyvips-3.2.0.tar.gz', [
+        ('pyvips-3.2.0', None), ('pyvips-3.2.0/LICENSE.txt', b'MIT'), ('pyvips-3.2.0/setup.py', b'raise SystemExit'),
+        ('pyvips-3.2.0/pyvips/__init__.py', b'X = 1'), ('pyvips-3.2.0/pyvips/vimage.pyi', b'x: int'),
+        ('pyvips-3.2.0/pyvips/pyvips_build.py', b'import cffi'), ('pyvips-3.2.0/pyvips/data.bin', b'\0'),
+        ('pyvips-3.2.0/tests/test_image.py', b'assert 0')])
+    site = tmp_path / 'site'
+    site.mkdir()
+    builder.install_sources([SOURCE], [archive], site)
+    assert sorted(p.relative_to(site).as_posix() for p in site.rglob('*') if p.is_file()) == [
+        'pyvips-3.2.0.dist-info/INSTALLER', 'pyvips-3.2.0.dist-info/LICENSE.txt', 'pyvips-3.2.0.dist-info/METADATA',
+        'pyvips-3.2.0.dist-info/top_level.txt', 'pyvips/__init__.py', 'pyvips/vimage.pyi']
+    assert (site / 'pyvips-3.2.0.dist-info/METADATA').read_text(encoding='utf-8') == 'Metadata-Version: 2.1\nName: pyvips\nVersion: 3.2.0\n'
+    assert (site / 'pyvips-3.2.0.dist-info/LICENSE.txt').read_bytes() == b'MIT'
+
+
+@pytest.mark.parametrize('entries, message', [
+    ([('pyvips-3.2.0/LICENSE.txt', b'MIT'), ('pyvips-3.2.0/pyvips/__init__.py', b''), ('pyvips-3.2.0/pyvips/x.py', 'link')], 'Unsupported archive member'),
+    ([('pyvips-3.2.0/LICENSE.txt', b'MIT'), ('pyvips-3.2.0/pyvips/__init__.py', b''), ('other-1.0/pyvips/x.py', b'')], 'Unexpected source archive layout'),
+    ([('pyvips-3.2.0/LICENSE.txt', b'MIT'), ('pyvips-3.2.0/pyvips/../../escape.py', b'')], 'Invalid resource path'),
+    ([('pyvips-3.2.0/pyvips/__init__.py', b'')], 'Incomplete source package'),
+    ([('pyvips-3.2.0/LICENSE.txt', b'MIT')], 'Incomplete source package'),
+    ([('pyvips-3.2.0/LICENSE.txt', b'MIT'), ('pyvips-3.2.0/pyvips/__init__.py', b'x' * (16 * 1024**2 + 1))], 'Source archive too large'),
+])
+def test_source_packages_refuse_unsafe_or_incomplete_archives(tmp_path, entries, message):
+    archive = source_archive(tmp_path / 'pyvips-3.2.0.tar.gz', entries)
+    site = tmp_path / 'site'
+    site.mkdir()
+    with pytest.raises(ValueError, match=message):
+        builder.install_sources([SOURCE], [archive], site)
+    assert not (tmp_path / 'escape.py').exists() and not (tmp_path / 'outside').exists()
+
+
+def test_wheel_installation_passes_every_platform_tag_of_a_target(tmp_path):
+    calls = []
+    staging = tmp_path / 'stage'
+    (staging / 'site').mkdir(parents=True)
+    for platforms, expected in (('win_amd64', ['win_amd64']), (['manylinux_2_28_x86_64', 'manylinux_2_17_x86_64'], ['manylinux_2_28_x86_64', 'manylinux_2_17_x86_64'])):
+        calls.clear()
+        builder.install_wheels({'wheel_platform': platforms, 'wheels': [], 'site_packages': 'site'}, [], staging, runner=lambda command, **_: calls.append(command))
+        command = calls[0]
+        assert [command[i + 1] for i, item in enumerate(command) if item == '--platform'] == expected
+    with pytest.raises(ValueError, match='Invalid wheel platform'):
+        builder.install_wheels({'wheel_platform': ['bad tag; rm'], 'wheels': [], 'site_packages': 'site'}, [], staging, runner=lambda *a, **k: None)
+    lock = json.loads(builder.LOCK.read_bytes())
+    assert 'manylinux_2_17_x86_64' in lock['targets']['linux-x64']['wheel_platform']   # NumPy, pandas and Pillow publish only 2_17 wheels

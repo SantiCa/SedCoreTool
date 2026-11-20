@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sedcoretool"
-version = "0.151.0"
+version = "0.152.0"
 description = "SedCoreTool (formerly CorAnTool and IchAnTool): quantitative ichnofabric analysis of sediment core images"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
@@ -23,7 +23,8 @@ dependencies = ["numpy>=1.24", "pillow>=10", "pandas>=2.0"]
 excel = ["openpyxl>=3.1"]
 plot = ["matplotlib>=3.7"]
 unet = ["onnxruntime>=1.17", "torch>=2.1", "segmentation-models-pytorch>=0.3", "onnx>=1.15"]
-dev = ["pytest>=7", "pytest-cov>=5", "openpyxl>=3.1", "matplotlib>=3.7", "psutil>=5.9"]   # psutil: tools/benchmark.py, imported by the benchmark tests
+large-images = ["pyvips[binary]>=3.0"]   # libvips: reading multi-gigabyte images for the tile store (ARCHITECTURE §3.4 decision 4)
+dev = ["pytest>=7", "pytest-cov>=5", "openpyxl>=3.1", "matplotlib>=3.7", "psutil>=5.9", "pyvips[binary]>=3.0"]   # psutil: tools/benchmark.py, imported by the benchmark tests; pyvips: the tile store
 
 [project.scripts]
 sedcoretool = "sedcoretool.cli:main"

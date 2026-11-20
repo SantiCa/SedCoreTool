@@ -71,13 +71,25 @@ export function manualRangeAt(section, d) { let hit = null; for (const m of sect
  * @returns {{bins: SectionBin[], rowCache: RowCache | undefined}}
  */
 export function computeSectionBins(s, project) {
-  const { classes, settings, ageModel } = project;
+  const { classes, settings } = project;
   if (s.loadWarnings) return { bins: [], rowCache: s._rc };
   const eff = effectiveClassIndex(s, classes, settings);
   let h = 2166136261; for (let i = 0; i < eff.length; i++) h = Math.imul(h ^ (eff[i] + 2), 16777619);   // signature of the class of each object
   const key = `${s._mv || 0}|${s.w}x${s.h}|${s.roi.x0},${s.roi.y0},${s.roi.x1},${s.roi.y1}|${classes.length}|${eff.length}|${h}`;
   const rowCache = s._rc?.key !== key ? { key, counts: rowCounts({ labels: s.labels, width: s.w, roi: s.roi, exclude: s.exclude, effClass: eff, nClasses: classes.length, stacks: s.stacks }) } : s._rc;   // V0.2: cached
-  const bins = /** @type {any[]} */ (binRows(rowCache.counts, { top: s.top, bottom: s.bottom, binPx: binRowsOfSection(s, settings), minValid: (settings.minValid ?? 20) / 100 }));
+  return { bins: binsFromRowCounts(s, rowCache.counts, project, binRowsOfSection(s, settings)), rowCache };
+}
+
+/**
+ * Interval bins from the row counts of a section's analysis area: the half of `computeSectionBins` that does not depend on how the rows were
+ * counted, so that a tiled section (card M8.4.17, counted tile by tile) and a section held whole give the same table. `binPx` is the rows per
+ * interval of the rows that were counted (`binRowsOfSection` of the section, or of its analysis area in source pixels for a tiled one).
+ * @param {any} s section: top, bottom, units, manual @param {import("./core.js").RowCounts} counts @param {AnalysisProject} project @param {number} binPx
+ * @returns {SectionBin[]}
+ */
+export function binsFromRowCounts(s, counts, project, binPx) {
+  const { settings, ageModel } = project;
+  const bins = /** @type {any[]} */ (binRows(counts, { top: s.top, bottom: s.bottom, binPx, minValid: (settings.minValid ?? 20) / 100 }));
   const pad = (settings.noDataPad || 0) / UNIT_TO_CM[/** @type {import('./core.js').DepthUnit} */ (s.units)];   // V0.3: widen the no-data zones by this length (cm) on each side
   if (pad > 0) {
     const gaps = bins.filter((b) => b.noData).map((b) => [b.dTop - pad, b.dBottom + pad]);
@@ -89,7 +101,7 @@ export function computeSectionBins(s, project) {
     const ar = interpAgeRange(ageModel, b.depth); b.ageMin = ar?.min ?? null; b.ageMax = ar?.max ?? null;   // V0.28
     const m = manualRangeAt(s, b.depth); b.BIm = m?.BI ?? null; b.iim = m?.ii ?? null;
   }
-  return { bins, rowCache };
+  return bins;
 }
 
 /** @param {ArrayBuffer} digest @returns {string} */
@@ -124,6 +136,28 @@ function finiteNumber(name, value) {
 /** @param {EngineDtype} dtype @param {number[]} shape @param {ArrayLike<number>} data @returns {EngineBuffer} */
 const engineBuffer = (dtype, shape, data) => ({ dtype, shape, data });
 
+/** The `objects` table of contract §4 (also stored with the masks of tiled sections, §8.7). @param {any} s */
+export const objectRecords = (s) => [...s.objects.values()].map((/** @type {AnalysisObject} */ o) => ({
+  id: o.id, class_id: o.cls || null, predicted_class_id: o.pred || null, confidence: Number.isFinite(o.conf) ? o.conf : 0 }));
+
+/** The `classes` table of contract §4. @param {readonly {id: string, name?: string, counts?: boolean}[]} classes */
+export const classRecords = (classes) => classes.map((c) => ({ id: c.id, name: c.name ?? c.id, counts: !!c.counts }));
+
+/**
+ * The overlap stacks as the CSR tables `stack_offsets` and `stack_members` of contract §4.
+ * @param {(number[] | null)[]} stacks @returns {{offsets: Uint32Array, members: Uint32Array, total: number}}
+ */
+export function stackTables(stacks) {
+  const offsets = new Uint32Array(stacks.length + 1);
+  let total = 0;
+  for (let k = 0; k < stacks.length; k++) { offsets[k] = total; total += stacks[k]?.length ?? 0; }
+  offsets[stacks.length] = total;
+  const members = new Uint32Array(total);
+  let at = 0;
+  for (const row of stacks) for (const id of row ?? []) members[at++] = id;
+  return { offsets, members, total };
+}
+
 /**
  * The scientific inputs of engine method `section.intervals/1` (docs/roadmap-engine-contract.md §4) taken from a
  * section as the interface keeps it. Data is copied; nothing is computed about classes or counts here. Missing or
@@ -145,27 +179,15 @@ export function buildIntervalSnapshot(s, project, { masks = true, change = null 
   const derived = masks === 'derive' && change ? deriveMasks(s, change) : null;
   const withMasks = !!masks;      // true for the full and the derived forms: both carry the stack tables
   const stacks = /** @type {(number[] | null)[]} */ (s.stacks || [null]);
-  /** @type {{offsets: Uint32Array, members: Uint32Array, total: number} | null} */
-  let stackBuffers = null;
-  if (withMasks) {
-    const offsets = new Uint32Array(stacks.length + 1);
-    let total = 0;
-    for (let k = 0; k < stacks.length; k++) { offsets[k] = total; total += stacks[k]?.length ?? 0; }
-    offsets[stacks.length] = total;
-    const members = new Uint32Array(total);
-    let at = 0;
-    for (const row of stacks) for (const id of row ?? []) members[at++] = id;
-    stackBuffers = { offsets, members, total };
-  }
+  const stackBuffers = withMasks ? stackTables(stacks) : null;
   const exclude = new Uint8Array(withMasks && !derived ? pixels : 0);
   if (withMasks && !derived && s.exclude) for (let i = 0; i < pixels; i++) exclude[i] = s.exclude[i] ? 1 : 0;
   const ranged = !!(ageModel && ageModel.min && ageModel.max);
   return {
     labels: derived ? derived.labels : withMasks ? engineBuffer('i32le', [s.h, s.w], Int32Array.from(s.labels)) : null,
     exclude: derived ? derived.exclude : withMasks ? engineBuffer('u8', [s.h, s.w], exclude) : null,
-    objects: [...s.objects.values()].map((/** @type {AnalysisObject} */ o) => ({
-      id: o.id, class_id: o.cls || null, predicted_class_id: o.pred || null, confidence: Number.isFinite(o.conf) ? o.conf : 0 })),
-    classes: classes.map((c) => ({ id: c.id, name: c.name ?? c.id, counts: !!c.counts })),
+    objects: objectRecords(s),
+    classes: classRecords(classes),
     stack_offsets: stackBuffers ? engineBuffer('u32le', [stackBuffers.offsets.length], stackBuffers.offsets) : null,
     stack_members: stackBuffers?.total ? engineBuffer('u32le', [stackBuffers.total], stackBuffers.members) : null,
     settings: {

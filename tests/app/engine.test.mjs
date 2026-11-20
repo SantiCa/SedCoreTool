@@ -43,10 +43,35 @@ test('engine controls reject duplicate keys, malformed UTF-8, deep structures an
   assert.deepEqual(parseControl(Buffer.from('{"a":{"x":1},"b":{"x":2},"literal":"{\\\"x\\\":1}"}')).b, { x: 2 });
 });
 
+// Card M8.4.26: a start that fails explains itself (once on GitHub's Windows runner the engine was unavailable at start and the rerun passed).
+// The evidence: time from spawn to failure against the request deadline, whether the process exited first (code, signal) or failed to
+// spawn, and the last lines of its standard error. SEDCORETOOL_ENGINE_START_LOG=<file> also appends every start (JSON lines).
+const startLog = process.env.SEDCORETOOL_ENGINE_START_LOG;
 async function clientFixture(t, options = {}) {
-  const client = new EngineClient({ executable: python, script, version: 'test', runtimeId, ...options });
+  const client = new EngineClient({ executable: python, script, version: 'test', runtimeId, captureDiagnostics: true, ...options });
   t.after(() => client.stop());
-  await client.start();
+  const started = performance.now(), starting = client.start(), child = client.child;
+  let exited = null, spawnError = null;
+  child?.once('exit', (code, signal) => { exited ??= { code, signal, atMs: Math.round(performance.now() - started) }; });
+  child?.once('error', (error) => { spawnError ??= String(error?.message || error); });
+  const record = async (entry) => { if (startLog) await fs.appendFile(startLog, JSON.stringify({ test: t.name, platform: process.platform, ...entry }) + '\n'); };
+  try {
+    await starting;
+  } catch (error) {
+    const failedMs = Math.round(performance.now() - started);
+    const exitedFirst = exited !== null && exited.atMs <= failedMs;
+    await Promise.race([client.exited, new Promise((resolve) => setTimeout(resolve, 2000))]);
+    const evidence = {
+      code: error?.code ?? null, failedMs, deadlineMs: client.options.startTimeoutMs, spawnError,
+      reason: spawnError ? 'the process could not be started'
+        : exitedFirst ? 'the process exited before its handshake'
+          : failedMs >= client.options.startTimeoutMs - 50 ? 'no handshake within the start deadline' : 'the handshake was refused or malformed',
+      exit: exitedFirst ? exited : null, stderr: client.stderr.toString('utf8').split(/\r?\n/).filter(Boolean).slice(-20),
+    };
+    await record({ ok: false, ...evidence });
+    throw Object.assign(new Error('engine did not start: ' + JSON.stringify(evidence)), { code: error?.code, cause: error });
+  }
+  await record({ ok: true, startMs: Math.round(performance.now() - started) });
   return client;
 }
 
@@ -60,6 +85,43 @@ async function upload(client, data) {
   await client.request('buffer.commit', { handle });
   return handle;
 }
+
+test('a start that fails says why: the process exited first, or no handshake came within the start deadline', { skip: !python }, async (t) => {
+  const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'engine-start-'));
+  t.after(() => fs.rm(folder, { recursive: true, force: true }));
+  const exits = path.join(folder, 'exits.py'), silent = path.join(folder, 'silent.py');
+  await fs.writeFile(exits, "import sys\nsys.stderr.write('engine could not import its runtime\\n')\nsys.exit(3)\n");
+  await fs.writeFile(silent, 'import time\ntime.sleep(30)\n');
+  await assert.rejects(clientFixture(t, { script: exits }), (error) => {
+    const evidence = JSON.parse(error.message.replace('engine did not start: ', ''));
+    assert.equal(error.code, 'ENGINE_UNAVAILABLE');
+    assert.equal(evidence.reason, 'the process exited before its handshake');
+    assert.equal(evidence.exit.code, 3);
+    assert.deepEqual(evidence.stderr, ['engine could not import its runtime']);
+    return true;
+  });
+  await assert.rejects(clientFixture(t, { script: silent, startTimeoutMs: 400 }), (error) => {
+    const evidence = JSON.parse(error.message.replace('engine did not start: ', ''));
+    assert.equal(evidence.reason, 'no handshake within the start deadline');
+    assert.ok(evidence.failedMs >= 350 && evidence.deadlineMs === 400, JSON.stringify(evidence));
+    return true;
+  });
+});
+
+test('the handshake has its own deadline: a slow start succeeds although it takes longer than an ordinary request may', { skip: !python }, async (t) => {
+  const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'engine-slow-start-'));
+  t.after(() => fs.rm(folder, { recursive: true, force: true }));
+  const slow = path.join(folder, 'slow.py'), engine = path.dirname(script).replaceAll(path.sep, '/');
+  await fs.writeFile(slow, ['import sys, time', `sys.path.insert(0, ${JSON.stringify(engine)})`, 'from protocol import read_frame, strict_json, write_json',
+    'hello = strict_json(read_frame(sys.stdin.buffer)[1])', 'time.sleep(0.8)',   // a start slowed down, as on a busy computer
+    `write_json(sys.stdout.buffer, {"v": 1, "kind": "response", "session": hello["session"], "id": hello["id"], "op": "hello", "status": "ok", "result": {"protocol": 1, "engine_version": "test", "runtime_id": ${JSON.stringify(runtimeId)}, "methods": ["buffer.digest/1"], "limits": {}}})`,
+    'sys.stdin.buffer.read()', ''].join('\n'));
+  const client = await clientFixture(t, { script: slow, timeoutMs: 300 });   // ordinary requests: 0.3 s; the start: the default 20 s
+  assert.equal(client.status().state, 'ready');
+  assert.equal(client.options.startTimeoutMs, 20000);
+  await client.stop();
+  await assert.rejects(clientFixture(t, { script: slow, startTimeoutMs: 300 }), /no handshake within the start deadline/);
+});
 
 test('actual isolated Python transfers multiple bounded chunks and runs the diagnostic', { skip: !python }, async (t) => {
   const client = await clientFixture(t);
@@ -330,4 +392,102 @@ test('closing the program while a restart is running starts nothing', { skip: !p
   assert.equal(await restarting, 'ENGINE_UNAVAILABLE');
   assert.equal(service.status().state, 'stopped');
   assert.equal(service.session(), null, 'no engine was started behind the closing program');
+});
+
+// ---- tile store (card M8.4.14, contract §8.5) ----------------------------------------------------------------------------------------
+
+test('a control frame may announce several binary frames, which must arrive exactly and in order', () => {
+  const control = Buffer.concat(controlFrame({ ok: true }));
+  const parts = ['abc', 'defgh', 'i'].map((text) => Buffer.concat(frame(2, Buffer.from(text))));
+  const stream = Buffer.concat([control, ...parts, control]);
+  for (let split = 1; split < stream.length; split += 3) {
+    const controls = [], payloads = [], reader = new ControlReader((value) => { controls.push(value); return controls.length === 1 ? { binaryFrames: [3, 5, 1] } : undefined; },
+      (bytes) => payloads.push(bytes.toString()));
+    reader.push(stream.subarray(0, split)); reader.push(stream.subarray(split)); reader.end();
+    assert.deepEqual([controls.length, payloads], [2, ['abc', 'defgh', 'i']]);
+  }
+  const announce = (sizes) => new ControlReader(() => ({ binaryFrames: sizes }), () => {});
+  assert.throws(() => announce([3, 5]).push(Buffer.concat([control, parts[0], control])), /header/, 'a control frame where a binary frame was announced');
+  assert.throws(() => announce([3, 4]).push(Buffer.concat([control, parts[0], parts[1]])), /header/, 'a frame of the wrong length');
+  for (const bad of [[], [0], [MAX_CHUNK + 1], Array(65).fill(1), [1.5], 'x']) assert.throws(() => announce(bad).push(control), /announcement/);
+  const truncated = announce([3, 5]); truncated.push(Buffer.concat([control, parts[0]]));
+  assert.throws(() => truncated.end(), /Truncated/, 'the second announced frame never came');
+});
+
+const pyvipsCheck = python ? spawnSync(python, ['-c', 'import pyvips'], { windowsHide: true }) : null;
+const withPyvips = Boolean(python) && pyvipsCheck.status === 0;
+
+test('the tile store through the real client: a build with progress events, pyramid.info and verified tiles in several frames', { skip: !withPyvips, timeout: 120000 }, async (t) => {
+  const pyramidDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'sedcoretool-pyramids-test-'));
+  t.after(() => fs.rm(pyramidDirectory, { recursive: true, force: true }));
+  const client = await clientFixture(t, { pyramidDirectory });
+  const source = fileURLToPath(new URL('../../examples/data/idealized_core_0-500cm.jpg', import.meta.url));
+  const events = [];
+  const built = await client.request('pyramid.build', { path: source, name: 'idealized_core_0-500cm.jpg' }, null, { onEvent: (event) => events.push(event) });
+  assert.equal(built.pyramid, digest(await fs.readFile(source)));
+  assert.equal(built.reused, false);
+  assert.ok(events.length >= 1 && events.every((event) => ['hash', 'level0', 'levels'].includes(event.stage)));
+  const info = await client.request('pyramid.info', { pyramid: built.pyramid });
+  assert.equal(info.width, built.width); assert.equal(info.levels.length, built.levels);
+  const positions = [[0, 0], [1, 0]].filter(([row]) => row < info.levels[0].rows);
+  const read = await client.request('tile.read', { pyramid: built.pyramid, level: 0, positions });
+  const tileBytes = 512 * 512 * info.channels;
+  assert.equal(read.bytes.length, tileBytes * positions.length);
+  read.tiles.forEach((tile, index) => assert.equal(digest(read.bytes.subarray(index * tileBytes, (index + 1) * tileBytes)), tile.sha256));
+  assert.equal(read.frames.length, Math.ceil(read.bytes.length / MAX_CHUNK));
+  await assert.rejects(client.request('tile.read', { pyramid: built.pyramid, level: 0, positions: [[999, 0]] }), { code: 'INVALID_REQUEST', field: 'positions' });
+  const again = await client.request('pyramid.build', { path: source, name: 'idealized_core_0-500cm.jpg' });
+  assert.equal(again.reused, true);
+  assert.equal(client.status().state, 'ready');
+});
+
+test('without a pyramid folder the engine refuses the tile-store operations, and the page bridge never forwards them', { skip: !python }, async (t) => {
+  const client = await clientFixture(t);
+  await assert.rejects(client.request('pyramid.info', { pyramid: '0'.repeat(64) }), { code: 'UNSUPPORTED_METHOD' });
+  const { createEngineIpc } = require('../../desktop/engine-ipc.js');
+  const ipc = createEngineIpc({ engine: { request: async () => ({}), session: () => null, status: () => ({}) } });
+  for (const op of ['pyramid.build', 'pyramid.info', 'tile.read']) assert.ok(!ipc.OPERATIONS.includes(op), op);
+});
+
+test('mask tiles through the real client and the page bridge: a version written, read back, and refused requests (card M8.4.16 step 4)', { skip: !python, timeout: 60000 }, async (t) => {
+  const projectsDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'sedcoretool-projects-test-'));
+  t.after(() => fs.rm(projectsDirectory, { recursive: true, force: true }));
+  const client = await clientFixture(t, { projectsDirectory });
+  const { createTileIpc } = require('../../desktop/tile-ipc.js');
+  const bridge = createTileIpc({ engine: { request: (op, payload, binary, options) => client.request(op, payload, binary, options) } });
+  const page = 7, other = 8;
+  const begun = await bridge.call(page, 'maskBegin', 'p1', 's1', 1300, 1100, null);
+  assert.deepEqual([begun.ok.rows, begun.ok.cols], [3, 3]);
+  const labels = new Int32Array(512 * 512); labels[5] = 42;
+  const labelBytes = new Uint8Array(labels.buffer), excludeBytes = new Uint8Array(512 * 512); excludeBytes[6] = 1;
+  assert.deepEqual(await bridge.call(page, 'maskPut', begun.ok.staged, 'labels', 1, 2, digest(labelBytes), labelBytes), { ok: { stored: true } });
+  assert.deepEqual(await bridge.call(page, 'maskPut', begun.ok.staged, 'exclude', 1, 2, digest(excludeBytes), excludeBytes), { ok: { stored: true } });
+  assert.equal((await bridge.call(other, 'maskPut', begun.ok.staged, 'labels', 1, 2, digest(labelBytes), labelBytes)).error.field, 'staged', 'another page cannot use it');
+  // Card M8.4.22: the objects as four binary columns; an index the classes table does not hold is refused by the engine.
+  const columns = (cls) => ({ object_ids: new Uint8Array(new Uint32Array([42]).buffer), object_class: new Uint8Array(new Int32Array([cls]).buffer),
+    object_predicted: new Uint8Array(new Int32Array([-1]).buffer), object_confidence: new Uint8Array(new Float64Array([0]).buffer) });
+  const classes = new TextEncoder().encode('[{"id":"a","name":"Burrow","counts":true}]'), offsets = new Uint8Array(new Uint32Array([0, 0]).buffer);
+  const unknownClass = await bridge.call(page, 'maskCommit', begun.ok.staged, { ...columns(1), classes, stack_offsets: offsets, stack_members: null });
+  assert.deepEqual(unknownClass.error, { code: 'INVALID_BUFFER', field: 'tables.object_class' });
+  const retry = await bridge.call(page, 'maskBegin', 'p1', 's1', 1300, 1100, null);              // a failed commit closes the staged version
+  assert.deepEqual(await bridge.call(page, 'maskPut', retry.ok.staged, 'labels', 1, 2, digest(labelBytes), labelBytes), { ok: { stored: true } });
+  assert.deepEqual(await bridge.call(page, 'maskPut', retry.ok.staged, 'exclude', 1, 2, digest(excludeBytes), excludeBytes), { ok: { stored: true } });
+  const committed = await bridge.call(page, 'maskCommit', retry.ok.staged, { ...columns(0), classes, stack_offsets: offsets, stack_members: null });
+  assert.match(committed.ok.manifest, /^[0-9a-f]{64}$/);
+  const read = await bridge.call(page, 'maskRead', 'p1', committed.ok.manifest, 'labels', [[1, 2], [0, 0]]);
+  assert.deepEqual(read.ok.tiles, [{ row: 1, col: 2, byte_length: 1048576 }, { row: 0, col: 0, byte_length: 0 }]);
+  assert.equal(Buffer.compare(Buffer.from(read.ok.bytes), Buffer.from(labelBytes)), 0);
+  const empty = await bridge.call(page, 'maskRead', 'p1', committed.ok.manifest, 'exclude', [[0, 0]]);
+  assert.deepEqual(empty.ok.tiles, [{ row: 0, col: 0, byte_length: 0 }]); assert.equal(empty.ok.bytes.length, 0);
+  // Refused before reaching the engine, or by it; the session stays usable.
+  for (const [args, field] of [[['maskBegin', 'P1', 's1', 10, 10, null], 'project'], [['maskBegin', 'con', 's1', 10, 10, null], 'project'],
+    [['maskBegin', 'p1', 's/1', 10, 10, null], 'section'], [['maskPut', begun.ok.staged, 'labels', 0, 0, digest(labelBytes), labelBytes], 'staged'],
+    [['maskRead', 'p1', 'f'.repeat(64), 'labels', [[0, 0]]], 'manifest'], [['maskCommit', 'x', {}], 'staged']]) {
+    const answer = await bridge.call(page, ...args);
+    assert.equal(answer.error?.field, field, JSON.stringify(args.slice(0, 2)));
+  }
+  const again = await bridge.call(page, 'maskBegin', 'p1', 's1', 1300, 1100, committed.ok.manifest);
+  assert.deepEqual(await bridge.call(page, 'maskPut', again.ok.staged, 'labels', 1, 2, digest(labelBytes), labelBytes.subarray(1)), { error: { code: 'INVALID_REQUEST', field: 'bytes' } });
+  assert.deepEqual(await bridge.call(page, 'maskDiscard', again.ok.staged), { ok: {} });
+  assert.equal(client.status().state, 'ready');
 });

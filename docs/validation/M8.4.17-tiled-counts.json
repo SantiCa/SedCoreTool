@@ -1,0 +1,50 @@
+{
+  "date": "2026-11-18T15:56:11.551Z",
+  "computer": "Windows_NT 10.0.26300, AMD Ryzen 7 7700X 8-Core Processor, 31 GiB",
+  "node": "v22.23.4",
+  "section": {
+    "width": 8192,
+    "height": 349526,
+    "tiles": 10928,
+    "tilesWithContent": 334,
+    "fill": 0.03,
+    "objects": 4068,
+    "bins": 3496,
+    "buildMs": 150
+  },
+  "firstCountMs": 204,
+  "scenarioB_editOf4TilesMs": {
+    "n": 60,
+    "median": 6.9,
+    "p95": 7.97,
+    "max": 8.18,
+    "target_p95": 150
+  },
+  "scenarioA_intervalSizeChangeMs": {
+    "n": 10,
+    "median": 5.07,
+    "p95": 29.55,
+    "max": 29.55,
+    "target_p95": 300,
+    "note": "one section; the totals are kept, only the binning runs"
+  },
+  "reported_classChangeAggregationMs": {
+    "n": 5,
+    "median": 10.65,
+    "p95": 11.14,
+    "max": 11.14
+  },
+  "reported_areaColumnsChangeMs": {
+    "n": 4,
+    "median": 13.1,
+    "p95": 40.35,
+    "max": 40.35
+  },
+  "memory": {
+    "histogramBytes": 2191624,
+    "histograms": 557,
+    "budgetBytes": 67108864,
+    "maskTilesBytes": 598736896
+  },
+  "incrementalEqualsFresh": true
+}

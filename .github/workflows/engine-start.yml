@@ -1,0 +1,47 @@
+name: engine start repetitions
+
+# Card M8.4.26: runs tests/app/engine.test.mjs repeatedly on GitHub's Windows runner, as the `web-app` job of tests.yml runs it, and records
+# every engine start (time to handshake, or the evidence of a failed start). It runs when this file changes on a work branch, and by hand.
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: Repetitions of the test file
+        default: '20'
+  push:
+    branches: ['work/**']
+    paths: ['.github/workflows/engine-start.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Run the engine tests repeatedly
+        shell: bash
+        env:
+          RUNS: ${{ inputs.runs || '20' }}
+          SEDCORETOOL_ENGINE_START_LOG: ${{ runner.temp }}/engine-starts.jsonl
+        run: |
+          failed=0
+          for i in $(seq 1 "$RUNS"); do
+            if ! node --test tests/app/engine.test.mjs > "$RUNNER_TEMP/run-$i.log" 2>&1; then
+              failed=$((failed + 1))
+              echo "::group::run $i failed"; cat "$RUNNER_TEMP/run-$i.log"; echo "::endgroup::"
+            fi
+          done
+          node -e '
+            const lines = require("fs").readFileSync(process.env.SEDCORETOOL_ENGINE_START_LOG, "utf8").trim().split("\n").map(JSON.parse);
+            const ok = lines.filter((l) => l.ok).map((l) => l.startMs).sort((a, b) => a - b), bad = lines.filter((l) => !l.ok && !/says why/.test(l.test));
+            const q = (p) => ok[Math.min(ok.length - 1, Math.floor(p * ok.length))];
+            console.log(JSON.stringify({ starts: lines.length, failedStarts: bad.length, startMs: { min: ok[0], median: q(0.5), p95: q(0.95), max: ok.at(-1) } }));
+            for (const l of bad) console.log("failed start:", JSON.stringify(l));
+          '
+          echo "test file runs: $RUNS, failed: $failed"
+          test "$failed" -eq 0

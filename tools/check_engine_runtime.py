@@ -51,6 +51,20 @@ def check(source, lock):
         Image.fromarray(original).save(output, format=extension)
         output.seek(0)
         np.testing.assert_array_equal(np.asarray(Image.open(output)), original)
+    # libvips (tile store, card M8.4.14): the compiled binding, the pinned version, and exact reads of a TIFF region in 8 and 16 bits.
+    import pyvips
+
+    if not pyvips.API_mode or '.'.join(str(pyvips.version(part)) for part in range(3)) != expected['packages']['pyvips-binary']:
+        raise ValueError('libvips binding mismatch')
+    for original in ((np.arange(48 * 40 * 3) % 251).astype(np.uint8).reshape(48, 40, 3), (np.arange(30 * 20) * 97 % 65536).astype(np.uint16).reshape(30, 20)):
+        output = io.BytesIO()
+        Image.fromarray(original).save(output, format='TIFF')
+        image = pyvips.Image.new_from_buffer(output.getvalue(), '', access='random')
+        if image.get('vips-loader') != 'tiffload_buffer':
+            raise ValueError('libvips did not use its TIFF loader')
+        region = image.crop(3, 5, 11, 7)
+        samples = np.frombuffer(region.write_to_memory(), dtype=original.dtype).reshape(7, 11, -1)
+        np.testing.assert_array_equal(samples, original[5:12, 3:14].reshape(7, 11, -1))
     # Exercise the public v2.1 reference when run from a source checkout; it is not shipped as user data.
     legacy = root / 'legacy/v2.1_console'
     if (legacy / 'example_output.csv').exists():
@@ -83,7 +97,8 @@ def check(source, lock):
         np.testing.assert_array_equal(result.columns['indices'], np.array(document['expected']['columns']['indices']['data']).reshape(4, 2))
         method_checked = True
     print(json.dumps({'python': expected['python_version'], 'bits': 64, 'packages': expected['packages'],
-                      'fractional_fixtures': 20, 'image_roundtrips': ['PNG-u16', 'TIFF-u16'], 'scientific_smoke': 'passed',
+                      'fractional_fixtures': 20, 'image_roundtrips': ['PNG-u16', 'TIFF-u16'], 'libvips': '.'.join(str(pyvips.version(part)) for part in range(3)),
+                      'libvips_regions': ['TIFF-u8-RGB', 'TIFF-u16'], 'scientific_smoke': 'passed',
                       'section_intervals_fixture': 'passed' if method_checked else 'not run (no source checkout)'}))
 
 

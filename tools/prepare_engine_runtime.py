@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import http.client
 import json
 import os
 import platform
@@ -14,6 +15,8 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
@@ -24,6 +27,24 @@ OUTPUT = ROOT / 'desktop/runtime'
 CACHE = ROOT / '.venv/runtime-downloads'
 MAX_EXPANDED = 2 * 1024**3
 MAX_MEMBERS = 50_000
+MAX_SOURCE_BYTES = 16 * 1024**2      # a pure-Python package copied from its source archive
+SOURCE_SUFFIXES = ('.py', '.pyi')
+# Card M8.4.26: a download that fails in transfer (timeout, dropped connection, truncated body, server error) is tried again after these
+# pauses, always into a new temporary file; bytes that arrive whole but do not match the lock are never tried again.
+DOWNLOAD_ATTEMPTS = 4
+DOWNLOAD_PAUSES_S = (2, 5, 15)
+DOWNLOAD_TIMEOUT_S = 30
+
+
+class TransferError(Exception):
+    """A download that ended before every locked byte arrived; worth another attempt."""
+
+
+def transfer_failed(error):
+    """True for failures of the transfer, which another attempt may not repeat; never for a verification failure (ValueError)."""
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code >= 500 or error.code in (408, 429)
+    return isinstance(error, (TransferError, OSError, http.client.HTTPException))
 
 
 def native_target():
@@ -48,7 +69,23 @@ def safe_relative(value):
     return path
 
 
-def download_artifact(artifact, cache, *, offline=False):
+def download_once(artifact, temporary, opener):
+    """One attempt: the bytes into `temporary`, then size and SHA-256 checked against the lock."""
+    request = urllib.request.Request(artifact['url'], headers={'User-Agent': 'SedCoreTool-runtime-builder'})
+    with opener(request, timeout=DOWNLOAD_TIMEOUT_S) as response, temporary.open('xb') as output:
+        length = 0
+        while block := response.read(1024**2):
+            length += len(block)
+            if length > artifact['size']:
+                raise ValueError('Download exceeds locked size')
+            output.write(block)
+    if length < artifact['size']:
+        raise TransferError(f'connection ended after {length} of {artifact["size"]} bytes')
+    if sha256_file(temporary) != artifact['sha256']:
+        raise ValueError(f'Download failed verification: {artifact["filename"]}')
+
+
+def download_artifact(artifact, cache, *, offline=False, opener=urllib.request.urlopen, sleep=time.sleep, log=None):
     filename = artifact['filename']
     if len(safe_relative(filename).parts) != 1 or not re.fullmatch('[0-9a-f]{64}', artifact['sha256']):
         raise ValueError('Invalid artifact descriptor')
@@ -65,22 +102,24 @@ def download_artifact(artifact, cache, *, offline=False):
         raise ValueError(f'Cached artifact failed verification: {filename}')
     if offline:
         raise ValueError(f'Artifact not cached: {filename}')
-    temporary = cache / f'.download-{uuid4().hex}'
-    try:
-        request = urllib.request.Request(artifact['url'], headers={'User-Agent': 'SedCoreTool-runtime-builder'})
-        with urllib.request.urlopen(request, timeout=30) as response, temporary.open('xb') as output:
-            length = 0
-            while block := response.read(1024**2):
-                length += len(block)
-                if length > artifact['size']:
-                    raise ValueError('Download exceeds locked size')
-                output.write(block)
-        if temporary.stat().st_size != artifact['size'] or sha256_file(temporary) != artifact['sha256']:
-            raise ValueError(f'Download failed verification: {filename}')
-        os.replace(temporary, target)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return target
+    log = log or (lambda message: print(message, file=sys.stderr, flush=True))
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        temporary = cache / f'.download-{uuid4().hex}'
+        try:
+            download_once(artifact, temporary, opener)
+            os.replace(temporary, target)
+            return target
+        except Exception as error:
+            if not transfer_failed(error):
+                raise
+            if attempt == DOWNLOAD_ATTEMPTS:
+                raise RuntimeError(f'Download of {filename} failed {DOWNLOAD_ATTEMPTS} times; last error: {error!r}') from error
+            pause = DOWNLOAD_PAUSES_S[min(attempt - 1, len(DOWNLOAD_PAUSES_S) - 1)]
+            log(f'Download of {filename} failed ({error!r}); trying again in {pause} s (attempt {attempt + 1} of {DOWNLOAD_ATTEMPTS})')
+            sleep(pause)
+        finally:
+            temporary.unlink(missing_ok=True)
+    raise AssertionError('unreachable')
 
 
 def extract_runtime(archive, destination):
@@ -111,10 +150,16 @@ def install_wheels(specification, artifacts, destination, *, runner=subprocess.r
     wheels.mkdir()
     for artifact in artifacts:
         shutil.copyfile(artifact, wheels / artifact.name)
+    # pip accepts only the exact platform tags it is given on Linux (not older manylinux tags), so a target may list several.
+    platforms = specification['wheel_platform']
+    platforms = [platforms] if isinstance(platforms, str) else list(platforms)
+    if not platforms or not all(isinstance(item, str) and re.fullmatch('[a-z0-9_]+', item) for item in platforms):
+        raise ValueError('Invalid wheel platform')
     try:
         runner([sys.executable, '-m', 'pip', 'install', '--isolated', '--disable-pip-version-check', '--no-index',
                 '--no-deps', '--only-binary=:all:', '--no-compile', '--require-hashes',
-                '--platform', specification['wheel_platform'], '--python-version', '3.12', '--implementation', 'cp', '--abi', 'cp312',
+                *(argument for platform_tag in platforms for argument in ('--platform', platform_tag)),
+                '--python-version', '3.12', '--implementation', 'cp', '--abi', 'cp312',
                 '--target', str(destination / specification['site_packages']), '--find-links', str(wheels), '-r', str(requirements)],
                check=True, timeout=180)
         # Host pip generates launchers with host/staging paths. The desktop imports these packages;
@@ -134,6 +179,49 @@ def install_wheels(specification, artifacts, destination, *, runner=subprocess.r
                 csv.writer(output, lineterminator='\n').writerows(rows)
     finally:
         shutil.rmtree(wheels)
+
+
+def install_sources(sources, artifacts, site_packages):
+    """Pure-Python packages that are published only as source archives (pyvips): copy the package's ``.py``/``.pyi`` files and
+    its licence, and write a minimal ``dist-info`` so ``importlib.metadata`` reports the pinned version. Nothing is built and no
+    setup code runs; the archive was verified by its SHA-256 when it was downloaded."""
+    for source, artifact in zip(sources, artifacts, strict=True):
+        name, version, package = source['name'], source['version'], source['package']
+        if not re.fullmatch('[A-Za-z0-9_]+', package) or not re.fullmatch('[A-Za-z0-9_.-]+', f'{name}-{version}'):
+            raise ValueError('Invalid source package descriptor')
+        prefix, target = f'{name}-{version}/', site_packages / package
+        if target.exists():
+            raise ValueError('Source package already present')
+        total, licence = 0, None
+        with tarfile.open(artifact, 'r:gz') as archive:
+            members = archive.getmembers()
+            if len(members) > 2_000:
+                raise ValueError('Too many archive members')
+            for member in members:
+                if not (member.name + '/').startswith(prefix):
+                    raise ValueError('Unexpected source archive layout')
+                relative = member.name[len(prefix):]
+                if member.isdir() or not relative:
+                    continue
+                if not member.isfile():
+                    raise ValueError('Unsupported archive member')
+                total += member.size
+                if total > MAX_SOURCE_BYTES:
+                    raise ValueError('Source archive too large')
+                if relative in ('LICENSE', 'LICENSE.txt'):
+                    licence = archive.extractfile(member).read()
+                elif relative.startswith(package + '/') and relative.endswith(SOURCE_SUFFIXES) and relative != f'{package}/{package}_build.py':
+                    destination = site_packages.joinpath(*safe_relative(relative).parts)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(archive.extractfile(member).read())
+        if licence is None or not (target / '__init__.py').is_file():
+            raise ValueError('Incomplete source package')
+        info = site_packages / f'{package}-{version}.dist-info'
+        info.mkdir()
+        (info / 'METADATA').write_text(f'Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n', encoding='utf-8')
+        (info / 'INSTALLER').write_text('sedcoretool-runtime\n', encoding='utf-8')
+        (info / 'top_level.txt').write_text(package + '\n', encoding='utf-8')
+        (info / 'LICENSE.txt').write_bytes(licence)
 
 
 # Content of the upstream interpreter and wheels that the engine never imports. The program verifies every shipped file
@@ -218,6 +306,7 @@ def prepare(target, *, offline=False, output=OUTPUT, cache=CACHE):
     specification = lock['targets'][target]
     archive = download_artifact(specification['archive'], cache, offline=offline)
     wheels = [download_artifact(wheel, cache, offline=offline) for wheel in specification['wheels']]
+    source_packages = [download_artifact(source, cache, offline=offline) for source in lock.get('sources', [])]
     sources = ROOT / 'desktop/python/src'
     if not (sources / 'sedcoretool/engine/server.py').is_file():
         raise ValueError('Run desktop/scripts/prepare.js before preparing the runtime')
@@ -230,6 +319,7 @@ def prepare(target, *, offline=False, output=OUTPUT, cache=CACHE):
             staging.mkdir()
             extract_runtime(archive, staging)
             install_wheels(specification, wheels, staging)
+            install_sources(lock.get('sources', []), source_packages, staging / specification['site_packages'])
             prune_runtime(staging, specification)
             native = target == native_target()
             if native:

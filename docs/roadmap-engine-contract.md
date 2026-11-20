@@ -19,7 +19,7 @@ How the code that implements this contract is layered, and the path of one reque
 [ARCHITECTURE.md](ARCHITECTURE.md). Amended on 13 November 2026 (card M8.3.5): §3 now defines `buffer.read`, which downloads
 committed buffers, and the exact shape of the `section.analyze` response; progress events are not yet sent. Amended on
 15 November 2026 (option A for large images, ARCHITECTURE D10-D12): §2 describes the ownership of tiled sections, §6 the new order
-of M8.4, and §7 adds absolute interactive targets and the rule that decides where the interval table of a tiled section is computed.
+of M8.4, and §7 adds absolute interactive targets and the rule that decides where the interval table of a tiled section is computed. Amended on 16 November 2026 (card M8.4.14, step 1): §8 specifies the tile store's pixel pyramids; not implemented yet.
 
 ## 1. Current calculation and ownership inventory
 
@@ -326,3 +326,226 @@ If a gate fails, record the failed measurement and next narrow correction; leave
 these gates requires a documented decision before a new validation run. Rust/GPU or a replacement interface
 needs separate evidence and authorisation. M8.1 is complete when this source-backed contract and its ordered
 gates are delivered; it does not certify M8.2 packaging or M8.3 numerical/performance acceptance.
+
+## 8. Tile store v1: pixel pyramids (card M8.4.14)
+
+Specified on 16 November 2026, before any store file was written. Implemented in the engine on 17 November 2026 (card M8.4.14 steps 3-5:
+`src/sedcoretool/store/`, the three operations below); **the interface does not use it yet** (card M8.4.15).
+It realises [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84) and its "Design of part C" for
+the pixel pyramid. Mask tiles and manifests (decision 6) are §8.7 (card M8.4.16). The format is independent of the browser,
+IndexedDB and Electron (D12): a program that reads this section can read and write a store without SedCoreTool.
+
+### 8.1 Roots and ownership
+
+The main process passes the pyramid root when it starts the coordinator (`--pyramid-dir`, an absolute folder under the program's user
+data, `pyramids/`). The engine writes nothing outside that root and its scratch folder. The renderer never sees a path: it names a
+pyramid by its identifier (below), and a source file only through a token the main process issued for a file the user chose (card M8.4.15).
+Only the engine writes the root (ARCHITECTURE §3.4 rule 1).
+
+### 8.2 Identity and layout
+
+A pyramid is identified by the **SHA-256 of the source file's bytes** (64 lowercase hexadecimal characters), computed by the engine while
+the build starts. Its folder is `<root>/<sha256>/`. All integers are little-endian; all JSON is UTF-8 with the strict rules of §3.
+
+| Path inside `<root>/<sha256>/` | Content |
+|---|---|
+| `pyramid.json` | `{format: "sedcoretool.pyramid", version: 1, source: {sha256, size, name}, width, height, channels, bits, tile: 512, levels: [{level, width, height, rows, cols}], compressor, complete: true}`. `name` is the file name without any folder. `channels` is 1 (grey), 3 (RGB) or 4 (RGBA); `bits` 8 or 16. `compressor` is `null` in format version 1: decided by the rule of M8.4.14 on 17 November 2026 ([evidence](validation/M8.4.14-compression-windows.json)): building
+`rgb2g` took 20.4 s without a compressor and 51.8 s with zlib level 1 (39 % of the throughput, the rule required 70 %), for 39 % less disk and a tile-read p95 of
+8.5 ms against 4.9 ms. Readers also accept `{"id": "zlib", "level": 1}`, which a later format version may adopt. The file is written last, through a temporary file and an atomic rename; a folder without it, or with `complete` other than `true`, is not a pyramid. |
+| `.zgroup` | `{"zarr_format": 2}` |
+| `.zattrs` | `{"multiscales": [{"version": "0.4", "axes": [{"name": "y", "type": "space"}, {"name": "x", "type": "space"}, {"name": "c", "type": "channel"}], "datasets": [{"path": "<k>", "coordinateTransformations": [{"type": "scale", "scale": [2^k, 2^k, 1]}]} ...]}]}` |
+| `<k>/.zarray` | Level `k` as a Zarr version 2 array: `{"zarr_format": 2, "shape": [height_k, width_k, channels], "chunks": [512, 512, channels], "dtype": "\|u1"` or `"<u2", "compressor": <as in pyramid.json>, "fill_value": 0, "order": "C", "filters": null, "dimension_separator": "."}` |
+| `<k>/<i>.<j>.0` | The tile in tile row `i`, tile column `j` of level `k`: exactly `512 x 512 x channels` samples in C order (y, x, channel), compressed by `compressor` or raw. Tiles on the right and bottom edges are padded with zeros to the full size, as Zarr requires. |
+| `<k>/.tiles.sha256` | `rows_k x cols_k` records of 32 bytes, row-major: the SHA-256 of each tile's **uncompressed** bytes (padding included). Zarr readers ignore this file. |
+
+**Identity record** (card M8.4.15, decided by the maintainer on 17 November 2026): `<root>/identities.json`, written by the engine after it has hashed a
+source whole, so that adding the same file again does not read it whole (8 GiB took about 7 s). Content: `{format: "sedcoretool.identities", version: 1,
+entries: [{path, size, mtime_ns, sample, sha256}]}`, newest last, at most 1,024 entries and 1 MiB; `path` is the absolute, case-normalised path,
+`mtime_ns` the modification time in nanoseconds, `sample` the SHA-256 of the size (8 bytes, little-endian) followed by the first, middle and last MiB of
+the file (the whole file when it is at most 3 MiB), `sha256` the SHA-256 of the whole file. It is written atomically; a record that is missing, larger
+than 1 MiB or not exactly of this form is ignored and replaced. Readers other than the engine ignore it. **Known limit:** a file rewritten in place with
+the same size, the same modification time to the nanosecond and the same sampled MiB, but other bytes elsewhere, is taken for its old state.
+
+Levels: level 0 is the source at full resolution. Level `k + 1` has `ceil(width_k / 2) x ceil(height_k / 2)` pixels; the last level is the
+first one whose width and height are both at most 512. A pixel of level `k + 1` is, for each channel, the integer mean of the `n` pixels
+(1, 2 or 4) of level `k` that it covers, rounded half up: `(sum + n // 2) // n`, so `(a + b + c + d + 2) // 4` inside the image. Grey stays grey,
+RGB stays RGB, RGBA averages alpha like the other channels; 16-bit samples stay 16-bit. No colour management, gamma or orientation tag is
+applied: samples are copied as stored (as `app/js/tiff.js` does today).
+
+### 8.3 Sources
+
+The engine opens a source with libvips (ARCHITECTURE §3.4 decision 4) and accepts only these loaders: TIFF (classic and BigTIFF, first page or
+image only), JPEG and PNG; anything else is `UNSUPPORTED_INPUT` with `details.field = "source"`. Accepted samples: 8-bit or 16-bit unsigned, 1, 3
+or 4 bands (a grey image with alpha, 2 bands, is refused as today). Limits checked from the header before any pixel is read: width at most
+262,144 and height at most 16,777,216 pixels; one band of 512 rows at most 256 MiB (`width x 512 x channels x bytes`); a JPEG or PNG at most
+1 GiB decoded (`width x height x channels x bytes`; maintainer, 16 November 2026), refused otherwise with `UNSUPPORTED_INPUT`, `details.field =
+"source.size"` and a message that suggests TIFF. TIFF sources are read by region (random access); JPEG and PNG sequentially, in bands.
+
+### 8.4 Building
+
+`pyramid.build` runs in the method worker as a job, so the coordinator stays responsive. Order: (0) if the identity record (§8.2) has an entry with
+the source's path, size, modification time and sampled hash, and the pyramid it names is complete with that `source.size`, the job ends at once with
+`reused: true` without reading the source whole; the record is never used to build; (1) otherwise compute the source SHA-256 (stage `hash`) and record it;
+if `<root>/<sha256>/pyramid.json` is complete and its `source.size` matches, the job ends at once with `reused: true`; (2) estimate the disk need
+(all levels, uncompressed, plus 1 %); (3) free space: delete complete pyramids that no session of this coordinator has opened, least recently used
+first (the modification time of `pyramid.json`, touched whenever a pyramid is opened), until the root's total plus the need is at most the budget
+(50 GiB by default, set by the main process with `--pyramid-budget-bytes`) and the disk keeps at least 1 GiB free; if that is not possible, the job
+fails with `LIMIT_EXCEEDED`, `details.field = "disk"`; (4) write everything into `<root>/.partial-<uuid>/`, one band of 512 rows of level 0 at a
+time, each band feeding the next levels as soon as they have two rows of tiles' worth of input (stages `level0` and `levels`), so the working
+memory stays within 512 MiB; (5) write the `.tiles.sha256` files, then `pyramid.json`, then rename the folder to `<sha256>`. If another build
+finished the same pyramid meanwhile, the new folder is removed and the existing one is used. A failure removes the partial folder before the
+answer; a cancellation answers at once and the worker deletes the folder in the background (deleting gigabytes before answering took up to 0.66 s);
+a killed worker leaves it. Every coordinator deletes `.partial-*` folders when it starts and before each build. A full disk during the build is
+`LIMIT_EXCEEDED` with `details.field = "disk"`.
+
+Progress: the worker writes `<job folder>/progress` as JSON `{stage, completed, total}`, through a temporary file and an atomic replacement; when
+the replacement fails because the coordinator is reading the file (Windows), that update is skipped. The coordinator reads it at most 10 times
+per second and sends events `{stage, completed, total}` (§3) with the build's request ID; the desktop client restarts its idle timeout (90 s) on
+each event. A build has no fixed deadline; the coordinator kills it when its progress
+has not advanced for 60 s. Cancellation follows §3 (marker file, polled before every tile; acknowledgement within 250 ms, measured 7-15 ms on Windows in M8.4.14; kill after 1.5 s).
+libvips' own caches are limited (`cache_set_max_mem` 64 MiB, `cache_set_max_files` 16) and its thread pool uses the engine's thread cap.
+
+### 8.5 Operations
+
+| Operation | Request payload | Successful result |
+|---|---|---|
+| `pyramid.build` | `{path, name}` or `{path, name, expect}`: `path` absolute, to a regular file; `name` its display name (no separators); `expect` (card M8.4.18b) the SHA-256 the file must have: another one ends the job with `UNSUPPORTED_INPUT`, `details.field = "source.sha256"`, as soon as it is known (from the identity record, or after stage `hash`), before any pyramid is built or removed. **Accepted only from the main process**; the renderer bridge never forwards a path (card M8.4.15 maps tokens to paths). | `{pyramid, width, height, channels, bits, levels, reused, disk_bytes}`; events `{stage: "hash" \| "level0" \| "levels", completed, total}`. |
+| `pyramid.info` | `{pyramid}` | the parsed `pyramid.json` (only for a complete pyramid; touches its modification time). |
+| `tile.read` | `{pyramid, level, positions: [[row, col], ...]}`, 1 to 16 positions inside the level's grid | `{tiles: [{row, col, byte_length, sha256}, ...], frames: [n1, n2, ...]}` in request order, immediately followed by the uncompressed tile bytes of all tiles, concatenated in that order and cut into binary frames of at most 1,048,576 bytes whose lengths `frames` announces (the client accepts exactly those frames, then checks each tile's SHA-256). Each tile is read, decompressed if needed and checked against `.tiles.sha256` before anything is sent; if any tile fails, the response is an error (`INVALID_BUFFER`, `details.field = "tile"`) and no binary frame follows. |
+
+`tile.read` and `pyramid.info` run in the coordinator (standard library only: file reads, `zlib`, `hashlib`); verified tiles are kept in a
+least-recently-used cache of at most 256 MiB. Tile bytes are never charged to the session's buffer budget of §3 (they are not buffers).
+Error codes are those of §3. A coordinator started without `--pyramid-dir` answers the three operations with `UNSUPPORTED_METHOD`.
+
+The page reaches these operations only through `desktop/tile-ipc.js` (card M8.4.15, behind `SEDCORETOOL_TILED_SECTIONS=1`): a file the user chose becomes an
+opaque token (the preload passes its path to the main process; a file made by code has none), a page may build pyramids of its own tokens and read only the
+pyramids it built in the session, and every argument is validated again in the main process. Tiles reach the page through `tile.read` (delivery path (a),
+chosen by the rule of M8.4.15: one tile p95 7.9 ms, 16 tiles p95 113 ms from the page on Windows).
+
+The method worker reads its command pipe on a private file descriptor; descriptor 0 and the Windows standard input handle point to the null
+device. With the pipe on descriptor 0, a thread blocked reading it made libvips crash with an access violation in a stress test (12 processes of 12)
+and in about one build in fourteen through the coordinator (found in M8.4.14).
+
+### 8.6 What is checked (M8.4.14)
+
+Exactness against the generator of card M8.4.13 (`tools/make_large_fixtures.py`): sampled level-0 regions equal `pixel_region` byte for byte,
+and levels 1-3 equal the same integer mean computed independently with NumPy; two builds of one source give identical tile bytes and hashes.
+Hostile sources (huge declared sizes, truncated files, offsets past the end) fail without large allocations. Interrupted builds, a full disk, a
+corrupted or missing tile file and a tile-hash file of the wrong length are handled as above.
+
+### 8.7 Mask tiles and manifests (card M8.4.16)
+
+Specified on 17 November 2026, before any mask file was written. It realises decision 6 of
+[ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84) and decision E of card M8.4.16. The masks of a
+tiled section are **project data**, not a cache: nothing here is deleted by a budget.
+
+**Root.** The main process passes the projects folder when it starts the coordinator (`--projects-dir`, an absolute folder under the
+program's user data, `projects/`). A project's mask store is `<projects>/<project>/tiles/`, where `<project>` is the project's identifier
+(1 to 64 characters `a-z 0-9 _ -`, lower case so that it names one folder on every file system, and never a Windows device name such
+as `con` or `lpt1`; the program's project identifiers are already of this form). A section identifier has 1 to 64 characters
+`A-Z a-z 0-9 _ -` and is never a path. The renderer names a project and a section only by these identifiers, never by a path; only the
+engine writes the folder. A coordinator started without `--projects-dir` answers the operations below with `UNSUPPORTED_METHOD`.
+
+**Layout of `<projects>/<project>/tiles/`.**
+
+| Path | Content |
+|---|---|
+| `blobs/<aa>/<sha256>` | One stored object: a mask tile or a table. `<sha256>` is the SHA-256 of its **uncompressed** bytes and `<aa>` its first two characters. The file is the zlib stream (RFC 1950, level 1) of those bytes. A blob is written to a temporary file in the same folder, flushed to disk and renamed; an existing blob is rewritten only if it does not decompress to bytes with its name's hash. |
+| `manifests/<sha256>.json` | One version of the masks of one section; `<sha256>` is the SHA-256 of the file's bytes, which are the manifest's canonical JSON (below). Written like a blob (temporary file, flushed, renamed); never changed afterwards. |
+
+**Mask tiles.** The grid of a section of `width x height` pixels has `rows = ceil(height / 512)` and `cols = ceil(width / 512)` positions;
+the tile at row `i`, column `j` covers pixels `x` in `[512 j, 512 j + 512)` and `y` in `[512 i, 512 i + 512)` of level 0 of the section's pixel
+pyramid (coordinates are full-resolution source pixels, ARCHITECTURE §6). A tile has two layers, each exactly 512 x 512 samples in C order (y, x):
+
+| Layer | Samples | Bytes | Values |
+|---|---|---|---|
+| `labels` | `i32le` | 1,048,576 | as `labels` in §4: 0 matrix, positive object ID, negative overlap-stack index |
+| `exclude` | `u8` | 262,144 | 0 or 1, as `exclude` in §4 |
+
+Samples outside the section (tiles on the right and bottom edges) are 0. A layer whose samples are all 0 is **not stored**: the manifest has
+no hash for it, and a reader returns zeros.
+
+**Tables** (version 2, card M8.4.22), stored as blobs of their exact bytes, all little-endian:
+
+| Table | Dtype | Rows | Content |
+|---|---|---|---|
+| `object_ids` | `u32le` | N | object IDs, 1 to 2,147,483,647 (a positive `i32` label), all different, in the page's order of its objects |
+| `object_class` | `i32le` | N | index into `classes` of the class given by hand, or -1 |
+| `object_predicted` | `i32le` | N | index into `classes` of the predicted class, or -1 |
+| `object_confidence` | `f64le` | N | confidence of the prediction, finite, 0 to 1 |
+| `classes` | `utf8json` | — | the classes table of §4 (a JSON array of records), at most 4 MiB (the metadata limit of §3) |
+| `stack_offsets`, `stack_members` | `u32le` | K + 1, M | the overlap stacks of §4; `stack_members` is `null` when there is no overlap |
+
+N is at most **1,048,576** (2^20). The four object columns have the same N and are all `null` when the section has no object. Unlike
+version 1, whose `objects` table was `utf8json` and so limited to about 51,000-56,000 objects by the 4 MiB cap (measured in card M8.4.16
+step 7), the columns take 20 bytes per object.
+
+**Manifest.** A JSON object with exactly these members:
+
+```
+{"format": "sedcoretool.masks", "version": 2, "section": "<section id>", "width": W, "height": H, "tile": 512,
+ "tiles": {"<i>.<j>": {"labels": "<sha256>" | null, "exclude": "<sha256>" | null}, ...},
+ "tables": {"object_ids": T | null, "object_class": T | null, "object_predicted": T | null, "object_confidence": T | null,
+            "classes": T, "stack_offsets": T, "stack_members": T | null}}                       T = {"sha256": "<sha256>", "byte_length": n}
+```
+
+- `section` is a section identifier; `W` from 1 to 262,144 and `H` from 1 to 16,777,216 (the source limits of §8.3), with
+  `rows x cols` at most 262,144 positions (68.7 gigapixels; the 8-GiB fixture `rgb8g` has 10,928).
+- `tiles` lists only positions with at least one stored layer. Keys are `<i>.<j>` in decimal without leading zeros, inside the grid.
+- `byte_length` of a table: `object_ids`, `object_class` and `object_predicted` a positive multiple of 4 up to 4,194,304, `object_confidence`
+  a positive multiple of 8 up to 8,388,608, the four giving the same N (or all four `null`); `classes` 1 to 4,194,304; `stack_offsets` a
+  multiple of 4, from 8 to 16,777,216; `stack_members` a positive multiple of 4 up to 16,777,216, or `null`.
+- **Version 1 manifests** (written only during card M8.4.16, never named by a project) are refused with `UNSUPPORTED_INPUT`,
+  `details.field = "manifest.version"`. Any other version is `INVALID_BUFFER`.
+- The store checks the object columns when they are committed (below); the classes and stack tables' content is checked by the method that
+  uses them (§4).
+- **Canonical JSON:** every key and string of a manifest is printable ASCII without `"` or `\`, so the canonical form is simply: keys
+  sorted by byte value at every level, no white space, integers in decimal (Python's
+  `json.dumps(value, sort_keys=True, separators=(",", ":"))`). A file whose bytes differ from the canonical form of its own content is not a manifest. At most 64 MiB.
+- The **identity of a version** is the manifest's SHA-256. Two sections, or two projects, may share blobs.
+
+**Reading.** A manifest is used only if its file's SHA-256 is its name and its content passes every rule above; a blob only if it
+decompresses (with a bound of its expected length plus one byte) to exactly its expected length and to bytes with its name's hash. Anything
+else is `INVALID_BUFFER` with `details.field = "manifest"` or `"tile"` / `"table"`, and nothing is sent.
+
+**Operations** (in the coordinator, standard library only; they never run in the method worker):
+
+| Operation | Request payload | Successful result |
+|---|---|---|
+| `mask.begin` | `{project, section, width, height, base}`: `base` `null` (no masks yet: every tile empty, no tables) or the SHA-256 of a manifest of that project with the same `section`, `width` and `height` | `{staged, rows, cols}`; `staged` a session-local UUID naming a new version in preparation, which starts as a copy of `base`. At most 16 per session. |
+| `mask.put` | `{staged, layer, row, col, sha256}` immediately followed by **one binary frame** of exactly the layer's byte length (the descriptor/binary pair of §3) | `{stored}`: `true` when the layer is now stored, `false` when it was all zeros and its entry was removed. The engine checks the length, the SHA-256, the zeros outside the section and, for `exclude`, that every sample is 0 or 1; any failure is `INVALID_BUFFER` (`details.field = "tile"`) and leaves the staged version unchanged. The blob is on disk before the answer. A later `mask.put` of the same layer and position replaces it. |
+| `mask.commit` | `{staged, tables}`: `tables` has any of the seven tables above, each the handle of a committed 1-D buffer of §3 with the table's dtype, or `null` for the four object columns together (no object) and for `stack_members` (no overlap); a name left out keeps the base's table. The four object columns and `classes` are given together or not at all; they are checked against each other before anything is written (same N, at most 2^20 rows else `LIMIT_EXCEEDED` `tables.object_ids`; IDs in range and all different; class indices from -1 to the number of `classes` records minus one; confidence finite in [0, 1]; else `INVALID_BUFFER` with `details.field = "tables.<name>"`). With `base: null`, all of them and `stack_offsets` are required. | `{manifest}`: the new version's SHA-256, after every blob and the manifest file are on disk. The staged version is closed (also when the commit fails). Committing the same content twice gives the same manifest. |
+| `mask.discard` | `{staged}` | `{}`; closes a staged version without writing a manifest (blobs already written stay, unreferenced). Idempotent. |
+| `mask.read` | `{project, manifest, layer, positions}`, 1 to 16 `[row, col]` positions inside the grid | `{tiles: [{row, col, sha256, byte_length}, ...], frames: [n1, n2, ...]}` in request order; an empty layer has `sha256: null` and `byte_length: 0` and sends no bytes; the bytes of the other tiles follow, concatenated and cut into binary frames of at most 1,048,576 bytes, exactly as for `tile.read` (§8.5). Every blob is verified before anything is sent. |
+| `mask.retain` | `{project, keep}`: at most 1,024 manifest hashes of the project (card M8.4.18a) | `{removed: {manifests, blobs}}`: every manifest of the project not in `keep` is deleted, then every blob that no kept manifest names and no open staged version holds. Every kept manifest must be readable, or nothing is deleted (`INVALID_REQUEST` or `INVALID_BUFFER` with `details.field = "keep"`). The manifests this engine process committed after the newest one `keep` names for the same section (all of a section's when `keep` names none of them) are kept too, with their blobs (card M8.4.31): the page may not have received a commit's answer when it asks for a clean-up. A new engine process has committed nothing, so after a restart only what `keep` names stays. Manifests go first, so a stop half-way leaves only unreferenced blobs, never a manifest without its blobs. The page calls it after a successful save, with the manifests its saved records name and the current acknowledged ones. |
+| `mask.info` | `{project, manifest, start}` (card M8.4.18a) | `{section, width, height, tiles, positions, next}`: from position `start` of the manifest's tile list (its order), at most 2,048 tiles as a flat list `[row, col, layers, ...]` with `layers` 1 = labels, 2 = exclusion, 3 = both; `tiles` is the total and `next` the start of the next page, or null. A reopened section learns from it which tiles it must read back. |
+| `mask.copy` | `{from, to, manifest, start}`: two different projects (card M8.4.27) | `{next, tiles}`: copies a manifest of `from` into `to` in pages of 32 tiles from position `start` of its tile list (the tables with `start` 0): every blob is read and verified from `from` and written to `to` unless a valid one is there. The manifest is written last, only when every blob it names is in `to`; a page skipped is `INVALID_REQUEST` (`start`), a damaged blob `INVALID_BUFFER`. `next` is the start of the next page, or `null` when the manifest has been written. |
+| `mask.forget` | `{project}` (card M8.4.27) | `{}`: the coordinator drops the project's store and its cached blobs from memory, before the main process deletes the folder; `BUSY` while a staged version of the project is open. |
+
+Identifiers are checked against the rules above (`INVALID_REQUEST` with the field's name); a staged version of another session does not
+exist. A staged version lives only in the coordinator's memory: if the engine stops before `mask.commit` answers, no manifest was written
+and the base, and every earlier manifest, stays readable; the client sends its unacknowledged tiles again to a new staged version (card
+M8.4.16 step 4). The project record names each section's current manifest (card M8.4.18a); between saves a stroke adds the tiles it
+changed (compressed) and one manifest, and after a save `mask.retain` removes what no saved or current version names. The tables are not read
+back: a reopened section takes its objects and stacks from the project record.
+
+**The folder follows its project (card M8.4.27).** When a project is deleted from the library, the page asks the main process to delete
+`<user data>/projects/<project>/` (`deleteProjectStore`): the engine first forgets the store (`mask.forget`; a `BUSY` answer is retried by the page
+after it stopped and waited for its sends), then the folder is renamed to `.deleting-<uuid>` inside the projects folder and removed; a stop
+half-way leaves a folder that no store identifier names, removed when the bridge starts. When a project is kept under a new identifier (the
+local version kept on import), `copyProjectStore` copies the manifests its tiled sections name (`mask.copy`, page by page) and their
+`sources.json` entries with the project's copies of sources (hard links when the file system allows them, otherwise verified copies); the
+project record under the new identifier is written only after this succeeded.
+
+**Source of a saved tiled section (cards M8.4.18a-b).** The main process, not the engine, keeps `<user data>/projects/<project>/sources.json`: `{format: "sedcoretool.sources", version: 1, sources: {<source SHA-256>: {path, size, name?, copy?}}}`, at most 4,096 entries, written through a temporary file and a rename when the page asks it to remember the source of a pyramid it built (`rememberSource`, which also records the file `name` without folders), when a moved source is located (`locate`, which replaces `path` and keeps `name`) and when the source is copied into the project (`copySource`, which records `copy`). `copy` is the name of the project's own copy in `<user data>/projects/<project>/sources/`: the SHA-256 followed by the original name's extension in lower case (`^[0-9a-f]{64}(\.[a-z0-9]{1,8})?$`; any other value is ignored). Readers ignore fields they do not know. The page never sees a path. When a saved section is reopened (`reopen`), the pyramid is used if the engine still has it; otherwise it is built from the copy, else from the remembered path, each only if its size is the saved one, with `expect` set to the saved SHA-256. `locate` takes a token of a file the user chose: a size other than the saved one is refused without reading the file (`{matched: false, size}`); otherwise the file is built with `expect`. `copySource` needs the page to have the pyramid open; it is refused (`LIMIT_EXCEEDED`, `disk`) when the disk would keep less than 1 GiB free, copies through a temporary file in the same folder while hashing what it writes, and renames only when the size and SHA-256 are the saved ones; a full disk, another file or a cancellation leaves no file. `sourceInfo` tells the page, without paths, whether the copy and the remembered original are there with the saved size, and the free space.
+
+**From the page (card M8.4.16 step 4).** The main process passes `--projects-dir <user data>/projects`. The page reaches the five operations
+only through `desktop/tile-ipc.js` (`window.corantoolDesktop.tiles.maskBegin`, `maskPut`, `maskCommit`, `maskDiscard`, `maskRead`), which checks
+every argument again, lets a page use only the staged versions it began (at most 8 at a time), and for `maskCommit` takes the tables as bytes,
+uploads each as a committed buffer (§3), names them in `mask.commit` and releases them. The page sends with `app/js/tiledsync.js` (`MaskSync`;
+before a round it checks the limits above with `tableLimit` and, beyond one, sends nothing, says so once and waits for the next change):
+after a change, a round begins a staged version on the last acknowledged manifest, sends each dirty tile (both layers, copied just before they
+are sent) and the tables whose content changed since the last acknowledged manifest (all of them for the first; card M8.4.25), and commits; a tile is acknowledged only if it did not change after its copy was taken. A failed round
+acknowledges nothing, discards its staged version and is tried again (pauses of 1, 2, 5, 15, then 30 s), after asking for the one automatic
+restart of the engine (card M8.4.7) when the engine is not ready. Clean tiles the page dropped are read back with `mask.read`
+(`MaskLoader`).

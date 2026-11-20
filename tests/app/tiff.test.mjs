@@ -83,6 +83,13 @@ test('16-bit TIFF strips preserve neighboring samples and drive automatic levels
   }
 });
 
+test('the factor callback learns the sample depth, so a 16-bit image can be reduced more (card H6)', async () => {
+  const seen = [];
+  await decodeTiffBlocks(tiffFixture({ signed: true }).source, wholeTiff, (w, h, bits) => { seen.push(bits); return 1; });
+  await decodeTiffBlocks(tiffFixture({ big: true, little: false, tiled: true, rgb: true, virtual: true }).source, () => ({ x: 2, y: 1, w: 2, h: 2 }), (w, h, bits) => { seen.push(bits); return 2; });
+  assert.deepEqual(seen, [16, 16]);
+});
+
 test('signed grayscale TIFF keeps the 16-bit samples in an offset working domain', async () => {
   const { source } = tiffFixture({ signed: true });
   const { rgba16 } = await decodeTiffBlocks(source, wholeTiff, () => 1);
@@ -107,4 +114,15 @@ test('a crop only reads intersecting strips and rejects truncated ranges', async
   assert.equal(result.rgba16[0], 32818);
   assert.ok(reads.every(([offset]) => offset !== 2048));
   await assert.rejects(decodeTiffBlocks({ ...source, size: source.size - 1 }, wholeTiff, () => 1), /TIFF block range/);
+});
+
+test('the 8-bit copy of 16-bit samples is their high byte, also above 112 million samples (card H7)', async () => {
+  const { highBytes } = await import('../../app/js/tiff.js');
+  assert.deepEqual([...highBytes(new Uint16Array([0, 0x00ff, 0x0100, 0xabcd, 0xffff]))], [0, 0, 1, 0xab, 0xff]);
+  // Uint8ClampedArray.from(samples, mapFn) died here with a fatal out-of-memory error (a 30-megapixel 16-bit image as RGBA).
+  const samples = new Uint16Array(6000 * 5000 * 4).fill(0x1234);
+  samples[samples.length - 1] = 0xfe01;
+  const out = highBytes(samples);
+  assert.equal(out.length, samples.length);
+  assert.deepEqual([out[0], out.at(-1)], [0x12, 0xfe]);
 });

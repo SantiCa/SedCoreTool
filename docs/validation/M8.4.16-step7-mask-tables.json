@@ -1,0 +1,107 @@
+{
+  "date": "2026-11-18T09:51:21.269Z",
+  "computer": "Windows_NT 10.0.26300, AMD Ryzen 7 7700X 8-Core Processor             , 31 GiB",
+  "limits": {
+    "records": 65536,
+    "metadataBytes": 4194304,
+    "stackBytes": 16777216
+  },
+  "objectTable": [
+    {
+      "objects": 72894,
+      "stacks": 0,
+      "classified": 1,
+      "classes": 301,
+      "stack_offsets": 8,
+      "stack_members": 0
+    },
+    {
+      "objects": 79783,
+      "stacks": 0,
+      "classified": 0,
+      "classes": 301,
+      "stack_offsets": 8,
+      "stack_members": 0
+    },
+    {
+      "objects": 738895,
+      "stacks": 0,
+      "classified": 1,
+      "classes": 301,
+      "stack_offsets": 8,
+      "stack_members": 0
+    },
+    {
+      "objects": 807817,
+      "stacks": 0,
+      "classified": 0,
+      "classes": 301,
+      "stack_offsets": 8,
+      "stack_members": 0
+    },
+    {
+      "objects": 3738895,
+      "stacks": 0,
+      "classified": 1,
+      "classes": 301,
+      "stack_offsets": 8,
+      "stack_members": 0
+    },
+    {
+      "objects": 4083331,
+      "stacks": 0,
+      "classified": 0,
+      "classes": 301,
+      "stack_offsets": 8,
+      "stack_members": 0
+    },
+    {
+      "objects": 4904095,
+      "stacks": 0,
+      "classified": 1,
+      "classes": 301,
+      "stack_offsets": 8,
+      "stack_members": 0
+    },
+    {
+      "objects": 5355462,
+      "stacks": 0,
+      "classified": 0,
+      "classes": 301,
+      "stack_offsets": 8,
+      "stack_members": 0
+    }
+  ],
+  "largestObjectCount": {
+    "classifiedByHand": 56072,
+    "predictedOnly": 51356,
+    "bytesPerRecordClassified": 74.8019510629191
+  },
+  "stackTables": [
+    {
+      "stacks": 1000,
+      "objects": 72894,
+      "classes": 301,
+      "stack_offsets": 4008,
+      "stack_members": 12000
+    },
+    {
+      "stacks": 100000,
+      "objects": 72894,
+      "classes": 301,
+      "stack_offsets": 400008,
+      "stack_members": 1200000
+    },
+    {
+      "stacks": 1000000,
+      "objects": 72894,
+      "classes": 301,
+      "stack_offsets": 4000008,
+      "stack_members": 12000000
+    }
+  ],
+  "stacksByOffsets": 4194303,
+  "stacksByMembers": 1398101,
+  "stacksWithinLimits": 1398101,
+  "recordLimitBinds": false
+}

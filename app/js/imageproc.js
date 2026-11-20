@@ -14,6 +14,27 @@
 import { hasId } from './core.js';
 // SedCoreTool web — image processing (no DOM): enhancement, detection, selection tools, shape features.
 
+/** Bytes the page keeps for each pixel of a section's working image: the RGBA original and its enhanced copy (4 + 4), the labels (4)
+ * and the exclusion (1); a 16-bit source adds its 16-bit RGBA copy (8). The section form shows the same estimate. */
+export const WORKING_BYTES_PER_PIXEL = 13, WORKING_BYTES_PER_PIXEL_16 = 21;
+/** Largest working image the page accepts (card H6, 16 November 2026). Choosing "full" resolution for a 2 GiB image needed several
+ * gigabytes and the window went blank; above this the image is reduced, or the choice is refused with a message. */
+export const WORKING_MEMORY_LIMIT = 1.5 * 2 ** 30;
+
+/** Estimated page memory, in bytes, of a working image of w x h pixels.
+ * @param {number} w @param {number} h @param {boolean} [bits16] */
+export function workingBytes(w, h, bits16 = false) {
+  return w * h * (bits16 ? WORKING_BYTES_PER_PIXEL_16 : WORKING_BYTES_PER_PIXEL);
+}
+
+/** Smallest reduction factor, at least `k0`, whose working image (floor(w / k) x floor(h / k)) fits `limit`.
+ * @param {number} w @param {number} h @param {number} [k0] @param {boolean} [bits16] @param {number} [limit] */
+export function factorThatFits(w, h, k0 = 1, bits16 = false, limit = WORKING_MEMORY_LIMIT) {
+  let k = Math.max(1, Math.ceil(k0));
+  while (workingBytes(Math.floor(w / k), Math.floor(h / k), bits16) > limit) k++;
+  return k;
+}
+
 /**
  * @param {ArrayLike<number>} rgba
  * @param {number} j
@@ -596,11 +617,14 @@ export function polygonPixels(pts, w, roi) {
  * @param {ReadonlySet<number> | null} [ids]
  * @param {Roi | null} [region]
  * @param {StackTable | null} [stacks]
+ * @param {Roi | null} [bounds] where the image lies in the arrays (default: all of them). Pixels outside it are beyond the image's edge: a
+ *   trace pixel next to them is on the edge and they are never read for the surrounding contrast. Tiled sections (card M8.4.16) pass arrays
+ *   padded around one tile.
  * @returns {Map<number, TraceStats>}
  */
-export function objectStats(labels, w, h, rgba, ids = null, region = null, stacks = null) {
+export function objectStats(labels, w, h, rgba, ids = null, region = null, stacks = null, bounds = null) {
   // V0.20: with `stacks`, a pixel in an overlap counts for every object of its stack.
-  const R = region || { x0: 0, y0: 0, x1: w, y1: h };
+  const R = region || { x0: 0, y0: 0, x1: w, y1: h }, B = bounds || { x0: 0, y0: 0, x1: w, y1: h };
   /** @type {Map<number, TraceStats>} */
   const acc = new Map();
   /** @param {number} i */
@@ -619,13 +643,13 @@ export function objectStats(labels, w, h, rgba, ids = null, region = null, stack
     a.n++; a.sx += x; a.sy += y; a.sxx += x * x; a.syy += y * y; a.sxy += x * y;
     if (x < a.x0) a.x0 = x; if (x > a.x1) a.x1 = x; if (y < a.y0) a.y0 = y; if (y > a.y1) a.y1 = y;
     a.sL += L; a.sLL += L * L; a.sA += r - g; a.sB += (r + g) / 2 - b;
-    const edge = x === 0 || !own(i - 1, id) || x === w - 1 || !own(i + 1, id) ||
-      y === 0 || !own(i - w, id) || y === h - 1 || !own(i + w, id);
+    const edge = x === B.x0 || !own(i - 1, id) || x === B.x1 - 1 || !own(i + 1, id) ||
+      y === B.y0 || !own(i - w, id) || y === B.y1 - 1 || !own(i + w, id);
     if (edge) {
       a.per++;
       for (const [dx, dy] of [[-3, 0], [3, 0], [0, -3], [0, 3]]) {
         const xx = x + dx, yy = y + dy;
-        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        if (xx < B.x0 || yy < B.y0 || xx >= B.x1 || yy >= B.y1) continue;
         const k = yy * w + xx;
         if (!own(k, id)) { a.rL += lum(k); a.rN++; }
       }

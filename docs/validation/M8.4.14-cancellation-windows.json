@@ -1,0 +1,123 @@
+{
+ "tool": "tools/measure_tile_store.py",
+ "card": "M8.4.14",
+ "phase": "cancel",
+ "environment": {
+  "os": "Windows-11-10.0.26300-SP0",
+  "cpu": "AMD64 Family 25 Model 97 Stepping 2, AuthenticAMD",
+  "logical_cpus": 16,
+  "python": "3.12.4",
+  "numpy": "1.26.4",
+  "libvips": "8.18.7",
+  "commit": "27daf07fe65c86ea51e1dedacdd31b102f5d3453",
+  "threads": "4"
+ },
+ "results": {
+  "runs": [
+   {
+    "stage": "level0",
+    "at": 0.05,
+    "status": "cancelled",
+    "ack_ms": 12.2,
+    "cleanup_s": 0.05,
+    "leftovers": []
+   },
+   {
+    "stage": "level0",
+    "at": 0.15,
+    "status": "cancelled",
+    "ack_ms": 10.2,
+    "cleanup_s": 0.1,
+    "leftovers": []
+   },
+   {
+    "stage": "level0",
+    "at": 0.25,
+    "status": "cancelled",
+    "ack_ms": 12.1,
+    "cleanup_s": 0.21,
+    "leftovers": []
+   },
+   {
+    "stage": "level0",
+    "at": 0.35,
+    "status": "cancelled",
+    "ack_ms": 12.0,
+    "cleanup_s": 0.26,
+    "leftovers": []
+   },
+   {
+    "stage": "level0",
+    "at": 0.45,
+    "status": "cancelled",
+    "ack_ms": 13.6,
+    "cleanup_s": 0.31,
+    "leftovers": []
+   },
+   {
+    "stage": "level0",
+    "at": 0.55,
+    "status": "cancelled",
+    "ack_ms": 14.6,
+    "cleanup_s": 0.41,
+    "leftovers": []
+   },
+   {
+    "stage": "level0",
+    "at": 0.65,
+    "status": "cancelled",
+    "ack_ms": 11.6,
+    "cleanup_s": 0.46,
+    "leftovers": []
+   },
+   {
+    "stage": "level0",
+    "at": 0.75,
+    "status": "cancelled",
+    "ack_ms": 11.7,
+    "cleanup_s": 0.46,
+    "leftovers": []
+   },
+   {
+    "stage": "level0",
+    "at": 0.85,
+    "status": "cancelled",
+    "ack_ms": 12.7,
+    "cleanup_s": 0.56,
+    "leftovers": []
+   },
+   {
+    "stage": "level0",
+    "at": 0.95,
+    "status": "cancelled",
+    "ack_ms": 11.8,
+    "cleanup_s": 0.61,
+    "leftovers": []
+   },
+   {
+    "stage": "hash",
+    "at": 0.3,
+    "status": "cancelled",
+    "ack_ms": 7.4,
+    "cleanup_s": 0.0,
+    "leftovers": []
+   },
+   {
+    "stage": "hash",
+    "at": 0.7,
+    "status": "cancelled",
+    "ack_ms": 7.8,
+    "cleanup_s": 0.0,
+    "leftovers": []
+   }
+  ]
+ },
+ "summary": {
+  "runs": 12,
+  "cancelled": 12,
+  "ack_ms_p50": 11.8,
+  "ack_ms_p95": 14.6,
+  "ack_ms_max": 14.6,
+  "leftovers": 0
+ }
+}

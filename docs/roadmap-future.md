@@ -217,6 +217,8 @@ Complete: M5.2.1, M5.2.2 (documentation corrections) and M5.3 (type checking)
 - [ ] **M5.2 - Scientific validation and documentation.** Complete the release requirements in
       [Validation](#validation) and the relevant user guidance. The maintainer decides when to declare 1.0
       and publish it.
+  - Council audit of 19 November 2026: its protocol is written now (card S6 of the roadmap) rather than at the end, because it is the
+    critical path of the paper and of 1.0 and does not depend on M8.
 - [ ] **M5.4 - Reduce legacy JavaScript type diagnostics (AUD-14).** Replace the baseline entries with checked
       contracts as the corresponding modules are changed.
   - Evaluate `figview.js`, `navpreview.js`, `exportio.js`, `tableview.js` and `edit.js` one at a time
@@ -265,6 +267,9 @@ Complete: M5.2.1, M5.2.2 (documentation corrections) and M5.3 (type checking)
       autocorrelation and age-model uncertainty. Do not infer causality from correlation or classification.
   - Acceptance: recover known synthetic signals/change depths within declared resolution, test null/aliasing
     cases and report uncertainty/sensitivity to resampling and age models. Define computational limits first.
+  - Council audit of 19 November 2026 (card S5 of the roadmap): age-model uncertainty through age-depth ensembles (for example the Bacon
+    iterations) giving probabilistic membership of age windows; correlation tests that account for autocorrelation and uneven sampling
+    (surrogate series, effective sample size).
 - [ ] **M6.6 - Program integration and reproducible delivery.** Implement the statistics workspace with
       explicit input selection, transformations, method settings, progress/cancellation and saved analysis runs.
       Export result tables and SVG/PNG figures with input identity, method/version, parameters and random seed.

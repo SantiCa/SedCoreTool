@@ -1,5 +1,5 @@
 // SedCoreTool web — composite core log (no DOM): table parsing, axis transforms, SVG and CSV of a window.
-import { interpAge, toCSV } from './core.js';
+import { interpAge, toCSV, seriesSampler } from './core.js';
 
 /** Normalise optional saved event presentation at the rendering/editing boundary. */
 export function eventShadeOptions(value) {
@@ -199,18 +199,21 @@ export function toAxis(v, from, to, model, inverse = invertModel(model)) {
  */
 export function compositeRows(sections, { axis, model }) {
   const rows = [];
+  let outside = 0;
   for (const s of sections) {
     for (const b of s.bins) {
       const age = interpAge(model, b.depth);
       let a0 = b.dTop, a1 = b.dBottom, c = b.depth;
+      let reversed = false;
       if (axis === 'age') {
         a0 = interpAge(model, b.dTop); a1 = interpAge(model, b.dBottom); c = age;
-        if (a0 == null || a1 == null) continue;
+        if (a0 == null || a1 == null) { outside++; continue; }   // card Q4: counted, and the CSV says how many
+        reversed = a0 > a1;                                        // an age reversal in the model: marked in the CSV
       }
-      rows.push({ ...b, section: s.name, a0: Math.min(a0, a1), a1: Math.max(a0, a1), c, age });
+      rows.push({ ...b, section: s.name, a0: Math.min(a0, a1), a1: Math.max(a0, a1), c, age, reversed });
     }
   }
-  return rows.sort((p, q) => p.a0 - q.a0);
+  return Object.assign(rows.sort((p, q) => p.a0 - q.a0), { outside });
 }
 
 export function rowsRange(rows) {
@@ -825,15 +828,26 @@ export function buildRangeSVG(o) {
 }
 
 /** CSV of the intervals inside the window, plus external records interpolated at each interval centre. */
-export function windowCSV({ rows, from, to, classes, records, units, ageUnits }) {
+export function windowCSV({ rows, from, to, classes, records, units, ageUnits, recordMode = 'mean', model = null }) {
   const sel = rows.filter((r) => r.a1 > from && r.a0 < to);
+  // Card Q4 (decision P): a record's column is the mean of its samples inside the interval, with their number, or (`point`) its value
+  // interpolated at the centre, never across a gap wider than three times its median spacing (the cursor's rule).
+  const samplers = records.map((s) => seriesSampler(s.x, s.y));
+  const ageAt = (depth) => (model ? interpAge(model, depth) : null);
   const head = ['section', `depth_top_${units}`, `depth_bottom_${units}`, `depth_${units}`, `age_${ageUnits}`, 'bioturbation_pct',
     ...classes.map((c) => `${c.name}_pct`), 'BI', 'ii', 'BI_manual', 'ii_manual',
-    ...records.map((r) => `${r.name} (interp.)`)];
+    ...records.flatMap((r) => (recordMode === 'point' ? [`${r.name} (interp.)`] : [`${r.name} (mean)`, `${r.name} (n)`])), 'note'];
   const out = [head];
   for (const r of sel) {
+    const cells = records.flatMap((s, k) => {
+      const onDepth = s.axis === 'depth';
+      if (recordMode === 'point') return [samplers[k].at(onDepth ? r.depth : r.age)];
+      const { mean, n } = onDepth ? samplers[k].mean(r.dTop, r.dBottom) : samplers[k].mean(ageAt(r.dTop), ageAt(r.dBottom));
+      return [mean, n];
+    });
     out.push([r.section, r.dTop, r.dBottom, r.depth, r.age, r.pct, ...classes.map((c) => r.classPct[c.index]), r.BI, r.ii, r.BIm, r.iim,
-      ...records.map((s) => interpAge({ depth: s.x, age: s.y }, s.axis === 'depth' ? r.depth : r.age))]);
+      ...cells, r.reversed ? 'age reversal' : '']);
   }
-  return toCSV(out);
+  const csv = toCSV(out);
+  return rows.outside ? csv + `# ${rows.outside} intervals lie outside the age model and are not listed\n` : csv;
 }

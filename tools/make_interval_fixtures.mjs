@@ -182,7 +182,46 @@ function large() {
     ageModel: { depth: [100, 200, 300], age: [0, 50, 120], min: [0, 40, 100], max: [0, 60, 140] }, ageUnits: 'ka' });
 }
 
-function allCases() {
+/**
+ * Cases whose objects, overlaps and exclusions cross the 512-pixel tile borders in both directions (card M8.4.17): a tiled section counts them tile by
+ * tile and must give exactly these columns, which come from the whole-image calculation. Python reproduces them like every other fixture.
+ */
+function seamObjectsAndOverlaps() {
+  const s = makeSection({ w: 1300, h: 1100, top: 0, bottom: 110, units: 'cm', stacks: [null, [1, 2], [3, 4, 5], [2, 6]],
+    objects: [{ id: 1, cls: 'a' }, { id: 2, cls: 'b' }, { id: 3, cls: 'a' }, { id: 4, cls: 'n' }, { id: 5, cls: 'b' }, { id: 6, cls: 'a' }] });
+  paint(s, 'labels', [500, 1030], [500, 1030], 1);                      // across both borders at 512 and 1024, in both directions
+  paint(s, 'labels', [100, 700], [900, 1100], 2);                       // across the vertical border at 1024
+  paint(s, 'labels', [0, 1100], [255, 262], 3);                         // a thin object along the whole height, across every horizontal border
+  paint(s, 'labels', [510, 514], [0, 1300], 4);                         // a thin object along the whole width, on the horizontal border at 512
+  paint(s, 'labels', [600, 900], [600, 700], -1);                       // an overlap of 1 and 2 over part of object 1
+  paint(s, 'labels', [1000, 1100], [1000, 1300], -2);                   // an overlap of three objects at the corner tiles
+  paint(s, 'labels', [20, 60], [1250, 1300], -3);
+  paint(s, 'labels', [700, 760], [20, 60], 5); paint(s, 'labels', [800, 830], [30, 90], 6);
+  return fixture('seams-objects-and-overlaps', '1,300 x 1,100 pixels (3 x 3 tiles of 512): objects and overlaps across the tile borders, thin objects along them.', s, { settings: { binCm: 3 } });
+}
+
+function seamExclusionUnalignedRoi() {
+  const s = makeSection({ w: 1300, h: 1100, roi: { x0: 37, y0: 311, x1: 1171, y1: 1003 }, top: 50, bottom: 120, units: 'cm', stacks: [null, [1, 2]],
+    objects: [{ id: 1, cls: 'a' }, { id: 2, pred: 'b', conf: 0.8 }, { id: 3, pred: 'a', conf: 0.2 }, { id: 4 }, { id: 5, cls: 'b' }] });
+  paint(s, 'labels', [300, 1010], [20, 1190], 5); paint(s, 'labels', [400, 900], [300, 1100], 1);
+  paint(s, 'labels', [450, 700], [500, 1200], 2); paint(s, 'labels', [600, 800], [700, 900], -1);
+  paint(s, 'labels', [850, 1000], [100, 600], 3); paint(s, 'labels', [850, 1000], [600, 900], 4);
+  paint(s, 'exclude', [505, 520], [0, 1300], 1);                        // a band across the horizontal border at 512
+  paint(s, 'exclude', [0, 1100], [1020, 1030], 1);                      // a band across the vertical border at 1024
+  paint(s, 'exclude', [900, 1000], [40, 300], 1);
+  return fixture('seams-exclusion-unaligned-roi', 'A region of interest that starts and ends inside tiles, exclusion across the borders, predictions and candidates counted, a fractional interval.',
+    s, { settings: { binCm: 2.7, includePred: true, predThr: 0.5, countCandidates: true, noDataPad: 1, minValid: 25 },
+      ageModel: { depth: [50, 90, 120], age: [0, 40, 100] }, ageUnits: 'ka' });
+}
+
+function seamSparseEmptyTiles() {
+  const s = makeSection({ w: 1100, h: 1600, top: 0, bottom: 160, units: 'cm', objects: [{ id: 1, cls: 'a' }, { id: 2, cls: 'b' }] });
+  paint(s, 'labels', [0, 40], [0, 40], 1); paint(s, 'labels', [1560, 1600], [1060, 1100], 2);   // only the corner tiles hold anything; the last row and column are partial
+  paint(s, 'exclude', [1550, 1600], [0, 1100], 1);
+  return fixture('seams-sparse-empty-tiles', 'Tiles with nothing in them between objects in the corners; partial tiles at the bottom and right.', s, { settings: { binCm: 10 } });
+}
+
+export function allCases() {
   const model = { depth: [0, 10], age: [0, 100], min: [0, 80], max: [0, 120] };
   return [
     basicFourIntervals(), predictions(true), predictions(false), overlapSameAndDifferentClass(), overlapWithExcludedPixels(), roiOffset(),
@@ -192,7 +231,7 @@ function allCases() {
     agesSection('ages-at-model-ends', 'Interval centres exactly at the first and last model depth are inside the model.', { depth: [2.5, 17.5], age: [10, 40], min: [8, 30], max: [12, 50] }),
     agesSection('ages-without-range', 'An age model without minimum and maximum.', { depth: [0, 10], age: [0, 100] }),
     agesSection('ages-no-model', 'No age model.', null),
-    manualRanges(), ...fractionalBoundaries(), large(),
+    manualRanges(), ...fractionalBoundaries(), large(), seamObjectsAndOverlaps(), seamExclusionUnalignedRoi(), seamSparseEmptyTiles(),
   ];
 }
 

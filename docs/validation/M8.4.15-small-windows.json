@@ -1,0 +1,60 @@
+{
+  "file": "idealized_core_0-500cm.jpg",
+  "date": "2026-11-17T20:01:59.003Z",
+  "computer": "Windows 11, AMD Ryzen 7 7700X, 31 GiB (maintainer's computer)",
+  "viewport": "1440 x 900",
+  "today": {
+    "tiled": false,
+    "ds": 2,
+    "w": 310,
+    "h": 8363,
+    "full": {
+      "w": 620,
+      "h": 16726
+    },
+    "firstUsefulViewMs": 329,
+    "frameCost": {
+      "n": 120,
+      "median": 6.1,
+      "p95": 8.8,
+      "max": 11.8
+    },
+    "frameInterval": {
+      "n": 119,
+      "median": 8.2,
+      "p95": 8.5,
+      "max": 12.5
+    }
+  },
+  "todayMemory": {
+    "samples": 5,
+    "peakMiB": 810
+  },
+  "tiled": {
+    "tiled": true,
+    "ds": 2,
+    "w": 310,
+    "h": 8363,
+    "full": {
+      "w": 620,
+      "h": 16726
+    },
+    "firstUsefulViewMs": 1086,
+    "frameCost": {
+      "n": 120,
+      "median": 6.2,
+      "p95": 8.1,
+      "max": 10
+    },
+    "frameInterval": {
+      "n": 119,
+      "median": 8.3,
+      "p95": 8.4,
+      "max": 8.5
+    }
+  },
+  "tiledMemory": {
+    "samples": 7,
+    "peakMiB": 743
+  }
+}
