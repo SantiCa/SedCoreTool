@@ -59,9 +59,6 @@ async function program(tiled) {
   const browser = await puppeteer.connect({ browserWSEndpoint: endpoint, defaultViewport: null, protocolTimeout: 600000 });
   const page = await (await browser.waitForTarget((t) => t.url().startsWith('app://corantool/app/index.html'), { timeout: 60000 })).page();
   page.setDefaultTimeout(600000);
-  // The strokes, lasso and scissors below are drawn at screen positions: the same view on every machine (the headless window of the
-  // maintainer's computer, where the expected values were measured; GitHub's runners have larger screens, card M8.4.32).
-  await page.setViewport({ width: 884, height: 561 });
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message + ' @ ' + String(error.stack).split('\n').slice(1, 4).join(' | ')));
   page.on('dialog', (dialog) => dialog.accept().catch(() => {}));
@@ -460,7 +457,7 @@ try {
   const [lassoId] = fresh(ops.lassoed, ops.start);
   assert.deepEqual(ops.lassoed.objects[lassoId], { area: 6000, sbox: [100, 6520, 199, 6579], cls: ops.lassoed.objects[lassoId].cls }, 'the lasso labels the source pixels whose centres are inside the polygon');
   assert.equal(ops.lassoed.counted[lassoId], 6000);
-  assert.deepEqual(ops.pieces.length, 2, 'the scissors split the object in two: ' + JSON.stringify(ops.cut.objects));
+  assert.deepEqual(ops.pieces.length, 2, 'the scissors split the object in two: ' + JSON.stringify({ objects: ops.cut.objects, toast: ops.cut.toast, undo: [ops.lassoed.undo, ops.cut.undo], canvas: ops.canvas }));
   assert.deepEqual(ops.pieces.map((id) => ops.cut.objects[id].area).sort(), [2880, 3120], 'left 49 + 3 cut columns, right 48 columns, 60 rows');
   for (const id of ops.pieces) assert.equal(ops.cut.counted[id], ops.cut.objects[id].area);
   const [mergedId] = fresh(ops.merged, ops.start);
