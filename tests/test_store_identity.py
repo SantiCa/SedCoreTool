@@ -10,7 +10,9 @@ import numpy as np
 import pytest
 from PIL import Image
 
-pytest.importorskip("pyvips")
+from conftest import require_pyvips
+
+require_pyvips()
 
 from sedcoretool.store import identity  # noqa: E402
 from sedcoretool.store import pyramid as pyr  # noqa: E402

@@ -55,6 +55,7 @@ npm run typecheck
 node tests/e2e/desktop.mjs                          # when desktop/, saving or the interface changed (see §6)
 node tests/e2e/smoke.mjs                            # when the interface changed; needs the server of §2 and Chrome
 node tests/e2e/large-16bit-desktop.mjs              # when image decoding or the memory of sections changed (card H7)
+# The Python tile-store tests skip when pyvips is missing; SEDCORETOOL_REQUIRE_PYVIPS=1 (set by the tests workflow, card M8.4.32) makes that a failure.
 ```
 
 The end-to-end tests that start the desktop program (`desktop.mjs`, `large-16bit-desktop.mjs`, `tiled-sections.mjs`, `working-memory-desktop.mjs`) first check, in under a second (`tests/e2e/preflight.mjs`), that `desktop/web` and `desktop/python` hold the current `app/` and `src/` and that the engine runtime's recorded sources match `src/`; if not, they stop and print the command that fixes it (`node desktop/scripts/prepare.js --with-examples`, `npm run prepare-runtime -- --offline` in `desktop/`).
@@ -175,7 +176,9 @@ the roadmap. State in the report what was **not** measured.
 - **Milestone gate** ([AGENTS.md §6](../AGENTS.md#6-working-on-a-task)): push the work branch; *Desktop builds* starts
   by itself (a newer push cancels the older run of the same branch; it can also be started by hand from Actions →
   Desktop builds → Run workflow, `draft_release` off). It prepares the bundled runtime, runs `tests/e2e/desktop.mjs`
-  with the engine experiment off and on and `tests/e2e/large-16bit-desktop.mjs`, packages and checks the package on Windows, macOS (Apple Silicon runner)
+  with the engine experiment off and on, `tests/e2e/large-16bit-desktop.mjs` and `tests/e2e/tiled-sections.mjs` (card M8.4.32: tiled sections,
+  their saving, reopening and store folder; the engine's process is found with PowerShell on Windows and `ps` elsewhere), packages and checks the
+  package on Windows, macOS (Apple Silicon runner)
   and Linux; the later steps run even when an earlier one failed, so one run reports every failure. The `tests`
   workflow must pass on the same commit. Results can be read without
   logging in: `GET https://api.github.com/repos/SantiCa/SedCoreTool/actions/runs/<run id>/jobs` and, for a failed

@@ -24,7 +24,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
-      - run: pytest -q --cov=sedcoretool --cov-report=term-missing:skip-covered
+      - env: { SEDCORETOOL_REQUIRE_PYVIPS: '1' }   # card M8.4.32: the tile-store tests must run, not skip
+        run: pytest -q --cov=sedcoretool --cov-report=term-missing:skip-covered
 
   web-app:
     runs-on: ${{ matrix.os }}

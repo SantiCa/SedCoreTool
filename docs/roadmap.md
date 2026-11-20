@@ -1918,7 +1918,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   Not done: macOS, Linux; a measured interleaving of a real commit and a real retain in the desktop program (the Python tests drive the
   coordinator in that order deterministically).
 
-##### M8.4.32 - The tiled tests run on GitHub on three systems — state: after Q3 (order O, approved 19 Nov 2026; council audit of 19 Nov 2026)
+##### M8.4.32 - The tiled tests run on GitHub on three systems — state: In progress (20 Nov 2026: pushed, waiting for the first run on three systems)
 
 - **Goal:** the milestone gate covers the tile store: `tests/e2e/tiled-sections.mjs` and `tests/e2e/interrupted-saves.mjs` run in the
   *Desktop builds* workflow on Windows, macOS and Linux, on a fixture generated in the job, and the Python tests of the store cannot skip
@@ -1935,6 +1935,13 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 - **Tests:** the workflows themselves: one green run on three systems, and one deliberately failing run (a broken assertion on a scratch
   branch) that shows red.
 - **Done when:** both workflows pass on three systems with the two tests in them; development gate (it changes what the milestone gate means).
+- *As built so far (20 Nov 2026):* `tests/e2e/interrupted-saves.mjs` already runs inside `tests/e2e/desktop.mjs` (`verifyInterruptedSaves`),
+  so only `tests/e2e/tiled-sections.mjs` was missing: it is now a step of *Desktop builds* on Windows, macOS and Linux (under `xvfb-run` on
+  Linux). Its image is the public example `examples/data/idealized_core_0-500cm.jpg`, so no fixture is generated; its only Windows-only part,
+  the lookup of the engine's process before it is killed, is `findCoordinator` (PowerShell on Windows, `ps` elsewhere). `tests/conftest.py`
+  `require_pyvips()` replaces `pytest.importorskip("pyvips")` in the four tile-store test files; the tests workflow sets
+  `SEDCORETOOL_REQUIRE_PYVIPS=1`, so a missing pyvips fails there instead of skipping. Local check: the four files pass in strict mode (63),
+  `tiled-sections.mjs` passes on Windows with the helper. Pending: the first run on three systems, and the deliberately failing run.
 
 ##### M8.4.33 - Backups and packages say what they leave out — state: after M8.4.32 (council audit of 19 Nov 2026)
 

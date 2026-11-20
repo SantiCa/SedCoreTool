@@ -97,6 +97,15 @@ jobs:
         run: node tests/e2e/large-16bit-desktop.mjs
         working-directory: .
         if: ${{ !cancelled() && runner.os != 'Linux' }}
+      # Card M8.4.32: tiled sections (the tile store, saving and reopening, a killed engine, the store folder) on every system
+      - name: Desktop tiled sections (card M8.4.32)
+        run: xvfb-run -a node tests/e2e/tiled-sections.mjs
+        working-directory: .
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+      - name: Desktop tiled sections (card M8.4.32)
+        run: node tests/e2e/tiled-sections.mjs
+        working-directory: .
+        if: ${{ !cancelled() && runner.os != 'Linux' }}
       - run: npm run dist
         if: ${{ !cancelled() }}
         env:

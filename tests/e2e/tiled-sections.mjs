@@ -23,6 +23,27 @@ const electron = createRequire(path.join(root, 'desktop/package.json'))('electro
 const image = process.argv[2] || path.join(root, 'examples/data/idealized_core_0-500cm.jpg');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Card M8.4.32: the process id of this program's engine coordinator (its command line names server.py and the projects folder), found among the
+ * descendants of the program's process (at most six levels down): PowerShell on Windows, `ps` on macOS and Linux. 0 when there is none.
+ * @param {number} rootPid
+ */
+function findCoordinator(rootPid) {
+  if (process.platform === 'win32') {
+    return Number(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      `(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*server.py*' -and $_.CommandLine -like '*projects-dir*' } | Where-Object { $p = $_; $chain = $p.ParentProcessId; $hit = $false; for ($k = 0; $k -lt 6 -and $chain; $k++) { if ($chain -eq ${rootPid}) { $hit = $true; break }; $chain = (Get-CimInstance Win32_Process -Filter "ProcessId=$chain").ParentProcessId }; $hit } | Select-Object -First 1).ProcessId`],
+      { encoding: 'utf8', windowsHide: true }).trim()) || 0;
+  }
+  const rows = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,args='], { encoding: 'utf8' }).split('\n').map((line) => /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)).filter(Boolean)
+    .map((m) => ({ pid: Number(m[1]), ppid: Number(m[2]), args: m[3] }));
+  const parent = new Map(rows.map((r) => [r.pid, r.ppid]));
+  for (const r of rows) {
+    if (!r.args.includes('server.py') || !r.args.includes('projects-dir')) continue;
+    for (let chain = r.ppid, k = 0; chain && k < 6; chain = parent.get(chain), k++) if (chain === rootPid) return r.pid;
+  }
+  return 0;
+}
+
 async function program(tiled) {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'sedcoretool-tiled-'));
   const env = { ...process.env, SEDCORETOOL_TEST_PROFILE: profile, SEDCORETOOL_ENGINE_EXPERIMENT: '1' };
@@ -172,9 +193,7 @@ try {
       for (let n = 1; n <= repeat; n++) {
         await on.page.evaluate(() => window.ichantool.clearTiles());
         if (process.env.SEDCORETOOL_PROBE_KILL === '1' && n === 5) {          // once: the program restarts the engine once per session
-          const coordinator = Number(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-            `(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*server.py*' -and $_.CommandLine -like '*projects-dir*' } | Where-Object { $p = $_; $chain = $p.ParentProcessId; $hit = $false; for ($k = 0; $k -lt 6 -and $chain; $k++) { if ($chain -eq ${on.pid}) { $hit = $true; break }; $chain = (Get-CimInstance Win32_Process -Filter "ProcessId=$chain").ParentProcessId }; $hit } | Select-Object -First 1).ProcessId`],
-            { encoding: 'utf8', windowsHide: true }).trim());
+          const coordinator = findCoordinator(on.pid);
           if (coordinator > 0) process.kill(coordinator, 'SIGKILL');
         }
         const again = await probe(0.2 + (n % 7) * 0.08);
@@ -478,9 +497,7 @@ try {
   await on.page.evaluate(() => { window.ichantool.setTool('brush'); window.ichantool.S.brushSize = 10; });
   const box = await on.page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
   // Found before the stroke: looking it up takes about a second, longer than a round.
-  const coordinator = Number(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-    `(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*server.py*' -and $_.CommandLine -like '*projects-dir*' } | Where-Object { $p = $_; $chain = $p.ParentProcessId; $hit = $false; for ($k = 0; $k -lt 6 -and $chain; $k++) { if ($chain -eq ${on.pid}) { $hit = $true; break }; $chain = (Get-CimInstance Win32_Process -Filter "ProcessId=$chain").ParentProcessId }; $hit } | Select-Object -First 1).ProcessId`],
-    { encoding: 'utf8', windowsHide: true }).trim());
+  const coordinator = findCoordinator(on.pid);
   assert.ok(coordinator > 0, 'the engine coordinator of this program was found');
   // Card M8.4.16 step 5: the stroke is undone while the engine is down and redone after it is back; each state reaches the store exactly.
   const objectsNow = () => on.page.evaluate(() => [...window.ichantool.S.sections.at(-1).objects.values()].map((o) => [o.id, o.area, String(o.sbox)]));
