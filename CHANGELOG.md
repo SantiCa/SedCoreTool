@@ -21,6 +21,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.30 step 2: `tiledstate.js` (`createTiledState`: statistics runner, row counts, pixel and mask reads, mask sends) moved out of `app.js`.
 - Card M8.4.30 step 1: `tiledproject.js` (`createTiledProject`: reopening, locks, store folder, the store's part of a save) moved out of `app.js` without changing behaviour.
 - Card M8.4.33: `projectForExport` returns and writes `left_out`; `tellLeftOut`; page test hooks `exportedProject` and `packageNow`.
 - Card M8.4.32: `tiled-sections.mjs` in the Desktop builds workflow on three systems (`findCoordinator` with `ps` outside Windows); `tests/conftest.py::require_pyvips` and `SEDCORETOOL_REQUIRE_PYVIPS=1` in the tests workflow.

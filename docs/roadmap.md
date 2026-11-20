@@ -1967,7 +1967,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   six ordinary sections, no tiled one, one `left_out` entry, and the message is shown; `desktop.mjs`: a project without tiled sections has no
   `left_out`). Two page hooks for the tests (`exportedProject`, `packageNow`). The full backup of every project uses the same function.
 
-##### M8.4.30 - The tiled-section controller leaves `app.js` — state: In progress (step 1 done 20 Nov 2026: `tiledproject.js`, `app.js` 5,390 → 5,256 lines; desktop.mjs off and on and tiled-sections.mjs pass) (written by the audit of 19 Nov 2026, finding 1)
+##### M8.4.30 - The tiled-section controller leaves `app.js` — state: In progress (step 1 done 20 Nov 2026: `tiledproject.js`, `app.js` 5,390 → 5,256 lines; step 2: `tiledstate.js`, 5,256 → 5,125; after each, desktop.mjs off and on and tiled-sections.mjs pass) (written by the audit of 19 Nov 2026, finding 1)
 
 - **Goal:** the tiled-section workflow lives in its own controller modules, `app.js` only wires them, and `app.js` is back below its size of
   13 November 2026 (4,344 lines); no behaviour changes.
