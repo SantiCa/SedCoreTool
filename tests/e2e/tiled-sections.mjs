@@ -44,6 +44,9 @@ function findCoordinator(rootPid) {
   return 0;
 }
 
+/** Where a failing step saves its screenshot: SEDCORETOOL_SHOT_DIR on GitHub (uploaded as an artifact, card M8.4.32), else the temporary folder. */
+function shotDir() { const dir = process.env.SEDCORETOOL_SHOT_DIR || os.tmpdir(); fs.mkdirSync(dir, { recursive: true }); return dir; }
+
 async function program(tiled) {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'sedcoretool-tiled-'));
   const env = { ...process.env, SEDCORETOOL_TEST_PROFILE: profile, SEDCORETOOL_ENGINE_EXPERIMENT: '1' };
@@ -192,7 +195,7 @@ try {
     assert.ok(drawn.completed, `${label}: the visible tiles were loaded within 30 s (waited ${drawn.waitedMs} ms): ` + JSON.stringify(drawn.evidence));
     assert.ok(drawn.probes.length >= 10, 'probes where full resolution differs from the working image: ' + JSON.stringify(drawn));
     if (drawn.evidence) {
-      const shot = path.join(os.tmpdir(), `sedcoretool-probe-${process.pid}-${Date.now()}.png`);
+      const shot = path.join(shotDir(), `sedcoretool-probe-${process.pid}-${Date.now()}.png`);
       await on.page.screenshot({ path: shot });
       console.log(`${label}: probe failed; screenshot ${shot}; tile state ${JSON.stringify(drawn.evidence)}; waited ${drawn.waitedMs} ms`);
     }
@@ -419,8 +422,20 @@ try {
     const start = await state();
     await path('lasso', [[100, 520], [200, 520], [200, 580], [100, 580]]);
     const lassoed = await state();
+    // Card M8.4.32: the pointer events the page receives during the cut, to tell a lost or merged move from a wrong mapping if it fails.
+    await page.evaluate(() => {
+      const seen = window.__cutEvents = [], view = document.getElementById('view');
+      for (const type of ['pointerdown', 'pointermove', 'pointerup']) view.addEventListener(type, (e) => { if (seen.length < 200) seen.push([type[7] || type[5], e.clientX, e.clientY, e.getCoalescedEvents?.().length ?? 0]); }, { capture: true });
+      window.addEventListener('pointerup', (e) => { if (seen.length < 200) seen.push(['window-up', e.clientX, e.clientY]); }, { capture: true });
+    });
     await path('cut', [[150, 500], [150, 600]]);
     const cut = await state();
+    cut.pointer = await page.evaluate(() => { const s = window.ichantool.S.sections.at(-1), r = document.getElementById('view').getBoundingClientRect();
+      return { events: window.__cutEvents, view: window.ichantool.S.view, ds: s.ds, rect: [r.left, r.top, r.width, r.height], dpr: window.devicePixelRatio }; });
+    cut.box = box;
+    if (Object.keys(cut.objects).filter((id) => !start.objects[id]).length !== 2) {
+      const shot = path.join(shotDir(), `sedcoretool-scissors-${process.pid}.png`); await page.screenshot({ path: shot }); cut.shot = shot;
+    }
     const pieces = Object.keys(cut.objects).filter((id) => !start.objects[id]).map(Number);
     await page.evaluate((ids) => window.ichantool.mergeObjects(ids), pieces); await idle();
     const merged = await state();
@@ -457,7 +472,7 @@ try {
   const [lassoId] = fresh(ops.lassoed, ops.start);
   assert.deepEqual(ops.lassoed.objects[lassoId], { area: 6000, sbox: [100, 6520, 199, 6579], cls: ops.lassoed.objects[lassoId].cls }, 'the lasso labels the source pixels whose centres are inside the polygon');
   assert.equal(ops.lassoed.counted[lassoId], 6000);
-  assert.deepEqual(ops.pieces.length, 2, 'the scissors split the object in two: ' + JSON.stringify({ objects: ops.cut.objects, toast: ops.cut.toast, undo: [ops.lassoed.undo, ops.cut.undo], canvas: ops.canvas }));
+  assert.deepEqual(ops.pieces.length, 2, 'the scissors split the object in two: ' + JSON.stringify({ objects: ops.cut.objects, toast: ops.cut.toast, undo: [ops.lassoed.undo, ops.cut.undo], canvas: ops.canvas, pointer: ops.cut.pointer, box: ops.cut.box, shot: ops.cut.shot }));
   assert.deepEqual(ops.pieces.map((id) => ops.cut.objects[id].area).sort(), [2880, 3120], 'left 49 + 3 cut columns, right 48 columns, 60 rows');
   for (const id of ops.pieces) assert.equal(ops.cut.counted[id], ops.cut.objects[id].area);
   const [mergedId] = fresh(ops.merged, ops.start);
