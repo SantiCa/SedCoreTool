@@ -2365,7 +2365,7 @@ Written from the council audit (status block). Each card names its model; the sc
       on screen, full resolution on export; the project's data record saved in parts with their own revision, so that a column width does
       not rewrite every table (a reproducible save benchmark first, AGENTS §4). *Model:* most capable, effort medium.
       *Part 1 done (20 Nov 2026, development gate):* `minOf`/`maxOf` in `core.js` replace the 68 spread calls (`Math.min(...x)`,
-      `Math.max(c, ...x)`) in 11 modules, exact by construction (`Math.min` applied pairwise); `tests/app/extent.test.mjs`. Checks: npm 496,
+      `Math.max(c, ...x)`) in 11 modules, exact by construction (`Math.min` applied pairwise); `tests/app/extent.test.mjs`. Checks: npm 493,
       typecheck, standalone build, `desktop.mjs` engine off and on (Windows). *Remaining:* part 2, decimation per pixel on screen (plots and
       core-column curves; export at full resolution); part 3, the data record saved in parts, after its save benchmark.
 - [ ] **Q6 - Tests that find what examples miss.** Property-based tests (a test-only dependency, AGENTS §3 item 9: fast-check for Node,
