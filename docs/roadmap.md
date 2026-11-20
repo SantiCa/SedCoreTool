@@ -84,7 +84,7 @@ Updated 18 November 2026.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
 - **Next step: Q5** (long series: `extent()` without spreads, decimation on screen, the data record saved in parts; **model: most capable tier,
   effort medium**), then M8.4.29 and the rest of order O; M8.4.30 is done (its size target replaced by the ceiling of decision R, approved 20 Nov 2026); decisions S, T and the four design choices of M8.4.34 were approved the same day; M8.4.33 is done; M8.4.32 is done
-  (green on three systems, commit `4a20dfd`); M8.4.29 and M8.4.34 are done at the development gate on 20 Nov 2026 (the GitHub run of their commits is pending); **GitHub on macOS and Linux (read on 20 Nov 2026; fixed by card M8.4.35, green on three systems on `fdf3d4c`): *Desktop builds* failed on `3b0f7dd` (P1), `00ca21b` (M8.4.29) and `12ff7cc` (M8.4.34), always in `tiled-sections.mjs` (`tests` passed on all three, and Windows and Linux passed): (i) twice a 30 s timeout waiting for the mask round to be on its way before the engine is killed (the wait polls with `requestAnimationFrame`, which a window macOS does not show may never run: diagnosis not confirmed); (ii) once `reopen()` found no tiled section after a reload (`grey: null`), the same symptom as the unexplained local failure of M8.4.34 (1 run in 4): the reason the load failed is not recorded by the test. Both block the milestone gate of part C (M8.4.19); a fix needs a card (proposed to the maintainer).** M8.4.18c is done at the development gate on 20 Nov 2026 (the masks of tiled sections and the project's copies of their sources in the folder backup and back; a day of the history can be opened; GitHub green on three systems on `cfd65e4`; M8.4.18d is done at the development gate on 20 Nov 2026 (packages carry tiled sections, ZIP64; the desktop round trip above 4 GiB not run, see the card; next card: M8.4.19, the milestone gate of part C); Q5 parts 1-2 are done (part 3 changes the saved format: approved on 20 Nov 2026 to wait for a save benchmark of long series, and done only if it shows a slow save; the thinning of core-column curves is decided with P2, approved the same day); P1 is done on 20 Nov 2026 (`figsize.js`, `pngmeta.js`, PNG at 300/600 dpi; `npm test` 507, typecheck and standalone build pass; the 600 dpi check added to `tests/e2e/figure-composition.mjs` (run by `smoke.mjs`) **has not been run**: the permission system refused to start the local server for it, so it runs in the next session or on the maintainer's computer); Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
+  (green on three systems, commit `4a20dfd`); M8.4.29 and M8.4.34 are done at the development gate on 20 Nov 2026 (the GitHub run of their commits is pending); **GitHub on macOS and Linux (read on 20 Nov 2026; fixed by card M8.4.35, green on three systems on `fdf3d4c`): *Desktop builds* failed on `3b0f7dd` (P1), `00ca21b` (M8.4.29) and `12ff7cc` (M8.4.34), always in `tiled-sections.mjs` (`tests` passed on all three, and Windows and Linux passed): (i) twice a 30 s timeout waiting for the mask round to be on its way before the engine is killed (the wait polls with `requestAnimationFrame`, which a window macOS does not show may never run: diagnosis not confirmed); (ii) once `reopen()` found no tiled section after a reload (`grey: null`), the same symptom as the unexplained local failure of M8.4.34 (1 run in 4): the reason the load failed is not recorded by the test. Both block the milestone gate of part C (M8.4.19); a fix needs a card (proposed to the maintainer).** M8.4.18c is done at the development gate on 20 Nov 2026 (the masks of tiled sections and the project's copies of their sources in the folder backup and back; a day of the history can be opened; GitHub green on three systems on `cfd65e4`; M8.4.18d is done (packages carry tiled sections, ZIP64; GitHub green on three systems on `2f6331b`; a synthetic package of 4.97 GB restored exactly through the desktop program on 21 Nov 2026); opening that synthetic section fails: new card M8.4.36, proposed before M8.4.19, the milestone gate of part C; Q5 parts 1-2 are done (part 3 changes the saved format: approved on 20 Nov 2026 to wait for a save benchmark of long series, and done only if it shows a slow save; the thinning of core-column curves is decided with P2, approved the same day); P1 is done on 20 Nov 2026 (`figsize.js`, `pngmeta.js`, PNG at 300/600 dpi; `npm test` 507, typecheck and standalone build pass; the 600 dpi check added to `tests/e2e/figure-composition.mjs` (run by `smoke.mjs`) **has not been run**: the permission system refused to start the local server for it, so it runs in the next session or on the maintainer's computer); Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
   council audit, below). **V0.152** (decision J) was prepared on 20 Nov 2026 at the maintainer's request ("Publica la 0.152 y haz un release"):
   full checks passed on the version commit (Windows: pytest 885 passed / 9 skipped, npm 478, typecheck, sync_version, ruff, standalone build,
   runtime rebuilt, desktop.mjs off and on, tiled-sections.mjs). **Published on 20 Nov 2026:** `master` `8ee9776`, tag `V0.152`, GitHub Release
@@ -2200,7 +2200,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   profile opens the section with identical masks and objects (grey, the image is not there), a damaged tile refuses the section (locked, user
   told, no manifest in the store). Not run: macOS and Linux (GitHub), `ruff` (not installed), `smoke.mjs`.
 
-##### M8.4.18d - Packages with tiled sections — state: Done at the development gate, with one criterion measured only in part (20 Nov 2026, Windows; GitHub pending)
+##### M8.4.18d - Packages with tiled sections — state: Done at the development gate (20-21 Nov 2026; GitHub green on three systems on `2f6331b`; the package above 4 GiB checked on Windows)
 
 - **Goal:** a `.sedcoretool` package can carry tiled sections as D4 decides, streamed, without loading a whole image or mask into memory.
 - **Read first:** `app/js/zip.js`; `projectForExport`, the package import path in `app.js`; M8.4.18c as built.
@@ -2220,6 +2220,10 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   a folder copy under the project's prefix, each once; sources when asked), `keptSourceBytes`; `tiledproject.js`: `packageTiledPlan` asks once
   whether to include the kept sources, with their size (D4: «only when the user ticks it»; a confirmation window, not a check box); `packageProjects`
   uses it. Import needed no change: a package's members are read through M8.4.18c's restore. `app.js` 4,664 lines before and after.
+- **Package above 4 GiB (21 Nov 2026, at the maintainer's request: a synthetic section):** `tools/make_large_mask_version.py` writes a stored version of
+  7,168 tiles of random labels (4.96 GB); `tools/check_large_package.mjs` packages it in the desktop program (4.97 GB, ZIP64, 96 s), moves the store
+  aside, restarts the engine and imports the package: the same 7,174 files, the manifest identical. **The criterion is met.** Opening that project
+  afterwards fails (card M8.4.36). [Summary](validation/M8.4.18d-large-package-summary.md).
 - **Checks (20 Nov 2026, Windows):** `npm test` 547 (with `tests/app/zip.test.mjs`: a classic archive byte-identical to the old writer's; forced
   ZIP64 read back; 65,536 members; ten hostile ZIP64 records refused; a package of 4 GiB + 12 KB written to disk in parts and read back with its
   CRC, members before and after 4 GiB intact, 31 s); typecheck; standalone build; `desktop.mjs` engine off and on; `tiled-sections.mjs` passed:
@@ -2227,9 +2231,25 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   without the engine a package leaves the section out and says so. **Not met as written:** a desktop round trip of a section whose *masks* exceed
   4 GiB in the package was not run (no such fixture: it needs a section of tens of gigapixels with dense masks); the ZIP64 path above 4 GiB is
   tested in Node, not through Chromium's Blob in the desktop program (Node's own Blob reports sizes above 4 GiB wrongly, so the test reads the file
-  with its own reader). Not run: macOS and Linux (GitHub, pending), `ruff`, `smoke.mjs`.
+  with its own reader); both were then checked with the synthetic section below. GitHub on `2f6331b`: `tests` and *Desktop builds* passed on
+  Windows, macOS and Linux. Not run: `ruff`, `smoke.mjs`.
 
-##### M8.4.19 - Milestone gate of part C — state: after M8.4.18d
+##### M8.4.36 - Opening a tiled section whose tiles are all masked — state: Ready (found 21 Nov 2026)
+
+- **Goal:** a tiled section whose every tile holds masks (the 7,168-tile synthetic section of M8.4.18d: 32,768 x 57,344 pixels, 65,535 objects)
+  opens, or refuses visibly and early with a reason, instead of failing after minutes.
+- **Found:** opening it read the tiles back for 4 to 8 minutes, then failed with "Cannot read properties of undefined (reading 'error')" or
+  "Unable to deserialize cloned data" (a reply of the main process the page could not receive), with "net::ERR_UNEXPECTED" resource errors; the load
+  reported its failure and saved nothing. Cause not known; the page keeps mask tiles within `MaskTiles`' budget, so memory elsewhere in the page
+  (reduced copy, counts, transfer buffers not freed) is the first suspect. Reproduce: `node tools/check_large_package.mjs` (or the profile it leaves
+  in `C:/sedcore-pyramids/package-check`).
+- **Read first:** `loadTiledSection` (`tiledproject.js`); `MaskLoader` (`tiledsync.js`); `MaskTiles` (`tiledmasks.js`); the summary of M8.4.18d.
+- **Steps:** (1) measure the page's memory (heap and ArrayBuffers) and the main process's during the opening; (2) find what grows; (3) fix or bound
+  it, or refuse the section early with a message; (4) the synthetic section opens (grey) within a stated time, measured.
+- **Model:** most capable, effort high (cause unknown; reopening user data).
+- **Done when:** the synthetic section of M8.4.18d opens with every tile, measured, on the primary host; development gate.
+
+##### M8.4.19 - Milestone gate of part C — state: after M8.4.18d and M8.4.36
 
 - **Model:** fast, effort low (running and recording the gate); the most capable with effort high for the decisions that follow it.
 - Windows, macOS and Linux on one commit (`tests` and *Desktop builds*, including the desktop end-to-end test with the engine experiment and the
