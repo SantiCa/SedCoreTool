@@ -554,6 +554,9 @@ try {
   const manifestBeforeStroke = await on.page.evaluate(() => window.ichantool.S.sections.at(-1)._maskSync.manifest);
   const objectsBefore = await objectsNow();
   const putsBefore = await on.page.evaluate(() => window.ichantool.S.sections.at(-1)._maskSync.puts);
+  // Card M8.4.35: the round is held after its last tile and before its commit, so the engine is killed while it is on its way without racing it
+  // (a wait on animation frames timed out on GitHub's macOS, twice in November 2026: the round had committed, or frames did not run).
+  await on.page.evaluate(() => { const sync = window.ichantool.S.sections.at(-1)._maskSync; sync.beforeCommit = () => new Promise((resolve) => { window.__heldRound = resolve; }); });
   await on.page.mouse.move(box.left + 500, box.top + 40); await on.page.mouse.down();
   for (let y = 40; y <= 900; y += 20) await on.page.mouse.move(box.left + 500 + (y % 40), box.top + y);
   await on.page.mouse.up();
@@ -564,10 +567,11 @@ try {
   });
   assert.ok(Object.keys(before).length >= 4, 'the stroke changed several tiles: ' + Object.keys(before));
   // Wait until the round is on its way (its first tile sent, not committed), then kill the coordinator.
-  await on.page.waitForFunction((base) => { const sync = window.ichantool.S.sections.at(-1)._maskSync; return !!sync.running && sync.puts > base; },
-    { polling: 'raf', timeout: 30000 }, putsBefore);
+  await on.page.waitForFunction((base) => { const sync = window.ichantool.S.sections.at(-1)._maskSync; return !!sync.running && sync.puts > base && !!window.__heldRound; },
+    { polling: 50, timeout: 60000 }, putsBefore);
   const manifestAtKill = await on.page.evaluate(() => window.ichantool.S.sections.at(-1)._maskSync.manifest);
   process.kill(coordinator, 'SIGKILL');
+  await on.page.evaluate(() => { const sync = window.ichantool.S.sections.at(-1)._maskSync; sync.beforeCommit = null; window.__heldRound(); window.__heldRound = null; });   // its commit now fails
   const kept = await on.page.evaluate(async (expected) => {
     const s = window.ichantool.S.sections.at(-1), tiles = s.maskTiles;
     return Object.entries(expected).every(([key, sum]) => { const [row, col] = key.split('.').map(Number);
@@ -738,13 +742,25 @@ try {
     const folder = path.join(on.profile, 'projects', project, 'tiles', 'manifests');
     return fs.existsSync(folder) ? fs.readdirSync(folder).filter((f) => /^[0-9a-f]{64}\.json$/.test(f)).map((f) => f.slice(0, 64)).sort() : [];
   };
-  const reopen = () => on.page.evaluate(async () => {
-    const { getProject } = await import(new URL('js/storage.js', location.href).href);
-    await window.ichantool.loadProject(await getProject(window.ichantool.S.id));
-    for (let i = 0; i < 2400 && !(window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle()); i++) await new Promise((r) => setTimeout(r, 50));
-    const s = window.ichantool.S.sections.find((q) => q.id === window.__tiledId);
-    return { frozen: s?.frozen ?? null, missing: !!s?.tiled?.missing, grey: s ? s.orig.subarray(0, 400).every((v, i) => (i % 4 === 3 ? v === 255 : v === 128)) : null };
-  });
+  // Card M8.4.35: when the section is not there after the load, the reason goes into the failure message (a failed load, its message, and
+  // what the stored project holds), since the failure seen on GitHub (`grey: null`) did not say why.
+  const reopenFailures = [];
+  const reopen = async () => {
+    const got = await on.page.evaluate(async () => {
+      const { getProject } = await import(new URL('js/storage.js', location.href).href), id = window.ichantool.S.id, stored = await getProject(id);
+      const errors = [], log = console.error;
+      console.error = (...args) => { errors.push(args.map((a) => String(a?.stack || a?.message || a)).join(' ').slice(0, 600)); log(...args); };
+      let loaded;
+      try { loaded = await window.ichantool.loadProject(stored); } finally { console.error = log; }
+      for (let i = 0; i < 2400 && !(window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle()); i++) await new Promise((r) => setTimeout(r, 50));
+      const s = window.ichantool.S.sections.find((q) => q.id === window.__tiledId);
+      const result = { frozen: s?.frozen ?? null, missing: !!s?.tiled?.missing, grey: s ? s.orig.subarray(0, 400).every((v, i) => (i % 4 === 3 ? v === 255 : v === 128)) : null };
+      return s ? { result } : { result, why: { loaded, errors, toast: document.getElementById('toast')?.textContent ?? '', id, sameId: window.ichantool.S.id === id,
+        storedSections: stored?.cores?.flatMap((c) => c.sections.map((q) => q.id + (q.tiled ? ':tiled' : ''))) ?? null, sections: window.ichantool.S.sections.map((q) => q.id) } };
+    });
+    if (got.why) { reopenFailures.push(got.why); console.error('reopen: the tiled section is not there:', JSON.stringify(got.why)); }
+    return got.result;
+  };
   const sameAsSaved = async (label) => {
     const index = await on.page.evaluate(() => window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId));
     await on.page.evaluate((i) => window.ichantool.tiledMasksLoad(i), index);      // reopened from the cache, the stored tiles are not in the page yet

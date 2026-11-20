@@ -280,3 +280,21 @@ test('MaskLoader: tiles the page dropped are read back once, and a read never re
   const missing = [[0, 0], [0, 1], [0, 3]].filter(([r, c]) => tiles.state(r, c) === 'missing');
   if (missing.length) await assert.rejects(failing.want(missing));
 });
+
+test('card M8.4.35: a test hook holds a round after its last tile and before its commit; without it nothing waits', async () => {
+  const tiles = new MaskTiles({ width: 1300, height: 1100 }), store = fakeStore();
+  tiles.set(0, 0, labelsWith(3), null);
+  const sync = new MaskSync({ tiles, api: store.api, tables: () => ({ objects: new Uint8Array([1]) }), sha256: sha, ...instant });
+  assert.equal(sync.beforeCommit, null);
+  let release;
+  sync.beforeCommit = () => new Promise((resolve) => { release = resolve; });
+  const sending = sync.request();
+  for (let i = 0; i < 50 && !release; i++) await new Promise((r) => setTimeout(r, 1));
+  assert.ok(release, 'held');
+  assert.deepEqual(store.calls, ['begin', 'put labels 0.0', 'put exclude 0.0'], 'every tile sent, nothing committed');
+  assert.equal(sync.puts, 2);
+  release();
+  await sending;
+  assert.equal(store.calls.at(-1), 'commit');
+  assert.ok(sync.settled);
+});

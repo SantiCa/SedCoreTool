@@ -142,6 +142,9 @@ export class MaskSync {
     this.stopped = false;
     /** Layers sent so far (both layers of a tile count two); tests use it to act while a round is on its way. */
     this.puts = 0;
+    /** Tests only (card M8.4.35): awaited after the last tile of a round is sent and before its commit, so a test can stop the engine there
+     *  without racing the round. Null in the program. @type {(() => Promise<void>) | null} */
+    this.beforeCommit = null;
   }
   /**
    * Something changed: send it (soon). `groups`: the groups of tables whose content may have changed (all by default; none when only mask
@@ -227,6 +230,7 @@ export class MaskSync {
         this.puts++;
         sent.push([row, col, edit]);
       }
+      if (this.beforeCommit) await this.beforeCommit();
       const manifest = await this.api.commit(staged, tables);
       this.manifest = manifest;
       for (const group of groups) this.acked[group] = built[group];

@@ -2088,6 +2088,24 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 - **Done when:** decision G is answered, the round trip is identical with and without the cache, the rejections are tested, and the times are recorded
   against the targets; development gate.
 
+##### M8.4.35 - Failures of `tiled-sections.mjs` on GitHub — state: In progress (20 Nov 2026)
+
+- **Goal:** `tiled-sections.mjs` passes on GitHub's Windows, macOS and Linux runners on one commit, so that the milestone gate of part C can be run.
+- **Origin:** *Desktop builds* failed on `3b0f7dd`, `00ca21b` and `12ff7cc` (macOS) and `f063434` (Linux): (i) a 30 s timeout waiting, by animation
+  frames, for the mask round to be on its way before the engine is killed (a hidden window may not run frames, and the round may commit before the
+  wait sees it); (ii) `reopen()` found no tiled section after a reload (`grey: null`, the same reopen after "reopened from the copy" every time,
+  and once in four local runs on Windows).
+- **Read first:** `tests/e2e/tiled-sections.mjs` (the engine kill of card M8.4.16 step 5; `reopen()`); `app/js/tiledsync.js` (`round`);
+  `loadProject` and `loadTiledSection`.
+- **Change:** `tests/e2e/tiled-sections.mjs`; a test-only hook `beforeCommit` in `tiledsync.js` (null in the program); the cause of (ii) once known.
+- **Do not touch:** the thresholds and the scenarios of the test (AGENTS §3 item 7).
+- **Model:** most capable, effort medium (an intermittent failure whose cause is not known).
+- **Steps:** (1) hold the round before its commit with the hook, then kill the engine: no race; (2) make `reopen()` report why the section is not
+  there (load result, console errors, toast, what the stored project holds); (3) find and fix the cause of (ii) from that evidence; (4) GitHub
+  green on the three systems.
+- **Tests:** a unit test of the hook (`tests/app/tiledsync.test.mjs`); the end-to-end test itself.
+- **Done when:** *Desktop builds* passes on Windows, macOS and Linux on one commit with this card's changes.
+
 ##### M8.4.34 - Desktop hardening — state: Done at the development gate (20 Nov 2026, Windows; council audit of 19 Nov 2026)
 
 - **As built.** `main.js`: `safeExternalUrl`, `isAppNavigation`, a `Content-Security-Policy: script-src 'self' 'wasm-unsafe-eval'` header on every `.html`
@@ -2153,7 +2171,10 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   missing or damaged in the store is left out of that copy and named (`left_out`, told once); any other failure fails the copy, which is retried,
   and the previous `project.json` stays; (4) a version that cannot be restored leaves its section's record in the project, locked (card M8.4.27),
   and the message names the file; (5) nothing is ever deleted from `tiles/` and `manifests/` of the folder.
-- **Open (questions for the maintainer):** (a) the folder grows with every version copied, because history files may name old versions: a
+- **Answered by the maintainer on 20 Nov 2026 ("apruebo lo que recomiendas"):** (a) no clean-up of the folder for now; (b) «Open project folder»
+  gets a choice of date (the current state or a day of `historial/`), restored with that folder's tiles and manifests; (c) step 3 is done: the
+  automatic copy includes a source image kept in the project, written once, with its size told to the user before the first time.
+- **Open (as asked before the answers):** (a) the folder grows with every version copied, because history files may name old versions: a
   clean-up of files that neither `project.json` nor any kept history file names is possible but deletes in the user's folder; (b) an old
   `historial/<date>.json` names versions that are in the folder, but «Open project folder» restores only `project.json`, and a history file
   imported on its own cannot read the folder: opening an older day needs a choice of date in «Open project folder» (small interface change);
