@@ -3359,6 +3359,20 @@ still apply. `sectiondepth.js` follows `core.js`, `sectionanalysis.js` follows `
 
 ## 28. Repository engineering and security
 
+**Desktop hardening (card M8.4.34).** `desktop/main.js` exports the pure checks that the tests use: `safeExternalUrl` (only `https:`, `http:` and
+`mailto:`, without credentials in a web address and at most 8,192 characters, are given to `shell.openExternal`), `isAppNavigation` (an address is
+an app page if `resolveAppPath` resolves it inside the web folder) and `DESKTOP_SCRIPT_POLICY`. `will-navigate`, `will-redirect` and
+`will-frame-navigate` of every window (the extra windows opened with `window.open` included) are cancelled unless the address is an app page, and
+`setWindowOpenHandler` opens an app page in a window, a web or mail address in the system and nothing else. Every `.html` file served over `app:`
+carries `Content-Security-Policy: script-src 'self' 'wasm-unsafe-eval'` as a header, which adds to (never replaces) the `<meta>` policy of the page.
+`desktop/tile-ipc.js` keeps two sets for the session: `opened` (projects for which the page began a stored version or reopened a section) and `known`
+(identifiers the page announced with `announceProjects` from the library listing, `announceStoreProjects` in `tiledproject.js`, at most 8,192).
+`deleteProjectStore` of a project that is not `opened` is refused (`INVALID_REQUEST`, `project`) unless it is `known`, and then it needs the answer
+of `confirm`, a message box of the main process (default button: cancel; `{deleted: false, declined: true}` when declined); `copyProjectStore`
+needs `from` opened or known and refuses a `to` whose folder exists and is not opened (`INVALID_REQUEST`, `from` / `to`); `maskRetain` needs an
+opened project. `EngineClient` gives each mask-store operation its own deadline (`STORE_DEADLINES_MS` in `desktop/engine.js`; the table is in
+contract §8.7) instead of the 5 s of an ordinary request, after which the engine is stopped.
+
 **Performance baseline.** The [M0.1 benchmark](benchmarks/M0.1.md) measures browser project opening, IndexedDB
 autosave and interval analysis, and verifies the shared interval results against the public Python API.
 Its [independent validation](benchmarks/M0.1-independent-review-2026-11-10.md) confirms source and fixture

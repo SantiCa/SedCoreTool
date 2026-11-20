@@ -22,6 +22,12 @@ const PYRAMID_BUDGET_BYTES = 50 * 2 ** 30;   // contract §8.4; the maintainer's
 // against a coordinator that stops answering, and it ends the whole session (see `request`).
 const ANALYSIS_TIMEOUT_MS = 10 * 60 * 1000;
 
+// Card M8.4.34: the operations of the mask store have their own deadlines (contract §8.7) instead of the 5 s of an ordinary request, after which the
+// engine is stopped, which could be in the middle of a commit on a slow disk. Chosen with a wide margin over the times seen (a retain, commit or copy
+// of a 10 % `rgb8g` section took well under 2 s on an SSD); not derived from a worst-case measurement.
+const STORE_DEADLINES_MS = Object.freeze({ 'mask.begin': 30000, 'mask.put': 60000, 'mask.commit': 120000, 'mask.discard': 30000, 'mask.read': 60000,
+  'mask.retain': 300000, 'mask.info': 30000, 'mask.copy': 120000, 'mask.forget': 60000, 'mask.derived.put': 120000, 'mask.derived.get': 120000 });
+
 const MAX_AUTOMATIC_RESTARTS = 1;
 // Card M8.4.26 (decided by the maintainer, 18 Nov 2026): the handshake has its own deadline. Starting Python took up to 4.7 s on a
 // computer with every core busy (once more than the 5 s of an ordinary request), which made the engine unavailable and used the one
@@ -53,12 +59,12 @@ function terminateTree(child) {
 }
 
 class EngineClient {
-  constructor({ executable, script, version, runtimeId, timeoutMs = 5000, startTimeoutMs = START_TIMEOUT_MS, captureDiagnostics = false, pyramidDirectory = null, pyramidBudgetBytes = PYRAMID_BUDGET_BYTES,
+  constructor({ executable, script, version, runtimeId, timeoutMs = 5000, deadlines = STORE_DEADLINES_MS, startTimeoutMs = START_TIMEOUT_MS, captureDiagnostics = false, pyramidDirectory = null, pyramidBudgetBytes = PYRAMID_BUDGET_BYTES,
     projectsDirectory = null }) {
     if (!path.isAbsolute(executable || '') || !path.isAbsolute(script || '') || !/^[0-9a-f]{64}$/.test(runtimeId || '')) throw unavailable();
     if (pyramidDirectory !== null && !path.isAbsolute(pyramidDirectory)) throw unavailable();
     if (projectsDirectory !== null && !path.isAbsolute(projectsDirectory)) throw unavailable();
-    this.options = { executable, script, version, runtimeId, timeoutMs, startTimeoutMs, captureDiagnostics, pyramidDirectory, pyramidBudgetBytes, projectsDirectory };
+    this.options = { executable, script, version, runtimeId, timeoutMs, deadlines, startTimeoutMs, captureDiagnostics, pyramidDirectory, pyramidBudgetBytes, projectsDirectory };
     this.child = null; this.state = 'stopped'; this.pending = new Map(); this.queue = []; this.writing = false;
     this.stderr = Buffer.alloc(0); this.handshake = null; this.session = null; this.partial = null;
   }
@@ -109,7 +115,7 @@ class EngineClient {
     return this.starting;
   }
   /** `onEvent(payload)` receives the progress events of a `pyramid.build`; each event also restarts its idle timeout. */
-  request(op, payload, binary = null, { timeoutMs = op === 'section.analyze' ? ANALYSIS_TIMEOUT_MS : op === 'pyramid.build' ? PYRAMID_IDLE_TIMEOUT_MS : this.options.timeoutMs, onEvent = null } = {}) {
+  request(op, payload, binary = null, { timeoutMs = op === 'section.analyze' ? ANALYSIS_TIMEOUT_MS : op === 'pyramid.build' ? PYRAMID_IDLE_TIMEOUT_MS : this.options.deadlines[op] ?? this.options.timeoutMs, onEvent = null } = {}) {
     if (!OPERATIONS.has(op) || !this.child || !['starting', 'ready', 'stopping'].includes(this.state)) return Promise.reject(unavailable());
     if (this.pending.size >= 32) return Promise.reject(Object.assign(new Error('BUSY'), { code: 'BUSY' }));
     if (WITH_BINARY.has(op) && [...this.pending.values()].filter((item) => WITH_BINARY.has(item.op)).length >= 2) return Promise.reject(Object.assign(new Error('BUSY'), { code: 'BUSY' }));
@@ -323,4 +329,4 @@ function createEngineService({ enabled, packaged, executable, sourceDirectory, r
   return service;
 }
 
-module.exports = { EngineClient, terminateTree, createEngineService, ADVERTISED_METHODS };
+module.exports = { EngineClient, terminateTree, createEngineService, ADVERTISED_METHODS, STORE_DEADLINES_MS };

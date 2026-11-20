@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('corantoolDesktop', {
     copySource: (project, pyramid, key) => ipcRenderer.invoke('tiles:copySource', project, pyramid, key),
     // Card M8.4.27: the store folder follows its project (deleted with it; copied when the project is saved under a new identifier).
     deleteProjectStore: (project) => ipcRenderer.invoke('tiles:deleteProjectStore', project),
+    announceProjects: (ids) => ipcRenderer.invoke('tiles:announceProjects', ids),   // card M8.4.34
     copyProjectStore: (from, to, manifests, sources, key) => ipcRenderer.invoke('tiles:copyProjectStore', from, to, manifests, sources, key),
   },
   diagnostics: {

@@ -3135,7 +3135,7 @@ const sectionFields = (q) => ({ id: q.id, rot: 0, crop: null, top: q.top, bottom
   detect: q.detect, manual: q.manual || [], nextId: q.nextId, marks: q.marks || [] });
 let tiledUnsavedShown = false, settleDeadlineMs = 15000;
 /** Card M8.4.30 step 1: the project side of tiled sections lives in tiledproject.js. */
-const { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, retainStore } = createTiledProject({
+const { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, retainStore, announceStoreProjects } = createTiledProject({
   TILES, get settleDeadlineMs() { return settleDeadlineMs; }, toast, storeProject, maskSync, maskLoader, newSection, sectionFields, greyRgba, sourceRoi,
   tileBuildDialog, tiledCounts, tiledStatsRunner, tiledWorkingImage, serTiledSection, hexDigest,
 });
@@ -3391,7 +3391,7 @@ function renderAnalyses(list, q = '') {
 async function renderProjects() {
   const box = $('projList');
   if (!storageOK) { box.innerHTML = `<p class="note">${t('save.off')}</p>`; return; }
-  let [list, lites] = await Promise.all([listProjects().catch(() => []), listLite().catch(() => [])]);
+  let [list, lites] = await Promise.all([listProjects().then(announceStoreProjects).catch(() => []), listLite().catch(() => [])]);
   list.sort((a, b) => b.updated - a.updated);
   const L = new Map(lites.map((l) => [l.id, l])), shared = sharedCores(lites), q = coreKey($('homeSearch').value);
   renderAnalyses(list.filter((p) => p.kind === 'multi'), q);   // V24: cross-project analyses are not projects

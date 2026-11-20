@@ -166,6 +166,22 @@ try {
   assert.ok(desktop.ort, 'bundled ONNX runtime');
   assert.ok(desktop.csp, 'CSP present');
   assert.deepEqual(desktop.rejected, [403, 403, 403, 403, 403], 'desktop protocol rejects outside and malformed paths');
+  // Card M8.4.34: no script from a remote origin (the page's own policy names two CDNs for the browser build; the desktop adds one that does not), no
+  // navigation outside the app origin, and links that are not web or mail addresses open nothing.
+  const violation = await p.evaluate(() => new Promise((resolve) => {
+    document.addEventListener('securitypolicyviolation', (event) => resolve({ directive: event.effectiveDirective, uri: event.blockedURI }), { once: true });
+    const el = document.createElement('script'); el.src = 'https://cdn.jsdelivr.net/npm/is-odd@3.0.1/index.js'; document.head.append(el);
+    setTimeout(() => resolve(null), 10000);
+  }));
+  assert.ok(violation && /^script-src/.test(violation.directive) && violation.uri.startsWith('https://cdn.jsdelivr.net/'), 'a script from a CDN is blocked by the desktop policy: ' + JSON.stringify(violation));
+  const windowsBefore = run.browser.targets().filter((x) => x.type() === 'page').length;
+  await p.evaluate(() => { window.open('file:///C:/Windows/win.ini'); window.open('javascript:window.__injected = 1'); window.open('data:text/html,<p>x</p>'); window.open('app://other/app/index.html'); });
+  await p.evaluate(() => { try { location.href = 'https://example.org/'; } catch { /* refused */ } });
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.equal(await p.evaluate(() => location.origin), 'app://corantool', 'the page did not navigate away');
+  assert.equal(await p.evaluate(() => window.__injected ?? null), null, 'a javascript: link ran nothing');
+  assert.equal(run.browser.targets().filter((x) => x.type() === 'page').length, windowsBefore, 'no window opened for file:, javascript:, data: or another app host');
+  console.log('Desktop hardening: remote script blocked, navigation away refused, file/javascript/data links open nothing.');
   let backupWindow = 0;
   const backupBrowser = { newPage: async () => {
     const url = `app://corantool/app/index.html?backup-test=${++backupWindow}`;

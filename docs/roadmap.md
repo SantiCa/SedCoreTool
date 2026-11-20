@@ -84,7 +84,7 @@ Updated 18 November 2026.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
 - **Next step: Q5** (long series: `extent()` without spreads, decimation on screen, the data record saved in parts; **model: most capable tier,
   effort medium**), then M8.4.29 and the rest of order O; M8.4.30 is done except its size target (decision R); M8.4.33 is done; M8.4.32 is done
-  (green on three systems, commit `4a20dfd`); M8.4.29 is done at the development gate on 20 Nov 2026 (the GitHub run of its commit is pending); Q5 parts 1-2 are done (part 3 changes the saved format: waits for the maintainer); P1 is done on 20 Nov 2026 (`figsize.js`, `pngmeta.js`, PNG at 300/600 dpi; `npm test` 507, typecheck and standalone build pass; the 600 dpi check added to `tests/e2e/figure-composition.mjs` (run by `smoke.mjs`) **has not been run**: the permission system refused to start the local server for it, so it runs in the next session or on the maintainer's computer); Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
+  (green on three systems, commit `4a20dfd`); M8.4.29 and M8.4.34 are done at the development gate on 20 Nov 2026 (the GitHub run of their commits is pending); Q5 parts 1-2 are done (part 3 changes the saved format: waits for the maintainer); P1 is done on 20 Nov 2026 (`figsize.js`, `pngmeta.js`, PNG at 300/600 dpi; `npm test` 507, typecheck and standalone build pass; the 600 dpi check added to `tests/e2e/figure-composition.mjs` (run by `smoke.mjs`) **has not been run**: the permission system refused to start the local server for it, so it runs in the next session or on the maintainer's computer); Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
   council audit, below). **V0.152** (decision J) was prepared on 20 Nov 2026 at the maintainer's request ("Publica la 0.152 y haz un release"):
   full checks passed on the version commit (Windows: pytest 885 passed / 9 skipped, npm 478, typecheck, sync_version, ruff, standalone build,
   runtime rebuilt, desktop.mjs off and on, tiled-sections.mjs). **Published on 20 Nov 2026:** `master` `8ee9776`, tag `V0.152`, GitHub Release
@@ -2084,7 +2084,22 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 - **Done when:** decision G is answered, the round trip is identical with and without the cache, the rejections are tested, and the times are recorded
   against the targets; development gate.
 
-##### M8.4.34 - Desktop hardening — state: after M8.4.29 (council audit of 19 Nov 2026)
+##### M8.4.34 - Desktop hardening — state: Done at the development gate (20 Nov 2026, Windows; council audit of 19 Nov 2026)
+
+- **As built.** `main.js`: `safeExternalUrl`, `isAppNavigation`, a `Content-Security-Policy: script-src 'self' 'wasm-unsafe-eval'` header on every `.html`
+  of `app:` (added to the page's `<meta>` policy, which keeps the two CDNs for the browser build, so the browser build is unchanged), navigation
+  guards on every window, `confirm` message box. `tile-ipc.js`: `opened` / `known` sets, `announceProjects`, the guards of delete, copy and retain.
+  `engine.js`: `STORE_DEADLINES_MS`. `app.js` stays at 4,666 lines. Documented in SECURITY.md, technical manual §28 and contract §8.7.
+- **Decisions of the design that the card left open, for the maintainer to review:** (1) the main process cannot read the page's library, so the
+  page announces its listing (`announceProjects`); a script could announce too, which is why a store that was only announced needs the user's
+  answer in a window of the main process (default Cancel) and an unknown identifier is refused; (2) deleting a project from the library that was not
+  opened in this session therefore shows that window once (the page's own confirmation comes first); (3) `mask.retain` is limited to projects
+  opened in the session; (4) the deadlines (30-300 s) were chosen with a margin, not measured on a slow disk (stated in the contract).
+- **Checks:** `npm test` 529, `pytest` 891 / 9 skipped, typecheck, standalone build, `desktop.mjs` engine off and on (with the new block: a remote script
+  is blocked by the policy, `location.href = 'https://…'` does not navigate, `window.open` of `file:`, `javascript:`, `data:` and another `app:` host
+  opens nothing), `tiled-sections.mjs` passed in 3 of 4 runs; the failing run stopped in a reopening with the section not found afterwards
+  (`grey: null`), was not reproduced in the next three runs and is not explained. Not run: `smoke.mjs` (local server refused), macOS and Linux (GitHub),
+  `ruff` (not installed). Not tested: that `shell.openExternal` is not called (it cannot be observed from the page); the unit tests cover the filter.
 
 - **Goal:** a script injected into the page could not load remote code, open arbitrary programs or delete another project's store, and a
   slow disk does not kill the engine in the middle of a commit.

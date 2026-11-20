@@ -201,11 +201,13 @@ test('card M8.4.18a: retain and info are checked before they reach the engine', 
   const engine = fakeEngine('a'.repeat(64)), request = engine.request.bind(engine);
   engine.request = (op, payload, binary, options) => {
     if (op === 'mask.retain' || op === 'mask.info') engine.calls.push({ op, payload });
+    if (op === 'mask.begin') return Promise.resolve({ staged: randomUUID(), rows: 1, cols: 2 });
     if (op === 'mask.retain') { const p = Promise.resolve({ removed: { manifests: 2, blobs: 5 } }); p.requestId = randomUUID(); return p; }
     if (op === 'mask.info') { const p = Promise.resolve({ section: 's1', width: 600, height: 300, tiles: 1, positions: [0, 1, 3], next: null }); p.requestId = randomUUID(); return p; }
     return request(op, payload, binary, options);
   };
   const ipc = createTileIpc({ engine }), m = 'd'.repeat(64);
+  await ipc.call(1, 'maskBegin', 'p1', 's1', 600, 300, null);                  // the page works on this project (card M8.4.34)
   assert.deepEqual(await ipc.call(1, 'maskRetain', 'p1', [m]), { ok: { removed: { manifests: 2, blobs: 5 } } });
   assert.deepEqual(engine.calls.at(-1), { op: 'mask.retain', payload: { project: 'p1', keep: [m] } });
   for (const keep of ['all', [m, 'x'], Array(1025).fill(m)]) assert.deepEqual(await ipc.call(1, 'maskRetain', 'p1', keep), { error: { code: 'INVALID_REQUEST', field: 'keep' } });

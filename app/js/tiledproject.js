@@ -161,6 +161,12 @@ export function createTiledProject(ctx) {
     }
   }
 
+  /** Card M8.4.34: tell the main process which stores belong to the projects of the library listing (it deletes only those, after asking when the page did not open them). Returns the list unchanged. */
+  function announceStoreProjects(list) {
+    if (ctx.TILES?.announceProjects && Array.isArray(list)) void ctx.TILES.announceProjects(list.map((m) => storeProject(m.id)).slice(0, 8192)).catch(() => {});
+    return list;
+  }
+
   /** Card M8.4.27: the store folder of a deleted project goes too, once the sends of its sections that were open have stopped. */
   async function deleteStoreOf(id, sections) {
     if (!ctx.TILES) return;
@@ -239,5 +245,5 @@ export function createTiledProject(ctx) {
     await writeReopenCaches();                                           // after the clean-up, so that it never removes a cache that was just written
   }
 
-  return { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, retainStore };
+  return { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, retainStore, announceStoreProjects };
 }

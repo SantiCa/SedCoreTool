@@ -100,7 +100,7 @@ function writeAtomically(file, text) {
   } catch (error) { fs.rmSync(temporary, { force: true }); throw error; }
 }
 
-function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delivery = 'engine' }) {
+function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delivery = 'engine', confirm = async () => false }) {
   if (!['engine', 'direct'].includes(delivery)) throw new Error('unknown tile delivery');
   const reader = delivery === 'direct' ? new TileReader(pyramidRoot) : null;
   if (projectsRoot) sweepDeleted(projectsRoot);
@@ -110,6 +110,10 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
   const staged = new Map();             // staged mask version (engine UUID) -> owner page
   const builtFrom = new Map();          // pyramid (source SHA-256) -> {path, size} of the file it was built from in this session
   const copies = new Map();             // `${owner}/${key}` -> AbortController of a copy into the project (card M8.4.18b)
+  // Card M8.4.34: which stores a page may delete, copy from or clean up. `opened`: projects this program session began a version of or reopened a section
+  // of (the page works on them). `known`: identifiers the page announced from the library listing of this session (`announceProjects`). A store that is
+  // only known is deleted after the user agrees in a window of the main process; one that is neither is refused.
+  const opened = new Set(), known = new Set(), MAX_KNOWN = 8192;
 
   const ownedStaging = (owner, id) => {
     if (typeof id !== 'string' || !UUID.test(id) || staged.get(id) !== owner) reject('INVALID_REQUEST', 'staged');
@@ -117,6 +121,7 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
   const checkProject = (project) => {
     if (typeof project !== 'string' || !PROJECT.test(project) || WINDOWS_DEVICES.has(project)) reject('INVALID_REQUEST', 'project');
   };
+  const checkOpened = (project) => { checkProject(project); if (!opened.has(project)) reject('INVALID_REQUEST', 'project'); };
   /** One table as a committed engine buffer; returns its handle. The caller releases it. */
   async function uploadTable(name, data) {
     const spec = TABLES[name], bytes = bytesOf(data);
@@ -231,6 +236,7 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
       if (base !== null && (typeof base !== 'string' || !SHA256.test(base))) reject('INVALID_REQUEST', 'base');
       if ([...staged.values()].filter((page) => page === owner).length >= MAX_STAGED_PER_PAGE) reject('LIMIT_EXCEEDED', 'staged');
       const result = await engine.request('mask.begin', { project, section, width, height, base });
+      opened.add(project);
       if (typeof result?.staged !== 'string' || !UUID.test(result.staged)) reject('INTERNAL', 'staged');
       staged.set(result.staged, owner);
       return { staged: result.staged, rows: result.rows, cols: result.cols };
@@ -274,7 +280,7 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
     /** Verified mask tiles of a stored version: `{tiles: [{row, col, byte_length}], bytes}`; an empty layer has byte_length 0. */
     /** Card M8.4.18a: after a save, the store keeps only these manifests of the project (and what open staged versions hold). */
     async maskRetain(owner, project, keep) {
-      checkProject(project);
+      checkOpened(project);                                                // card M8.4.34: a page cleans up only the store it works on
       if (!Array.isArray(keep) || keep.length > MAX_RETAINED || !keep.every((name) => typeof name === 'string' && SHA256.test(name))) reject('INVALID_REQUEST', 'keep');
       const result = await engine.request('mask.retain', { project, keep });
       return { removed: { manifests: Number(result?.removed?.manifests) || 0, blobs: Number(result?.removed?.blobs) || 0 } };
@@ -338,7 +344,7 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
      * saved one (checked by the engine before it builds anything). `{available: false}` when none is possible.
      */
     async reopen(owner, project, pyramid, key, onProgress = () => {}) {
-      checkProject(project);
+      checkProject(project); opened.add(project);
       if (typeof pyramid !== 'string' || !SHA256.test(pyramid)) reject('INVALID_REQUEST', 'pyramid');
       checkKey(owner, key);
       try { await (reader ? reader.describe(pyramid) : engine.request('pyramid.info', { pyramid })); own(owner, pyramid); return { available: true, rebuilt: false }; } catch { /* not in the cache */ }
@@ -417,6 +423,10 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
       if (!projectsRoot) reject('UNSUPPORTED_METHOD');
       const folder = path.join(projectsRoot, project);
       try { fs.lstatSync(folder); } catch { return { deleted: false }; }
+      if (!opened.has(project)) {                                        // card M8.4.34: not a store this page worked on
+        if (!known.has(project)) reject('INVALID_REQUEST', 'project');
+        if (!(await confirm({ kind: 'delete', project }))) return { deleted: false, declined: true };
+      }
       try { await engine.request('mask.forget', { project }); } catch (error) {
         if (error?.code === 'BUSY' || error?.code === 'INVALID_REQUEST') throw error;
         // the engine is not running: it holds nothing of this project
@@ -438,6 +448,8 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
       if (!Array.isArray(pyramidList) || pyramidList.length > MAX_COPIED_SOURCES || !pyramidList.every((name) => typeof name === 'string' && SHA256.test(name))) reject('INVALID_REQUEST', 'sources');
       checkKey(owner, key);
       if (!projectsRoot) reject('UNSUPPORTED_METHOD');
+      if (!opened.has(from) && !known.has(from)) reject('INVALID_REQUEST', 'from');             // card M8.4.34
+      if (!opened.has(to)) { try { fs.lstatSync(path.join(projectsRoot, to)); reject('INVALID_REQUEST', 'to'); } catch (error) { if (error?.code === 'INVALID_REQUEST') throw error; } }   // never over another project's folder
       const controller = new AbortController();
       copies.set(`${owner}/${key}`, controller);
       try {
@@ -470,8 +482,15 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
           }
           updateSource(to, pyramid, fields);
         }
+        opened.add(to);
         return { copied: true };
       } finally { copies.delete(`${owner}/${key}`); }
+    },
+    /** Card M8.4.34: the store identifiers of the projects in this session's library listing, so that a store the page did not open can be offered for deletion. */
+    async announceProjects(owner, ids) {
+      if (!Array.isArray(ids) || ids.length > MAX_KNOWN) reject('INVALID_REQUEST', 'projects');
+      for (const id of ids) if (typeof id === 'string' && PROJECT.test(id) && !WINDOWS_DEVICES.has(id) && known.size < MAX_KNOWN) known.add(id);
+      return { known: known.size };
     },
     async maskRead(owner, project, manifest, layer, positions) {
       checkProject(project);

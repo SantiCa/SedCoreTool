@@ -524,6 +524,12 @@ else is `INVALID_BUFFER` with `details.field = "manifest"` or `"tile"` / `"table
 | `mask.copy` | `{from, to, manifest, start}`: two different projects (card M8.4.27) | `{next, tiles}`: copies a manifest of `from` into `to` in pages of 32 tiles from position `start` of its tile list (the tables with `start` 0): every blob is read and verified from `from` and written to `to` unless a valid one is there. The manifest is written last, only when every blob it names is in `to`; a page skipped is `INVALID_REQUEST` (`start`), a damaged blob `INVALID_BUFFER`. `next` is the start of the next page, or `null` when the manifest has been written. |
 | `mask.forget` | `{project}` (card M8.4.27) | `{}`: the coordinator drops the project's store and its cached blobs from memory, before the main process deletes the folder; `BUSY` while a staged version of the project is open. |
 
+**Deadlines of the store operations (card M8.4.34).** The client of the main process (`desktop/engine.js`, `STORE_DEADLINES_MS`) gives each
+operation of this section its own deadline instead of the 5 s of an ordinary request, after which it stops the engine: `mask.begin`, `mask.discard`,
+`mask.info` 30 s; `mask.put`, `mask.read`, `mask.forget` 60 s; `mask.commit`, `mask.copy`, `mask.derived.put`, `mask.derived.get` 120 s; `mask.retain`
+300 s. They were chosen with a wide margin over the times seen (every one of these operations took well under 2 s on an SSD in the cards
+M8.4.29 and M8.4.32 runs); no worst-case measurement on a slow disk was made. A request that exceeds its deadline still ends the session.
+
 **Derived files (card M8.4.29, decision G).** `<project>/tiles/derived/<manifest>.<kind>` holds what the page derived from the stored version
 named by `manifest` and would otherwise read every tile to rebuild (its format is the page's: `docs/TECHNICAL_DOCUMENTATION.md`, reopening
 tiled sections). It is a **cache**: the engine neither interprets nor trusts it, nothing refers to it, and a missing, damaged or refused file
