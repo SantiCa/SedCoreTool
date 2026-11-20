@@ -5,7 +5,7 @@ import { tickFieldsHTML, arrowFormHTML, axesFormHTML, colOrderHTML, colView, edi
 import { busy, clsAbbr, compositeMarks, compositeTaxonPoints, curCore, effClassArray, effClassId, esc, idListOf, idMode, legendOf, markDirty, needPixels, requestRender, safe, saveFile, toast } from './app.js';
 import { buildGeoLog, eventShadeFormHTML, eventShadeSettings, fetchImage, geoComputeSamples, geoFigureTracks, geoFigureVars, geoLand, geoOverlay, geoRT, mapNetConsent, renderGeoMap } from './multiproxy.js';
 
-import { UNIT_TO_CM, hasId, interpAge, topAt } from './core.js';
+import { UNIT_TO_CM, hasId, interpAge, topAt, minOf, maxOf } from './core.js';
 import { vec } from './learn.js';
 import { buildLogSVG, buildRangeSVG, taxaOptions, invertModel, extraTicks, noDataDefs, mergedStyle, noDataGaps, noDataRect, rowsRange, validHexColor, verticalTicks } from './log.js';
 import { t } from './i18n.js';
@@ -164,7 +164,7 @@ function tracesSVG() {
   }
   if (!rows.length) return null;
   const nv = views.length, TW = nv * T + (nv - 1) * vgap, head = nv > 1 ? 16 : 0;
-  const maxN = Math.max(...rows.map((r) => r.chosen.length)), W = labW + maxN * (TW + gap) + 10, rowH = T + 34, H = head + rows.length * rowH + 10;
+  const maxN = maxOf(rows.map((r) => r.chosen.length)), W = labW + maxN * (TW + gap) + 10, rowH = T + 34, H = head + rows.length * rowH + 10;
   const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="IBM Plex Sans, Arial, sans-serif" font-size="11"><rect width="${W}" height="${H}" fill="${INK.bg}"/>`];
   if (nv > 1) for (let k = 0; k < maxN; k++) views.forEach((v, vi) => parts.push(`<text x="${labW + k * (TW + gap) + vi * (T + vgap) + T / 2}" y="12" text-anchor="middle" fill="${INK.sub}" font-size="10">${esc(t('fig.tv.' + v))}</text>`));
   rows.forEach((r, ri) => {
@@ -275,7 +275,7 @@ function figLightD() {
 /** V0.2: depth window shared by all figures (base units of the core; empty fields = whole core). */
 function secFigRange(D) {
   const view = colView('figure');
-  let dMin = Math.min(...D.secs.map((s) => s.top * D.f(s))), dMax = Math.max(...D.secs.map((s) => s.bottom * D.f(s)));
+  let dMin = minOf(D.secs.map((s) => s.top * D.f(s))), dMax = maxOf(D.secs.map((s) => s.bottom * D.f(s)));
   if (!D.secs.length) { const r = D.axis === 'depth' ? rowsRange(D.rows) : [0, 1]; [dMin, dMax] = r; }
   let from = view.depthFrom ?? dMin, to = view.depthTo ?? dMax;
   if (!(to > from)) { from = dMin; to = dMax; }
@@ -780,7 +780,7 @@ function orientSVG(svg) {
   host.innerHTML = new XMLSerializer().serializeToString(root); document.body.appendChild(host);
   try { const b = host.querySelector('svg').getBBox(); if (b.width > 0 && b.height > 0) box = b; } catch { /* keep the rotated page */ }   // root user space: includes the rotation
   host.remove();
-  const hh = head.length ? Math.max(...head.map((e) => +e.getAttribute('y'))) + 10 : 0;
+  const hh = head.length ? maxOf(head.map((e) => +e.getAttribute('y'))) + 10 : 0;
   const pad = 6, X = Math.floor(box.x - pad), Y = Math.floor(box.y - pad - hh), W = Math.ceil(box.width + 2 * pad), H = Math.ceil(box.height + 2 * pad + hh);
   root.setAttribute('viewBox', `${X} ${Y} ${W} ${H}`); root.setAttribute('width', W); root.setAttribute('height', H);
   // background of the whole new page

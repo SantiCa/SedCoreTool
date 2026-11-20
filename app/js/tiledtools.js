@@ -5,7 +5,7 @@
 import { EditWindow, WINDOW_TILES, affectedTiles, pinRanges, planWindows, tilesUnder, toWindowRect, windowRange, windowRgba } from './tiledit.js';
 import { TILE } from './tiledsection.js';
 import { TileChanges, trimTileHistory } from './tiledundo.js';
-import { hasId, renameId, topAt } from './core.js';
+import { hasId, renameId, topAt, minOf, maxOf } from './core.js';
 import { polygonPixels, regionGrow } from './imageproc.js';
 import { reduceTile } from './tiledmasks.js';
 import { sameTaxonGroups, splitPieces, trimEditHistory } from './edit.js';
@@ -339,8 +339,8 @@ export function createTiledTools(ctx) {
     if (!pts || pts.length < 3) return;
     const src = pts.map(([x, y]) => [x * s.ds, y * s.ds]), roi = sourceRoi(s);
     const xs = src.map((p) => p[0]), ys = src.map((p) => p[1]);
-    const rect = { x0: Math.max(roi.x0, Math.floor(Math.min(...xs))), y0: Math.max(roi.y0, Math.floor(Math.min(...ys))),
-      x1: Math.min(roi.x1, Math.ceil(Math.max(...xs)) + 1), y1: Math.min(roi.y1, Math.ceil(Math.max(...ys)) + 1) };
+    const rect = { x0: Math.max(roi.x0, Math.floor(minOf(xs))), y0: Math.max(roi.y0, Math.floor(minOf(ys))),
+      x1: Math.min(roi.x1, Math.ceil(maxOf(xs)) + 1), y1: Math.min(roi.y1, Math.ceil(maxOf(ys)) + 1) };
     if (rect.x1 <= rect.x0 || rect.y1 <= rect.y0) return;
     tiledPixels(s, rect, mode, (win) => polygonPixels(src.map(([x, y]) => [x - win.ox, y - win.oy]), win.w, toWindowRect(win, roi)));
   }

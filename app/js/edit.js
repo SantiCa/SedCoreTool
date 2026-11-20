@@ -1,6 +1,6 @@
 // SedCoreTool web — V0.42: pure editing algorithms (no DOM, no global state), taken out of app.js so they can be tested
 // with synthetic masks. Labels: Int32Array, > 0 one object id, 0 matrix, < 0 stack −v in `stacks` (core.js).
-import { codeFor, hasId, idsAt } from './core.js';
+import { codeFor, hasId, idsAt, maxOf } from './core.js';
 
 /**
  * Scissors: pieces of object `id` inside its bbox [x0, y0, x1, y1] once the pixels in `cut` (Set of indices) are
@@ -26,7 +26,7 @@ export function splitPieces(L, w, stacks, bbox, id, cut) {
       for (const d of [x > 0 ? j - 1 : -1, x < bw - 1 ? j + 1 : -1, j - bw, j + bw]) if (d >= 0 && d < comp.length && comp[d] > 0) { comp[j] = comp[d]; changed = true; break; }
     }
   }
-  return { comp, bw, n, size, main: n ? size.indexOf(Math.max(...size.slice(1))) : 0 };
+  return { comp, bw, n, size, main: n ? size.indexOf(maxOf(size.slice(1))) : 0 };
 }
 
 /** Which object keeps its id and class when merging: the largest with a class given by hand, else the largest. */

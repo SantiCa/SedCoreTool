@@ -7,7 +7,7 @@ import { applyPanels } from './panels.js';
 import { disposeDataTable, renderData } from './datatab.js';
 import { FIG_PANELS, arrowMarksSVG, axisErr, coreRatio, editSVGLabels, figTraces, panelDataURL, renderFigPanel, renderFigure, scheduleFigure } from './figures.js';
 
-import { UNIT_TO_CM, interpAge, topAt, guessRecordUnit, unitFactor, rangeOverlaps } from './core.js';
+import { UNIT_TO_CM, interpAge, topAt, guessRecordUnit, unitFactor, rangeOverlaps, minOf, maxOf } from './core.js';
 import { validSavedRegion } from './edit.js';
 import { LOG_STYLE, ND_STYLE, mergedStyle, taxaOptions, validHexColor, buildLogSVG, compositeRows, guessAxisColumn, invertModel, orderCols, rowsRange, toAxis, windowCSV } from './log.js';
 import { t } from './i18n.js';
@@ -582,10 +582,10 @@ function recordAxisUnit(axis) {
 /** Card Q3: whether a converted record lies, at least in part, within the open core's depths or the age model's ages. */
 function recordAxisOverlaps(series, axis) {
   const xs = series.flatMap((s) => s.x);
-  if (axis === 'age') { const ages = (S.age.model?.age || []).filter((a) => a != null); return !ages.length || rangeOverlaps(xs, Math.min(...ages), Math.max(...ages)); }
+  if (axis === 'age') { const ages = (S.age.model?.age || []).filter((a) => a != null); return !ages.length || rangeOverlaps(xs, minOf(ages), maxOf(ages)); }
   if (!S.sections.length) return true;
   const unit = recordAxisUnit('depth'), f = (s) => UNIT_TO_CM[s.units] / UNIT_TO_CM[unit];
-  return rangeOverlaps(xs, Math.min(...S.sections.map((s) => s.top * f(s))), Math.max(...S.sections.map((s) => s.bottom * f(s))));
+  return rangeOverlaps(xs, minOf(S.sections.map((s) => s.top * f(s))), maxOf(S.sections.map((s) => s.bottom * f(s))));
 }
 /** Card Q2: the record added by the last import of this session, which «Undo import» removes without asking. */
 let lastImported = null;

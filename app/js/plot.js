@@ -1,6 +1,7 @@
 // SedCoreTool web — scientific plots of the Data tab (V21), in the spirit of Golden Software Grapher. No DOM.
 // XY plots (line, scatter, line + symbols, step, area, bars; secondary Y axis; log or inverted axes; curve fits with
 // equation and R²) and stratigraphic plots (one panel per variable sharing a vertical depth/age axis).
+import { minOf, maxOf } from './core.js';
 
 const esc3 = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[m]);
 export const PLOT_TYPES = ['line', 'scatter', 'linesym', 'step', 'area', 'bar'];
@@ -66,7 +67,7 @@ function ticksOf(lo, hi, log, n = 6) {
 /** Axis range from data (with 4 % padding) unless min/max are given. */
 export function axisRange(vals, ax = {}) {
   let v = vals.filter(okv); if (ax.log) v = v.filter((q) => q > 0);
-  let lo = okv(ax.min) ? ax.min : Math.min(...v), hi = okv(ax.max) ? ax.max : Math.max(...v);
+  let lo = okv(ax.min) ? ax.min : minOf(v), hi = okv(ax.max) ? ax.max : maxOf(v);
   if (!v.length && !(okv(ax.min) && okv(ax.max))) return [0, 1];
   if (lo === hi) { lo -= 1; hi += 1; }
   if (!ax.log) { const pad = (hi - lo) * 0.04; if (!okv(ax.min)) lo -= pad; if (!okv(ax.max)) hi += pad; } else if (lo <= 0) lo = hi / 1000;

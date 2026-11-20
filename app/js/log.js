@@ -1,5 +1,5 @@
 // SedCoreTool web — composite core log (no DOM): table parsing, axis transforms, SVG and CSV of a window.
-import { interpAge, toCSV, seriesSampler } from './core.js';
+import { interpAge, toCSV, seriesSampler, minOf, maxOf } from './core.js';
 
 /** Normalise optional saved event presentation at the rendering/editing boundary. */
 export function eventShadeOptions(value) {
@@ -279,7 +279,7 @@ export function compositeRows(sections, { axis, model }) {
 
 export function rowsRange(rows) {
   if (!rows.length) return [0, 1];
-  return [Math.min(...rows.map((r) => r.a0)), Math.max(...rows.map((r) => r.a1))];
+  return [minOf(rows.map((r) => r.a0)), maxOf(rows.map((r) => r.a1))];
 }
 
 /** Identification marker: its reference point remains at the trace depth. */
@@ -668,7 +668,7 @@ export function buildLogSVG(o) {
         q: taxa, x: c.x, width: c.w, top, height: H, y, from, to, axis: st.axes?.[c.id] || {}, ink: st.textColor, axisY: top - 7 });
       out.push(`</g>${drawing.axis}<g clip-path="url(#track-${c.x})">${drawing.body}`);
     } else if (c.key === 'species') {
-      const max = Math.max(1, ...rows.map((r) => presentClasses.reduce((s, k) => s + (r.classPct[k.index] || 0), 0)));
+      const max = Math.max(1, maxOf(rows.map((r) => presentClasses.reduce((s, k) => s + (r.classPct[k.index] || 0), 0))));
       const [, hi] = niceRange(0, max);
       const sx = xScale(c, 0, hi);
       for (const r of rows) {
@@ -680,7 +680,7 @@ export function buildLogSVG(o) {
         }
       }
     } else if (c.key === 'sp1') {   // V0.31: one ichnotaxon per column, own scale (editable in the axes table as sp:<name>)
-      const k = c.cls, kc = validHexColor(k.color, '#777777'), [, hi] = niceRange(0, Math.max(1, ...rows.map((r) => r.classPct[k.index] || 0))), sx = xScale(c, 0, hi);
+      const k = c.cls, kc = validHexColor(k.color, '#777777'), [, hi] = niceRange(0, Math.max(1, maxOf(rows.map((r) => r.classPct[k.index] || 0)))), sx = xScale(c, 0, hi);
       for (const r of rows) {
         const v = r.classPct[k.index] || 0; if (!v || (sx.log && v <= 0)) continue;
         out.push(`<rect x="${f2(Math.min(sx.base, sx(v)))}" y="${y(r.a0)}" width="${f2(Math.abs(sx(v) - (sx.base)))}" height="${f2(Math.max(0.3, y(r.a1) - y(r.a0)))}" fill="${kc}"/>`);
@@ -731,7 +731,7 @@ export function buildLogSVG(o) {
     } else if (c.key === 'rec') {
       const pts = c.rec.pts.filter((p) => p[0] != null && p[1] != null && p[0] >= from - span * 0.02 && p[0] <= to + span * 0.02);
       if (pts.length) {
-        const [lo, hi] = niceRange(Math.min(...pts.map((p) => p[1])), Math.max(...pts.map((p) => p[1])));
+        const [lo, hi] = niceRange(minOf(pts.map((p) => p[1])), maxOf(pts.map((p) => p[1])));
         const sx = xScale(c, lo, hi, c.rec.reverse);
         const recColor = validHexColor(c.rec.color, '#0b5394');
         out.push(recordShadingSVG(o.shade, { column: c, points: pts, sx, y, from, to, lanes: o.shadeLanes, area: o.shadeArea }));
@@ -782,7 +782,7 @@ export function buildRangeSVG(o) {
   const taxa = o.taxa ? taxaOptions(o.taxa, { range: true, style: K, display: o.display }) : null;
   if (taxa && taxa.layout !== 'separate') return buildLogSVG({ ...o, taxa, taxonPoints: o.points || [], records: [], tracks: { species: true, total: !!o.total }, labels: { total: o.totalLabel || 'Bioturbation (%)' } });
   const H = o.height, from = o.from, to = o.to, span = to - from || 1, colW = Math.max(16, Math.min(200, +o.colW || 30)), x0 = 72;   // V0.51: column width
-  const longest = Math.max(8, ...o.classes.map((c) => String(c.name).length)), top = 46 + Math.min(150, longest * 5.2 * 0.87);   // room for names at 60°
+  const longest = Math.max(8, maxOf(o.classes.map((c) => String(c.name).length))), top = 46 + Math.min(150, longest * 5.2 * 0.87);   // room for names at 60°
   const y = (v) => f2(top + ((v - from) / span) * H);
   const rows = (o.rows || []).filter((r) => r.a1 > from && r.a0 < to), display = o.display || 'symbols';
   const spHide = new Set(Array.isArray(K.speciesHide) ? K.speciesHide : []);   // V0.31
@@ -833,7 +833,7 @@ export function buildRangeSVG(o) {
     x += totW + 14;
   }
   for (const c of cols) {
-    const cx = x + colW / 2, max = Math.max(1e-9, ...rows.map((r) => r.classPct?.[c.index] || 0)), cColor = validHexColor(c.color, '#777777');
+    const cx = x + colW / 2, max = Math.max(1e-9, maxOf(rows.map((r) => r.classPct?.[c.index] || 0))), cColor = validHexColor(c.color, '#777777');
     out.push(`<text transform="translate(${cx + 3},${top - 6}) rotate(-60)" font-style="${c.plain ? 'normal' : 'italic'}" font-weight="600" fill="${K.textColor}">${escXml(c.name)}</text>`);
     out.push(`<line x1="${cx}" y1="${top}" x2="${cx}" y2="${top + H}" stroke="${K.gridColor}" stroke-width="0.6"/>`);
     if (taxa) {

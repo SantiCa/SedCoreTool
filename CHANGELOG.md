@@ -14,6 +14,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### For users
 
+- Very long series (more than about 100,000 values in a record, an age model, a chart or a spreadsheet column) no longer stop a chart, a map or a figure with an error: their lowest and highest values are now found without the limit on function arguments of the browser.
 - A backup or a package of a project with large "tiled" sections now says, before it is written, which of them it leaves out (their masks are only on this computer for now), and names them in the file.
 - Units: adding an external record now asks the unit of its depth or age column (proposed from the header, such as "mbsf" for metres) and converts it to the core's unit; a record that then lies wholly outside the core is reported. Changing a section's unit now asks whether to convert its depths (100–200 cm become 1–2 m) or only correct the label. Joining the same core from several projects converts their depths and ages to the units of the first one and says how many values disagreed.
 - Importing a table now shows «How the file was read» in the import dialog: what was changed, with counts, the first rows as read, the choice of sheet in a workbook and of how values below a detection limit are read (empty, half the limit or the limit). An external record just imported can be removed with «Undo import».
@@ -21,6 +22,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card Q5 part 1: `minOf` and `maxOf` in `core.js` (exactly `Math.min(...values)` and `Math.max(...values)`, including empty, NaN and -0, for any length) replace the 68 spread calls in 11 modules; `tests/app/extent.test.mjs` compares them with the spread on edge cases and checks a series of 10^6 values, where the spread throws.
 - Card M8.4.30 step 4 and checks: `tiledview.js` (`createTiledView`) moved out of `app.js` (4,787 -> 4,666 lines); `tests/app/architecture.test.mjs` checks the pure modules of ARCHITECTURE §3.2 for DOM use and imports of controllers and holds `app.js` at or below 4,666 lines; `tableview.js` is listed as a controller (it uses the DOM).
 - Card M8.4.30 step 3: `tiledtools.js` (`createTiledTools`: strokes, undo and redo of tiled edits, wand, lasso, scissors, object operations) moved out of `app.js`.
 - Card M8.4.30 step 2: `tiledstate.js` (`createTiledState`: statistics runner, row counts, pixel and mask reads, mask sends) moved out of `app.js`.

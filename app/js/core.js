@@ -377,6 +377,16 @@ export function baconToAgeText(text, { center = 'median', depthUnit = 'cm', ageD
   return out.length >= 2 ? out : null;
 }
 
+/** The smallest of `values` (any iterable): exactly `Math.min(...values)` (Infinity when empty, NaN when one is NaN, -0 below +0), without
+ *  passing every value as an argument, which throws a RangeError for long series (card Q5).
+ * @param {Iterable<any>} values
+ * @returns {number} */
+export function minOf(values) { let low = Infinity; for (const v of values) low = Math.min(low, v); return low; }
+/** The largest of `values`: exactly `Math.max(...values)` (-Infinity when empty), for series of any length (card Q5).
+ * @param {Iterable<any>} values
+ * @returns {number} */
+export function maxOf(values) { let high = -Infinity; for (const v of values) high = Math.max(high, v); return high; }
+
 /**
  * @param {readonly (readonly CsvCell[])[]} rows
  * @returns {string}

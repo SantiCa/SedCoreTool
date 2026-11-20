@@ -1,6 +1,6 @@
 // SedCoreTool web — multi-proxy geochemical interpretation (no DOM).
 // Cores → resampled samples → labels (intervals + rules) → machine learning → classes per sample → maps.
-import { parseAgeModel, interpAge, seriesGap } from './core.js';
+import { parseAgeModel, interpAge, seriesGap, minOf, maxOf } from './core.js';
 import { finiteStyleNumber, niceTicks } from './log.js';
 
 /* ───────── utilities ───────── */
@@ -159,7 +159,7 @@ export function buildSamples(cores, cfg) {
     const xs = cfg.axis === 'age' ? ages : core.depth;
     if (!xs) continue;
     const valid = xs.filter((v) => v != null); if (valid.length < 2) continue;
-    const lo = Math.ceil(Math.min(...valid) / cfg.step) * cfg.step, hi = Math.max(...valid);
+    const lo = Math.ceil(minOf(valid) / cfg.step) * cfg.step, hi = maxOf(valid);
     const grid = []; for (let g = lo; g <= hi + 1e-9; g += cfg.step) grid.push(+g.toFixed(10));
     const toDepth = coreConverter(core, 'age', 'depth'), toAge = coreConverter(core, 'depth', 'age');   // once per core, not once per sample
     const cols = F.map((name) => {
@@ -353,7 +353,7 @@ function knnProba(m, x) {
 
 function nbFit(X, y, p) {
   const classes = [...new Set(y)], d = X[0].length, model = { kind: 'nb', classes, stats: {} };
-  const maxVar = Math.max(...Array.from({ length: d }, (_, j) => std(X.map((r) => r[j])) ** 2));
+  const maxVar = maxOf(Array.from({ length: d }, (_, j) => std(X.map((r) => r[j])) ** 2));
   for (const c of classes) {
     const rows = X.filter((_, i) => y[i] === c);
     const mu = Array.from({ length: d }, (_, j) => mean(rows.map((r) => r[j])));
@@ -368,7 +368,7 @@ function nbProba(m, x) {
     const { mu, va, prior } = m.stats[c];
     ll[c] = Math.log(prior) + x.reduce((s, v, j) => s - 0.5 * Math.log(2 * Math.PI * va[j]) - ((v - mu[j]) ** 2) / (2 * va[j]), 0);
   }
-  const mx = Math.max(...Object.values(ll)); let tot = 0; const out = {};
+  const mx = maxOf(Object.values(ll)); let tot = 0; const out = {};
   for (const c in ll) { out[c] = Math.exp(ll[c] - mx); tot += out[c]; }
   for (const c in out) out[c] /= tot;
   return out;
@@ -433,7 +433,7 @@ export function kmeansFit(X, p, seed) {
   for (let rs = 0; rs < p.restarts; rs++) {
     const C = [X[Math.floor(rnd() * X.length)].slice()];
     while (C.length < p.k) {
-      const dist = X.map((x) => Math.min(...C.map((c) => d2(x, c)))), tot = dist.reduce((a, b) => a + b, 0);
+      const dist = X.map((x) => minOf(C.map((c) => d2(x, c)))), tot = dist.reduce((a, b) => a + b, 0);
       let r = rnd() * tot, i = 0; while (i < X.length - 1 && (r -= dist[i]) > 0) i++;
       C.push(X[i].slice());
     }
@@ -451,7 +451,7 @@ export function kmeansFit(X, p, seed) {
 }
 function kmeansProba(m, x) {
   const d = m.centers.map((c) => Math.sqrt(c.reduce((s, v, j) => s + (v - x[j]) ** 2, 0)));
-  const k = d.indexOf(Math.min(...d)), out = {}; m.classes.forEach((c, i) => (out[c] = i === k ? 1 : 0));
+  const k = d.indexOf(minOf(d)), out = {}; m.classes.forEach((c, i) => (out[c] = i === k ? 1 : 0));
   return out;
 }
 
@@ -483,7 +483,7 @@ function* mlpFitSteps(X, y, p, seed) {
     tr = []; for (let k = 0; k < K; k++) { const ids = Y.map((v, i) => (v === k ? i : -1)).filter((i) => i >= 0); for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; } const nv = ids.length >= 4 ? Math.round(ids.length * 0.15) : 0; va.push(...ids.slice(0, nv)); tr.push(...ids.slice(nv)); }
   }
   const act = p.activation === 'tanh' ? Math.tanh : (v) => (v > 0 ? v : 0), dact = p.activation === 'tanh' ? (a) => 1 - a * a : (a) => (a > 0 ? 1 : 0);
-  const forward = (x) => { const A = [x]; for (let l = 0; l < W.length; l++) { const prev = A[l], out = W[l].map((w, i) => { let s = B[l][i]; for (let j = 0; j < w.length; j++) s += w[j] * prev[j]; return s; }); if (l < W.length - 1) A.push(out.map(act)); else { const m = Math.max(...out), e = out.map((v) => Math.exp(v - m)), t = e.reduce((a, b) => a + b, 0); A.push(e.map((v) => v / t)); } } return A; };
+  const forward = (x) => { const A = [x]; for (let l = 0; l < W.length; l++) { const prev = A[l], out = W[l].map((w, i) => { let s = B[l][i]; for (let j = 0; j < w.length; j++) s += w[j] * prev[j]; return s; }); if (l < W.length - 1) A.push(out.map(act)); else { const m = maxOf(out), e = out.map((v) => Math.exp(v - m)), t = e.reduce((a, b) => a + b, 0); A.push(e.map((v) => v / t)); } } return A; };
   const lossOf = (ids) => ids.reduce((s, i) => s - cw[Y[i]] * Math.log(Math.max(1e-12, forward(Z[i])[W.length][Y[i]])), 0) / Math.max(1, ids.length);
   const mW = W.map((w) => w.map((r) => r.map(() => 0))), vW = W.map((w) => w.map((r) => r.map(() => 0))), mB = B.map((b) => b.map(() => 0)), vB = B.map((b) => b.map(() => 0));
   const lr = p.lr, l2 = p.l2 || 0, bs = Math.max(1, Math.min(p.batch || 32, tr.length)), b1 = 0.9, b2 = 0.999;
@@ -521,7 +521,7 @@ function mlpProba(m, x) {
   let a = x.map((v, j) => (v - m.mu[j]) / m.sd[j]);
   for (let l = 0; l < m.W.length; l++) {
     const out = m.W[l].map((w, i) => { let s = m.B[l][i]; for (let j = 0; j < w.length; j++) s += w[j] * a[j]; return s; });
-    if (l < m.W.length - 1) a = out.map(act); else { const mx = Math.max(...out), e = out.map((v) => Math.exp(v - mx)), t = e.reduce((q, r) => q + r, 0); a = e.map((v) => v / t); }
+    if (l < m.W.length - 1) a = out.map(act); else { const mx = maxOf(out), e = out.map((v) => Math.exp(v - mx)), t = e.reduce((q, r) => q + r, 0); a = e.map((v) => v / t); }
   }
   return Object.fromEntries(m.classes.map((c, k) => [c, a[k]]));
 }
@@ -590,7 +590,7 @@ export function* crossValidateSteps(samples, labels, method, params, seed = 42, 
   const perFold = []; let nScored = 0, nCovered = 0, nCovOk = 0;
   for (const [fi, test] of folds.entries()) {
     yield { fold: fi, folds: folds.length };
-    const tset = new Set(test), lo = Math.min(...test.map((i) => samples[i].x)) - gap, hi = Math.max(...test.map((i) => samples[i].x)) + gap;
+    const tset = new Set(test), lo = minOf(test.map((i) => samples[i].x)) - gap, hi = maxOf(test.map((i) => samples[i].x)) + gap;
     const train = idx.filter((i) => !tset.has(i) && !(gap > 0 && samples[i].x > lo && samples[i].x < hi)), tst = test.filter(scored);
     if (new Set(train.map((i) => labels[i])).size < 2 || !tst.length) continue;
     const X = zf(train);
@@ -706,7 +706,7 @@ export function makeProjection(kind, bbox) {
 export function mapFrame(bbox, kind = 'plate') {
   const pr = makeProjection(kind, bbox), [x0, y0, x1, y1] = bbox, xs = [], ys = [];
   for (let k = 0; k <= 20; k++) for (const [lo, la] of [[x0 + ((x1 - x0) * k) / 20, y0], [x0 + ((x1 - x0) * k) / 20, y1], [x0, y0 + ((y1 - y0) * k) / 20], [x1, y0 + ((y1 - y0) * k) / 20]]) { const [x, y] = pr.fwd(lo, la); xs.push(x); ys.push(y); }
-  const X0 = Math.min(...xs), X1 = Math.max(...xs), Y0 = Math.min(...ys), Y1 = Math.max(...ys);
+  const X0 = minOf(xs), X1 = maxOf(xs), Y0 = minOf(ys), Y1 = maxOf(ys);
   const W = 900, H = Math.max(60, Math.round((W * (Y1 - Y0)) / (X1 - X0 || 1))), top = 44, bottom = 70;
   const P = (lon, lat) => { const [x, y] = pr.fwd(lon, lat); return [((x - X0) / (X1 - X0)) * W, top + ((Y1 - y) / (Y1 - Y0)) * H]; };
   const Pinv = (px, py) => pr.inv(X0 + (px / W) * (X1 - X0), Y1 - ((py - top) / H) * (Y1 - Y0));
@@ -850,7 +850,7 @@ export function mapBBox(points, margin = 3) {
   const p = points.filter(validMapCoords);
   if (!p.length) return [-10, 30, 40, 48];
   const lon = p.map((q) => q.lon), lat = p.map((q) => q.lat);
-  return [Math.min(...lon) - margin, Math.min(...lat) - margin, Math.max(...lon) + margin, Math.max(...lat) + margin];
+  return [minOf(lon) - margin, minOf(lat) - margin, maxOf(lon) + margin, maxOf(lat) + margin];
 }
 
 

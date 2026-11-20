@@ -1,5 +1,5 @@
 // SedCoreTool web (antes CorAnTool e IchAnTool) — application (UI, state, tools, rendering, files).
-import { rleValid, baconToAgeText, BI, II, UNIT_TO_CM, idsAt, topAt, hasId, stackIndex, codeFor, withoutId, renameId, compactStacks, parseAgeModel, parseAgeModelDetailed, interpAge, toCSV, rleEncode, rleDecode, unitFactor } from './core.js';
+import { rleValid, baconToAgeText, BI, II, UNIT_TO_CM, idsAt, topAt, hasId, stackIndex, codeFor, withoutId, renameId, compactStacks, parseAgeModel, parseAgeModelDetailed, interpAge, toCSV, rleEncode, rleDecode, unitFactor, minOf, maxOf } from './core.js';
 import { pxPerCm, depthAtRow, rowAtDepth } from './sectiondepth.js';
 import { effectiveClassId, effectiveClassIndex, computeSectionBins, binsFromRowCounts, binRowsOfSection } from './sectionanalysis.js';
 import { createEngineClient } from './engineclient.js';
@@ -2701,7 +2701,7 @@ function setAge() {
   S.age.text = $('ageText').value; S.age.units = $('ageUnits').value;
   const parsed = parseAgeModelDetailed(S.age.text); S.age.model = parsed.model;
   const m = S.age.model;
-  $('ageStatus').textContent = m ? t('age.ok', { n: m.depth.length, a: fmt(Math.min(...m.age), 3), b: fmt(Math.max(...m.age), 3), u: S.age.units }) + (m.reversals ? ' ' + t('age.reversal', { n: m.reversals }) : '') + (m.bacon ? ' ' + t('age.baconPasted') : '') + (m.rangeIgnored ? ' ' + t('age.rangeIgnored', { n: m.rangeIgnored }) : '')
+  $('ageStatus').textContent = m ? t('age.ok', { n: m.depth.length, a: fmt(minOf(m.age), 3), b: fmt(maxOf(m.age), 3), u: S.age.units }) + (m.reversals ? ' ' + t('age.reversal', { n: m.reversals }) : '') + (m.bacon ? ' ' + t('age.baconPasted') : '') + (m.rangeIgnored ? ' ' + t('age.rangeIgnored', { n: m.rangeIgnored }) : '')
     : parsed.issue?.kind === 'dupDepth' ? t('age.dupDepth', { d: fmt(parsed.issue.depth, 4) }) : t('age.none');
   $('ageStatus').classList.toggle('warn', !!(m?.reversals || m?.bacon || m?.rangeIgnored || parsed.issue));
   const c = curCore(); if (c) c.ageText = S.age.text;
@@ -3408,8 +3408,8 @@ async function renderProjects() {
   const shown = list.filter((p) => !q || coreKey(p.name).includes(q) || (p.coreNames || []).some((n) => coreKey(n).includes(q)));
   box.innerHTML = shown.map((p) => {
     const lite = L.get(p.id), cores = lite?.cores || (p.coreNames || []).map((n) => ({ name: n }));
-    const len = (c) => { const d = (c.depth || []).filter((v) => v != null); return d.length ? Math.max(...d) - Math.min(...d) : 0; };
-    const maxLen = Math.max(1, ...cores.map(len)), ivCores = new Set((lite?.intervals || []).map((iv) => iv.core));
+    const len = (c) => { const d = (c.depth || []).filter((v) => v != null); return d.length ? maxOf(d) - minOf(d) : 0; };
+    const maxLen = Math.max(1, maxOf(cores.map(len))), ivCores = new Set((lite?.intervals || []).map((iv) => iv.core));
     const nShared = cores.filter((c) => (shared.get(coreKey(c.name))?.size || 0) > 1).length;
     const liners = cores.slice(0, 22).map((c) => {
       const others = [...(shared.get(coreKey(c.name)) || new Map()).entries()].filter(([id]) => id !== p.id).map(([, n]) => n);
@@ -3721,7 +3721,7 @@ function backupNow() {
 /** V0.38: warning when the automatic copy is set but has not run for a week (or needs reactivating) and there are changes. */
 async function checkBackupAge() {
   if (!backupDir || !storageOK) return;
-  const newest = Math.max(0, ...(await listProjects().catch(() => [])).map((m) => m.updated || 0));
+  const newest = Math.max(0, maxOf((await listProjects().catch(() => [])).map((m) => m.updated || 0)));
   if (newest > lastBackup && (backupState === 'needs' || Date.now() - lastBackup > 7 * 864e5)) toast(t('bk.old', { d: lastBackup ? Math.floor((Date.now() - lastBackup) / 864e5) : '?' }), 9000);
 }
 
