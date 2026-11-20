@@ -128,14 +128,16 @@ try {
         running: !!q._maskSync.running, wanted: q._maskSync.wanted, stopped: q._maskSync.stopped, failures: q._maskSync.failures } : null, frozen: q.frozen ?? null } };
   });
   assert.equal(saved.names.length, 7, 'the tiled section is saved with the six others: ' + JSON.stringify(saved.why) + ' ' + JSON.stringify(toasts.slice(-4)));
-  // Card M8.4.33: a package leaves the tiled section out, names it in `left_out` and tells the user before it is written.
+  // Card M8.4.33, changed by card M8.4.18d (decision D4): with the engine a package carries the tiled section and says nothing is left out; the
+  // project as `projectForExport` alone writes it still leaves it out and names it (the path of a package made without the engine, checked below
+  // in the program with the flag off).
   const toastsBeforePackage = toasts.length;
   const exported = await on.page.evaluate(async () => { const json = window.ichantool.exportedProject(); await window.ichantool.packageNow();
     return { sections: json.cores.flatMap((c) => c.sections).length, leftOut: json.left_out, tiled: json.cores.flatMap((c) => c.sections).some((q) => q.tiled) }; });
   assert.equal(exported.sections, 6, 'the six ordinary sections are packaged');
   assert.equal(exported.tiled, false);
   assert.equal(exported.leftOut?.length, 1, 'the tiled section is named in left_out: ' + JSON.stringify(exported.leftOut));
-  assert.ok(toasts.slice(toastsBeforePackage).some((text) => /secciones grandes por piezas|large tiled sections/.test(text)), 'the user is told: ' + JSON.stringify(toasts.slice(toastsBeforePackage)));
+  assert.ok(!toasts.slice(toastsBeforePackage).some((text) => /secciones grandes por piezas|large tiled sections/.test(text)), 'the package carries it: nothing is said to be left out: ' + JSON.stringify(toasts.slice(toastsBeforePackage)));
   assert.equal(saved.version, 6, 'a project with a tiled section is format version 6');
   assert.ok(saved.manifests.length === 1 && /^[0-9a-f]{64}$/.test(saved.manifests[0]), 'saved with its stored version: ' + JSON.stringify(saved.manifests));
   // Release the working image and ask for it again: it comes back from the pyramid, never from the source file.
@@ -958,6 +960,18 @@ try {
   const secondBackup = await backupFiles(on.page, 'backup-m8418c');
   for (const name of [...versionFiles, sourceFile]) assert.equal(secondBackup[name].modified, firstBackup[name].modified, 'not written again: ' + name);
   const expectedRestore = beforeSave;
+  // Card M8.4.18d: the package of the project carries the tiled versions and, the user agreeing (the dialog is accepted), the image the project keeps.
+  const packaged = Buffer.from(await on.page.evaluate(async () => {
+    const bytes = new Uint8Array(await (await window.ichantool.packageBlob()).arrayBuffer());
+    let text = ''; for (let i = 0; i < bytes.length; i += 32768) text += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + 32768)));
+    return btoa(text);
+  }), 'base64');
+  const { unzipBlob } = await import(new URL('../../app/js/zip.js', import.meta.url).href);
+  const packageMembers = await unzipBlob(new Blob([packaged]));
+  const packagedProject = JSON.parse(await (await packageMembers.get('project.json').get()).text());
+  assert.ok(!packagedProject.left_out && packagedProject.cores.flatMap((c) => c.sections).some((q) => q.id === backupTiledId), 'the package keeps the tiled sections');
+  for (const q of backedTiled) assert.ok(packageMembers.has(`manifests/${q.tiled.manifest}.json`), 'the package holds the version of ' + q.id);
+  assert.ok(packageMembers.has(`sources/${pyramid}`) && Buffer.from(await (await packageMembers.get(`sources/${pyramid}`).get()).arrayBuffer()).equals(fs.readFileSync(lossless)), 'and the image');
   const other = await program(true);
   try {
     const otherToasts = [];
@@ -983,6 +997,18 @@ try {
         seen: { name: window.ichantool.S.name, sections: window.ichantool.S.sections.map((q) => q.id), record: record.id, recordSections: record.cores?.flatMap((c) => c.sections.map((q) => q.id)) } };
     }, files, folder, backupFolderName, id, chooser);
     await other.page.evaluate((id) => { window.__tiledId = id; }, backupTiledId);
+    // The package opened on another computer (empty profile): the section with its image and the same masks and objects.
+    const fromPackage = await other.page.evaluate(async (b64) => {
+      await window.ichantool.restoreFiles([new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], 'project.sedcoretool')]);
+      for (let i = 0; i < 2400 && !(window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle()); i++) await new Promise((r) => setTimeout(r, 50));
+      const index = window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId), s = window.ichantool.S.sections[index];
+      return { index, frozen: index < 0 ? 'absent' : (s.frozen ?? null), grey: s ? s.orig.subarray(0, 400).every((v, i) => (i % 4 === 3 ? v === 255 : v === 128)) : null };
+    }, packaged.toString('base64'));
+    assert.deepEqual([fromPackage.frozen, fromPackage.grey], [null, false], 'the package opens with its image: ' + JSON.stringify({ fromPackage, toasts: otherToasts.slice(-4) }));
+    await other.page.evaluate((index) => window.ichantool.tiledMasksLoad(index), fromPackage.index);
+    const fromPackageDump = await dumpIn(other.page, fromPackage.index);
+    assert.deepEqual([fromPackageDump.runs, fromPackageDump.exRuns, fromPackageDump.nextId], [expectedRestore.runs, expectedRestore.exRuns, expectedRestore.nextId], 'masks from the package identical');
+    assert.deepEqual(fromPackageDump.objects.map((o) => [o.id, o.cls, o.area, o.bbox]), expectedRestore.objects.map((o) => [o.id, o.cls, o.area, o.bbox]), 'objects from the package identical');
     // A damaged tile: the section's version is refused whole and it opens locked; the user is told which tile.
     const ownVersion = backedTiled.find((q) => q.id === backupTiledId).tiled.manifest;
     const ownTiles = Object.values(JSON.parse(Buffer.from(firstBackup[`${backupFolderName}/manifests/${ownVersion}.json`].b64, 'base64').toString('ascii')).tiles);
@@ -1014,7 +1040,7 @@ try {
     assert.deepEqual(got.objects.map((o) => [o.id, o.cls, o.area, o.bbox]), expectedRestore.objects.map((o) => [o.id, o.cls, o.area, o.bbox]), 'restored objects identical');
     assert.deepEqual(other.errors, []);
   } finally { await other.close(); }
-  console.log(`Folder backup: ${versionFiles.length} files of tiled versions written once (a second backup rewrote none); restored in another profile (at a day of its history, chosen in the dialog) with identical masks and objects and its image; a damaged tile refused the section (locked)`);
+  console.log(`Folder backup: ${versionFiles.length} files of tiled versions written once (a second backup rewrote none); restored in another profile (at a day of its history, chosen in the dialog) with identical masks and objects and its image; a damaged tile refused the section (locked); the package (${packaged.length} bytes, versions and image) opened there identically`);
   // Card M8.4.27: the store folder follows its project. (1) A missing stored version: the project opens, the section is locked and says so, its
   // record is saved back unchanged, the rest is edited and saved; with the version back it opens as before.
   const storeFolder = async (id = null) => path.join(on.profile, 'projects', await on.page.evaluate((id) => window.ichantool.storeProject(id), id));
@@ -1182,6 +1208,17 @@ try {
     return { placeholder: true, bins: s.bins.length, same: JSON.stringify(tiledOf(stored)) === JSON.stringify(tiledOf(record)), name: stored.name, version: stored.version };
   }, projectRecord);
   assert.deepEqual(d2, { placeholder: true, bins: 0, same: true, name: projectRecord.name + ' (other build)', version: 6 }, 'D2: placeholder, record unchanged, the rest saved');
+  // Cards M8.4.33 and M8.4.18d: without the engine a package cannot carry the tiled section: it is left out, named, and the user is told first.
+  // (A copy of the project with only its tiled sections: the images of its other sections are in the other program's profile, not in this one.)
+  const offPackage = await off.page.evaluate(async (record) => {
+    await window.ichantool.loadProject({ ...record, id: record.id + '-tiled-only', cores: record.cores.map((c) => ({ ...c, sections: c.sections.filter((q) => q.tiled) })) });
+    const told = [], observer = new MutationObserver(() => { const el = document.getElementById('toast'); if (el && !el.hidden) told.push(el.textContent); });
+    observer.observe(document.getElementById('toast'), { attributes: true, childList: true, subtree: true, characterData: true });
+    const size = await window.ichantool.packageNow();
+    await new Promise((r) => setTimeout(r, 100)); observer.disconnect();
+    return { size, told };
+  }, projectRecord);
+  assert.ok(offPackage.size > 0 && offPackage.told.some((text) => /secciones grandes por piezas|large tiled sections/.test(text)), 'without the engine the package leaves it out and says so: ' + JSON.stringify(offPackage.told));
   assert.deepEqual(off.errors, []);
   console.log('Flag off: today\'s path (factor', section.ds + '); a saved tiled section is a placeholder whose record is saved back unchanged');
 } finally { await off.close(); }

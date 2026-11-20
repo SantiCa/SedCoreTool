@@ -3136,7 +3136,7 @@ const sectionFields = (q) => ({ id: q.id, rot: 0, crop: null, top: q.top, bottom
   detect: q.detect, manual: q.manual || [], nextId: q.nextId, marks: q.marks || [] });
 let tiledUnsavedShown = false, settleDeadlineMs = 15000;
 /** Card M8.4.30 step 1: the project side of tiled sections lives in tiledproject.js. */
-const { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, retainStore, announceStoreProjects, backupTiledOf, restoreTiledOf } = createTiledProject({
+const { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, retainStore, announceStoreProjects, backupTiledOf, restoreTiledOf, packageTiledPlan } = createTiledProject({
   TILES, get settleDeadlineMs() { return settleDeadlineMs; }, toast, storeProject, maskSync, maskLoader, newSection, sectionFields, greyRgba, sourceRoi,
   tileBuildDialog, tiledCounts, tiledStatsRunner, tiledWorkingImage, serTiledSection, hexDigest,
 });
@@ -3791,12 +3791,12 @@ function tellLeftOut(kind, projectName, leftOut, always = false) {
   toast(t('bk.leftOut', { p: projectName || APP, n: leftOut.length, s: leftOut.slice(0, 4).map((q) => q.section).join(', ') }), 12000);
 }
 async function packageProjects(list) {
-  const files = [];
-  for (const d of list) tellLeftOut('package', d.name, projectForExport(d).leftOut, true);   // card M8.4.33: before anything is written
-  if (list.length === 1) { const e = projectForExport(list[0]); files.push({ name: 'project.json', data: JSON.stringify(e.json) }); for (const im of e.images) files.push({ name: im.path, data: await im.get() }); }
-  else list.forEach((d, i) => { const e = projectForExport(d, `p${i + 1}/`); files.push({ name: `p${i + 1}/project.json`, data: JSON.stringify(e.json) }, ...e.images.map((im) => ({ name: im.path, lazy: im.get }))); });
-  for (const f of files) if (f.lazy) { f.data = await f.lazy(); delete f.lazy; }
-  files.push({ name: 'settings.json', data: JSON.stringify(settingsBundle()) });
+  const files = [], tiled = await packageTiledPlan(list);              // card M8.4.18d: tiled sections in the package (with the engine), sources if the user agrees
+  for (const [i, d] of list.entries()) {
+    const prefix = list.length === 1 ? '' : `p${i + 1}/`, e = projectForExport(d, prefix, false, !!tiled), more = tiled ? await tiled(e.json, d.id, prefix) : { files: [], leftOut: [] };
+    tellLeftOut('package', d.name, [...e.leftOut, ...more.leftOut], true); files.push({ name: prefix + 'project.json', data: JSON.stringify(e.json) }, ...e.images.map((im) => ({ name: im.path, lazy: im.get })), ...more.files);   // card M8.4.33: told before the package is saved
+  }
+  for (const f of files) if (f.lazy) { f.data = await f.lazy(); delete f.lazy; } files.push({ name: 'settings.json', data: JSON.stringify(settingsBundle()) });
   return zipFiles(files);
 }
 /** One file with every project of the library plus the user settings. */
@@ -4654,7 +4654,7 @@ window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, read
   tileState: (k, row, col) => { const s = sec(), scheduler = s?.tiled && tileSchedulers.get(s.tiled.pyramid), key = s?.tiled ? s.tiled.pyramid + '/' + tileKey(k, row, col) : '';   // evidence when a probe fails (card M8.4.24)
     return { cached: tileCache.has(key), inFlight: !!scheduler?.inFlight.has(key), idle: !!scheduler?.idle, failures: scheduler?.failures ?? 0, lastError: s?.tiled?.lastError ?? null }; },
   objectsWaiting, saveBlockers: () => ({ blankStart, loading, readOnlyProject, storageOK, id: !!S.id, cores: S.cores.length, running: !!saves.running }),   // tests: why a save would not run   // card M8.4.28: an object operation waits for its objects' tiles (tests)
-  exportedProject: () => projectForExport(serialize()).json, packageNow: async () => (await packageProjects([serialize()])).size, projectFolderTo: (dir) => writeProjectFolder(dir, serialize()), restoreFolders, chooseFolderVersion,   // cards M8.4.33 and M8.4.18c tests
+  exportedProject: () => projectForExport(serialize()).json, packageNow: async () => (await packageProjects([serialize()])).size, projectFolderTo: (dir) => writeProjectFolder(dir, serialize()), restoreFolders, chooseFolderVersion, packageBlob: () => packageProjects([serialize()]), restoreFiles,   // cards M8.4.33 and M8.4.18c tests
   saveNow: () => saveToDB(), storeProject: (id = null) => storeProject(id ?? S.id), settleDeadline: (ms) => { settleDeadlineMs = ms; },   // card M8.4.18a tests
   stopMaskSync: () => sec()?._maskSync?.stop(), tiledSaved: () => S.cores.flatMap((c) => c.sections).filter((q) => q.tiled).map((q) => q._savedRecord?.tiled?.manifest ?? null),
   tiledCountsIdle: () => S.sections.every((q) => !q._counts || (!q._counts.runner.running && q._counts.counts.ready)),

@@ -183,6 +183,70 @@ export async function restoreSource(TILES, project, pyramid, name, readFile) {
 }
 
 /**
+ * Card M8.4.18d (D4): the files a `.sedcoretool` package carries for the tiled sections of `json` (as `projectForExport` writes it, tiled sections
+ * kept): `<prefix>tiles/<sha256>` and `<prefix>manifests/<sha256>.json` exactly as in a backup folder (each name once), and, when `withSources`,
+ * `<prefix>sources/<sha256>` for each source the project keeps a copy of. Each piece of a source is checked against the SHA-256 the main process sent
+ * with it. A section whose version is missing or damaged in the store is taken out of `json` and named in its `left_out`; any other failure throws.
+ * Returns `{files: [{name, data: Blob}], leftOut}`. The bytes are held as Blobs, which the browser keeps on disk when they are large.
+ */
+export async function packageTiledSections(TILES, project, json, prefix, hexDigest, withSources = false) {
+  const files = [], leftOut = [], written = new Set();
+  const holders = (json.cores || [json]).filter((c) => Array.isArray(c.sections) && c.sections.some((q) => q.tiled?.manifest));
+  for (const c of holders) {
+    const kept = [];
+    for (const q of c.sections) {
+      if (!q.tiled?.manifest) { kept.push(q); continue; }
+      try {
+        const manifest = q.tiled.manifest, manifestName = `${prefix}${BACKUP_MANIFESTS_DIR}/${manifest}.json`;
+        if (!written.has(manifestName)) {
+          const [text] = answerOf(await TILES.maskExport(project, manifest, null)).files;
+          const missing = [...manifestBlobs(text.bytes).keys()].filter((name) => !written.has(`${prefix}${BACKUP_TILES_DIR}/${name}`));
+          const mine = [];
+          for (let start = 0; start < missing.length; start += EXPORT_PAGE) {
+            for (const file of answerOf(await TILES.maskExport(project, manifest, missing.slice(start, start + EXPORT_PAGE))).files) mine.push({ name: `${prefix}${BACKUP_TILES_DIR}/${file.name}`, data: new Blob([file.bytes]) });
+          }
+          for (const file of mine) { files.push(file); written.add(file.name); }   // only once the whole version was read
+          files.push({ name: manifestName, data: new Blob([text.bytes]) }); written.add(manifestName);
+        }
+        kept.push(q);
+      } catch (error) {
+        if (!(error instanceof TiledBackupError) || !PERMANENT.has(error.code)) throw error;
+        leftOut.push({ core: c.name ?? null, section: q.name ?? q.id });
+      }
+    }
+    c.sections = kept;
+  }
+  if (leftOut.length) json.left_out = [...(json.left_out || []), ...leftOut];
+  if (withSources && TILES.sourceCopyRead) {
+    for (const pyramid of new Set(holders.flatMap((c) => c.sections.filter((q) => q.tiled?.source?.sha256).map((q) => q.tiled.source.sha256)))) {
+      const first = answerOf(await TILES.sourceCopyRead(project, pyramid, 0));
+      if (!first.copied) continue;                                        // not kept by the project: its identity is in the record
+      const pieces = [];
+      for (let offset = 0, piece = first; ;) {
+        if (piece.bytes.length !== Math.min(SOURCE_PIECE, first.size - offset) || (await hexDigest(piece.bytes)) !== piece.sha256) throw new TiledBackupError('BACKUP_MISMATCH', pyramid);
+        pieces.push(new Blob([piece.bytes]));
+        offset += piece.bytes.length;
+        if (offset >= first.size) break;
+        piece = answerOf(await TILES.sourceCopyRead(project, pyramid, offset));
+        if (!piece.copied || piece.size !== first.size) throw new TiledBackupError('BACKUP_CHANGED', pyramid);
+      }
+      files.push({ name: `${prefix}${BACKUP_SOURCES_DIR}/${pyramid}`, data: new Blob(pieces) });
+    }
+  }
+  return { files, leftOut };
+}
+
+/** Card M8.4.18d: the total size of the copies of sources the projects keep (`[storeProject, pyramid]` pairs), 0 when none; to ask the user first. */
+export async function keptSourceBytes(TILES, pairs) {
+  let total = 0;
+  for (const [project, pyramid] of pairs) {
+    const first = answerOf(await TILES.sourceCopyRead(project, pyramid, 0));
+    if (first.copied) total += first.size;
+  }
+  return total;
+}
+
+/**
  * Read the files of one version from a backup folder into the store of `project`, the blobs first and the manifest last, each verified by the
  * engine. `readFile(path)` reads a file of the project's backup folder by its relative path (null, or a throw, when it is not there).
  * Returns null when the version is in the store now, or where it failed (`"manifest"`, `"<row>.<col>"` or `"tables.<name>"`): a missing or

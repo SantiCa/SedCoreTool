@@ -119,6 +119,8 @@ U-Net on the computer.
    In the desktop program with the scientific engine on, the folder copy also holds the masks of large (tiled) sections;
    opening the project folder on another computer restores them, with the image when the project keeps its own copy (otherwise locate the
    image there). When the folder keeps a history, **Open project folder** asks whether to open the last save or a given day.
+   With the engine on, an exported `.sedcoretool` package also carries large sections (and, if you agree, the original images the project
+   keeps); it may exceed 4 GB.
    A project with an invalid analysis region or broken mask references opens for inspection, with a warning in
    the affected section. Edits are temporary and a project export keeps the original data.
 

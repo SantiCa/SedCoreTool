@@ -6,7 +6,7 @@ import { MaskTiles, reduceTile } from './tiledmasks.js';
 import { tileHistogram } from './tiledcounts.js';
 import { TiledObjectStats } from './tiledit.js';
 import { CacheRejected, decodeReopenCache, encodeReopenCache, statsCover } from './tiledcache.js';
-import { backupTiledSections, restoreVersion, restoreSource } from './tiledbackup.js';
+import { backupTiledSections, restoreVersion, restoreSource, packageTiledSections, keptSourceBytes } from './tiledbackup.js';
 import { features } from './imageproc.js';
 import { pxPerCm } from './sectiondepth.js';
 import { t } from './i18n.js';
@@ -197,6 +197,19 @@ export function createTiledProject(ctx) {
       if (outcome === 'damaged' || outcome === 'failed') toast(t('bk.sourceDamaged', { n: name || pyramid.slice(0, 12) }), 12000);
     }
   }
+  /**
+   * Card M8.4.18d (D4): how a package carries the tiled sections of `list` (projects as saved). Null when it cannot (no engine) or need not (no tiled
+   * section): they are then left out as before. Otherwise asks once whether to include the copies of sources the projects keep (with their total
+   * size), and returns `(json, id, prefix) => {files, leftOut}` for `projectForExport`'s output of each project.
+   */
+  async function packageTiledPlan(list) {
+    const tiledOf = (d) => (d.cores || []).flatMap((c) => c.sections || []).filter((q) => q.tiled?.manifest);
+    if (!ctx.TILES?.maskExport || !list.some((d) => tiledOf(d).length)) return null;
+    const pairs = list.flatMap((d) => [...new Set(tiledOf(d).map((q) => q.tiled.source?.sha256).filter(Boolean))].map((pyramid) => [storeProject(d.id), pyramid]));
+    const bytes = ctx.TILES.sourceCopyRead ? await keptSourceBytes(ctx.TILES, pairs) : 0;
+    const withSources = bytes > 0 && confirm(t('pkg.withSources', { s: sizeText(bytes) }));
+    return (json, id, prefix) => packageTiledSections(ctx.TILES, storeProject(id), json, prefix, hexDigest, withSources);
+  }
   /** A size in bytes as the user reads it (MB below 1 GB). @param {number} bytes */
   const sizeText = (bytes) => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`);
 
@@ -284,5 +297,5 @@ export function createTiledProject(ctx) {
     await writeReopenCaches();                                           // after the clean-up, so that it never removes a cache that was just written
   }
 
-  return { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, retainStore, announceStoreProjects, backupTiledOf, restoreTiledOf };
+  return { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, retainStore, announceStoreProjects, backupTiledOf, restoreTiledOf, packageTiledPlan };
 }

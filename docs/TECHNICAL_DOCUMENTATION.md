@@ -172,7 +172,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `singleflight.js` | One run at a time with at most one more run for the requests made meanwhile, if the revision changed (card M8.4.31): project saves | Yes |
 | `tiledundo.js` | Undo and redo of tiled edits (card M8.4.16 step 5): copies of the mask tiles an edit changed, taken before its first write and swapped with the page's tiles (`TileChanges`); the 64 MiB budget of those copies (`trimTileHistory`) | Yes |
 | `tiledcounts.js` | Row counts of tiled sections (card M8.4.17): the histogram of each tile (`tileHistogram`), their sum under the current classes (`TiledRowCounts`) and the queue that counts changed tiles between frames (`TiledCountsRunner`); no DOM |
-| `tiledbackup.js` | Tiled sections in the folder backup and back into the store at a restore (card M8.4.18c): `backupTiledSections` (with the project's copies of sources), `restoreVersion`, `restoreSource`, `manifestBlobs`; no DOM (the folder is a directory handle or a read function) |
+| `tiledbackup.js` | Tiled sections in the folder backup and in packages, and back into the store at a restore (cards M8.4.18c-d): `backupTiledSections` (with the project's copies of sources), `packageTiledSections`, `keptSourceBytes`, `restoreVersion`, `restoreSource`, `manifestBlobs`; no DOM (the folder is a directory handle or a read function) |
 | `folderversion.js` | «Open project folder» at a day of the history (card M8.4.18c): `historyDays` (no DOM) and `chooseFolderVersion` (a dialog) |
 | `tiledcache.js` | The reopening cache of a tiled section (card M8.4.29): `encodeReopenCache` and `decodeReopenCache` (every check; a refusal is `CacheRejected`), `statsCover`; no DOM |
 | `tiledsource.js` | The original image of a tiled section in the section form (card M8.4.18b): where it is, "Locate the image…" and "Copy the image into the project", through `window.corantoolDesktop.tiles` (`createTiledSourcePanel`); `sizeText` | — |
@@ -2311,14 +2311,28 @@ with **Import file…** on another computer. **Download full backup (all project
 (`settings.json`), named `sedcoretool_copia_<date>.sedcoretool`. Older `.corantool` packages and older JSON project
 files (with inline images) are still imported. Project identifiers are preserved on import unless the user chooses
 to restore a separate copy after an identifier conflict (§23.3). The library stores images separately from project metadata.
-Large tiled sections are not in packages or folder copies yet (their masks live in the store on this computer; cards M8.4.18c-d): the
-project in the package lists them in `left_out` (`[{core, section}]`, absent when there are none, so other packages are unchanged), and the
-program says so before writing (for every package; for the automatic folder copy, once per session) (card M8.4.33).
+**Large tiled sections (card M8.4.18d, decision D4).** In the desktop program with the engine on, a package carries each tiled section's stored
+version next to its `project.json` (`<prefix>tiles/<sha256>` and `<prefix>manifests/<sha256>.json`, each file once, exactly as in a folder copy:
+contract §8.7, "Backup folder"; `packageTiledSections` in `tiledbackup.js`, `packageTiledPlan` in `tiledproject.js`). When the projects keep
+copies of their sources (card M8.4.18b), the program asks once, with their total size, whether to include them (`<prefix>sources/<sha256>`, read
+in pieces of 8 MiB checked against their SHA-256); otherwise only each source's identity is in the record. Importing a package restores them
+exactly as a project folder is restored (§23.2: every file verified by the engine or the main process, a missing or damaged one locks its
+section). A section whose version is missing or damaged in the store, and every tiled section of a package made without the engine, is left out:
+the project in the package lists them in `left_out` (`[{core, section}]`, absent when there are none, so other packages are unchanged), and the
+program says so before the package is saved (for every package; for the automatic folder copy, once per session) (card M8.4.33).
 
-Project ZIP import accepts classic stored and Deflate archives. It checks paths, directory and local headers,
+**ZIP64 (card M8.4.18d).** The writer (`zipParts`, `zipFiles`) gives a member the ZIP64 extended information (APPNOTE 4.5.3: version 45,
+0xFFFFFFFF in the 32-bit fields, uncompressed size, compressed size and, in the directory, the local header's offset as 64-bit values) only when
+its size or offset reaches 2^32 - 1, and writes the ZIP64 end record and locator (APPNOTE 4.3.14-4.3.15) only when the directory's size or offset
+reaches it or there are 65,535 members or more; any package that fits the classic format is written byte for byte as before. The reader follows
+the locator when the end record holds 0xFFFF or 0xFFFFFFFF, and requires the ZIP64 end record to end exactly at the locator, the directory to end
+exactly at that record, disk numbers 0, equal member counts, every 64-bit value to be a safe integer and the ZIP64 extra field to be present and
+long enough wherever a 32-bit field is 0xFFFFFFFF; local headers must repeat the sizes (in their own ZIP64 field when they are 0xFFFFFFFF).
+
+Project ZIP import accepts classic and ZIP64 stored and Deflate archives. It checks paths, directory and local headers,
 and declared uncompressed sizes before reading entries. Limits are 16 MiB for the central directory, 128 MiB
-per project or settings JSON, 256 MiB per Deflate member, 1 GiB for Deflate data and less than 4 GiB for all
-members. Each member read is charged to the aggregate limits. Deflate output is checked against the declared size
+per project or settings JSON, 256 MiB per Deflate member, 1 GiB for Deflate data and, for stored members, the size of the file (at least 4 GiB;
+they cannot overlap); the reads of all members together are limited to twice the file's size (at least 4 GiB). Each member read is charged to the aggregate limits. Deflate output is checked against the declared size
 and CRC during extraction. For a stored member, the reader computes CRC-32 in blocks of at most 4 MiB on each
 read and compares it with the directory before returning the original Blob slice. Stored images retain range
 access. The importer reads the project JSON and ingests its referenced images before entering the replacement
@@ -3670,8 +3684,7 @@ The percentage difference comes from the JPEG decoder (§3.4), not from the meth
     core's age model; interpolated maps are exploratory; k-NN compares each sample with all training samples (slow
     with hundreds of thousands of samples); MDI importance is biased among correlated proxies; everything is computed
     on the user's computer.
-11. **Known defects, with cards in the roadmap** (found by the audits of 19 November 2026; each item is removed when its card is done):
-    packages leave tiled sections out; they say so and name them (`left_out`, card M8.4.33) until card M8.4.18d carries them.
+11. **Known defects, with cards in the roadmap** (found by the audits of 19 November 2026; each item is removed when its card is done): none open.
 
 ## 33. Reproducibility
 

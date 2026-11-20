@@ -2228,3 +2228,5 @@ Object.assign(D.en, {
   'bk.sourceDamaged': 'The copy of the original image «{n}» in the folder could not be restored (a piece is missing or it is not that image). The masks were; locate the image from the section.',
   'bk.versionTitle': 'Which state of the project to open', 'bk.versionCurrent': 'The last save', 'bk.versionDay': 'Last state of {d}',
   'bk.versionNote': 'The history keeps the last state of each day. Large sections are restored with the masks of that day.', 'bk.versionOpen': 'Open' });
+Object.assign(D.es, { 'pkg.withSources': 'El paquete lleva las máscaras de las secciones grandes. ¿Incluir también las imágenes originales que el proyecto conserva ({s})?\n\nAceptar: incluirlas (el paquete se abre con sus imágenes en otro ordenador).\nCancelar: solo las máscaras (las imágenes se localizan allí).' });
+Object.assign(D.en, { 'pkg.withSources': 'The package carries the masks of the large sections. Also include the original images the project keeps ({s})?\n\nOK: include them (the package opens with its images on another computer).\nCancel: masks only (the images are located there).' });

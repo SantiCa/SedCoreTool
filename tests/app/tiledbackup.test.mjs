@@ -4,7 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { deflateSync, inflateSync } from 'node:zlib';
-import { backupTiledSections, restoreVersion, restoreSource, manifestBlobs, TiledBackupError, EXPORT_PAGE, SOURCE_PIECE } from '../../app/js/tiledbackup.js';
+import { backupTiledSections, restoreVersion, restoreSource, manifestBlobs, TiledBackupError, EXPORT_PAGE, SOURCE_PIECE, packageTiledSections, keptSourceBytes } from '../../app/js/tiledbackup.js';
+import { zipFiles, unzipBlob } from '../../app/js/zip.js';
 import { historyDays } from '../../app/js/folderversion.js';
 
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -280,4 +281,33 @@ test('the days of a project folder history, newest first; none without a history
   await history.getDirectoryHandle('2026-11-21.json', { create: true });        // a folder with that name is not a day
   assert.deepEqual((await historyDays(dir)).map((d) => d.day), ['2026-11-20', '2026-11-19', '2026-11-18']);
   assert.deepEqual(await historyDays(new Dir()), []);
+});
+
+test('card M8.4.18d: a package carries the tiled versions (each file once) and, when asked, the kept source; a restore from it brings them back', async () => {
+  const engine = withSources(new Engine());
+  const image = Buffer.alloc(SOURCE_PIECE + 999);
+  for (let i = 0; i < image.length; i += 777) image[i] = i & 255;
+  const pyramid = sha(image), shared = engine.commit('p1', { '0.0': tile(1), '0.1': tile(2) }), damaged = engine.commit('p1', { '0.0': tile(3) });
+  engine.damaged.add(damaged);
+  engine.copies.set(`p1/${pyramid}`, { bytes: image, name: 'core.tif' });
+  const json = project([shared, shared, damaged]);
+  for (const q of json.cores[0].sections.slice(1)) q.tiled.source = { sha256: pyramid, name: 'core.tif', size: image.length };
+  assert.equal(await keptSourceBytes(engine, [['p1', pyramid], ['p1', 'f'.repeat(64)]]), image.length);
+  const { files, leftOut } = await packageTiledSections(engine, 'p1', json, 'p2/', hexDigest, true);
+  assert.deepEqual(leftOut, [{ core: 'C1', section: 'tiled 2' }]);
+  assert.deepEqual(json.cores[0].sections.map((q) => q.id), ['a', 't0', 't1'], 'the damaged version is left out, named');
+  const names = files.map((f) => f.name);
+  assert.equal(new Set(names).size, names.length, 'each file once');
+  assert.deepEqual(names.filter((n) => n.startsWith('p2/manifests/')), [`p2/manifests/${shared}.json`]);
+  assert.equal(names.filter((n) => n.startsWith('p2/tiles/')).length, 3);
+  assert.ok(names.includes(`p2/sources/${pyramid}`));
+  const members = await unzipBlob(await zipFiles([{ name: 'p2/project.json', data: JSON.stringify(json) }, ...files]));
+  const readFile = async (path) => { const e = members.get('p2/' + path); return e ? e.get() : null; };
+  const other = withSources(new Engine());
+  assert.equal(await restoreVersion(other, 'p9', shared, readFile), null);
+  assert.deepEqual(other.store('p9').manifests.get(shared), engine.store('p1').manifests.get(shared));
+  assert.equal(await restoreSource(other, 'p9', pyramid, 'core.tif', readFile), 'restored');
+  assert.ok(other.copies.get(`p9/${pyramid}`).bytes.equals(image));
+  const without = await packageTiledSections(engine, 'p1', project([shared]), '', hexDigest, false);
+  assert.ok(!without.files.some((f) => f.name.startsWith('sources/')), 'no source unless asked');
 });
