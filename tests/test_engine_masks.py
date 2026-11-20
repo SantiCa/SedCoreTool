@@ -6,6 +6,7 @@ import io
 import json
 import subprocess
 import sys
+import zlib
 from pathlib import Path
 from uuid import uuid4
 
@@ -603,3 +604,110 @@ def test_copy_does_not_carry_derived_files(engine):
     page = value.ok('mask.copy', {'from': 'p1', 'to': 'p2', 'manifest': manifest, 'start': 0})[0]
     assert page['next'] is None
     assert get_derived(value, manifest, project='p2') == ({'found': False}, b'')
+
+
+# ---- Card M8.4.18c: export and import of a stored version (folder backup and restore, contract §8.7) ----
+
+def export(value, manifest, blobs=None, project='p1'):
+    """``{name: bytes}`` of a ``mask.export``; each file's bytes are checked against its announced SHA-256."""
+    result, binary = value.ok('mask.export', {'project': project, 'manifest': manifest, 'blobs': blobs})
+    joined, offset, out = b''.join(binary), 0, {}
+    assert result['frames'] == [len(part) for part in binary] and all(len(part) <= MAX_CHUNK for part in binary)
+    for item in result['files']:
+        data = joined[offset:offset + item['byte_length']]
+        assert hashlib.sha256(data).hexdigest() == item['sha256']
+        out[item['name']] = data
+        offset += item['byte_length']
+    assert offset == len(joined)
+    return out
+
+
+def import_files(value, kind, files, project='p1'):
+    joined = b''.join(data for _, data in files)
+    return value.call('mask.import', {'project': project, 'kind': kind, 'handle': upload(value, joined),
+                                      'files': [{'name': name, 'byte_length': len(data)} for name, data in files]})[0]
+
+
+def backup_of(value, manifest, project='p1'):
+    """Every file of a stored version as a backup folder holds them: ``(manifest bytes, {blob name: zlib stream})``."""
+    text = export(value, manifest, project=project)[manifest]
+    names = sorted(masks.MaskStore(Path(value.coordinator.projects_root) / project / 'tiles').blob_lengths(manifest))
+    blobs = {}
+    for start in range(0, len(names), masks.EXPORT_PAGE):
+        blobs.update(export(value, manifest, names[start:start + masks.EXPORT_PAGE], project=project))
+    return text, blobs
+
+
+def test_a_version_exported_from_one_store_is_imported_into_another_and_reads_identically(engine):
+    value = engine()
+    manifest = committed_version(value)
+    text, blobs = backup_of(value, manifest)
+    assert hashlib.sha256(text).hexdigest() == manifest and len(blobs) == 7    # one tile and six tables
+    for name, raw in blobs.items():                                            # the files as stored: zlib streams of the named bytes
+        assert hashlib.sha256(zlib.decompress(raw)).hexdigest() == name
+    assert import_files(value, 'manifest', [(manifest, text)], project='p2')['error']['details']['field'] == 'blobs'   # blobs first
+    response = import_files(value, 'blobs', sorted(blobs.items()), project='p2')
+    assert response['status'] == 'ok' and response['result'] == {'accepted': [True] * 7}
+    assert import_files(value, 'manifest', [(manifest, text)], project='p2')['result'] == {'manifest': manifest}
+    for project in ('p1', 'p2'):
+        _, binary = value.ok('mask.read', {'project': project, 'manifest': manifest, 'layer': 'labels', 'positions': [[0, 0]]})
+        assert b''.join(binary) == labels_tile(5)[0]
+    assert import_files(value, 'blobs', sorted(blobs.items()), project='p2')['result'] == {'accepted': [True] * 7}   # again: nothing changes
+
+
+def test_an_import_refuses_a_corrupt_or_misnamed_blob_and_keeps_the_others(engine):
+    value = engine()
+    manifest = committed_version(value)
+    text, blobs = backup_of(value, manifest)
+    names = sorted(blobs)
+    damaged = bytearray(blobs[names[0]])
+    damaged[len(damaged) // 2] ^= 0xFF
+    trailing = blobs[names[1]] + b'x'
+    swapped = (names[2], blobs[names[3]])
+    bomb = zlib.compress(bytes(masks.MAX_BLOB_BYTES + 1))                     # decompresses beyond the largest blob
+    files = [(names[0], bytes(damaged)), (names[1], trailing), swapped, (names[4], blobs[names[4]]), (hashlib.sha256(b'b').hexdigest(), bomb)]
+    assert import_files(value, 'blobs', files, project='p2')['result'] == {'accepted': [False, False, False, True, False]}
+    store = Path(value.coordinator.projects_root) / 'p2' / 'tiles' / 'blobs'
+    assert sorted(path.name for path in store.glob('*/*')) == [names[4]]      # only the good one was written
+    assert import_files(value, 'manifest', [(manifest, text)], project='p2')['error']['details']['field'] == 'blobs'
+    assert not (Path(value.coordinator.projects_root) / 'p2' / 'tiles' / 'manifests').exists()
+
+
+def test_an_import_refuses_a_manifest_that_is_not_one(engine):
+    value = engine()
+    manifest = committed_version(value)
+    text, blobs = backup_of(value, manifest)
+    assert import_files(value, 'blobs', sorted(blobs.items()), project='p2')['status'] == 'ok'
+    for name, data in ((manifest, text + b' '), ('1' * 64, text), (manifest, text.replace(b'"tile":512', b'"tile":513'))):
+        response = import_files(value, 'manifest', [(name, data)], project='p2')
+        assert (response['error']['code'], response['error']['details']['field']) == ('INVALID_BUFFER', 'manifest')
+    assert not (Path(value.coordinator.projects_root) / 'p2' / 'tiles' / 'manifests').exists()
+
+
+def test_export_and_import_requests_are_validated(engine):
+    value = engine()
+    manifest = committed_version(value)
+    _, blobs = backup_of(value, manifest)
+    name = sorted(blobs)[0]
+    assert value.error('mask.export', {'project': 'p1', 'manifest': '1' * 64, 'blobs': None}) == ('INVALID_REQUEST', 'manifest')
+    assert value.error('mask.export', {'project': 'p1', 'manifest': manifest, 'blobs': ['2' * 64]}) == ('INVALID_REQUEST', 'blobs')   # not named by it
+    assert value.error('mask.export', {'project': 'p1', 'manifest': manifest, 'blobs': []}) == ('INVALID_REQUEST', 'blobs')
+    assert value.error('mask.export', {'project': 'p1', 'manifest': manifest, 'blobs': [name] * (masks.EXPORT_PAGE + 1)}) == ('INVALID_REQUEST', 'blobs')
+    assert value.error('mask.export', {'project': 'Bad', 'manifest': manifest, 'blobs': None}) == ('INVALID_REQUEST', 'project')
+    handle = upload(value, blobs[name])
+    base = {'project': 'p2', 'kind': 'blobs', 'handle': handle, 'files': [{'name': name, 'byte_length': len(blobs[name])}]}
+    assert value.error('mask.import', {**base, 'kind': 'other'}) == ('INVALID_REQUEST', 'kind')
+    assert value.error('mask.import', {**base, 'files': []}) == ('INVALID_REQUEST', 'files')
+    assert value.error('mask.import', {**base, 'files': [{'name': 'x', 'byte_length': 1}]}) == ('INVALID_REQUEST', 'files')
+    assert value.error('mask.import', {**base, 'files': [{'name': name, 'byte_length': len(blobs[name]) + 1}]}) == ('INVALID_BUFFER', 'files')
+    assert value.error('mask.import', {**base, 'kind': 'manifest', 'files': base['files'] * 2}) == ('INVALID_REQUEST', 'files')
+
+
+def test_export_refuses_a_damaged_blob(engine):
+    value = engine()
+    manifest = committed_version(value)
+    tile = labels_tile(5)[1]
+    path = Path(value.coordinator.projects_root) / 'p1' / 'tiles' / 'blobs' / tile[:2] / tile
+    path.write_bytes(path.read_bytes()[:-3])
+    value.coordinator.mask_cache.items.clear()
+    assert value.error('mask.export', {'project': 'p1', 'manifest': manifest, 'blobs': [tile]}) == ('INVALID_BUFFER', 'tile')

@@ -9,6 +9,9 @@ const { TileReader } = require('./tile-reader');
 const { copyVerified, freeBytes } = require('./source-copy');
 
 const MAX_SOURCES_PER_PAGE = 64, MAX_BUILDS_PER_PAGE = 4, MAX_STAGED_PER_PAGE = 8, MAX_CHUNK = 1048576;
+// Card M8.4.18c: files of a stored version per export or import request (as the engine's EXPORT_PAGE), and the bytes one import may carry
+// (a backup's blobs are zlib streams of at most 16 MiB plus zlib's margin; a manifest at most 64 MiB; the engine's buffers hold 256 MiB).
+const EXPORT_PAGE = 32, MAX_IMPORT_BYTES = 128 * 2 ** 20;
 // Card M8.4.18a: the main process remembers where the source of each tiled section was, per project; the page never sees it.
 const DERIVED_KINDS = new Set(['reopen']), MAX_DERIVED_BYTES = 134217728;   // card M8.4.29, contract §8.7
 const SOURCES_FILE = 'sources.json', MAX_REMEMBERED_SOURCES = 4096, MAX_RETAINED = 1024;
@@ -327,6 +330,46 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
       if (result?.found === false) return { found: false };
       if (!result?.bytes || result.bytes.length !== result.byte_length) reject('INTERNAL', 'derived');
       return { found: true, bytes: result.bytes };
+    },
+    /**
+     * Card M8.4.18c: files of a stored version for a backup folder, exactly as the store keeps them, each verified by the engine and in transport:
+     * `blobs` null gives the manifest's file, otherwise 1 to 32 blob names it uses give their zlib streams. `{files: [{name, sha256, bytes}]}`
+     * (`sha256` is that of the bytes, which for a manifest is its name).
+     */
+    async maskExport(owner, project, manifest, blobs) {
+      checkProject(project);
+      if (typeof manifest !== 'string' || !SHA256.test(manifest)) reject('INVALID_REQUEST', 'manifest');
+      if (blobs !== null && (!Array.isArray(blobs) || blobs.length < 1 || blobs.length > EXPORT_PAGE || !blobs.every((name) => typeof name === 'string' && SHA256.test(name)))) reject('INVALID_REQUEST', 'blobs');
+      const result = await engine.request('mask.export', { project, manifest, blobs });
+      if (!result?.bytes || !Array.isArray(result.files)) reject('INTERNAL', 'export');
+      let offset = 0;
+      const files = result.files.map((file) => { const bytes = new Uint8Array(result.bytes.subarray(offset, offset + file.byte_length)); offset += file.byte_length; return { name: file.name, sha256: file.sha256, bytes }; });
+      return { files };
+    },
+    /**
+     * Card M8.4.18c: files read from a backup folder into this project's store, verified by the engine before anything is written: `kind`
+     * 'blobs' (1 to 32 `{name, bytes}`, zlib streams named by the SHA-256 of what they decompress to) gives `{accepted: [boolean]}`; 'manifest'
+     * (one file named by its SHA-256; every blob it names must be stored already) gives `{manifest}`.
+     */
+    async maskImport(owner, project, kind, files) {
+      checkProject(project);
+      if (kind !== 'blobs' && kind !== 'manifest') reject('INVALID_REQUEST', 'kind');
+      if (!Array.isArray(files) || files.length < 1 || files.length > (kind === 'blobs' ? EXPORT_PAGE : 1)) reject('INVALID_REQUEST', 'files');
+      const parts = files.map((file) => ({ name: file?.name, bytes: bytesOf(file?.bytes) }));
+      if (!parts.every((part) => typeof part.name === 'string' && SHA256.test(part.name) && part.bytes && part.bytes.length > 0)) reject('INVALID_REQUEST', 'files');
+      const total = parts.reduce((sum, part) => sum + part.bytes.length, 0);
+      if (total > MAX_IMPORT_BYTES) reject('LIMIT_EXCEEDED', 'files');
+      const joined = Buffer.concat(parts.map((part) => part.bytes));
+      const sha256 = createHash('sha256').update(joined).digest('hex');
+      const { handle } = await engine.request('buffer.begin', { dtype: 'u8', shape: [total], byte_length: total, sha256 });
+      try {
+        for (let offset = 0; offset < total; offset += MAX_CHUNK) await engine.request('buffer.chunk', { handle, offset, byte_length: Math.min(MAX_CHUNK, total - offset) }, joined.subarray(offset, offset + MAX_CHUNK));
+        await engine.request('buffer.commit', { handle });
+        const result = await engine.request('mask.import', { project, kind, handle, files: parts.map((part) => ({ name: part.name, byte_length: part.bytes.length })) });
+        if (kind === 'manifest') return { manifest: result?.manifest };
+        if (!Array.isArray(result?.accepted) || result.accepted.length !== parts.length) reject('INTERNAL', 'import');
+        return { accepted: result.accepted.map((value) => value === true) };
+      } finally { engine.request('buffer.release', { handles: [handle] }).catch(() => {}); }
     },
     /** Remember, for this project, the file a pyramid this page built came from (its path stays in the main process). */
     async rememberSource(owner, project, pyramid) {

@@ -3135,7 +3135,7 @@ const sectionFields = (q) => ({ id: q.id, rot: 0, crop: null, top: q.top, bottom
   detect: q.detect, manual: q.manual || [], nextId: q.nextId, marks: q.marks || [] });
 let tiledUnsavedShown = false, settleDeadlineMs = 15000;
 /** Card M8.4.30 step 1: the project side of tiled sections lives in tiledproject.js. */
-const { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, retainStore, announceStoreProjects } = createTiledProject({
+const { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, retainStore, announceStoreProjects, backupTiledOf, restoreTiledOf } = createTiledProject({
   TILES, get settleDeadlineMs() { return settleDeadlineMs; }, toast, storeProject, maskSync, maskLoader, newSection, sectionFields, greyRgba, sourceRoi,
   tileBuildDialog, tiledCounts, tiledStatsRunner, tiledWorkingImage, serTiledSection, hexDigest,
 });
@@ -3621,8 +3621,8 @@ function renderBackupState() {
  */
 async function writeProjectFolder(root, d) {
   const dir = await root.getDirectoryHandle(`${safe(d.name)}__${d.id}`, { create: true }), imgs = await dir.getDirectoryHandle('images', { create: true });
-  const e = projectForExport(d, '', true);
-  tellLeftOut('folder', d.name, e.leftOut);                         // the automatic copy runs often: said once per session
+  const e = projectForExport(d, '', true, true);                    // card M8.4.18c: tiled sections kept; their masks go first, project.json last
+  tellLeftOut('folder', d.name, await backupTiledOf(dir, d.id, e.json));   // the automatic copy runs often: said once per session
   for (const im of e.images) {
     diagnosticEvent('operation.start', { operation: 'backup.image' });
     const name = im.path.slice('images/'.length);
@@ -3769,15 +3769,15 @@ async function projectImageSource(file, ranged = false) {
   throw new Error(t('err.missingImage', { name: file.name || file.key || '?' }));
 }
 /** Folder copies use immutable image names so a failed manifest write cannot change the previous save's images. */
-function projectForExport(d, prefix = '', immutableImages = false) {
+function projectForExport(d, prefix = '', immutableImages = false, keepTiled = false) {
   const p = JSON.parse(JSON.stringify(d, (k, v) => (v instanceof Blob ? undefined : v))), images = [];
-  // Tiled sections stay out (their masks are in the store: cards M8.4.18c-d); card M8.4.33: named in `left_out` and reported to the user.
-  const leftOut = (p.cores || [p]).flatMap((c) => (Array.isArray(c.sections) ? c.sections.filter((q) => q.tiled).map((q) => ({ core: c.name ?? null, section: q.name ?? q.id })) : []));
-  for (const c of p.cores || [p]) if (Array.isArray(c.sections)) c.sections = c.sections.filter((q) => !q.tiled);
+  // Tiled sections stay out of packages (card M8.4.18d); card M8.4.33: named in `left_out` and reported. The folder backup keeps them (M8.4.18c).
+  const leftOut = keepTiled ? [] : (p.cores || [p]).flatMap((c) => (Array.isArray(c.sections) ? c.sections.filter((q) => q.tiled).map((q) => ({ core: c.name ?? null, section: q.name ?? q.id })) : []));
+  for (const c of p.cores || [p]) if (Array.isArray(c.sections) && !keepTiled) c.sections = c.sections.filter((q) => !q.tiled);
   if (leftOut.length) p.left_out = leftOut;
   const src = new Map(); for (const c of d.cores || [{ sections: d.sections }]) for (const q of c.sections || []) src.set(q.id, q.file);
   for (const c of p.cores || [{ sections: p.sections }]) for (const q of c.sections || []) {
-    const f = src.get(q.id) || q.file;
+    if (q.tiled) continue; const f = src.get(q.id) || q.file;          // a tiled section's source is not an image of the project
     const imageId = immutableImages ? `${q.id}__${f.key || uid()}` : q.id;
     const path = `images/${imageId}${imgExt(f)}`;
     images.push({ path: prefix + path, get: (ranged = false) => projectImageSource(f, ranged) });
@@ -3840,7 +3840,7 @@ async function restoreFiles(files) {
       }
       else { p.id = uid(); p.name = `${p.name || APP} (${t('bk.restored')})`; }
     } else if (!p.id) p.id = uid();
-    existing.add(p.id);
+    existing.add(p.id); await restoreTiledOf(p, getBlob);          // card M8.4.18c: masks of tiled sections into the store of its final identifier
     const nSec = p.cores ? p.cores.reduce((n, c) => n + (c.sections || []).length, 0) : (p.sections || []).length;
     if (storageOK) await putProject({ id: p.id, name: p.name, updated: Date.now(), sections: nSec, cores: p.cores?.length || 1, coreNames: p.cores?.map((c) => c.name) }, p);
     if (p.id === S.id) dirty = false;   // Clear pending edits only after the replacement succeeds.
@@ -4656,7 +4656,7 @@ window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, read
   tileState: (k, row, col) => { const s = sec(), scheduler = s?.tiled && tileSchedulers.get(s.tiled.pyramid), key = s?.tiled ? s.tiled.pyramid + '/' + tileKey(k, row, col) : '';   // evidence when a probe fails (card M8.4.24)
     return { cached: tileCache.has(key), inFlight: !!scheduler?.inFlight.has(key), idle: !!scheduler?.idle, failures: scheduler?.failures ?? 0, lastError: s?.tiled?.lastError ?? null }; },
   objectsWaiting, saveBlockers: () => ({ blankStart, loading, readOnlyProject, storageOK, id: !!S.id, cores: S.cores.length, running: !!saves.running }),   // tests: why a save would not run   // card M8.4.28: an object operation waits for its objects' tiles (tests)
-  exportedProject: () => projectForExport(serialize()).json, packageNow: async () => (await packageProjects([serialize()])).size,   // card M8.4.33 tests
+  exportedProject: () => projectForExport(serialize()).json, packageNow: async () => (await packageProjects([serialize()])).size, projectFolderTo: (dir) => writeProjectFolder(dir, serialize()), restoreFolders,   // cards M8.4.33 and M8.4.18c tests
   saveNow: () => saveToDB(), storeProject: (id = null) => storeProject(id ?? S.id), settleDeadline: (ms) => { settleDeadlineMs = ms; },   // card M8.4.18a tests
   stopMaskSync: () => sec()?._maskSync?.stop(), tiledSaved: () => S.cores.flatMap((c) => c.sections).filter((q) => q.tiled).map((q) => q._savedRecord?.tiled?.manifest ?? null),
   tiledCountsIdle: () => S.sections.every((q) => !q._counts || (!q._counts.runner.running && q._counts.counts.ready)),

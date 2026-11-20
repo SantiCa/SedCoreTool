@@ -110,7 +110,7 @@ const pythonCheck = spawnSync(process.platform === 'win32' ? 'py' : 'python3', [
 const python = process.env.SEDCORETOOL_TEST_PYTHON || (pythonCheck.status === 0 ? pythonCheck.stdout.trim() : null);
 
 test('every mask-store operation has a deadline longer than an ordinary request', () => {
-  const ops = ['mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.forget', 'mask.derived.put', 'mask.derived.get'];
+  const ops = ['mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.forget', 'mask.derived.put', 'mask.derived.get', 'mask.export', 'mask.import'];
   assert.deepEqual(Object.keys(STORE_DEADLINES_MS).sort(), [...ops].sort());
   for (const op of ops) assert.ok(STORE_DEADLINES_MS[op] >= 30000 && Number.isInteger(STORE_DEADLINES_MS[op]), op);
   assert.ok(Object.isFrozen(STORE_DEADLINES_MS));

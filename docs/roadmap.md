@@ -84,7 +84,7 @@ Updated 18 November 2026.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
 - **Next step: Q5** (long series: `extent()` without spreads, decimation on screen, the data record saved in parts; **model: most capable tier,
   effort medium**), then M8.4.29 and the rest of order O; M8.4.30 is done (its size target replaced by the ceiling of decision R, approved 20 Nov 2026); decisions S, T and the four design choices of M8.4.34 were approved the same day; M8.4.33 is done; M8.4.32 is done
-  (green on three systems, commit `4a20dfd`); M8.4.29 and M8.4.34 are done at the development gate on 20 Nov 2026 (the GitHub run of their commits is pending); Q5 parts 1-2 are done (part 3 changes the saved format: approved on 20 Nov 2026 to wait for a save benchmark of long series, and done only if it shows a slow save; the thinning of core-column curves is decided with P2, approved the same day); P1 is done on 20 Nov 2026 (`figsize.js`, `pngmeta.js`, PNG at 300/600 dpi; `npm test` 507, typecheck and standalone build pass; the 600 dpi check added to `tests/e2e/figure-composition.mjs` (run by `smoke.mjs`) **has not been run**: the permission system refused to start the local server for it, so it runs in the next session or on the maintainer's computer); Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
+  (green on three systems, commit `4a20dfd`); M8.4.29 and M8.4.34 are done at the development gate on 20 Nov 2026 (the GitHub run of their commits is pending); M8.4.18c is in progress (steps 1-2, the masks of tiled sections in the folder backup and their restore, done at the development gate on 20 Nov 2026; step 3, the source copy, and three questions open: see the card); Q5 parts 1-2 are done (part 3 changes the saved format: approved on 20 Nov 2026 to wait for a save benchmark of long series, and done only if it shows a slow save; the thinning of core-column curves is decided with P2, approved the same day); P1 is done on 20 Nov 2026 (`figsize.js`, `pngmeta.js`, PNG at 300/600 dpi; `npm test` 507, typecheck and standalone build pass; the 600 dpi check added to `tests/e2e/figure-composition.mjs` (run by `smoke.mjs`) **has not been run**: the permission system refused to start the local server for it, so it runs in the next session or on the maintainer's computer); Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
   council audit, below). **V0.152** (decision J) was prepared on 20 Nov 2026 at the maintainer's request ("Publica la 0.152 y haz un release"):
   full checks passed on the version commit (Windows: pytest 885 passed / 9 skipped, npm 478, typecheck, sync_version, ruff, standalone build,
   runtime rebuilt, desktop.mjs off and on, tiled-sections.mjs). **Published on 20 Nov 2026:** `master` `8ee9776`, tag `V0.152`, GitHub Release
@@ -2125,7 +2125,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   `javascript:` link and nothing happens; a store operation slowed by a test hook past 5 s completes without an engine restart.
 - **Done when:** the tests pass; development gate.
 
-##### M8.4.18c - Folder backup and restore of tiled sections — state: after M8.4.34
+##### M8.4.18c - Folder backup and restore of tiled sections — state: In progress (steps 1-2 done at the development gate, 20 Nov 2026, Windows; step 3 open)
 
 - **Goal:** the folder backup (`writeProjectFolder`) carries tiled sections incrementally, and a project restored from it on another computer opens
   with identical masks.
@@ -2141,6 +2141,29 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 - **Tests:** incremental backup copies only new tiles; a corrupt tile in the backup is refused at restore; a restore on an empty store (another
   computer, simulated by another user-data folder) opens identically; an interrupted backup leaves the previous backup openable.
 - **Done when:** backup and restore round trip exactly on the desktop, with the failure cases above; development gate.
+- **As built (steps 1-2, 20 Nov 2026).** The main process does not know where the folder the page chose is (a File System Access handle has no
+  path), so the files travel through the page and the engine checks them at both ends: `mask.export` (a stored version's files exactly as stored,
+  each verified first) and `mask.import` (each blob accepted only if it decompresses to bytes with its name's hash; the manifest only when every
+  blob it names is stored), contract §8.7 with a "Backup folder" paragraph; `maskExport` / `maskImport` in `tile-ipc.js` and `preload.js`
+  (deadlines 120 s); pure module `tiledbackup.js` (`backupTiledSections`, `restoreVersion`, `manifestBlobs`); `backupTiledOf` and `restoreTiledOf`
+  in `tiledproject.js`; `projectForExport` keeps tiled sections for the folder copy only. `app.js` 4,666 lines before and after (two test hooks on
+  an existing line).
+- **Choices made in this card, for the maintainer to review:** (1) the files of the folder are the store's own zlib streams, in a flat `tiles/`
+  folder; (2) the unit of "already copied" is the version: a manifest in the folder means its version is whole there (written last); (3) a version
+  missing or damaged in the store is left out of that copy and named (`left_out`, told once); any other failure fails the copy, which is retried,
+  and the previous `project.json` stays; (4) a version that cannot be restored leaves its section's record in the project, locked (card M8.4.27),
+  and the message names the file; (5) nothing is ever deleted from `tiles/` and `manifests/` of the folder.
+- **Open (questions for the maintainer):** (a) the folder grows with every version copied, because history files may name old versions: a
+  clean-up of files that neither `project.json` nor any kept history file names is possible but deletes in the user's folder; (b) an old
+  `historial/<date>.json` names versions that are in the folder, but «Open project folder» restores only `project.json`, and a history file
+  imported on its own cannot read the folder: opening an older day needs a choice of date in «Open project folder» (small interface change);
+  (c) step 3, the copy of a source image kept in the project (D3): it may be several GB, so it would travel from the main process to the page in
+  pieces and be written by the page; on another computer it would be located (card M8.4.18b, verified by its SHA-256) and copied into the project.
+- **Checks (steps 1-2, Windows):** `npm test` 537; `pytest` 896 passed / 9 skipped; typecheck; standalone build; `sync_version --check`;
+  `desktop.mjs` with the engine off and on; `tiled-sections.mjs` passed (first run) with the new block: a backup into a folder of the origin's
+  private file system holds the tiled versions (33 files), a second backup rewrites none of them, a restore in a second program with an empty
+  profile opens the section with identical masks and objects (grey, the image is not there), a damaged tile refuses the section (locked, user
+  told, no manifest in the store). Not run: macOS and Linux (GitHub), `ruff` (not installed), `smoke.mjs`.
 
 ##### M8.4.18d - Packages with tiled sections — state: after M8.4.18c (D4 answered: packages carry tiled sections, with ZIP64)
 

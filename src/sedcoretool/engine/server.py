@@ -64,7 +64,8 @@ RUNNER_IDLE_SECONDS = 30         # an idle method worker holds memory (NumPy, th
 PROGRESS_EVENT_SECONDS = 0.1     # at most ten progress events per second (§3)
 PYRAMID_NAME = re.compile(r'[^/\\:\x00-\x1f]{1,255}')   # a file name for display: no folder separators or control characters
 MAX_PATH = 4096
-MASK_OPERATIONS = ('mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.forget', 'mask.derived.put', 'mask.derived.get')
+MASK_OPERATIONS = ('mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.forget', 'mask.derived.put', 'mask.derived.get',
+                   'mask.export', 'mask.import')
 MAX_STAGINGS = 16                # staged mask versions per session (contract §8.7)
 
 
@@ -388,6 +389,38 @@ class Coordinator:
                 return {'found': False}
             self.attachments = [data[start:start + MAX_CHUNK] for start in range(0, len(data), MAX_CHUNK)]
             return {'found': True, 'byte_length': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'frames': [len(part) for part in self.attachments]}
+        if operation == 'mask.export':                                          # card M8.4.18c: files of a stored version, for a backup folder
+            require_fields(payload, ('project', 'manifest', 'blobs'))
+            store = self.mask_store(payload['project'])
+            names = [payload['manifest']] if payload['blobs'] is None else payload['blobs']
+            files = [store.export_manifest(payload['manifest'])] if payload['blobs'] is None else store.export_blobs(payload['manifest'], payload['blobs'])
+            joined = b''.join(files)
+            self.attachments = [joined[start:start + MAX_CHUNK] for start in range(0, len(joined), MAX_CHUNK)]
+            return {'files': [{'name': name, 'byte_length': len(data), 'sha256': hashlib.sha256(data).hexdigest()} for name, data in zip(names, files)],
+                    'frames': [len(part) for part in self.attachments]}
+        if operation == 'mask.import':                                          # card M8.4.18c: files of a backup folder, verified, into the store
+            require_fields(payload, ('project', 'kind', 'handle', 'files'))
+            kind, files = payload['kind'], payload['files']
+            if kind not in ('blobs', 'manifest'):
+                raise RequestError('INVALID_REQUEST', 'kind')
+            if (not isinstance(files, list) or not 1 <= len(files) <= (self.masks.EXPORT_PAGE if kind == 'blobs' else 1)
+                    or not all(isinstance(item, dict) and set(item) == {'name', 'byte_length'} and isinstance(item['name'], str)
+                               and self.masks.HEX64.fullmatch(item['name']) and type(item['byte_length']) is int and item['byte_length'] > 0
+                               for item in files)):
+                raise RequestError('INVALID_REQUEST', 'files')
+            value = self.store.get(payload['handle'], committed=True)
+            if value.dtype != 'u8' or len(value.shape) != 1 or value.length != sum(item['byte_length'] for item in files):
+                raise RequestError('INVALID_BUFFER', 'files')
+            data = value.path.read_bytes()
+            if len(data) != value.length or hashlib.sha256(data).hexdigest() != value.expected_hash:
+                raise RequestError('INTERNAL')
+            store, parts, offset = self.mask_store(payload['project']), [], 0
+            for item in files:
+                parts.append((item['name'], data[offset:offset + item['byte_length']]))
+                offset += item['byte_length']
+            if kind == 'manifest':
+                return {'manifest': self.masks.write_or_disk_error(store.import_manifest, parts[0][0], parts[0][1])}
+            return {'accepted': self.masks.write_or_disk_error(store.import_blobs, parts)}
         if operation == 'mask.forget':                                          # card M8.4.27: the project's folder is about to be deleted
             require_fields(payload, ('project',))
             store = self.mask_store(payload['project'])

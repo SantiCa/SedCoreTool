@@ -53,6 +53,7 @@ DERIVED_KINDS = ('reopen',)                     # card M8.4.29: what the page de
 MAX_DERIVED_BYTES = 128 * 2**20                 # uncompressed; the page's limit is stated in the card before measuring, then recorded against the measurement
 DERIVED_NAME = re.compile(r'([0-9a-f]{64})\.([a-z]{1,16})')
 COMPRESSION_LEVEL = 1
+EXPORT_PAGE = 32                                # blobs per `mask.export` or `mask.import` (card M8.4.18c: folder backup and restore)
 BLOB_CACHE_BYTES = 64 * 2**20
 HEX64 = re.compile('[0-9a-f]{64}')
 PROJECT = re.compile('[a-z0-9_-]{1,64}')
@@ -60,6 +61,7 @@ SECTION = re.compile('[A-Za-z0-9_-]{1,64}')
 POSITION_KEY = re.compile(r'(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})')
 WINDOWS_DEVICES = {'con', 'prn', 'aux', 'nul', *(f'com{i}' for i in range(10)), *(f'lpt{i}' for i in range(10))}
 ZEROS = bytes(LAYER_BYTES['labels'])
+MAX_BLOB_BYTES = max(*LAYER_BYTES.values(), *TABLE_LIMITS.values())   # the largest uncompressed blob: a stack table of 16 MiB
 ZERO_LAYER = {layer: bytes(length) for layer, length in LAYER_BYTES.items()}
 
 
@@ -261,6 +263,21 @@ class BlobCache:
             self.size -= len(dropped)
 
 
+def inflate_blob(raw: bytes, sha256: str, length: int | None, field: str) -> bytes:
+    """The uncompressed bytes of the zlib stream ``raw``: exactly ``length`` bytes (at most ``MAX_BLOB_BYTES`` when ``length`` is None), one whole
+    stream with nothing after it, hashing to ``sha256``; otherwise ``MaskError('INVALID_BUFFER', field)``."""
+    bound = MAX_BLOB_BYTES if length is None else length
+    try:
+        inflater = zlib.decompressobj()
+        data = inflater.decompress(raw, bound + 1)
+    except zlib.error:
+        raise MaskError('INVALID_BUFFER', field) from None
+    if (len(data) != length if length is not None else not 0 < len(data) <= bound) or not inflater.eof or inflater.unused_data \
+            or inflater.unconsumed_tail or hashlib.sha256(data).hexdigest() != sha256:
+        raise MaskError('INVALID_BUFFER', field)
+    return data
+
+
 def _write_durably(path: Path, data: bytes) -> None:
     """Temporary file in the same folder, flushed to the disk, then renamed over ``path``: a reader sees the old file or the whole new one."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -296,20 +313,19 @@ class MaskStore:
         data = self.cache.get(key)
         if data is not None and len(data) == length:
             return data
+        data = inflate_blob(self._raw_blob(sha256, length, field), sha256, length, field)
+        self.cache.put(key, data)
+        return data
+
+    def _raw_blob(self, sha256: str, length: int, field: str) -> bytes:
+        """The file of a blob as it is on disk (not verified here)."""
         path = self.blob_path(sha256)
         try:
             if path.is_symlink() or path.stat().st_size > length + length // 100 + 1024:   # more than zlib can need: not ours
                 raise MaskError('INVALID_BUFFER', field)
-            raw = path.read_bytes()
-            inflater = zlib.decompressobj()
-            data = inflater.decompress(raw, length + 1)
-        except (OSError, zlib.error):
+            return path.read_bytes()
+        except OSError:
             raise MaskError('INVALID_BUFFER', field) from None
-        if len(data) != length or not inflater.eof or inflater.unused_data or inflater.unconsumed_tail \
-                or hashlib.sha256(data).hexdigest() != sha256:
-            raise MaskError('INVALID_BUFFER', field)
-        self.cache.put(key, data)
-        return data
 
     def write_blob(self, data: bytes, sha256: str, field: str) -> None:
         """Store ``data`` (whose SHA-256 the caller has checked) unless a valid blob with that name is already there."""
@@ -391,6 +407,65 @@ class MaskStore:
         if not data or len(data) > MAX_DERIVED_BYTES or not inflater.eof or inflater.unused_data or inflater.unconsumed_tail:
             raise MaskError('INVALID_BUFFER', 'derived')
         return data
+
+    def blob_lengths(self, sha256: str) -> dict[str, tuple[int, str]]:
+        """Every blob a stored manifest names, with its uncompressed length and the field an error names (``tile`` or ``tables.<name>``)."""
+        manifest, tiles = self.read_manifest(sha256)
+        named = {name: (LAYER_BYTES[layer], 'tile') for entry in tiles.values() for layer in SAMPLE_BYTES if (name := entry[layer])}
+        named.update({table['sha256']: (table['byte_length'], f'tables.{key}') for key, table in manifest['tables'].items() if table})
+        return named
+
+    def export_manifest(self, sha256: str) -> bytes:
+        """The file of a stored manifest, checked (card M8.4.18c): its bytes are its canonical form and hash to its name."""
+        manifest, _ = self.read_manifest(sha256)
+        return canonical(manifest)
+
+    def export_blobs(self, sha256: str, names) -> list[bytes]:
+        """The files of 1 to ``EXPORT_PAGE`` blobs that the stored manifest ``sha256`` names, exactly as stored (zlib streams), each checked
+        to decompress to bytes with its name's hash before it is returned (card M8.4.18c). A name the manifest does not use is
+        ``INVALID_REQUEST`` (``blobs``); a damaged blob ``INVALID_BUFFER`` with its field."""
+        named = self.blob_lengths(sha256)
+        if not isinstance(names, list) or not 1 <= len(names) <= EXPORT_PAGE or not all(isinstance(name, str) and name in named for name in names):
+            raise MaskError('INVALID_REQUEST', 'blobs')
+        files = []
+        for name in names:
+            length, field = named[name]
+            raw = self._raw_blob(name, length, field)
+            inflate_blob(raw, name, length, field)
+            files.append(raw)
+        return files
+
+    def import_blobs(self, files) -> list[bool]:
+        """Store blobs given as ``(name, zlib stream)`` pairs, from a backup (card M8.4.18c). Each is accepted only if it decompresses, within
+        ``MAX_BLOB_BYTES``, to one whole stream whose SHA-256 is its name; returns, in order, whether each was accepted (a refused one is not
+        written, and does not stop the others)."""
+        accepted = []
+        for name, raw in files:
+            try:
+                if not (isinstance(name, str) and HEX64.fullmatch(name)) or len(raw) > MAX_BLOB_BYTES + MAX_BLOB_BYTES // 100 + 1024:
+                    raise MaskError('INVALID_BUFFER', 'blob')
+                data = inflate_blob(raw, name, None, 'blob')
+            except MaskError:
+                accepted.append(False)
+                continue
+            self.write_blob(data, name, 'blob')
+            accepted.append(True)
+        return accepted
+
+    def import_manifest(self, sha256: str, data: bytes) -> str:
+        """Store a manifest file from a backup (card M8.4.18c): it must pass every check of a stored one, and every blob it names must already be
+        in this store (else ``INVALID_REQUEST``, ``blobs``, and nothing is written). Written last, so a restore stopped half-way leaves only
+        blobs that no manifest names."""
+        if not isinstance(sha256, str) or not HEX64.fullmatch(sha256):
+            raise MaskError('INVALID_REQUEST', 'manifest')
+        manifest, tiles = parse_manifest(data, sha256)
+        names = {name for entry in tiles.values() for name in (entry['labels'], entry['exclude']) if name}
+        names.update(table['sha256'] for table in manifest['tables'].values() if table)
+        if not all(self.blob_path(name).is_file() and not self.blob_path(name).is_symlink() for name in names):
+            raise MaskError('INVALID_REQUEST', 'blobs')
+        if self.write_manifest(manifest) != sha256:
+            raise MaskError('INTERNAL', 'manifest')
+        return sha256
 
     def blobs_of(self, sha256: str) -> set[str]:
         """Every blob a stored manifest names: its tiles' layers and its tables."""

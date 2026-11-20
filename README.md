@@ -116,6 +116,8 @@ U-Net on the computer.
    If permission cannot be restored, use **Choose automatic backup folder…** to select the folder again.
    In the desktop program, choose a dedicated subfolder if a system folder is rejected. Slow folder copies
    run in the background after the local save, so you can continue navigating or export a project.
+   In the desktop program with the scientific engine on, the folder copy also holds the masks of large (tiled) sections;
+   opening the project folder on another computer restores them (their source image must be located there).
    A project with an invalid analysis region or broken mask references opens for inspection, with a warning in
    the affected section. Edits are temporary and a project export keeps the original data.
 

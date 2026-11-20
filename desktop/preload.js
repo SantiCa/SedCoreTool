@@ -38,6 +38,9 @@ contextBridge.exposeInMainWorld('corantoolDesktop', {
     // Card M8.4.29: a cache of what the page derived from a stored version (a file the engine keeps next to it).
     derivedPut: (project, manifest, kind, bytes) => ipcRenderer.invoke('tiles:derivedPut', project, manifest, kind, bytes),
     derivedGet: (project, manifest, kind) => ipcRenderer.invoke('tiles:derivedGet', project, manifest, kind),
+    // Card M8.4.18c: the files of a stored version for a backup folder, and back into a store at a restore (verified by the engine).
+    maskExport: (project, manifest, blobs) => ipcRenderer.invoke('tiles:maskExport', project, manifest, blobs),
+    maskImport: (project, kind, files) => ipcRenderer.invoke('tiles:maskImport', project, kind, files),
     rememberSource: (project, pyramid) => ipcRenderer.invoke('tiles:rememberSource', project, pyramid),
     reopen: (project, pyramid, key) => ipcRenderer.invoke('tiles:reopen', project, pyramid, key),
     // Card M8.4.18b: a moved source located again (a File the user chose, sent as its path), and a copy of the source into the project.

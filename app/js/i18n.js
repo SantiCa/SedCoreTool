@@ -2212,3 +2212,9 @@ Object.assign(D.en, {
   'engine.retry': 'Retry', 'engine.restarted': 'The scientific engine stopped and was restarted. The sections are being recalculated.', 'engine.restartFailed': 'The scientific engine could not be restarted. The sections keep their error.',
 });
 Object.assign(D.en, { 'nav.preview': 'Optimised navigation preview', 'nav.previewTip': 'Enabled at startup. Disable it to use the previous renderer for this session; figures and data are unchanged.' });
+Object.assign(D.es, {
+  'bk.tiledRefused': 'Las máscaras de la sección grande «{s}» de «{p}» no se han restaurado: en la copia falta o está dañado «{w}». Se abrirá bloqueada; restaura desde otra copia o abre la carpeta del proyecto.',
+  'bk.tiledNeedsEngine': 'Las máscaras de {n} secciones grandes de «{p}» no se han restaurado: hace falta el programa de escritorio con el motor activado. Vuelve a restaurar con él.' });
+Object.assign(D.en, {
+  'bk.tiledRefused': 'The masks of the large section «{s}» of «{p}» were not restored: «{w}» is missing or damaged in the copy. It will open locked; restore from another copy or open the project folder.',
+  'bk.tiledNeedsEngine': 'The masks of {n} large sections of «{p}» were not restored: this needs the desktop program with the engine on. Restore again with it.' });

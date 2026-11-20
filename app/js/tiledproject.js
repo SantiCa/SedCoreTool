@@ -6,6 +6,7 @@ import { MaskTiles, reduceTile } from './tiledmasks.js';
 import { tileHistogram } from './tiledcounts.js';
 import { TiledObjectStats } from './tiledit.js';
 import { CacheRejected, decodeReopenCache, encodeReopenCache, statsCover } from './tiledcache.js';
+import { backupTiledSections, restoreVersion } from './tiledbackup.js';
 import { features } from './imageproc.js';
 import { pxPerCm } from './sectiondepth.js';
 import { t } from './i18n.js';
@@ -161,6 +162,35 @@ export function createTiledProject(ctx) {
     }
   }
 
+  /**
+   * Card M8.4.18c: the masks of the tiled sections of `json` (the project as the folder backup writes it) into its backup folder `dir`. Without the
+   * engine they cannot be read, and the sections are left out as before (cards M8.4.18d and M8.4.33). Returns the sections left out.
+   */
+  async function backupTiledOf(dir, id, json) {
+    if (ctx.TILES?.maskExport) return backupTiledSections(ctx.TILES, dir, storeProject(id), json, hexDigest);
+    const leftOut = (json.cores || [json]).flatMap((c) => (Array.isArray(c.sections) ? c.sections.filter((q) => q.tiled).map((q) => ({ core: c.name ?? null, section: q.name ?? q.id })) : []));
+    for (const c of json.cores || [json]) if (Array.isArray(c.sections)) c.sections = c.sections.filter((q) => !q.tiled);
+    if (leftOut.length) json.left_out = [...(json.left_out || []), ...leftOut];
+    return leftOut;
+  }
+
+  /**
+   * Card M8.4.18c: at a restore, the stored versions of the project's tiled sections from the backup folder (`readFile` reads one of its files by
+   * relative path; null for a file restored on its own) into the store of the project's (final) identifier, unless the store has them already. A
+   * section whose version cannot be restored keeps its record and opens locked (card M8.4.27); the user is told which file was missing or damaged.
+   */
+  async function restoreTiledOf(p, readFile) {
+    const tiled = (p.cores || [p]).flatMap((c) => (Array.isArray(c.sections) ? c.sections : [])).filter((q) => q.tiled?.manifest);
+    if (!tiled.length) return;
+    if (!ctx.TILES?.maskImport) { toast(t('bk.tiledNeedsEngine', { p: p.name || APP, n: tiled.length }), 12000); return; }
+    const project = storeProject(p.id);
+    for (const q of tiled) {
+      if (!(await ctx.TILES.maskInfo(project, q.tiled.manifest, 0)).error) continue;            // already in this computer's store
+      const failed = readFile ? await restoreVersion(ctx.TILES, project, q.tiled.manifest, readFile) : 'manifest';
+      if (failed) toast(t('bk.tiledRefused', { s: q.name || '?', p: p.name || APP, w: failed }), 15000);
+    }
+  }
+
   /** Card M8.4.34: tell the main process which stores belong to the projects of the library listing (it deletes only those, after asking when the page did not open them). Returns the list unchanged. */
   function announceStoreProjects(list) {
     if (ctx.TILES?.announceProjects && Array.isArray(list)) void ctx.TILES.announceProjects(list.map((m) => storeProject(m.id)).slice(0, 8192)).catch(() => {});
@@ -245,5 +275,5 @@ export function createTiledProject(ctx) {
     await writeReopenCaches();                                           // after the clean-up, so that it never removes a cache that was just written
   }
 
-  return { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, retainStore, announceStoreProjects };
+  return { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, retainStore, announceStoreProjects, backupTiledOf, restoreTiledOf };
 }

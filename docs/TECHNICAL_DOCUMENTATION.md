@@ -172,6 +172,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `singleflight.js` | One run at a time with at most one more run for the requests made meanwhile, if the revision changed (card M8.4.31): project saves | Yes |
 | `tiledundo.js` | Undo and redo of tiled edits (card M8.4.16 step 5): copies of the mask tiles an edit changed, taken before its first write and swapped with the page's tiles (`TileChanges`); the 64 MiB budget of those copies (`trimTileHistory`) | Yes |
 | `tiledcounts.js` | Row counts of tiled sections (card M8.4.17): the histogram of each tile (`tileHistogram`), their sum under the current classes (`TiledRowCounts`) and the queue that counts changed tiles between frames (`TiledCountsRunner`); no DOM |
+| `tiledbackup.js` | Tiled sections in the folder backup and back into the store at a restore (card M8.4.18c): `backupTiledSections`, `restoreVersion`, `manifestBlobs`; no DOM (the folder is a directory handle or a read function) |
 | `tiledcache.js` | The reopening cache of a tiled section (card M8.4.29): `encodeReopenCache` and `decodeReopenCache` (every check; a refusal is `CacheRejected`), `statsCover`; no DOM |
 | `tiledsource.js` | The original image of a tiled section in the section form (card M8.4.18b): where it is, "Locate the image…" and "Copy the image into the project", through `window.corantoolDesktop.tiles` (`createTiledSourcePanel`); `sizeText` | — |
 | `tiledsync.js` | Sending the masks of tiled sections to the engine's store (card M8.4.16): rounds of staged version, dirty tiles and tables, commit and acknowledgement, retried after a failure (`MaskSync`); reading back tiles the page dropped (`MaskLoader`); the tables as bytes (`maskTables`) | Yes |
@@ -2330,7 +2331,23 @@ Dropbox; Chrome and Edge, and the desktop program), one folder per project:
 - `<name>__<id>/images/` — original images, each stored image key written once;
 - `<name>__<id>/historial/<YYYY-MM-DD>.json` — the last version of each day. The 30 most recent daily copies are kept
   and, of older ones, the first of each month for 12 months; the rest are deleted;
+- `<name>__<id>/tiles/<sha256>` and `<name>__<id>/manifests/<sha256>.json` — the stored versions of the project's tiled sections (card
+  M8.4.18c; format in contract §8.7, "Backup folder"), desktop program with the engine on only;
 - `sedcoretool_ajustes.json` — the user settings.
+
+**Tiled sections in the copy (card M8.4.18c, `tiledbackup.js`, `backupTiledOf` and `restoreTiledOf` in `tiledproject.js`).** Before a project's
+`project.json` is written, the stored version that each tiled section's record names is copied into the project's folder unless its manifest is
+already there: the manifest's file is asked of the engine (`mask.export`), the blobs it names that the folder lacks are asked 32 at a time, each
+file is written, read back and its SHA-256 compared with the one the engine sent (`BACKUP_MISMATCH` otherwise), and the manifest is written last.
+A section whose version is missing or damaged in the store (`INVALID_REQUEST`, `INVALID_BUFFER`) is taken out of `project.json` and named in
+`left_out`, and the user is told once per session; any other failure (engine stopped or busy, disk, folder) fails the copy, which is retried, and
+the previous `project.json` stays. Without the engine, tiled sections are left out as before. Nothing is ever deleted from `tiles/` and
+`manifests/`. Restoring a project folder («Open project folder»), before the project is stored under its final identifier, reads each tiled
+section's version from the folder into that identifier's store (`mask.import`: the blobs first, at most 32 files or 64 MiB per request, the
+manifest last), unless the store has it already. A missing or damaged file refuses that version whole: its manifest is not written, the section
+keeps its record and opens locked (card M8.4.27), and the user is told which file (`<row>.<col>` of a tile, `tables.<name>`, or `manifest`). A
+project file imported on its own (not as a folder) has no folder to read from: its tiled sections open only if this computer's store has their
+versions. The section's source image is not in the copy: on another computer it opens grey until its image is located (card M8.4.18b).
 
 A copy is requested 20 s after each change and in the background when switching projects; each copy also writes
 every other project modified since the previous copy. Attempts share one in-flight promise per renderer:
@@ -3641,7 +3658,8 @@ The percentage difference comes from the JPEG decoder (§3.4), not from the meth
     with hundreds of thousands of samples); MDI importance is biased among correlated proxies; everything is computed
     on the user's computer.
 11. **Known defects, with cards in the roadmap** (found by the audits of 19 November 2026; each item is removed when its card is done):
-    backups and packages leave tiled sections out; they say so and name them (`left_out`, card M8.4.33) until M8.4.18c-d carry them.
+    packages leave tiled sections out; they say so and name them (`left_out`, card M8.4.33) until card M8.4.18d carries them. The folder backup
+    carries their masks (card M8.4.18c) but not a copy of their source image kept in the project.
 
 ## 33. Reproducibility
 

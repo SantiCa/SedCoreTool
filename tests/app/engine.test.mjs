@@ -491,3 +491,37 @@ test('mask tiles through the real client and the page bridge: a version written,
   assert.deepEqual(await bridge.call(page, 'maskDiscard', again.ok.staged), { ok: {} });
   assert.equal(client.status().state, 'ready');
 });
+
+test('card M8.4.18c: a stored version exported through the real client and the page bridge is imported into another project and reads identically', { skip: !python, timeout: 60000 }, async (t) => {
+  const projectsDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'sedcoretool-projects-test-'));
+  t.after(() => fs.rm(projectsDirectory, { recursive: true, force: true }));
+  const client = await clientFixture(t, { projectsDirectory });
+  const { createTileIpc } = require('../../desktop/tile-ipc.js');
+  const bridge = createTileIpc({ engine: { request: (op, payload, binary, options) => client.request(op, payload, binary, options) } });
+  const page = 7, begun = await bridge.call(page, 'maskBegin', 'p1', 's1', 1300, 1100, null);
+  const labels = new Int32Array(512 * 512); labels[5] = 42;
+  const labelBytes = new Uint8Array(labels.buffer);
+  await bridge.call(page, 'maskPut', begun.ok.staged, 'labels', 1, 2, digest(labelBytes), labelBytes);
+  const tables = { object_ids: new Uint8Array(new Uint32Array([42]).buffer), object_class: new Uint8Array(new Int32Array([0]).buffer),
+    object_predicted: new Uint8Array(new Int32Array([-1]).buffer), object_confidence: new Uint8Array(new Float64Array([0]).buffer),
+    classes: new TextEncoder().encode('[{"id":"a","name":"Burrow","counts":true}]'), stack_offsets: new Uint8Array(new Uint32Array([0, 0]).buffer), stack_members: null };
+  const manifest = (await bridge.call(page, 'maskCommit', begun.ok.staged, tables)).ok.manifest;
+  const exported = await bridge.call(page, 'maskExport', 'p1', manifest, null);
+  assert.equal(exported.ok.files.length, 1);
+  const text = exported.ok.files[0].bytes, named = JSON.parse(Buffer.from(text).toString('ascii'));
+  assert.equal(digest(text), manifest, 'the manifest file hashes to its name');
+  const names = [named.tiles['1.2'].labels, ...Object.values(named.tables).filter(Boolean).map((table) => table.sha256)];
+  const blobs = (await bridge.call(page, 'maskExport', 'p1', manifest, names)).ok.files;
+  assert.deepEqual(blobs.map((file) => file.name), names);
+  for (const file of blobs) assert.equal(digest(file.bytes), file.sha256, 'each file arrives as it was sent');
+  assert.deepEqual(await bridge.call(page, 'maskImport', 'p2', 'manifest', [{ name: manifest, bytes: text }]), { error: { code: 'INVALID_REQUEST', field: 'blobs' } });
+  assert.deepEqual(await bridge.call(page, 'maskImport', 'p2', 'blobs', blobs.map((file) => ({ name: file.name, bytes: file.bytes }))), { ok: { accepted: names.map(() => true) } });
+  assert.deepEqual(await bridge.call(page, 'maskImport', 'p2', 'manifest', [{ name: manifest, bytes: text }]), { ok: { manifest } });
+  const read = await bridge.call(page, 'maskRead', 'p2', manifest, 'labels', [[1, 2]]);
+  assert.equal(Buffer.compare(Buffer.from(read.ok.bytes), Buffer.from(labelBytes)), 0);
+  for (const [args, field] of [[['maskExport', 'p1', manifest, []], 'blobs'], [['maskExport', 'p1', 'x', null], 'manifest'], [['maskImport', 'p2', 'other', []], 'kind'],
+    [['maskImport', 'p2', 'blobs', [{ name: 'x', bytes: text }]], 'files'], [['maskImport', 'p2', 'manifest', [{ name: manifest, bytes: text }, { name: manifest, bytes: text }]], 'files']]) {
+    assert.equal((await bridge.call(page, ...args)).error?.field, field, JSON.stringify(args.slice(0, 3)));
+  }
+  assert.equal(client.status().state, 'ready');
+});

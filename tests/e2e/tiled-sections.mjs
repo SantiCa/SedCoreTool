@@ -673,7 +673,7 @@ try {
     await page.click('#redoBtn'); await idle();
     await page.click('#undoBtn'); await idle();
   };
-  const dump = (index) => on.page.evaluate((index) => {
+  const dumpIn = (page, index) => page.evaluate((index) => {
     const s = window.ichantool.S.sections[index], width = s.tiled ? s.maskTiles.width : s.w, height = s.tiled ? s.maskTiles.height : s.h;
     const at = s.tiled ? (x, y) => s.maskTiles.labelAt(x, y) : (x, y) => s.labels[y * s.w + x];
     const exAt = s.tiled ? (x, y) => { const e = s.maskTiles.get(Math.floor(y / 512), Math.floor(x / 512)); return e?.exclude ? e.exclude[(y % 512) * 512 + (x % 512)] : 0; } : (x, y) => s.exclude[y * s.w + x];
@@ -691,6 +691,7 @@ try {
     const stacks = s.stacks.map((m) => (m ? m.slice().sort((a, b) => a - b) : null));
     return { runs, exRuns, objects, usedStacks: [...new Set(runs.map((r) => r[3]).filter((n) => n.includes('+')))].sort(), stackCount: stacks.length, nextId: s.nextId };
   }, index);
+  const dump = (index) => dumpIn(on.page, index);
   await script(wholeAt); await script(tiledAt);
   const whole = await dump(wholeAt), tiledDump = await dump(tiledAt);
   assert.ok(whole.runs.length > 50 && whole.exRuns.length > 0 && whole.usedStacks.length > 0 && whole.objects.length >= 2, 'the script made labels, exclusion and overlaps: ' + JSON.stringify({ r: whole.runs.length, e: whole.exRuns.length, s: whole.usedStacks, o: whole.objects.length }));
@@ -887,6 +888,81 @@ try {
   // D2: the same project in a program without tiled sections: a placeholder whose record is saved back byte for byte.
   projectRecord = await on.page.evaluate(async () => { const { getProject } = await import(new URL('js/storage.js', location.href).href); return JSON.parse(JSON.stringify(await getProject(window.ichantool.S.id))); });
   console.log('Saving and reopening: identical masks, objects and table after a reopen, a rebuilt pyramid and a missing source (grey, locked); the moved image located (another file refused), copied into the project and reopened from the copy; D1 keeps the saved version');
+  // Card M8.4.18c: the folder backup carries the tiled section: the files of its version are written once, by name (a second backup rewrites none of
+  // them); a restore in another program with an empty store (another computer: another profile) opens it with identical masks and objects; a damaged
+  // file of the folder refuses the section, which opens locked. The folder is a directory of the origin's private file system (as a chosen folder).
+  const backupFiles = (page, folder) => page.evaluate(async (folder) => {
+    const b64 = (bytes) => { let text = ''; for (let i = 0; i < bytes.length; i += 32768) text += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + 32768))); return btoa(text); };
+    const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle(folder, { create: true });
+    await window.ichantool.projectFolderTo(dir);
+    const out = {};
+    const walk = async (handle, prefix) => {
+      for await (const [name, child] of handle.entries()) {
+        if (child.kind === 'directory') await walk(child, prefix + name + '/');
+        else { const file = await child.getFile(); out[prefix + name] = { modified: file.lastModified, b64: b64(new Uint8Array(await file.arrayBuffer())) }; }
+      }
+    };
+    await walk(dir, '');
+    return out;
+  }, folder);
+  const backupTiledId = await on.page.evaluate(() => window.__tiledId);
+  const firstBackup = await backupFiles(on.page, 'backup-m8418c');
+  const backupFolderName = Object.keys(firstBackup).find((name) => name.endsWith('/project.json')).split('/')[0];
+  const backupProject = JSON.parse(Buffer.from(firstBackup[backupFolderName + '/project.json'].b64, 'base64').toString('utf8'));
+  const backedTiled = backupProject.cores.flatMap((c) => c.sections).filter((q) => q.tiled);
+  assert.ok(backedTiled.some((q) => q.id === backupTiledId) && !backupProject.left_out, 'the backup keeps its tiled sections: ' + JSON.stringify(backupProject.left_out ?? null));
+  const versionFiles = Object.keys(firstBackup).filter((name) => name.startsWith(backupFolderName + '/tiles/') || name.startsWith(backupFolderName + '/manifests/'));
+  for (const q of backedTiled) assert.ok(firstBackup[`${backupFolderName}/manifests/${q.tiled.manifest}.json`], 'the version of ' + q.id + ' is in the folder');
+  assert.ok(versionFiles.some((name) => name.includes('/tiles/')), 'its tiles are in the folder');
+  const secondBackup = await backupFiles(on.page, 'backup-m8418c');
+  for (const name of versionFiles) assert.equal(secondBackup[name].modified, firstBackup[name].modified, 'not written again: ' + name);
+  const expectedRestore = beforeSave;
+  const other = await program(true);
+  try {
+    const otherToasts = [];
+    await other.page.exposeFunction('tiledToast', (text) => otherToasts.push(text));
+    await other.page.evaluate(() => new MutationObserver(() => { const el = document.getElementById('toast'); if (el && !el.hidden) window.tiledToast(el.textContent); })
+      .observe(document.getElementById('toast'), { attributes: true, childList: true, subtree: true, characterData: true }));
+    const restoreIn = (files, folder, id) => other.page.evaluate(async (files, folder, folderName, id) => {
+      const top = await (await navigator.storage.getDirectory()).getDirectoryHandle(folder, { create: true });
+      for (const [name, file] of Object.entries(files)) {
+        const parts = name.split('/');
+        let dir = top;
+        for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part, { create: true });
+        const writable = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
+        await writable.write(Uint8Array.from(atob(file.b64), (c) => c.charCodeAt(0))); await writable.close();
+      }
+      const projectFolder = await top.getDirectoryHandle(folderName), record = JSON.parse(await (await (await projectFolder.getFileHandle('project.json')).getFile()).text());
+      if (id) { record.id = id; record.name += ' (damaged copy)'; }
+      await window.ichantool.restoreFolders([{ folder: projectFolder, text: JSON.stringify(record) }]);
+      for (let i = 0; i < 2400 && !(window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle()); i++) await new Promise((r) => setTimeout(r, 50));
+      const index = window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId);
+      return { index, id: window.ichantool.S.id, frozen: window.ichantool.S.sections[index]?.frozen ?? 'absent', manifest: window.ichantool.S.sections[index]?._savedRecord?.tiled?.manifest ?? null };
+    }, files, folder, backupFolderName, id);
+    await other.page.evaluate((id) => { window.__tiledId = id; }, backupTiledId);
+    // A damaged tile: the section's version is refused whole and it opens locked; the user is told which tile.
+    const ownVersion = backedTiled.find((q) => q.id === backupTiledId).tiled.manifest;
+    const ownTiles = Object.values(JSON.parse(Buffer.from(firstBackup[`${backupFolderName}/manifests/${ownVersion}.json`].b64, 'base64').toString('ascii')).tiles);
+    const damagedFiles = structuredClone(firstBackup), victim = `${backupFolderName}/tiles/${ownTiles[0].labels ?? ownTiles[0].exclude}`;
+    const victimBytes = Buffer.from(damagedFiles[victim].b64, 'base64'); victimBytes[Math.floor(victimBytes.length / 2)] ^= 0xff;
+    damagedFiles[victim].b64 = victimBytes.toString('base64');
+    const damagedRestore = await restoreIn(damagedFiles, 'restore-damaged', 'e2e-damaged-copy');
+    assert.equal(damagedRestore.frozen, 'store', 'a damaged file of the folder: the section opens locked');
+    assert.ok(otherToasts.some((text) => /no se han restaurado|were not restored/.test(text)), 'the user is told: ' + JSON.stringify(otherToasts));
+    assert.ok(!fs.existsSync(path.join(other.profile, 'projects', 'e2e-damaged-copy', 'tiles', 'manifests', damagedRestore.manifest + '.json')), 'never a partial version in the store');
+    // The intact folder: every version back in the empty store, the section opens (grey: the image is not on this computer) with the same masks.
+    const restored = await restoreIn(firstBackup, 'restore-good', null);
+    assert.equal(restored.manifest, backedTiled.find((q) => q.id === backupTiledId).tiled.manifest);
+    assert.equal(restored.frozen, 'source', 'restored on another computer: masks there, the image is not');
+    const store = await other.page.evaluate(() => window.ichantool.storeProject());
+    for (const q of backedTiled) assert.ok(fs.existsSync(path.join(other.profile, 'projects', store, 'tiles', 'manifests', q.tiled.manifest + '.json')), 'version restored into the store: ' + q.id);
+    await other.page.evaluate((index) => window.ichantool.tiledMasksLoad(index), restored.index);
+    const got = await dumpIn(other.page, restored.index);
+    assert.deepEqual([got.runs, got.exRuns, got.usedStacks, got.nextId], [expectedRestore.runs, expectedRestore.exRuns, expectedRestore.usedStacks, expectedRestore.nextId], 'restored masks identical');
+    assert.deepEqual(got.objects.map((o) => [o.id, o.cls, o.area, o.bbox]), expectedRestore.objects.map((o) => [o.id, o.cls, o.area, o.bbox]), 'restored objects identical');
+    assert.deepEqual(other.errors, []);
+  } finally { await other.close(); }
+  console.log(`Folder backup: ${versionFiles.length} files of tiled versions written once (a second backup rewrote none); restored in another profile with identical masks and objects; a damaged tile refused the section (locked)`);
   // Card M8.4.27: the store folder follows its project. (1) A missing stored version: the project opens, the section is locked and says so, its
   // record is saved back unchanged, the rest is edited and saved; with the version back it opens as before.
   const storeFolder = async (id = null) => path.join(on.profile, 'projects', await on.page.evaluate((id) => window.ichantool.storeProject(id), id));
