@@ -118,6 +118,17 @@ export async function verifyFigureComposition(browser, url, { screenshots = fals
       png: [...new Uint8Array(await window.__compositionExports.find((b) => b.type === 'image/png').arrayBuffer()).slice(0, 8)] }));
     assert.match(exported.svg, /data-role="abundance"/); assert.match(exported.svg, /#fff8e8/);
     assert.deepEqual(exported.png, [137, 80, 78, 71, 13, 10, 26, 10]);
+    // Card P1: at 600 dpi the PNG carries a pHYs chunk right after IHDR (23622 px/m, unit metre); the default export has none.
+    const physOf = (bytes) => (String.fromCharCode(...bytes.slice(37, 41)) === 'pHYs'   // IHDR ends at byte 33; the next chunk is length (4), type (4), data
+      ? { ppmX: new DataView(bytes.buffer).getUint32(41), ppmY: new DataView(bytes.buffer).getUint32(45), unit: bytes[49] } : null);
+    const firstPng = await page.evaluate(async () => [...new Uint8Array(await window.__compositionExports.find((b) => b.type === 'image/png').arrayBuffer()).slice(0, 56)]);
+    assert.equal(physOf(Uint8Array.from(firstPng)), null);
+    await page.evaluate(() => { window.__compositionExports.length = 0; });
+    await page.select('#figPngDpi', '600'); await click('#figPng');
+    await page.waitForFunction(() => window.__compositionExports.some((blob) => blob.type === 'image/png'), { timeout: 60000 });
+    const highPng = await page.evaluate(async () => [...new Uint8Array(await window.__compositionExports.find((b) => b.type === 'image/png').arrayBuffer()).slice(0, 56)]);
+    assert.deepEqual(physOf(Uint8Array.from(highPng)), { ppmX: 23622, ppmY: 23622, unit: 1 });
+    await page.select('#figPngDpi', '0');
     await click('#figCompositionReset');
     assert.equal(await page.evaluate(() => window.ichantool.S.fig.views.log == null), true);
     assert.equal(await page.$eval('[data-fview="axis"]', (input) => input.value), 'depth');

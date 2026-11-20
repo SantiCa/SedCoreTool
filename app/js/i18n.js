@@ -601,6 +601,7 @@ Object.assign(D.en, {
 Object.assign(D.es, {
   'mode.fig': 'Figuras', 'fig.type': 'Figura', 'fig.t.traces': 'Trazas representativas por icnotaxón', 'fig.t.core': 'Sondeo entero interpretado',
   'fig.t.log': 'Registro del sondeo (ventana actual)', 'fig.t.geolog': 'Registro multiproxy de un sondeo', 'fig.t.map': 'Mapa multiproxy',
+  'fig.pngRes': 'Resolución del PNG', 'fig.pngRes0': '×2 (pantalla)', 'fig.pngTooBig': 'A {dpi} dpi la imagen tendría {w} × {h} px, más de lo que el navegador puede dibujar; elige una resolución menor.',
   'fig.title': 'Título', 'fig.caption': 'Pie de figura', 'fig.note': 'SVG para editar en Inkscape o Illustrator; PNG a doble resolución.',
   'fig.n': 'Ejemplos por icnotaxón', 'fig.pick': 'Elección automática', 'fig.pick.largest': 'Los más grandes', 'fig.pick.typical': 'Los más típicos', 'fig.pick.spread': 'Repartidos en profundidad',
   'fig.tile': 'Tamaño de cada ejemplo (px)', 'fig.outline': 'Dibujar el contorno de la traza', 'fig.auto': 'Elegir automáticamente',
@@ -613,6 +614,7 @@ Object.assign(D.es, {
 Object.assign(D.en, {
   'mode.fig': 'Figures', 'fig.type': 'Figure', 'fig.t.traces': 'Representative traces per ichnotaxon', 'fig.t.core': 'Whole interpreted core',
   'fig.t.log': 'Core log (current window)', 'fig.t.geolog': 'Multiproxy log of a core', 'fig.t.map': 'Multiproxy map',
+  'fig.pngRes': 'PNG resolution', 'fig.pngRes0': '×2 (screen)', 'fig.pngTooBig': 'At {dpi} dpi the image would be {w} × {h} px, more than the browser can draw; choose a lower resolution.',
   'fig.title': 'Title', 'fig.caption': 'Caption', 'fig.note': 'SVG to edit in Inkscape or Illustrator; PNG at double resolution.',
   'fig.n': 'Examples per ichnotaxon', 'fig.pick': 'Automatic choice', 'fig.pick.largest': 'Largest', 'fig.pick.typical': 'Most typical', 'fig.pick.spread': 'Spread in depth',
   'fig.tile': 'Size of each example (px)', 'fig.outline': 'Draw the trace outline', 'fig.auto': 'Choose automatically',
@@ -1501,7 +1503,7 @@ Object.assign(D.es, {
   'h.fig.type': 'Tipo de figura que se compone.',
   'h.fig.title': 'Título que aparece en la figura.',
   'h.#figSvg': 'Exporta la figura como SVG (vectorial, editable).',
-  'h.#figPng': 'Exporta la figura como imagen PNG.',
+  'h.#figPng': 'Exporta la figura como imagen PNG. Con 300 o 600 dpi el archivo declara esa resolución, calculada sobre el tamaño de la figura en pantalla (96 px por pulgada).',
   'h.data.core': 'Sondeo cuyos datos se muestran.',
   'h.data.showLayers': 'Muestra también las capas de intervalos en la tabla.',
   'h.data.csv': 'Descarga la tabla en CSV.',
@@ -1686,7 +1688,7 @@ Object.assign(D.en, {
   'h.fig.type': 'Type of figure being composed.',
   'h.fig.title': 'Title shown on the figure.',
   'h.#figSvg': 'Exports the figure as SVG (vector, editable).',
-  'h.#figPng': 'Exports the figure as a PNG image.',
+  'h.#figPng': 'Exports the figure as a PNG image. At 300 or 600 dpi the file declares that resolution, computed on the figure\'s size on screen (96 px per inch).',
   'h.data.core': 'Core whose data are shown.',
   'h.data.showLayers': 'Also shows the interval layers in the table.',
   'h.data.csv': 'Downloads the table as CSV.',

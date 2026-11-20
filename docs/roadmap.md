@@ -84,7 +84,7 @@ Updated 18 November 2026.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
 - **Next step: Q5** (long series: `extent()` without spreads, decimation on screen, the data record saved in parts; **model: most capable tier,
   effort medium**), then M8.4.29 and the rest of order O; M8.4.30 is done except its size target (decision R); M8.4.33 is done; M8.4.32 is done
-  (green on three systems, commit `4a20dfd`); Q5 parts 1-2 are done (part 3 changes the saved format: waits for the maintainer); Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
+  (green on three systems, commit `4a20dfd`); Q5 parts 1-2 are done (part 3 changes the saved format: waits for the maintainer); P1 is done on 20 Nov 2026 (`figsize.js`, `pngmeta.js`, PNG at 300/600 dpi; `npm test` 507, typecheck and standalone build pass; the 600 dpi check added to `tests/e2e/figure-composition.mjs` (run by `smoke.mjs`) **has not been run**: the permission system refused to start the local server for it, so it runs in the next session or on the maintainer's computer); Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
   council audit, below). **V0.152** (decision J) was prepared on 20 Nov 2026 at the maintainer's request ("Publica la 0.152 y haz un release"):
   full checks passed on the version commit (Windows: pytest 885 passed / 9 skipped, npm 478, typecheck, sync_version, ruff, standalone build,
   runtime rebuilt, desktop.mjs off and on, tiled-sections.mjs). **Published on 20 Nov 2026:** `master` `8ee9776`, tag `V0.152`, GitHub Release
@@ -2409,7 +2409,7 @@ Written from the council audit (status block). Each card names its model; the sc
   alternative embeds the bundled IBM Plex Sans, accepted everywhere but not the Arial/Helvetica that GSA, Nature and Copernicus name); **T**
   the new optional saved fields `fig.publish` and `fig.plate` (a saved-format change, AGENTS §3 item 5; older versions ignore them). Order:
   P1 at any time (pure, no saved field); P2-P5 after M8.4.30 and U1-U3, which move the dialogs and messages they use.
-- [ ] **P1 - Physical sizes, presets and PNG resolution.** Pure `figsize.js` (journal presets, `mmToPt`, `widthMm`, `pixelsFor`, the text,
+- [x] **P1 - Physical sizes, presets and PNG resolution** (done 20 Nov 2026, development gate; see CHANGELOG, card P1; the e2e check is pending, see the status). Pure `figsize.js` (journal presets, `mmToPt`, `widthMm`, `pixelsFor`, the text,
       line and raster audits, `panelLabel`, `fitWidths`, `OKABE_ITO`) and `pngmeta.js` (`crc32`, `withPhys`, `withText`); the PNG export can
       save at a chosen DPI with its `pHYs` chunk. *Do not touch:* the builders, the default ×2 PNG, saved fields. *Model:* fast tier, effort
       medium. *Tests:* `pixelsFor(170, 600) === 4016`, `pixelsFor(84, 600) === 1984`; `mmToPt(170)` = 481.89 ± 0.005; the PNG has `pHYs`

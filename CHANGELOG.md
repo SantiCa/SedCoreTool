@@ -14,6 +14,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### For users
 
+- Figures: the PNG export can save at 300 or 600 dpi (new «PNG resolution» selector); the file then declares that resolution, so an image viewer or a journal's upload check reads it. «×2 (screen)» is the same export as before.
 - Plots of the Data tab with very long series draw quickly: the screen shows the first, lowest, highest and last point of each pixel column, which looks the same; SVG and PNG exports keep every point.
 - Very long series (more than about 100,000 values in a record, an age model, a chart or a spreadsheet column) no longer stop a chart, a map or a figure with an error: their lowest and highest values are now found without the limit on function arguments of the browser.
 - A backup or a package of a project with large "tiled" sections now says, before it is written, which of them it leaves out (their masks are only on this computer for now), and names them in the file.
@@ -23,6 +24,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card P1: pure modules `figsize.js` (journal presets, `mmToPt`, `pixelsFor`, text/line/raster checks, `panelLabel`, `fitWidths`, Okabe-Ito) and `pngmeta.js` (`withPhys`, `withText`, `readPhys`; CRC from `zip.js`); tests in `tests/app/figsize.test.mjs` and a 600 dpi check in `tests/e2e/figure-composition.mjs`. The figure builders, the default ×2 PNG and the saved fields are unchanged.
 - Card M8.4.32: `tests/e2e/tiled-sections.mjs` on GitHub's machines. It waits for the test project to finish loading before adding the large image (the end of the load selected another section, so the pixel probe read a different image), measures the canvas before every stroke (its pane scrolled by about 29 px there, which put the scissors' line inside the trace), and its idle wait includes a wand still reading pixels (`objectsWaiting` in `tiledtools.js`). Failed steps save screenshots, uploaded as a workflow artifact.
 - Card Q5 part 2: `plot.js::decimatePerPixel` and `spec.decimate` for the plots of the Data tab (screen only; the exports build the plot again without it); tests in `tests/app/plot.test.mjs` (10^5 points: at most four per pixel column, the same vertical extent as the full drawing, short series unchanged).
 - Card Q5 part 1: `minOf` and `maxOf` in `core.js` (exactly `Math.min(...values)` and `Math.max(...values)`, including empty, NaN and -0, for any length) replace the 68 spread calls in 11 modules; `tests/app/extent.test.mjs` compares them with the spread on edge cases and checks a series of 10^6 values, where the spread throws.

@@ -196,6 +196,8 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `columns.js` | Composite log of a core: column view, records, order and visibility of chart columns | — |
 | `navpreview.js` | Navigation-only photo/mask reduction and bounded preview ownership | ✓ |
 | `figview.js` | Serializable figure presentation, inherited defaults and independent overrides | ✓ |
+| `figsize.js` | Journal presets (widths in mm, text and line minimums, dpi), `mmToPt`, `pixelsFor`, text, line and raster checks, `panelLabel`, `fitWidths`, Okabe-Ito palette (card P1; not yet used by the figure builders) | ✓ |
+| `pngmeta.js` | PNG `pHYs` (resolution) and `tEXt` chunks added to PNG bytes; reuses `zip.js::crc32` (card P1) | ✓ |
 | `panels.js` | Resizable and collapsible side panels, resizable maps | — |
 | `datatab.js` | Data tab: all data of the project, Grapher-like plots and the spreadsheet view | — |
 | `multiproxy.js` | Multiproxy tool: numeric records, interval layers, classifiers, composite-log readout, manual classification, maps | — |
@@ -1865,7 +1867,13 @@ more than the data. Outside the core perimeter the values are extrapolated and a
 ## 20. Figures
 
 The **Figures** mode prepares publication figures from the active core or project. All figures have an optional title
-and caption and are exported as SVG (images embedded) and PNG (×2); the location map also exports JPEG.
+and caption and are exported as SVG (images embedded) and PNG (×2 by default; or 300 / 600 dpi, below); the location map also exports JPEG.
+
+**PNG resolution.** The selector «PNG resolution» of the figure panel chooses the export: «×2 (screen)» draws the figure at twice its
+screen size and declares no resolution (as before); 300 or 600 dpi draws it at `dpi / 96` times its screen size (the figure's CSS size, 96 px
+per inch, is taken as its physical size) and adds a `pHYs` chunk right after `IHDR` with `round(dpi / 0.0254)` pixels per metre in both
+directions (600 dpi → 23622, 300 dpi → 11811; unit: metre). A picture wider or taller than 16 384 px, or of more than 2·10⁸ pixels, is
+refused with a message instead of drawn. The pixel and size rules of the journal presets live in `figsize.js` (`pixelsFor(170, 600) = 4016`).
 
 **Saved figures (tabs).** The project keeps a list of figures, shown as tabs above the figure (project fields `figTabs`,
 `[{ id, name, fig }]`, and `figTab`, the active one; `fig` repeats the active figure for files read by older versions).

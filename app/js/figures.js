@@ -9,6 +9,7 @@ import { UNIT_TO_CM, hasId, interpAge, topAt, minOf, maxOf } from './core.js';
 import { vec } from './learn.js';
 import { buildLogSVG, buildRangeSVG, taxaOptions, invertModel, extraTicks, noDataDefs, mergedStyle, noDataGaps, noDataRect, rowsRange, validHexColor, verticalTicks } from './log.js';
 import { t } from './i18n.js';
+import { withPhys } from './pngmeta.js';
 import { LOCMAP_DEFAULTS, buildLocMapSVG, lmFitBBox, lmUtmZone, lmZoom } from './locmap.js';
 
 /* ───────────── figures: representative traces, interpreted core, logs and maps ───────────── */
@@ -956,12 +957,17 @@ $('figPanel').addEventListener('click', (e) => {
   for (const c of S.classes) { const list = classTraces(c.id); if (list.length) F.picks[c.id] = autoPick(list, F.n, F.pick); }
   renderFigPanel(); markDirty(); renderFigure();
 });
+const CSS_PX_PER_INCH = 96, MAX_PNG_SIDE = 16384, MAX_PNG_PIXELS = 2e8;   // canvas limits of Chromium, with margin
 const figName = () => `${safe(S.name)}_${S.fig.type}`;
 $('figSvg').addEventListener('click', () => { if (figSvgCache) saveFile(figName() + '.svg', figSvgCache, 'image/svg+xml'); });
 $('figPng').addEventListener('click', () => busy(async () => {
   if (!figSvgCache) return;
   const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(figSvgCache); await img.decode();
-  const k = 2, c = document.createElement('canvas'); c.width = img.width * k; c.height = img.height * k;
+  const dpi = Number(/** @type {HTMLSelectElement} */ ($('figPngDpi')).value) || 0, k = dpi ? dpi / CSS_PX_PER_INCH : 2;   // "×2" keeps the screen export; a dpi is declared on the CSS size
+  const w = Math.round(img.width * k), h = Math.round(img.height * k);
+  if (w > MAX_PNG_SIDE || h > MAX_PNG_SIDE || w * h > MAX_PNG_PIXELS) { toast(t('fig.pngTooBig', { dpi, w, h })); return; }
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
   const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
-  const blob = await new Promise((r) => c.toBlob(r, 'image/png')); if (blob) await saveFile(figName() + '.png', blob, 'image/png');
+  const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+  if (blob) await saveFile(figName() + '.png', dpi ? new Blob([withPhys(new Uint8Array(await blob.arrayBuffer()), dpi)], { type: 'image/png' }) : blob, 'image/png');
 }));
