@@ -1331,7 +1331,7 @@ dialog). External records are any measured down-core series added to a core (XRF
 
 - **Formats:** CSV, TXT, TSV or DAT, and spreadsheets (`.xlsx`, `.xls`, `.ods`; the first sheet, with a warning when there are more;
   the stored numbers, not the text the cell's format shows: `rawNumbers`, card Q2) read with SheetJS
-  0.20.3, bundled from `cdn.sheetjs.com/xlsx-0.20.3` with its Apache-2.0 licence (SHA-256 of the bundled file
+  0.20.3 (`.xlsx`, `.xls`, `.ods`: the sheet is chosen in the import report), bundled from `cdn.sheetjs.com/xlsx-0.20.3` with its Apache-2.0 licence (SHA-256 of the bundled file
   `cc015130aa8521e7f088f88898eba949ccdcbfb38df0bd129b44b7273c3a6f41`; the online fallback uses the same version
   with an SRI SHA-384 check). This version fixes CVE-2023-30533 and CVE-2024-22363.
 - **Text encoding:** UTF-16 when the file starts with its byte-order mark (Excel's "Unicode text"); otherwise UTF-8 and, if
@@ -1352,7 +1352,13 @@ dialog). External records are any measured down-core series added to a core (XRF
   - * values below a detection limit (`<0.01`, `bdl`, `b.d.l.`, `n.d.`, `<DL`) are empty by default (decision M of the maintainer, 19 Nov
     2026); the reader can also give half the stated limit or the limit (`censored: 'half' | 'limit'`; a code without a number stays empty);
   - other non-numeric cells are treated as empty and counted (`dropped`, in mostly numeric columns); rows shorter or longer than the header
-    (`short`, `long`) are counted; on import one message lists every kind of change with its count.
+    (`short`, `long`) are counted.
+- **Import report** (`readTableFile`, `importNotes`, `renderImportReport` in `multiproxy.js`; card Q2): the dialogs that open on import (an
+  external record; a multiproxy table) show «How the file was read»: every kind of change with its count (or «Read without changing
+  anything»), the sheet of a workbook with several, the rule for values below a detection limit when there are any (empty, half the limit,
+  the limit), and the first five rows as read, where «—» marks a cell with text read as empty. Changing the sheet or the rule reads the file
+  again. After an external record is added, «Undo import» beside it removes it without asking, while it is the last one imported in the
+  session (not available for multiproxy tables, whose import adds cores and data).
 - **Axis column:** the first header that looks like depth (depth, prof, mbsf, CSF, CCSF, mcd, m, cm) is proposed or,
   if none, age (age, edad, ka, Ma, yr, cal). The user can change it and say whether it is depth or age.
 - **Series:** each chosen column is a series of (axis, value) pairs without empty values, sorted by axis. Each series
@@ -3568,8 +3574,7 @@ The percentage difference comes from the JPEG decoder (§3.4), not from the meth
     with hundreds of thousands of samples); MDI importance is biased among correlated proxies; everything is computed
     on the user's computer.
 11. **Known defects, with cards in the roadmap** (found by the audits of 19 November 2026; each item is removed when its card is done):
-    spreadsheets are read from their first sheet only, with a warning (Q2, import panel); changing a section's unit does not convert its
-    depths (Q3);
+    changing a section's unit does not convert its depths (Q3);
     joined projects keep the first core's units (Q3); backups and packages leave tiled sections out (M8.4.33).
 
 ## 33. Reproducibility

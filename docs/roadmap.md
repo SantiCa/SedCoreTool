@@ -82,8 +82,8 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: Q2, second delivery** (the import panel: preview, sheet choice, censored-value rule per column, "Undo import"; **model: most
-  capable tier, effort medium**); its first delivery (the readers) is done, then the order O approved on 19 November 2026 (second
+- **Next step: Q3** (units: external records declare and convert theirs, joined projects convert, a section's unit change asks; **model: most
+  capable tier, effort medium**); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
   council audit, below). **V0.152** (decision J) was prepared on 20 Nov 2026 at the maintainer's request ("Publica la 0.152 y haz un release"):
   full checks passed on the version commit (Windows: pytest 885 passed / 9 skipped, npm 478, typecheck, sync_version, ruff, standalone build,
   runtime rebuilt, desktop.mjs off and on, tiled-sections.mjs). **Published on 20 Nov 2026:** `master` `8ee9776`, tag `V0.152`, GitHub Release
@@ -2276,12 +2276,17 @@ Written from the council audit (status block). Each card names its model; the sc
       `.deleting-*` and its removal failed (`deleteProjectStore` calls `fs.rmSync` without retries, `fs.renameSync` without retries; a file still
       held for a moment on Windows makes them fail). Nothing of Q1 runs in that step. No data is lost (the program says the folder was not
       deleted, and removes the remainder at its next start). The retries are part of card A2; bringing them forward is proposed to the maintainer.
-- [~] **Q2 - The import panel and the readers.** *First delivery done 20 Nov 2026 (the readers; development gate):* `parseTable` with
+- [x] **Q2 - The import panel and the readers.** Done 20 Nov 2026 (development gate). *First delivery (the readers):* `parseTable` with
       missing-value codes, censored values (decision M: empty by default; `half` and `limit` available to callers), decimal separators per
       column with ambiguous columns reported, preamble, repeated names, longer rows, all counted; `decodeText` with UTF-16; spreadsheets with
       `rawNumbers`; one message on import listing every change. Tests: Node (`tests/app/log.test.mjs`, each case above; the V0.38 test now
-      counts "n.d." as below the detection limit instead of as text). *Still to do (second delivery):* the import panel with a preview, the choice
-      of sheet and of the censored-value rule per column, interrupting only for an ambiguity, and "Undo import".
+      counts "n.d." as below the detection limit instead of as text). *Second delivery (the import report):* the two dialogs that already open on
+      import (external record, multiproxy table) show what was changed with counts, the sheet of a workbook, the rule for values below a
+      detection limit (one rule per file, not per column: a simplification of the card), the first five rows as read; a change reads the file
+      again; nothing else interrupts the user (those dialogs were already the step that asks). «Undo import» exists for external records only
+      (a multiproxy import adds cores and data; its undo belongs to card U2's undo by domain). Checked once in the desktop program with a
+      script not kept (a CSV with a title, -999, «<0.02» and «bdl»: report, preview, the rule changed to half the limit, record added and
+      removed with «Undo import»). `app.js` unchanged.
       Full checks of the first delivery (20 Nov 2026, Windows): pytest 885 passed / 9 skipped, npm 479, typecheck, sync_version, ruff, standalone
       build, runtime rebuilt (it no longer matched `src/` after the release steps on `master`), desktop.mjs off and on, tiled-sections.mjs. One import panel with a preview of the first rows as read and counts: missing-value codes
       (a configurable list, by default -999, -999.25, -9999), censored values (decision M), rows dropped and why (`parseAgeModelDetailed`,

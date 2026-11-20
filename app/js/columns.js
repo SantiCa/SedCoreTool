@@ -2,7 +2,7 @@ import { rowAtDepth } from './sectiondepth.js';
 /* Composite log: shared drawing for the column view and independent figures, records and track controls. */
 import { $, S, fmt, hex, uid } from './state.js';
 import { analyze, armed, busy, compositeMarks, compositeTaxonPoints, effClassArray, esc, idListOf, idMode, legendOf, markDirty, needPixels, requestRender, resizeCanvases, safe, saveFile, toast, updateTip, withProv } from './app.js';
-import { geoOverlay, loadLand, logInteract, readTableFile, renderGeo, renderGeoLogs } from './multiproxy.js';
+import { geoOverlay, loadLand, logInteract, readTableFile, renderGeo, renderGeoLogs, renderImportReport } from './multiproxy.js';
 import { applyPanels } from './panels.js';
 import { disposeDataTable, renderData } from './datatab.js';
 import { FIG_PANELS, arrowMarksSVG, axisErr, coreRatio, editSVGLabels, figTraces, panelDataURL, renderFigPanel, renderFigure, scheduleFigure } from './figures.js';
@@ -572,10 +572,13 @@ export function addRecordFromTable(name, tab, xCol, axis, yCols) {
   return true;
 }
 
+/** Card Q2: the record added by the last import of this session, which «Undo import» removes without asking. */
+let lastImported = null;
 export function renderRecList() {
   $('recList').innerHTML = S.records.map((r) => `
     <div class="rec" data-id="${esc(r.id)}">
       <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><b>${esc(r.name)}</b><button class="btn small ghost" data-del="1" aria-label="${esc(t('a11y.delete'))}">✕</button></div>
+      ${r.id === lastImported ? `<div class="row"><span class="note">${t('imp.justAdded')}</span><button class="btn small" data-undo="1">${t('imp.undo')}</button></div>` : ''}
       <span class="note">${t(r.axis === 'age' ? 'log.age' : 'log.depth')} · ${r.series[0]?.x.length || 0} ${t('log.points')}</span>
       ${r.series.map((s, i) => `<div class="row srow"><label class="chk"><input type="checkbox" data-s="${i}" data-k="show" ${s.show ? 'checked' : ''}><span>${esc(s.name)}</span></label>
         <input type="color" data-s="${i}" data-k="color" value="${esc(validHexColor(s.color, REC_COLORS[i % REC_COLORS.length]))}" aria-label="${esc(t('a11y.color'))}">
@@ -589,6 +592,11 @@ $('recList').addEventListener('change', (e) => {
   markDirty(); scheduleLog(50);
 });
 $('recList').addEventListener('click', (e) => {
+  if (/** @type {HTMLElement} */ (e.target).dataset.undo) {         // card Q2: «Undo import» of the record just added
+    const at = S.records.findIndex((r) => r.id === lastImported);
+    if (at >= 0) S.records.splice(at, 1);
+    lastImported = null; renderRecList(); markDirty(); scheduleLog(0); return;
+  }
   if (!e.target.dataset.del) return;
   if (!armed(e.target, '?')) return;
   const id = e.target.closest('.rec').dataset.id;
@@ -598,25 +606,33 @@ $('recList').addEventListener('click', (e) => {
 $('recFile').addEventListener('change', async (e) => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
   try {
-    const tab = await readTableFile(f);
-    if (tab.headers.length < 2 || !tab.rows.length) throw new Error(t('rec.short'));
-    pendingTable = tab;
-    const g = guessAxisColumn(tab.headers);
-    $('recName').value = f.name.replace(/\.[^.]+$/, '');
-    $('recX').innerHTML = tab.headers.map((h, i) => `<option value="${i}" ${i === g.col ? 'selected' : ''}>${esc(h)}</option>`).join('');
-    $('recAxis').value = g.axis;
-    const fillCols = () => {
-      const xc = +$('recX').value;
-      $('recCols').innerHTML = tab.headers.map((h, i) => i === xc ? '' : `<label class="chk"><input type="checkbox" value="${i}" ${tab.rows.some((r) => r[i] != null) ? 'checked' : 'disabled'}><span>${esc(h)}</span></label>`).join('');
-    };
-    $('recX').onchange = fillCols; fillCols();
-    $('recDlg').showModal();
+    openRecordImport(await readTableFile(f), f.name);
   } catch (err) { toast(t('rec.err', { m: err.message || err })); }
 });
+/** The dialog of a new external record; card Q2: with the import report, which may read the file again (another sheet, another rule). */
+function openRecordImport(tab, fileName) {
+  if (tab.headers.length < 2 || !tab.rows.length) throw new Error(t('rec.short'));
+  pendingTable = tab;
+  renderImportReport($('recReport'), tab, (next) => { try { openRecordImport(next, fileName); } catch (err) { toast(t('rec.err', { m: err.message || err })); } });
+  const g = guessAxisColumn(tab.headers);
+  /** @type {any} */ ($('recName')).value = fileName.replace(/\.[^.]+$/, '');
+  $('recX').innerHTML = tab.headers.map((h, i) => `<option value="${i}" ${i === g.col ? 'selected' : ''}>${esc(h)}</option>`).join('');
+  /** @type {any} */ ($('recAxis')).value = g.axis;
+  const fillCols = () => {
+    const xc = +$('recX').value;
+    $('recCols').innerHTML = tab.headers.map((h, i) => i === xc ? '' : `<label class="chk"><input type="checkbox" value="${i}" ${tab.rows.some((r) => r[i] != null) ? 'checked' : 'disabled'}><span>${esc(h)}</span></label>`).join('');
+  };
+  $('recX').onchange = fillCols; fillCols();
+  const dialog = /** @type {any} */ ($('recDlg'));
+  if (!dialog.open) dialog.showModal();
+}
 $('recCancel').addEventListener('click', () => $('recDlg').close());
 $('recAdd').addEventListener('click', () => {
   if (!pendingTable) return;
   const cols = [...$('recCols').querySelectorAll('input:checked')].map((i) => +i.value);
-  if (addRecordFromTable($('recName').value.trim() || 'Registro', pendingTable, +$('recX').value, $('recAxis').value, cols)) $('recDlg').close();
+  const field = (id) => /** @type {any} */ ($(id)).value;
+  if (addRecordFromTable(field('recName').trim() || 'Registro', pendingTable, +field('recX'), field('recAxis'), cols)) {
+    lastImported = S.records.at(-1)?.id ?? null; renderRecList(); /** @type {any} */ ($('recDlg')).close();
+  }
   else toast(t('rec.err', { m: t('rec.short') }));
 });

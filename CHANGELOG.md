@@ -14,10 +14,12 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### For users
 
+- Importing a table now shows «How the file was read» in the import dialog: what was changed, with counts, the first rows as read, the choice of sheet in a workbook and of how values below a detection limit are read (empty, half the limit or the limit). An external record just imported can be removed with «Undo import».
 - Tables of records read more of what laboratories write: -999, -999.25 and -9999 are now empty instead of values; values below a detection limit ("<0.01", "bdl", "n.d.") are empty and counted; a title or notes before the table are skipped; "0.500" in a file with decimal commas is no longer read as 500, and a column where "1,250" could be 1.25 or 1250 is named in the message; repeated column names are kept apart; files saved as "Unicode text" open; spreadsheets give their stored numbers instead of the rounded text a cell shows. One message after import says what was changed, with counts.
 
 ### Internal
 
+- Card Q2 (second delivery, the import report): `readTableFile` returns a table that can be read again (`read({sheet, censored})`), `importNotes` and `renderImportReport` in `multiproxy.js`, used by the records and multiproxy import dialogs; «Undo import» for records.
 - Card Q2 (first delivery, the readers): `parseTable(text, {missing, censored})` with per-column decimal separators, preamble, missing-value codes, censored values, repeated names and counts; `decodeText` reads UTF-16 with its byte-order mark; `readTableFile` reads spreadsheets with `rawNumbers` and lists every change; `tools/release.sh` finds `export const DELIVERY` and takes `PYTHON` for an interpreter with the test extras.
 
 ## V0.152 — 2026-11-20

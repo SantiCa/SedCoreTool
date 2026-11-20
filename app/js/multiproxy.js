@@ -461,37 +461,61 @@ function openGeoImport(kind, tabs, names) {
     } else $('giProx').innerHTML = H.map((h, k) => used.includes(k) ? '' : `<label class="chk"><input type="checkbox" value="${k}" ${tab.rows.some((r) => r[k] != null) ? 'checked' : 'disabled'}><span>${esc(h)}</span></label>`).join('');
   };
   IMP_IDS.forEach((id) => ($(id).onchange = fill)); fill();
+  renderImportReport($('giReport'), tab, (next) => { tabs[0] = next; openGeoImport(kind, tabs, names); });   // card Q2
   $('giTitle').textContent = t('geo.imp.' + kind) + (names.length > 1 ? ` (${names.length})` : '');
   $('giNote').textContent = t(iv ? 'geo.r.noteIv' : 'geo.r.note');
   $('geoImpDlg').showModal();
 }
 /** V0.38: table file (CSV/TXT as UTF-8 or Windows-1252, or Excel/ODS); warns about text cells read as empty. */
 export async function readTableFile(f) {
-  let tab, sheets = 1;
+  let textOf, sheets = [];
   if (/\.xlsx?$|\.ods$/i.test(f.name)) {
     if (!window.XLSX) await loadLib('xlsx.full.min.js');
-    const wb = window.XLSX.read(await f.arrayBuffer(), { type: 'array' });
-    sheets = wb.SheetNames.length;
+    const X = /** @type {any} */ (window).XLSX, wb = X.read(await f.arrayBuffer(), { type: 'array' });
+    sheets = wb.SheetNames;
     // card Q2: the stored numbers, not the text the sheet's format shows (12.3456 shown as 12.35)
-    tab = parseTable(/** @type {any} */ (window).XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]], { FS: '\t', rawNumbers: true }));
-  } else tab = parseTable(decodeText(await f.arrayBuffer()));
-  const notes = importNotes(tab, sheets);
-  if (notes.length) toast(`«${f.name}»: ` + notes.join('; ') + '.', 12000);
-  return tab;
+    textOf = (sheet) => X.utils.sheet_to_csv(wb.Sheets[sheets[sheet] ?? sheets[0]], { FS: '\t', rawNumbers: true });
+  } else { const text = decodeText(await f.arrayBuffer()); textOf = () => text; }
+  /** Card Q2: the same file read again with another sheet or another rule for values below a detection limit. */
+  const read = (/** @type {{sheet?: number, censored?: any}} */ { sheet = 0, censored = 'empty' } = {}) => Object.assign(parseTable(textOf(sheet), { censored }), { file: f.name, sheets, sheet, censoredRule: censored, read });
+  return read();
 }
 /** Card Q2: what the reader did with the file, in the user's words (one entry per kind of change, none when nothing was changed). */
-function importNotes(tab, sheets) {
+export function importNotes(tab) {
   return [
-    sheets > 1 ? t('imp.sheets', { n: sheets }) : '',
+    tab.sheets?.length > 1 ? t('imp.sheetOf', { s: tab.sheets[tab.sheet], n: tab.sheets.length }) : '',
     tab.preamble ? t('imp.preamble', { n: tab.preamble }) : '',
     tab.missingCodes ? t('imp.missing', { n: tab.missingCodes }) : '',
-    tab.censored ? t('imp.censored', { n: tab.censored }) : '',
+    tab.censored ? t('imp.censored.' + (tab.censoredRule || 'empty'), { n: tab.censored }) : '',
     tab.dropped ? t('imp.dropped', { n: tab.dropped, c: tab.droppedCols.slice(0, 4).join(', ') }) : '',
     tab.ambiguousCols?.length ? t('imp.ambiguous', { c: tab.ambiguousCols.slice(0, 4).join(', ') }) : '',
     tab.renamed?.length ? t('imp.renamed', { c: tab.renamed.slice(0, 4).join(', ') }) : '',
     tab.short ? t('imp.short', { r: tab.short }) : '',
     tab.long ? t('imp.long', { r: tab.long }) : '',
   ].filter(Boolean);
+}
+/**
+ * Card Q2: the import report inside an import dialog: what the reader changed, the sheet and the rule for values below a detection limit
+ * when they matter (changing them reads the file again and calls `onRead` with the new table), and the first rows as they were read.
+ * @param {HTMLElement} box @param {any} tab @param {(tab: any) => void} onRead
+ */
+export function renderImportReport(box, tab, onRead) {
+  const notes = importNotes(tab), rows = tab.rows.slice(0, 5);
+  const cell = (v, raw) => (v == null ? (String(raw ?? '').trim() ? `<i title="${esc(raw)}">—</i>` : '') : esc(String(v)));
+  box.innerHTML = `
+    ${notes.length ? `<ul class="impnotes">${notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : `<p class="note">${t('imp.clean')}</p>`}
+    <div class="row">
+      ${tab.sheets?.length > 1 ? `<label class="f"><span>${t('imp.sheet')}</span><select data-imp="sheet">${tab.sheets.map((s, k) => `<option value="${k}" ${k === tab.sheet ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></label>` : ''}
+      ${tab.censored ? `<label class="f"><span>${t('imp.censoredRule')}</span><select data-imp="censored">${['empty', 'half', 'limit'].map((r) => `<option value="${r}" ${r === tab.censoredRule ? 'selected' : ''}>${t('imp.rule.' + r)}</option>`).join('')}</select></label>` : ''}
+    </div>
+    <div class="imppreview"><table><thead><tr>${tab.headers.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map((r, i) => `<tr>${r.map((v, k) => `<td>${cell(v, tab.text[i]?.[k])}</td>`).join('')}</tr>`).join('')}</tbody></table>
+      <p class="note">${t('imp.previewNote', { n: rows.length, m: tab.rows.length })}</p></div>`;
+  box.querySelectorAll('select[data-imp]').forEach((/** @type {any} */ select) => select.addEventListener('change', () => {
+    const value = /** @type {HTMLSelectElement} */ (select).value;
+    const next = tab.read({ sheet: select.dataset.imp === 'sheet' ? +value : tab.sheet, censored: select.dataset.imp === 'censored' ? value : tab.censoredRule });
+    onRead(next);
+  }));
 }
 
 const norm = (s) => String(s ?? '').trim().toLowerCase();
