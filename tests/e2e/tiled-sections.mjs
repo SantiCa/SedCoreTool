@@ -106,11 +106,13 @@ try {
   assert.ok(section.full.w * section.full.h > section.maxMP * 1e6, 'only images above the size limit are tiled');
   assert.ok(section.bins > 0 && !section.bioturbated, 'card M8.4.17: the interval table is counted from the full-resolution masks, which are empty: bins without any bioturbation');
   assert.ok(toasts.some((text) => text.includes(String(section.full.h))), 'the user is told what a tiled section is: ' + JSON.stringify(toasts));
-  // The new section's first masks must have reached the store, or the save keeps it for the next one (D1): slower machines (GitHub, card
-  // M8.4.32) need more than the save's deadline for that first round.
-  await on.page.waitForFunction(() => window.ichantool.masksSettled(), { polling: 200, timeout: 240000 });
+  // D1: a save waits up to 15 s for the section's masks to reach the store and otherwise keeps it for the next save; on GitHub's machines the
+  // first round of a new section can take longer, so the test saves again, as the program does, until the section is in the record.
   const saved = await on.page.evaluate(async () => {
-    await window.ichantool.saveNow();                                    // card M8.4.18a: a tiled section is saved like the others
+    for (let attempt = 0; attempt < 10 && !window.ichantool.tiledSaved().some(Boolean); attempt++) {
+      await window.ichantool.saveNow();                                  // card M8.4.18a: a tiled section is saved like the others
+      for (let k = 0; k < 600 && !window.ichantool.masksSettled(); k++) await new Promise((r) => setTimeout(r, 100));
+    }
     const project = window.ichantool.serialize();
     return { names: project.cores.flatMap((core) => core.sections.map((q) => q.name)), version: project.version, manifests: window.ichantool.tiledSaved() };
   });
