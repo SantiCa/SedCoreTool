@@ -46,6 +46,8 @@ function findCoordinator(rootPid) {
 
 /** Where a failing step saves its screenshot: SEDCORETOOL_SHOT_DIR on GitHub (uploaded as an artifact, card M8.4.32), else the temporary folder. */
 function shotDir() { const dir = process.env.SEDCORETOOL_SHOT_DIR || os.tmpdir(); fs.mkdirSync(dir, { recursive: true }); return dir; }
+/** The file of a screenshot named `name` in that folder (a function, because the editing steps below have their own `path`). */
+const shotFile = (name) => path.join(shotDir(), name);
 
 async function program(tiled) {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'sedcoretool-tiled-'));
@@ -196,7 +198,7 @@ try {
     assert.ok(drawn.completed, `${label}: the visible tiles were loaded within 30 s (waited ${drawn.waitedMs} ms): ` + JSON.stringify(drawn.evidence));
     assert.ok(drawn.probes.length >= 10, 'probes where full resolution differs from the working image: ' + JSON.stringify(drawn));
     if (drawn.evidence) {
-      const shot = path.join(shotDir(), `sedcoretool-probe-${process.pid}-${Date.now()}.png`);
+      const shot = shotFile(`sedcoretool-probe-${process.pid}-${Date.now()}.png`);
       await on.page.screenshot({ path: shot });
       console.log(`${label}: probe failed; screenshot ${shot}; tile state ${JSON.stringify(drawn.evidence)}; waited ${drawn.waitedMs} ms`);
     }
@@ -438,7 +440,7 @@ try {
       return { events: window.__cutEvents, view: window.ichantool.S.view, ds: s.ds, rect: [r.left, r.top, r.width, r.height], dpr: window.devicePixelRatio }; });
     cut.box = box;
     if (Object.keys(cut.objects).filter((id) => !start.objects[id]).length !== 2) {
-      const shot = path.join(shotDir(), `sedcoretool-scissors-${process.pid}.png`); await page.screenshot({ path: shot }); cut.shot = shot;
+      const shot = shotFile(`sedcoretool-scissors-${process.pid}.png`); await page.screenshot({ path: shot }); cut.shot = shot;
     }
     const pieces = Object.keys(cut.objects).filter((id) => !start.objects[id]).map(Number);
     await page.evaluate((ids) => window.ichantool.mergeObjects(ids), pieces); await idle();
