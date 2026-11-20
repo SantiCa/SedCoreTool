@@ -1922,7 +1922,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   Not done: macOS, Linux; a measured interleaving of a real commit and a real retain in the desktop program (the Python tests drive the
   coordinator in that order deterministically).
 
-##### M8.4.32 - The tiled tests run on GitHub on three systems — state: In progress (20 Nov 2026: pushed, waiting for the first run on three systems)
+##### M8.4.32 - The tiled tests run on GitHub on three systems — state: In progress (20 Nov 2026: three runs on three systems, failures below)
 
 - **Goal:** the milestone gate covers the tile store: `tests/e2e/tiled-sections.mjs` and `tests/e2e/interrupted-saves.mjs` run in the
   *Desktop builds* workflow on Windows, macOS and Linux, on a fixture generated in the job, and the Python tests of the store cannot skip
@@ -1953,6 +1953,14 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   the program (`deleteStoreOf`): a send round on its way after many edits could outlast the 3 s the delete gave it, so the project folder
   stayed («the folder was not deleted»); the delete now lets it finish, up to 60 s, and the test's wait follows that bound. Pending: a green run
   on three systems, and the deliberately failing run.
+- *GitHub runs of 20 Nov 2026 (`tiled-sections.mjs`, Desktop builds):* (1) macOS and Linux: the first save happened while the test project
+  was still loading (`saveBlockers().loading`); fixed, the test waits for the load. (2) Windows, every run: the scissors do not cut, with the
+  message "The line does not split the trace: it must cross it from side to side." (lasso at the same screen positions correct, area 6000;
+  canvas 862 × 1665). A fixed window of 884 × 561 did not change it and was removed. Locally a window of 884 × 1700 lets the scissors pass
+  (and then fails the final comparison of labels, line 667), so the window height alone is not the cause; not diagnosed. (3) macOS and Linux,
+  after the load fix: the pixel probe draws [106,79,35] where the source is [14,14,14] (sx 230, sy 570), tile state not cached, not in
+  flight; first time the probe runs on those systems; not diagnosed. Next: record the scissors' input polyline and the section under the
+  pointer on Windows, and a screenshot of the probe on macOS/Linux as a workflow artifact.
 
 ##### M8.4.33 - Backups and packages say what they leave out — state: Done (20 Nov 2026, development gate; council audit of 19 Nov 2026)
 
