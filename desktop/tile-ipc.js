@@ -12,6 +12,8 @@ const MAX_SOURCES_PER_PAGE = 64, MAX_BUILDS_PER_PAGE = 4, MAX_STAGED_PER_PAGE = 
 // Card M8.4.18c: files of a stored version per export or import request (as the engine's EXPORT_PAGE), and the bytes one import may carry
 // (a backup's blobs are zlib streams of at most 16 MiB plus zlib's margin; a manifest at most 64 MiB; the engine's buffers hold 256 MiB).
 const EXPORT_PAGE = 32, MAX_IMPORT_BYTES = 128 * 2 ** 20;
+// Card M8.4.18c step 3: a project's copy of a source goes to and comes back from the backup folder in pieces of 8 MiB, at most two imports per page.
+const SOURCE_PIECE = 8 * 2 ** 20, MAX_IMPORTS_PER_PAGE = 2;
 // Card M8.4.18a: the main process remembers where the source of each tiled section was, per project; the page never sees it.
 const DERIVED_KINDS = new Set(['reopen']), MAX_DERIVED_BYTES = 134217728;   // card M8.4.29, contract §8.7
 const SOURCES_FILE = 'sources.json', MAX_REMEMBERED_SOURCES = 4096, MAX_RETAINED = 1024;
@@ -35,11 +37,16 @@ async function renameRetrying(from, to) {
 }
 const removeTree = (folder) => fs.rmSync(folder, { recursive: true, force: true, maxRetries: RETRY_MS.length, retryDelay: 100 });
 
-/** Remove the folders a delete renamed but did not finish removing (the program stopped half-way). */
+/** Remove the folders a delete renamed but did not finish removing, and the pieces of imports of sources (card M8.4.18c), left by a stop half-way. */
 function sweepDeleted(projectsRoot) {
   let names = [];
   try { names = fs.readdirSync(projectsRoot); } catch { return; }
-  for (const name of names) if (name.startsWith(DELETING)) { try { removeTree(path.join(projectsRoot, name)); } catch { /* tried again at the next start */ } }
+  for (const name of names) {
+    if (name.startsWith(DELETING)) { try { removeTree(path.join(projectsRoot, name)); } catch { /* tried again at the next start */ } continue; }
+    let parts = [];
+    try { parts = fs.readdirSync(path.join(projectsRoot, name, SOURCES_DIR)).filter((file) => /^\.import-[0-9a-f-]{36}\.part$/.test(file)); } catch { continue; }
+    for (const file of parts) fs.rmSync(path.join(projectsRoot, name, SOURCES_DIR, file), { force: true });
+  }
 }
 /** A new name for a copy of a source: a hard link when the file system allows it, otherwise a verified copy. */
 async function linkOrCopy(from, to, sha256, size, signal) {
@@ -117,6 +124,20 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
   // of (the page works on them). `known`: identifiers the page announced from the library listing of this session (`announceProjects`). A store that is
   // only known is deleted after the user agrees in a window of the main process; one that is neither is refused.
   const opened = new Set(), known = new Set(), MAX_KNOWN = 8192;
+  // Card M8.4.18c step 3: copies of sources being read back from a backup folder: token -> {owner, project, pyramid, name, size, part, fd, hash, written}.
+  const imports = new Map();
+  const dropImport = (token) => {
+    const job = imports.get(token);
+    if (!job) return;
+    imports.delete(token);
+    if (job.fd !== null) { try { fs.closeSync(job.fd); } catch { /* already closed */ } }
+    fs.rmSync(job.part, { force: true });
+  };
+  const importOf = (owner, token) => {
+    const job = typeof token === 'string' && UUID.test(token) ? imports.get(token) : null;
+    if (!job || job.owner !== owner) reject('INVALID_REQUEST', 'token');
+    return job;
+  };
 
   const ownedStaging = (owner, id) => {
     if (typeof id !== 'string' || !UUID.test(id) || staged.get(id) !== owner) reject('INVALID_REQUEST', 'staged');
@@ -403,6 +424,79 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
       }
       return { available: false, rebuilt: false, ...(changed ? { changed: true } : {}) };
     },
+    /**
+     * Card M8.4.18c step 3: a piece (at most 8 MiB from `offset`) of the project's own copy of a source, for the folder backup:
+     * `{copied: true, size, name, sha256, bytes}` (`size` of the whole file, `sha256` of these bytes), or `{copied: false}` when the project holds none.
+     */
+    async sourceCopyRead(owner, project, pyramid, offset) {
+      checkProject(project);
+      if (typeof pyramid !== 'string' || !SHA256.test(pyramid)) reject('INVALID_REQUEST', 'pyramid');
+      if (!Number.isSafeInteger(offset) || offset < 0) reject('INVALID_REQUEST', 'offset');
+      if (!projectsRoot) reject('UNSUPPORTED_METHOD');
+      const entry = remembered(project, pyramid), file = copyOf(project, entry);
+      if (!file) return { copied: false };
+      if (offset > entry.size) reject('INVALID_REQUEST', 'offset');
+      const length = Math.min(SOURCE_PIECE, entry.size - offset), bytes = Buffer.alloc(length), handle = await fs.promises.open(file, 'r');
+      try {
+        for (let done = 0; done < length;) {
+          const { bytesRead } = await handle.read(bytes, done, length - done, offset + done);
+          if (!bytesRead) reject('INVALID_BUFFER', 'source');                 // shorter than its record: changed on disk
+          done += bytesRead;
+        }
+      } finally { await handle.close(); }
+      return { copied: true, size: entry.size, name: entry.name || entry.copy, sha256: createHash('sha256').update(bytes).digest('hex'), bytes };
+    },
+    /**
+     * Card M8.4.18c step 3: a copy of a source read back from a backup folder into the project, in pieces sent in order. `{present: true}` when the
+     * project already holds it; otherwise `{token}`. Refused when the disk would keep less than 1 GiB free. Nothing is kept until the end checks the
+     * size and the SHA-256 of the whole file.
+     */
+    async sourceImportBegin(owner, project, pyramid, name, size) {
+      checkProject(project);
+      if (typeof pyramid !== 'string' || !SHA256.test(pyramid)) reject('INVALID_REQUEST', 'pyramid');
+      if (typeof name !== 'string' || !name.length || name.length > 1024) reject('INVALID_REQUEST', 'name');
+      if (!Number.isSafeInteger(size) || size < 1) reject('INVALID_REQUEST', 'size');
+      if (!projectsRoot) reject('UNSUPPORTED_METHOD');
+      if (copyOf(project, remembered(project, pyramid))) return { present: true };
+      if ([...imports.values()].filter((job) => job.owner === owner).length >= MAX_IMPORTS_PER_PAGE) reject('LIMIT_EXCEEDED', 'imports');
+      const free = freeBytes(projectsRoot);
+      if (free !== null && free < size + COPY_RESERVE) reject('LIMIT_EXCEEDED', 'disk');
+      const folder = path.join(projectsRoot, project, SOURCES_DIR), token = randomUUID(), part = path.join(folder, `.import-${token}.part`);
+      fs.mkdirSync(folder, { recursive: true });
+      imports.set(token, { owner, project, pyramid, name: displayName(name), size, part, fd: fs.openSync(part, 'wx'), hash: createHash('sha256'), written: 0 });
+      return { token };
+    },
+    /** Card M8.4.18c step 3: the next piece (1 B to 8 MiB, at `offset` = what was written so far) of an import; anything else drops the import. */
+    async sourceImportChunk(owner, token, offset, data) {
+      const job = importOf(owner, token), bytes = bytesOf(data);
+      if (!bytes || !bytes.length || bytes.length > SOURCE_PIECE || offset !== job.written || job.written + bytes.length > job.size) {
+        dropImport(token);
+        reject('INVALID_REQUEST', 'bytes');
+      }
+      for (let done = 0; done < bytes.length;) done += fs.writeSync(job.fd, bytes, done, bytes.length - done, job.written + done);
+      job.hash.update(bytes);
+      job.written += bytes.length;
+      return { written: job.written };
+    },
+    /** Card M8.4.18c step 3: the end of an import: kept as the project's copy only with its size and SHA-256 (`INVALID_BUFFER` otherwise). */
+    async sourceImportEnd(owner, token) {
+      const job = importOf(owner, token);
+      try {
+        if (job.written !== job.size) reject('INVALID_BUFFER', 'size');
+        fs.fsyncSync(job.fd); fs.closeSync(job.fd); job.fd = null;
+        if (job.hash.digest('hex') !== job.pyramid) reject('INVALID_BUFFER', 'source');
+        const name = copyName(job.pyramid, job.name);
+        await renameRetrying(job.part, path.join(projectsRoot, job.project, SOURCES_DIR, name));
+        updateSource(job.project, job.pyramid, { size: job.size, name: job.name, copy: name });
+        return { copied: true };
+      } finally { dropImport(token); }
+    },
+    /** Card M8.4.18c step 3: an import given up by the page (its piece file is removed). */
+    async sourceImportAbort(owner, token) {
+      importOf(owner, token);
+      dropImport(token);
+      return {};
+    },
     /** What the main process knows about a saved section's source, for the page to show (never a path): whether the project holds a copy,
      *  whether the remembered original is there with the saved size, and the free space of the disk that holds the projects. */
     async sourceInfo(owner, project, pyramid) {
@@ -557,6 +651,7 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
       for (const name of [...builds.keys()]) if (name.startsWith(`${owner}/`)) builds.delete(name);
       for (const [name, controller] of copies) if (name.startsWith(`${owner}/`)) { controller.abort(); copies.delete(name); }
       for (const [id, page] of staged) if (page === owner) { staged.delete(id); engine.request('mask.discard', { staged: id }).catch(() => {}); }
+      for (const [token, job] of [...imports]) if (job.owner === owner) dropImport(token);
     },
     OPERATIONS: Object.keys(operations),
   };

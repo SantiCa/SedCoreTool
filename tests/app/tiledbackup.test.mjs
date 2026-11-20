@@ -4,7 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { deflateSync, inflateSync } from 'node:zlib';
-import { backupTiledSections, restoreVersion, manifestBlobs, TiledBackupError, EXPORT_PAGE } from '../../app/js/tiledbackup.js';
+import { backupTiledSections, restoreVersion, restoreSource, manifestBlobs, TiledBackupError, EXPORT_PAGE, SOURCE_PIECE } from '../../app/js/tiledbackup.js';
+import { historyDays } from '../../app/js/folderversion.js';
 
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const hexDigest = async (bytes) => sha(bytes);
@@ -25,7 +26,7 @@ class Dir {
       createWritable: async () => {
         let data = null;
         return {
-          write: async (bytes) => { data = new Uint8Array(bytes); },
+          write: async (bytes) => { const add = new Uint8Array(bytes), next = new Uint8Array((data?.length || 0) + add.length); if (data) next.set(data); next.set(add, data?.length || 0); data = next; },
           close: async () => {
             if (++root.writes > root.failAfter) throw new Error('disk stopped');
             if (dir.corrupt.has(name)) { data = data.slice(); data[0] ^= 1; }
@@ -201,4 +202,82 @@ test('manifestBlobs names every blob once with the first place it is used, and r
   for (const bad of [{ format: 'x', tiles: {}, tables: {} }, { format: 'sedcoretool.masks', tiles: { '0.0': { labels: '../x' } }, tables: {} },
     { format: 'sedcoretool.masks', tiles: {}, tables: { classes: { sha256: 'z' } } }]) assert.throws(() => manifestBlobs(text(bad)));
   assert.throws(() => manifestBlobs(new Uint8Array([0xff, 0xfe])));
+});
+
+/** The main process's side of step 3: copies of sources per project, read in pieces and imported whole with their SHA-256. */
+function withSources(engine) {
+  engine.copies = new Map();                     // `${project}/${pyramid}` -> {bytes, name}
+  engine.imports = new Map();
+  engine.sourceCopyRead = async (project, pyramid, offset) => {
+    engine.calls.push({ op: 'read', offset });
+    const copy = engine.copies.get(`${project}/${pyramid}`);
+    if (!copy) return { ok: { copied: false } };
+    const bytes = copy.bytes.subarray(offset, offset + SOURCE_PIECE);
+    return { ok: { copied: true, size: copy.bytes.length, name: copy.name, sha256: sha(bytes), bytes: new Uint8Array(bytes) } };
+  };
+  engine.sourceImportBegin = async (project, pyramid, name, size) => {
+    if (engine.copies.has(`${project}/${pyramid}`)) return { ok: { present: true } };
+    const token = `t${engine.imports.size + 1}`;
+    engine.imports.set(token, { project, pyramid, name, size, parts: [] });
+    return { ok: { token } };
+  };
+  engine.sourceImportChunk = async (token, offset, bytes) => {
+    const job = engine.imports.get(token);
+    if (!job || offset !== job.parts.reduce((n, p) => n + p.length, 0)) return { error: { code: 'INVALID_REQUEST', field: 'bytes' } };
+    job.parts.push(Buffer.from(bytes)); return { ok: { written: offset + bytes.length } };
+  };
+  engine.sourceImportEnd = async (token) => {
+    const job = engine.imports.get(token), whole = Buffer.concat(job.parts);
+    engine.imports.delete(token);
+    if (whole.length !== job.size || sha(whole) !== job.pyramid) return { error: { code: 'INVALID_BUFFER', field: 'source' } };
+    engine.copies.set(`${job.project}/${job.pyramid}`, { bytes: whole, name: job.name });
+    return { ok: { copied: true } };
+  };
+  engine.sourceImportAbort = async (token) => { engine.imports.delete(token); return { ok: {} }; };
+  return engine;
+}
+
+test('step 3: the project\'s copy of a source goes to the folder once, checked piece by piece, and comes back whole into another computer\'s project', async () => {
+  const engine = withSources(new Engine()), dir = new Dir(), told = [];
+  const image = Buffer.alloc(2 * SOURCE_PIECE + 77);
+  for (let i = 0; i < image.length; i += 999) image[i] = i & 255;
+  const pyramid = sha(image), manifest = engine.commit('p1', { '0.0': tile(1) });
+  engine.copies.set(`p1/${pyramid}`, { bytes: image, name: 'core.tif' });
+  const json = project([manifest]);
+  json.cores[0].sections[1].tiled.source = { sha256: pyramid, name: 'core.tif', size: image.length };
+  await backupTiledSections(engine, dir, 'p1', json, hexDigest, (name, size) => told.push([name, size]));
+  assert.deepEqual(told, [['core.tif', image.length]], 'the user is told before the copy');
+  assert.ok(Buffer.from(dir.dirs.get('sources').files.get(pyramid)).equals(image));
+  assert.deepEqual(engine.calls.filter((c) => c.op === 'read').map((c) => c.offset), [0, SOURCE_PIECE, 2 * SOURCE_PIECE]);
+  engine.calls.length = 0; told.length = 0;
+  await backupTiledSections(engine, dir, 'p1', json, hexDigest, (name, size) => told.push([name, size]));
+  assert.deepEqual([engine.calls.filter((c) => c.op === 'read').length, told.length], [1, 0], 'already in the folder: only its size is asked');
+  // A section whose source the project does not keep: only its identity, nothing in sources/.
+  const bare = new Dir(), json2 = project([manifest]);
+  json2.cores[0].sections[1].tiled.source = { sha256: 'd'.repeat(64), name: 'x.tif', size: 5 };
+  await backupTiledSections(engine, bare, 'p1', json2, hexDigest);
+  assert.equal(bare.dirs.get('sources').files.size, 0);
+  // A written file that comes back different stops the backup.
+  const bad = new Dir();
+  (await bad.getDirectoryHandle('sources', { create: true })).corrupt.add(pyramid);
+  await assert.rejects(backupTiledSections(engine, bad, 'p1', json, hexDigest), (error) => error.code === 'BACKUP_MISMATCH');
+  // Restored on another computer; again: present; a damaged copy is refused and nothing is kept; none in the folder: absent.
+  const other = withSources(new Engine());
+  assert.equal(await restoreSource(other, 'p1', pyramid, 'core.tif', dir.readFile), 'restored');
+  assert.ok(other.copies.get(`p1/${pyramid}`).bytes.equals(image));
+  assert.equal(await restoreSource(other, 'p1', pyramid, 'core.tif', dir.readFile), 'present');
+  const damaged = Buffer.from(image); damaged[SOURCE_PIECE + 3] ^= 1;
+  dir.dirs.get('sources').files.set(pyramid, damaged);
+  const third = withSources(new Engine());
+  assert.equal(await restoreSource(third, 'p1', pyramid, 'core.tif', dir.readFile), 'damaged');
+  assert.equal(third.copies.size, 0);
+  assert.equal(await restoreSource(third, 'p1', 'e'.repeat(64), 'x.tif', dir.readFile), 'absent');
+});
+
+test('the days of a project folder history, newest first; none without a history', async () => {
+  const dir = new Dir(), history = await dir.getDirectoryHandle('historial', { create: true });
+  for (const name of ['2026-11-18.json', '2026-11-20.json', 'notes.txt', '2026-11-19.json']) history.files.set(name, new Uint8Array([123, 125]));
+  await history.getDirectoryHandle('2026-11-21.json', { create: true });        // a folder with that name is not a day
+  assert.deepEqual((await historyDays(dir)).map((d) => d.day), ['2026-11-20', '2026-11-19', '2026-11-18']);
+  assert.deepEqual(await historyDays(new Dir()), []);
 });

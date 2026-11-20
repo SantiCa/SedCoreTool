@@ -252,3 +252,68 @@ test('card M8.4.29: derived files are checked before they reach the engine and s
   assert.deepEqual(await ipc.call(1, 'derivedGet', 'p1', 'x', 'reopen'), { error: { code: 'INVALID_REQUEST', field: 'manifest' } });
   assert.deepEqual(await ipc.call(1, 'derivedGet', 'p1', m, 'nope'), { error: { code: 'INVALID_REQUEST', field: 'kind' } });
 });
+
+test('card M8.4.18c step 3: a project\'s copy of a source is read in pieces, and read back into another project only whole and with its SHA-256', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sedcoretool-source-backup-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const image = Buffer.alloc(20 * 2 ** 20 + 123);
+  for (let i = 0; i < image.length; i += 4096) image[i] = (i / 4096) & 255;
+  const pyramid = sha(image).toString('hex'), copy = pyramid + '.png';
+  fs.mkdirSync(path.join(root, 'p1', 'sources'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'p1', 'sources', copy), image);
+  fs.writeFileSync(path.join(root, 'p1', 'sources.json'), JSON.stringify({ format: 'sedcoretool.sources', version: 1, sources: { [pyramid]: { size: image.length, name: 'core.png', copy } } }));
+  const ipc = createTileIpc({ engine: fakeEngine(pyramid), projectsRoot: root });
+  // Read in pieces of 8 MiB, each with its SHA-256; a project without a copy says so.
+  const pieces = [];
+  for (let offset = 0; offset < image.length;) {
+    const got = (await ipc.call(1, 'sourceCopyRead', 'p1', pyramid, offset)).ok;
+    assert.equal(got.copied, true); assert.equal(got.size, image.length); assert.equal(got.name, 'core.png');
+    assert.equal(got.sha256, sha(got.bytes).toString('hex'));
+    pieces.push(Buffer.from(got.bytes)); offset += got.bytes.length;
+  }
+  assert.deepEqual(pieces.map((p) => p.length), [8388608, 8388608, 4194427]);
+  assert.ok(Buffer.concat(pieces).equals(image));
+  assert.deepEqual(await ipc.call(1, 'sourceCopyRead', 'p2', pyramid, 0), { ok: { copied: false } });
+  assert.deepEqual(await ipc.call(1, 'sourceCopyRead', 'p1', pyramid, image.length + 1), { error: { code: 'INVALID_REQUEST', field: 'offset' } });
+  // Import into p2: in order, whole, with its hash; then p2 holds a copy under the same name and remembers it.
+  const begun = (await ipc.call(1, 'sourceImportBegin', 'p2', pyramid, 'core.png', image.length)).ok;
+  assert.match(begun.token, /^[0-9a-f-]{36}$/);
+  let offset = 0;
+  for (const piece of pieces) { assert.deepEqual(await ipc.call(1, 'sourceImportChunk', begun.token, offset, piece), { ok: { written: offset + piece.length } }); offset += piece.length; }
+  assert.deepEqual(await ipc.call(2, 'sourceImportEnd', begun.token), { error: { code: 'INVALID_REQUEST', field: 'token' } }, 'another page cannot finish it');
+  assert.deepEqual(await ipc.call(1, 'sourceImportEnd', begun.token), { ok: { copied: true } });
+  assert.ok(fs.readFileSync(path.join(root, 'p2', 'sources', copy)).equals(image));
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'p2', 'sources.json'), 'utf8')).sources[pyramid], { size: image.length, name: 'core.png', copy });
+  assert.deepEqual(await ipc.call(1, 'sourceImportBegin', 'p2', pyramid, 'core.png', image.length), { ok: { present: true } });
+  assert.deepEqual(await ipc.call(1, 'sourceCopyRead', 'p2', pyramid, 0).then((r) => r.ok.copied), true);
+  const leftovers = (project) => fs.readdirSync(path.join(root, project, 'sources')).filter((name) => name.endsWith('.part'));
+  // Another file under that identity: refused at the end, nothing kept.
+  const other = Buffer.from(image); other[5] ^= 1;
+  let job = (await ipc.call(1, 'sourceImportBegin', 'p3', pyramid, 'core.png', other.length)).ok;
+  for (let at = 0; at < other.length; at += 8388608) await ipc.call(1, 'sourceImportChunk', job.token, at, other.subarray(at, at + 8388608));
+  assert.deepEqual(await ipc.call(1, 'sourceImportEnd', job.token), { error: { code: 'INVALID_BUFFER', field: 'source' } });
+  assert.deepEqual(fs.readdirSync(path.join(root, 'p3', 'sources')), []);
+  // Short, out of order, too large: refused and dropped.
+  job = (await ipc.call(1, 'sourceImportBegin', 'p3', pyramid, 'core.png', image.length)).ok;
+  assert.deepEqual(await ipc.call(1, 'sourceImportEnd', job.token), { error: { code: 'INVALID_BUFFER', field: 'size' } });
+  job = (await ipc.call(1, 'sourceImportBegin', 'p3', pyramid, 'core.png', image.length)).ok;
+  assert.deepEqual(await ipc.call(1, 'sourceImportChunk', job.token, 5, pieces[0]), { error: { code: 'INVALID_REQUEST', field: 'bytes' } });
+  assert.deepEqual(await ipc.call(1, 'sourceImportChunk', job.token, 0, pieces[0]), { error: { code: 'INVALID_REQUEST', field: 'token' } }, 'dropped');
+  job = (await ipc.call(1, 'sourceImportBegin', 'p3', pyramid, 'core.png', image.length)).ok;
+  assert.deepEqual(await ipc.call(1, 'sourceImportChunk', job.token, 0, Buffer.alloc(8388609)), { error: { code: 'INVALID_REQUEST', field: 'bytes' } });
+  assert.deepEqual(leftovers('p3'), []);
+  // At most two at a time per page; a page that goes away leaves no piece file; another program start removes leftovers.
+  const a = (await ipc.call(1, 'sourceImportBegin', 'p4', pyramid, 'core.png', image.length)).ok, b = (await ipc.call(1, 'sourceImportBegin', 'p5', pyramid, 'core.png', image.length)).ok;
+  assert.deepEqual(await ipc.call(1, 'sourceImportBegin', 'p6', pyramid, 'core.png', image.length), { error: { code: 'LIMIT_EXCEEDED', field: 'imports' } });
+  await ipc.call(1, 'sourceImportChunk', a.token, 0, pieces[0]);
+  assert.equal(leftovers('p4').length, 1);
+  ipc.releasePage(1);
+  assert.deepEqual([leftovers('p4'), leftovers('p5')], [[], []]);
+  fs.writeFileSync(path.join(root, 'p4', 'sources', `.import-${randomUUID()}.part`), 'x');
+  createTileIpc({ engine: fakeEngine(pyramid), projectsRoot: root });
+  assert.deepEqual(leftovers('p4'), [], 'swept at the next start');
+  for (const [args, field] of [[['P1', pyramid, 'a.png', 5], 'project'], [['p7', 'x', 'a.png', 5], 'pyramid'], [['p7', pyramid, '', 5], 'name'], [['p7', pyramid, 'a.png', 0], 'size']]) {
+    assert.deepEqual(await ipc.call(1, 'sourceImportBegin', ...args), { error: { code: 'INVALID_REQUEST', field } });
+  }
+  void b;
+});

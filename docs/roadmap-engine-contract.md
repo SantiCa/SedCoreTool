@@ -537,8 +537,11 @@ two folders next to its `project.json`: `tiles/<sha256>`, one file per blob, exa
 SHA-256 is the name), and `manifests/<sha256>.json`, one file per version (its canonical JSON). Files are written only when missing, by name, and
 each is read back and checked after writing; a version's manifest is written after every blob it names, so a manifest in the folder means its
 version is whole there. The page never deletes these files, so a `historial/<date>.json` keeps naming versions that are still in the folder. A
-restore reads them back through `mask.import`. The format depends on nothing of the browser or Electron: a reader needs only zlib, SHA-256 and the
-manifest rules above.
+restore reads them back through `mask.import`. A copy of a section's source that the project keeps (card M8.4.18b) is in `sources/<sha256>` (the
+file's bytes, named by their SHA-256, no extension); it is written once, in pieces of 8 MiB checked against the SHA-256 the main process sends with
+each piece and again after writing, and read back into the project only when its size and SHA-256 are right (the main process's `sourceCopyRead`
+and `sourceImport*`; the engine is not involved). The format depends on nothing of the browser or Electron: a reader needs only zlib, SHA-256 and
+the manifest rules above.
 
 **Derived files (card M8.4.29, decision G).** `<project>/tiles/derived/<manifest>.<kind>` holds what the page derived from the stored version
 named by `manifest` and would otherwise read every tile to rebuild (its format is the page's: `docs/TECHNICAL_DOCUMENTATION.md`, reopening

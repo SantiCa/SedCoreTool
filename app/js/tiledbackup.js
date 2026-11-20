@@ -7,7 +7,8 @@
 // The engine verifies every file it sends and every file it receives; this module only moves them. No DOM: the folder is a File System Access
 // directory handle (or, at a restore, a function that reads a file of the folder by its relative path), so Node can test it with fakes.
 
-export const BACKUP_TILES_DIR = 'tiles', BACKUP_MANIFESTS_DIR = 'manifests';
+export const BACKUP_TILES_DIR = 'tiles', BACKUP_MANIFESTS_DIR = 'manifests', BACKUP_SOURCES_DIR = 'sources';
+export const SOURCE_PIECE = 8 * 2 ** 20;                       // step 3: a copy of a source travels in pieces of 8 MiB (the main process's size)
 export const EXPORT_PAGE = 32;                                  // files per export or import request (the engine's limit)
 export const IMPORT_BATCH_BYTES = 64 * 2 ** 20;                 // bytes per import request (the main process accepts 128 MiB)
 const BLOB_NAME = /^[0-9a-f]{64}$/;
@@ -82,6 +83,38 @@ async function backupVersion(TILES, project, manifest, folders, hexDigest) {
 }
 
 /**
+ * Step 3 (D3): the project's own copy of the source `pyramid` into the backup folder as `sources/<pyramid>`, unless a file of that name and size is
+ * there. Each piece is checked against the SHA-256 the main process sent with it, on arrival and again read back from the written file. `onCopy(name,
+ * size)` is called before a copy is written. Returns 'none' (the project holds no copy: only the source's identity is in the record), 'present' or
+ * 'copied'; a failed bridge call throws `TiledBackupError`.
+ */
+async function backupSource(TILES, sources, project, pyramid, hexDigest, onCopy) {
+  const first = answerOf(await TILES.sourceCopyRead(project, pyramid, 0));
+  if (!first.copied) return 'none';
+  try { if ((await (await sources.getFileHandle(pyramid)).getFile()).size === first.size) return 'present'; } catch { /* not there yet */ }
+  onCopy(first.name, first.size);
+  const handle = await sources.getFileHandle(pyramid, { create: true }), writable = await handle.createWritable(), digests = [];
+  try {
+    for (let offset = 0, piece = first; ;) {
+      if (piece.bytes.length !== Math.min(SOURCE_PIECE, first.size - offset) || (await hexDigest(piece.bytes)) !== piece.sha256) throw new TiledBackupError('BACKUP_MISMATCH', pyramid);
+      await writable.write(piece.bytes);
+      digests.push(piece.sha256);
+      offset += piece.bytes.length;
+      if (offset >= first.size) break;
+      piece = answerOf(await TILES.sourceCopyRead(project, pyramid, offset));
+      if (!piece.copied || piece.size !== first.size) throw new TiledBackupError('BACKUP_CHANGED', pyramid);
+    }
+    await writable.close();
+  } catch (error) { await writable.abort?.().catch(() => {}); throw error; }
+  const file = await handle.getFile();
+  if (file.size !== first.size) throw new TiledBackupError('BACKUP_MISMATCH', pyramid);
+  for (let k = 0; k < digests.length; k++) {
+    if ((await hexDigest(new Uint8Array(await file.slice(k * SOURCE_PIECE, (k + 1) * SOURCE_PIECE).arrayBuffer()))) !== digests[k]) throw new TiledBackupError('BACKUP_MISMATCH', pyramid);
+  }
+  return 'copied';
+}
+
+/**
  * The masks of the tiled sections of `json` (a project as `projectForExport` writes it, tiled sections kept) into the project's backup folder
  * `dir`, before its `project.json` is written. A section whose stored version is missing or damaged in the store is taken out of `json`, named in
  * its `left_out` and returned (the user is told); any other failure (engine stopped or busy, disk, folder) throws, so that the backup is retried and
@@ -93,7 +126,7 @@ async function backupVersion(TILES, project, manifest, folders, hexDigest) {
  * @param {(bytes: Uint8Array) => Promise<string>} hexDigest
  * @returns {Promise<{core: string|null, section: string}[]>}
  */
-export async function backupTiledSections(TILES, dir, project, json, hexDigest) {
+export async function backupTiledSections(TILES, dir, project, json, hexDigest, onSourceCopy = () => {}) {
   const holders = (json.cores || [json]).filter((c) => Array.isArray(c.sections) && c.sections.some((q) => q.tiled?.manifest));
   if (!holders.length) return [];
   const tiles = await dir.getDirectoryHandle(BACKUP_TILES_DIR, { create: true }), manifests = await dir.getDirectoryHandle(BACKUP_MANIFESTS_DIR, { create: true });
@@ -112,7 +145,41 @@ export async function backupTiledSections(TILES, dir, project, json, hexDigest) 
     c.sections = kept;
   }
   if (leftOut.length) json.left_out = [...(json.left_out || []), ...leftOut];
+  // Step 3: the copies of sources the project holds, once each (a source whose copy cannot be read stays identified by its record only).
+  const pyramids = new Set(holders.flatMap((c) => c.sections.filter((q) => q.tiled?.source?.sha256).map((q) => q.tiled.source.sha256)));
+  if (pyramids.size && TILES.sourceCopyRead) {
+    const sources = await dir.getDirectoryHandle(BACKUP_SOURCES_DIR, { create: true });
+    for (const pyramid of pyramids) {
+      try { await backupSource(TILES, sources, project, pyramid, hexDigest, onSourceCopy); }
+      catch (error) { if (!(error instanceof TiledBackupError) || !PERMANENT.has(error.code)) throw error; }
+    }
+  }
   return leftOut;
+}
+
+/**
+ * Step 3: a copy of the source `pyramid` from the backup folder (`sources/<pyramid>`) into the project, sent in pieces; the main process keeps it only
+ * if its size and SHA-256 are right. Returns 'absent' (not in the folder), 'present' (the project holds it already), 'restored' or 'damaged'.
+ * @param {any} TILES @param {string} project @param {string} pyramid @param {string} name the source's file name (its extension names the copy)
+ * @param {(path: string) => Promise<Blob|null>} readFile
+ */
+export async function restoreSource(TILES, project, pyramid, name, readFile) {
+  let blob = null;
+  try { blob = BLOB_NAME.test(pyramid) ? await readFile(`${BACKUP_SOURCES_DIR}/${pyramid}`) : null; } catch { blob = null; }
+  if (!blob || !blob.size) return 'absent';
+  const begun = answerOf(await TILES.sourceImportBegin(project, pyramid, name || pyramid, blob.size));
+  if (begun.present) return 'present';
+  try {
+    for (let offset = 0; offset < blob.size; offset += SOURCE_PIECE) {
+      answerOf(await TILES.sourceImportChunk(begun.token, offset, new Uint8Array(await blob.slice(offset, offset + SOURCE_PIECE).arrayBuffer())));
+    }
+    answerOf(await TILES.sourceImportEnd(begun.token));
+    return 'restored';
+  } catch (error) {
+    void Promise.resolve(TILES.sourceImportAbort(begun.token)).catch(() => {});      // nothing to abort when the end refused it
+    if (error instanceof TiledBackupError && error.code === 'INVALID_BUFFER') return 'damaged';
+    throw error;
+  }
 }
 
 /**

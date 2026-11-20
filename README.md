@@ -117,7 +117,8 @@ U-Net on the computer.
    In the desktop program, choose a dedicated subfolder if a system folder is rejected. Slow folder copies
    run in the background after the local save, so you can continue navigating or export a project.
    In the desktop program with the scientific engine on, the folder copy also holds the masks of large (tiled) sections;
-   opening the project folder on another computer restores them (their source image must be located there).
+   opening the project folder on another computer restores them, with the image when the project keeps its own copy (otherwise locate the
+   image there). When the folder keeps a history, **Open project folder** asks whether to open the last save or a given day.
    A project with an invalid analysis region or broken mask references opens for inspection, with a warning in
    the affected section. Edits are temporary and a project export keeps the original data.
 

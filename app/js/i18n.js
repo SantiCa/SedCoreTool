@@ -2218,3 +2218,13 @@ Object.assign(D.es, {
 Object.assign(D.en, {
   'bk.tiledRefused': 'The masks of the large section «{s}» of «{p}» were not restored: «{w}» is missing or damaged in the copy. It will open locked; restore from another copy or open the project folder.',
   'bk.tiledNeedsEngine': 'The masks of {n} large sections of «{p}» were not restored: this needs the desktop program with the engine on. Restore again with it.' });
+Object.assign(D.es, {
+  'bk.sourceCopy': 'La copia automática guarda en la carpeta de copia la imagen original «{n}» ({s}), que el proyecto conserva. Se copia una sola vez.',
+  'bk.sourceDamaged': 'La copia de la imagen original «{n}» en la carpeta no se ha podido restaurar (falta un trozo o no es esa imagen). Las máscaras sí; localiza la imagen desde la sección.',
+  'bk.versionTitle': 'Qué estado del proyecto abrir', 'bk.versionCurrent': 'El último guardado', 'bk.versionDay': 'Último estado del día {d}',
+  'bk.versionNote': 'El historial guarda el último estado de cada día. Las secciones grandes se restauran con las máscaras de ese día.', 'bk.versionOpen': 'Abrir' });
+Object.assign(D.en, {
+  'bk.sourceCopy': 'The automatic copy is saving the original image «{n}» ({s}), which the project keeps, in the backup folder. It is copied only once.',
+  'bk.sourceDamaged': 'The copy of the original image «{n}» in the folder could not be restored (a piece is missing or it is not that image). The masks were; locate the image from the section.',
+  'bk.versionTitle': 'Which state of the project to open', 'bk.versionCurrent': 'The last save', 'bk.versionDay': 'Last state of {d}',
+  'bk.versionNote': 'The history keeps the last state of each day. Large sections are restored with the masks of that day.', 'bk.versionOpen': 'Open' });

@@ -172,7 +172,8 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `singleflight.js` | One run at a time with at most one more run for the requests made meanwhile, if the revision changed (card M8.4.31): project saves | Yes |
 | `tiledundo.js` | Undo and redo of tiled edits (card M8.4.16 step 5): copies of the mask tiles an edit changed, taken before its first write and swapped with the page's tiles (`TileChanges`); the 64 MiB budget of those copies (`trimTileHistory`) | Yes |
 | `tiledcounts.js` | Row counts of tiled sections (card M8.4.17): the histogram of each tile (`tileHistogram`), their sum under the current classes (`TiledRowCounts`) and the queue that counts changed tiles between frames (`TiledCountsRunner`); no DOM |
-| `tiledbackup.js` | Tiled sections in the folder backup and back into the store at a restore (card M8.4.18c): `backupTiledSections`, `restoreVersion`, `manifestBlobs`; no DOM (the folder is a directory handle or a read function) |
+| `tiledbackup.js` | Tiled sections in the folder backup and back into the store at a restore (card M8.4.18c): `backupTiledSections` (with the project's copies of sources), `restoreVersion`, `restoreSource`, `manifestBlobs`; no DOM (the folder is a directory handle or a read function) |
+| `folderversion.js` | «Open project folder» at a day of the history (card M8.4.18c): `historyDays` (no DOM) and `chooseFolderVersion` (a dialog) |
 | `tiledcache.js` | The reopening cache of a tiled section (card M8.4.29): `encodeReopenCache` and `decodeReopenCache` (every check; a refusal is `CacheRejected`), `statsCover`; no DOM |
 | `tiledsource.js` | The original image of a tiled section in the section form (card M8.4.18b): where it is, "Locate the image…" and "Copy the image into the project", through `window.corantoolDesktop.tiles` (`createTiledSourcePanel`); `sizeText` | — |
 | `tiledsync.js` | Sending the masks of tiled sections to the engine's store (card M8.4.16): rounds of staged version, dirty tiles and tables, commit and acknowledgement, retried after a failure (`MaskSync`); reading back tiles the page dropped (`MaskLoader`); the tables as bytes (`maskTables`) | Yes |
@@ -2333,6 +2334,7 @@ Dropbox; Chrome and Edge, and the desktop program), one folder per project:
   and, of older ones, the first of each month for 12 months; the rest are deleted;
 - `<name>__<id>/tiles/<sha256>` and `<name>__<id>/manifests/<sha256>.json` — the stored versions of the project's tiled sections (card
   M8.4.18c; format in contract §8.7, "Backup folder"), desktop program with the engine on only;
+- `<name>__<id>/sources/<sha256>` — the copy of a tiled section's source image that the project keeps (card M8.4.18b), written once;
 - `sedcoretool_ajustes.json` — the user settings.
 
 **Tiled sections in the copy (card M8.4.18c, `tiledbackup.js`, `backupTiledOf` and `restoreTiledOf` in `tiledproject.js`).** Before a project's
@@ -2347,7 +2349,16 @@ section's version from the folder into that identifier's store (`mask.import`: t
 manifest last), unless the store has it already. A missing or damaged file refuses that version whole: its manifest is not written, the section
 keeps its record and opens locked (card M8.4.27), and the user is told which file (`<row>.<col>` of a tile, `tables.<name>`, or `manifest`). A
 project file imported on its own (not as a folder) has no folder to read from: its tiled sections open only if this computer's store has their
-versions. The section's source image is not in the copy: on another computer it opens grey until its image is located (card M8.4.18b).
+versions. **Source images (step 3).** When the project keeps a copy of a tiled section's source (card M8.4.18b), the copy goes into `sources/<sha256>`
+once: the user is told its name and size first («The automatic copy is saving the original image…»), the main process reads it in pieces of 8 MiB
+(`sourceCopyRead`, each with its SHA-256), the page writes them and then reads the file back and checks every piece again; a file of that name and
+size already there is not written again. A source the project does not keep stays identified by its record only (on another computer the section
+opens grey until its image is located). At a restore, `sources/<sha256>` is sent back in pieces (`sourceImportBegin`, `sourceImportChunk`,
+`sourceImportEnd`); the main process writes them to a temporary file in the project's `sources/` and keeps it as the project's copy only if its size
+and SHA-256 are the saved ones (otherwise the user is told, and the masks are restored all the same); temporary files left by a stop are removed at
+the next start. **Choosing a day.** «Open project folder» on one project folder whose `historial/` holds days asks which state to open
+(`folderversion.js`): the last save (`project.json`) or the last state of a day; that file is restored like `project.json`, with the same folder's
+tiles, manifests and sources.
 
 A copy is requested 20 s after each change and in the background when switching projects; each copy also writes
 every other project modified since the previous copy. Attempts share one in-flight promise per renderer:
@@ -3660,8 +3671,7 @@ The percentage difference comes from the JPEG decoder (§3.4), not from the meth
     with hundreds of thousands of samples); MDI importance is biased among correlated proxies; everything is computed
     on the user's computer.
 11. **Known defects, with cards in the roadmap** (found by the audits of 19 November 2026; each item is removed when its card is done):
-    packages leave tiled sections out; they say so and name them (`left_out`, card M8.4.33) until card M8.4.18d carries them. The folder backup
-    carries their masks (card M8.4.18c) but not a copy of their source image kept in the project.
+    packages leave tiled sections out; they say so and name them (`left_out`, card M8.4.33) until card M8.4.18d carries them.
 
 ## 33. Reproducibility
 

@@ -41,6 +41,12 @@ contextBridge.exposeInMainWorld('corantoolDesktop', {
     // Card M8.4.18c: the files of a stored version for a backup folder, and back into a store at a restore (verified by the engine).
     maskExport: (project, manifest, blobs) => ipcRenderer.invoke('tiles:maskExport', project, manifest, blobs),
     maskImport: (project, kind, files) => ipcRenderer.invoke('tiles:maskImport', project, kind, files),
+    // Card M8.4.18c step 3: the project's copy of a source to the backup folder (read in pieces) and back (written in pieces, kept only when whole).
+    sourceCopyRead: (project, pyramid, offset) => ipcRenderer.invoke('tiles:sourceCopyRead', project, pyramid, offset),
+    sourceImportBegin: (project, pyramid, name, size) => ipcRenderer.invoke('tiles:sourceImportBegin', project, pyramid, name, size),
+    sourceImportChunk: (token, offset, bytes) => ipcRenderer.invoke('tiles:sourceImportChunk', token, offset, bytes),
+    sourceImportEnd: (token) => ipcRenderer.invoke('tiles:sourceImportEnd', token),
+    sourceImportAbort: (token) => ipcRenderer.invoke('tiles:sourceImportAbort', token),
     rememberSource: (project, pyramid) => ipcRenderer.invoke('tiles:rememberSource', project, pyramid),
     reopen: (project, pyramid, key) => ipcRenderer.invoke('tiles:reopen', project, pyramid, key),
     // Card M8.4.18b: a moved source located again (a File the user chose, sent as its path), and a copy of the source into the project.

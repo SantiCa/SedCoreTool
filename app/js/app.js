@@ -41,6 +41,7 @@ import { MaskLoader, MaskSync, buildMaskTables, classesText } from './tiledsync.
 import { TiledRowCounts, TiledCountsRunner, tileHistogram } from './tiledcounts.js';
 import { TileChanges, trimTileHistory } from './tiledundo.js';
 import { createTiledSourcePanel } from './tiledsource.js';
+import { chooseFolderVersion } from './folderversion.js';
 import { renderData } from './datatab.js';
 import { frameRatio, panelPrefs, savePanels } from './panels.js';
 import { addRecordFromTable, defaultLogView, lastLog, mode, renderLog, renderLogPanel, renderRecList, scheduleLog, sectionCanvas, navigationPreviewCanvas, clearNavigationPreviews, setMode } from './columns.js';
@@ -3655,11 +3656,8 @@ async function openProjectFolder() {
     }
   }
   if (!dirs.length) { toast(t('bk.noFolderProject')); return; }
-  const files = [];
-  for (const d of dirs) {
-    const p = await (await (await d.getFileHandle('project.json')).getFile()).text();
-    files.push({ folder: d, text: p });
-  }
+  const files = [];   // card M8.4.18c: one project folder may be opened at a day of its history
+  for (const d of dirs) { const text = dirs.length === 1 ? await chooseFolderVersion(d) : await (await (await d.getFileHandle('project.json')).getFile()).text(); if (text === null) return; files.push({ folder: d, text }); }
   await busy(() => restoreFolders(files));
 }
 async function writeText(dir, name, text) {
@@ -4656,7 +4654,7 @@ window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, read
   tileState: (k, row, col) => { const s = sec(), scheduler = s?.tiled && tileSchedulers.get(s.tiled.pyramid), key = s?.tiled ? s.tiled.pyramid + '/' + tileKey(k, row, col) : '';   // evidence when a probe fails (card M8.4.24)
     return { cached: tileCache.has(key), inFlight: !!scheduler?.inFlight.has(key), idle: !!scheduler?.idle, failures: scheduler?.failures ?? 0, lastError: s?.tiled?.lastError ?? null }; },
   objectsWaiting, saveBlockers: () => ({ blankStart, loading, readOnlyProject, storageOK, id: !!S.id, cores: S.cores.length, running: !!saves.running }),   // tests: why a save would not run   // card M8.4.28: an object operation waits for its objects' tiles (tests)
-  exportedProject: () => projectForExport(serialize()).json, packageNow: async () => (await packageProjects([serialize()])).size, projectFolderTo: (dir) => writeProjectFolder(dir, serialize()), restoreFolders,   // cards M8.4.33 and M8.4.18c tests
+  exportedProject: () => projectForExport(serialize()).json, packageNow: async () => (await packageProjects([serialize()])).size, projectFolderTo: (dir) => writeProjectFolder(dir, serialize()), restoreFolders, chooseFolderVersion,   // cards M8.4.33 and M8.4.18c tests
   saveNow: () => saveToDB(), storeProject: (id = null) => storeProject(id ?? S.id), settleDeadline: (ms) => { settleDeadlineMs = ms; },   // card M8.4.18a tests
   stopMaskSync: () => sec()?._maskSync?.stop(), tiledSaved: () => S.cores.flatMap((c) => c.sections).filter((q) => q.tiled).map((q) => q._savedRecord?.tiled?.manifest ?? null),
   tiledCountsIdle: () => S.sections.every((q) => !q._counts || (!q._counts.runner.running && q._counts.counts.ready)),

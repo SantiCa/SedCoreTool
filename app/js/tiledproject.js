@@ -6,7 +6,7 @@ import { MaskTiles, reduceTile } from './tiledmasks.js';
 import { tileHistogram } from './tiledcounts.js';
 import { TiledObjectStats } from './tiledit.js';
 import { CacheRejected, decodeReopenCache, encodeReopenCache, statsCover } from './tiledcache.js';
-import { backupTiledSections, restoreVersion } from './tiledbackup.js';
+import { backupTiledSections, restoreVersion, restoreSource } from './tiledbackup.js';
 import { features } from './imageproc.js';
 import { pxPerCm } from './sectiondepth.js';
 import { t } from './i18n.js';
@@ -167,7 +167,7 @@ export function createTiledProject(ctx) {
    * engine they cannot be read, and the sections are left out as before (cards M8.4.18d and M8.4.33). Returns the sections left out.
    */
   async function backupTiledOf(dir, id, json) {
-    if (ctx.TILES?.maskExport) return backupTiledSections(ctx.TILES, dir, storeProject(id), json, hexDigest);
+    if (ctx.TILES?.maskExport) return backupTiledSections(ctx.TILES, dir, storeProject(id), json, hexDigest, (name, size) => toast(t('bk.sourceCopy', { n: name, s: sizeText(size) }), 12000));
     const leftOut = (json.cores || [json]).flatMap((c) => (Array.isArray(c.sections) ? c.sections.filter((q) => q.tiled).map((q) => ({ core: c.name ?? null, section: q.name ?? q.id })) : []));
     for (const c of json.cores || [json]) if (Array.isArray(c.sections)) c.sections = c.sections.filter((q) => !q.tiled);
     if (leftOut.length) json.left_out = [...(json.left_out || []), ...leftOut];
@@ -189,7 +189,16 @@ export function createTiledProject(ctx) {
       const failed = readFile ? await restoreVersion(ctx.TILES, project, q.tiled.manifest, readFile) : 'manifest';
       if (failed) toast(t('bk.tiledRefused', { s: q.name || '?', p: p.name || APP, w: failed }), 15000);
     }
+    // Step 3: a copy of each source the folder holds goes into the project, so the section opens with its image on this computer too.
+    const sources = new Map(tiled.filter((q) => q.tiled.source?.sha256).map((q) => [q.tiled.source.sha256, q.tiled.source.name || '']));
+    if (!readFile || !ctx.TILES.sourceImportBegin) return;
+    for (const [pyramid, name] of sources) {
+      const outcome = await restoreSource(ctx.TILES, project, pyramid, name, readFile).catch((error) => { console.warn('source copy not restored', error); return 'failed'; });
+      if (outcome === 'damaged' || outcome === 'failed') toast(t('bk.sourceDamaged', { n: name || pyramid.slice(0, 12) }), 12000);
+    }
   }
+  /** A size in bytes as the user reads it (MB below 1 GB). @param {number} bytes */
+  const sizeText = (bytes) => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`);
 
   /** Card M8.4.34: tell the main process which stores belong to the projects of the library listing (it deletes only those, after asking when the page did not open them). Returns the list unchanged. */
   function announceStoreProjects(list) {
