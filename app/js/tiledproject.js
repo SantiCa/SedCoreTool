@@ -98,13 +98,15 @@ export function createTiledProject(ctx) {
     // A round already on its way finishes (a stopped send starts no other) and closes its staged version; after many edits it can take more
     // than the few seconds allowed before (seen on 20 Nov 2026: the folder stayed), so up to 60 s.
     await Promise.race([Promise.all(sections.map((q) => q._maskSync?.running?.catch(() => {}))), new Promise((r) => setTimeout(r, 60000))]);
+    let error = null;
     for (let attempt = 0; attempt < 5; attempt++) {
       const result = await ctx.TILES.deleteProjectStore(storeProject(id));
       if (!result.error) return;
+      error = result.error;
       if (result.error.code !== 'BUSY') break;
       await new Promise((r) => setTimeout(r, 1000));                   // a version still being sent: the engine closes it shortly
     }
-    toast(t('tiles.deleteFailed'), 9000);
+    toast(t('tiles.deleteFailed') + ` (${error?.code || '?'}${error?.field ? ' ' + error.field : ''})`, 9000);   // the reason, for a report
   }
   /** Card M8.4.27: before a project is kept under a new identifier, its tiled sections' stored versions and sources are copied to it; throws
    *  (and nothing is kept) when that is not possible. */

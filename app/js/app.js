@@ -4655,7 +4655,7 @@ window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, read
   clearTiles: () => { for (const bitmap of tileCache.clear()) bitmap?.close?.(); requestRender(); },   // repeated viewer probes (card M8.4.24)
   tileState: (k, row, col) => { const s = sec(), scheduler = s?.tiled && tileSchedulers.get(s.tiled.pyramid), key = s?.tiled ? s.tiled.pyramid + '/' + tileKey(k, row, col) : '';   // evidence when a probe fails (card M8.4.24)
     return { cached: tileCache.has(key), inFlight: !!scheduler?.inFlight.has(key), idle: !!scheduler?.idle, failures: scheduler?.failures ?? 0, lastError: s?.tiled?.lastError ?? null }; },
-  objectsWaiting,   // card M8.4.28: an object operation waits for its objects' tiles (tests)
+  objectsWaiting, saveBlockers: () => ({ blankStart, loading, readOnlyProject, storageOK, id: !!S.id, cores: S.cores.length, running: !!saves.running }),   // tests: why a save would not run   // card M8.4.28: an object operation waits for its objects' tiles (tests)
   exportedProject: () => projectForExport(serialize()).json, packageNow: async () => (await packageProjects([serialize()])).size,   // card M8.4.33 tests
   saveNow: () => saveToDB(), storeProject: (id = null) => storeProject(id ?? S.id), settleDeadline: (ms) => { settleDeadlineMs = ms; },   // card M8.4.18a tests
   stopMaskSync: () => sec()?._maskSync?.stop(), tiledSaved: () => S.cores.flatMap((c) => c.sections).filter((q) => q.tiled).map((q) => q._savedRecord?.tiled?.manifest ?? null),

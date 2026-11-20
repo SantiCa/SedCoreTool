@@ -115,7 +115,8 @@ try {
     }
     const project = window.ichantool.serialize(), q = window.ichantool.S.sections.at(-1);
     return { names: project.cores.flatMap((core) => core.sections.map((q) => q.name)), version: project.version, manifests: window.ichantool.tiledSaved(),
-      why: { saveState: document.getElementById('saveState')?.dataset.state, settled: window.ichantool.masksSettled(), sync: q._maskSync ? { manifest: q._maskSync.manifest,
+      why: { blockers: window.ichantool.saveBlockers(), inCores: window.ichantool.S.cores.some((c) => c.sections.includes(q)), tiled: !!q.tiled, maskTiles: !!q.maskTiles,
+        saveState: document.getElementById('saveState')?.dataset.state, settled: window.ichantool.masksSettled(), sync: q._maskSync ? { manifest: q._maskSync.manifest,
         running: !!q._maskSync.running, wanted: q._maskSync.wanted, stopped: q._maskSync.stopped, failures: q._maskSync.failures } : null, frozen: q.frozen ?? null } };
   });
   assert.equal(saved.names.length, 7, 'the tiled section is saved with the six others: ' + JSON.stringify(saved.why) + ' ' + JSON.stringify(toasts.slice(-4)));
