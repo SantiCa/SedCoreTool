@@ -34,6 +34,7 @@ import { joinCoreTables } from './coremerge.js';
 import { createTiledProject } from './tiledproject.js';
 import { createTiledState } from './tiledstate.js';
 import { createTiledTools } from './tiledtools.js';
+import { createTiledView } from './tiledview.js';
 import { classUse, deleteClass, restoreClass, repairOrphanLabels } from './taxa.js';
 import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, tilesUnder, windowRange, planWindows, pinRanges, toWindowRect, windowRgba } from './tiledit.js';
 import { MaskLoader, MaskSync, buildMaskTables, classesText } from './tiledsync.js';
@@ -395,58 +396,10 @@ const TILES = /** @type {any} */ (window).corantoolDesktop?.tiles?.enabled === t
 const TILED_BLOCKED_TOOLS = new Set();
 function tiledRefused(s) { if (!s?.tiled && !s?.frozen) return false; toast(t(s.frozen ? 'tiles.frozen.' + s.frozen : 'tiles.unavailable')); return true; }
 
-/** The working image of a tiled section: its proxy level of the pyramid, read through the engine in batches of 16 verified tiles. */
-async function tiledWorkingImage(tiled) {
-  const level = tiled.levels[tiled.level], positions = levelPositions(level), tiles = [];
-  for (let i = 0; i < positions.length; i += 16) {
-    const batch = positions.slice(i, i + 16), read = await TILES.read(tiled.pyramid, tiled.level, batch);
-    if (read.error) throw new Error(t('tiles.err', { code: read.error.code }));
-    const bytes = new Uint8Array(read.ok.bytes.buffer || read.ok.bytes, read.ok.bytes.byteOffset || 0, read.ok.bytes.byteLength);
-    let offset = 0;
-    read.ok.tiles.forEach((tile, k) => { tiles.push({ row: batch[k][0], col: batch[k][1], bytes: bytes.subarray(offset, offset + tile.byte_length) }); offset += tile.byte_length; });
-  }
-  return assembleLevel(tiles, level, tiled.channels, tiled.bits);
-}
-
-/* The viewer's full-resolution tiles (card M8.4.15 step 4): one page cache with one budget, one scheduler per pyramid. A tile becomes an
-   ImageBitmap (16-bit shown by its high byte, as the working image); evicted bitmaps are closed. */
-const tileCache = new TileCache();
-const tileSchedulers = new Map();
-
-/** @returns {TileScheduler} */
-function tileScheduler(s) {
-  const tiled = s.tiled;
-  let scheduler = tileSchedulers.get(tiled.pyramid);
-  if (scheduler) return scheduler;
-  const fetch = async (k, positions) => {
-    const read = await TILES.read(tiled.pyramid, k, positions);
-    if (read.error) throw new Error(t('tiles.err', { code: read.error.code, field: read.error.field || '' }));
-    const bytes = new Uint8Array(read.ok.bytes.buffer || read.ok.bytes, read.ok.bytes.byteOffset || 0, read.ok.bytes.byteLength);
-    const out = [];
-    let offset = 0;
-    for (let i = 0; i < read.ok.tiles.length; i++) {
-      const length = read.ok.tiles[i].byte_length, rgba = tileRgba(bytes.subarray(offset, offset + length), tiled.channels, tiled.bits);
-      offset += length;
-      out.push({ row: positions[i][0], col: positions[i][1], value: await createImageBitmap(new ImageData(rgba, TILE, TILE)), bytes: rgba.byteLength });
-    }
-    return out;
-  };
-  scheduler = new TileScheduler({ fetch, cache: tileCache, prefix: tiled.pyramid + '/',
-    onLoaded: () => { if (sec()?.tiled === tiled) requestRender(); },
-    onRetry: () => { if (sec()?.tiled === tiled) requestRender(); },     // the view asks again for the tiles it still wants
-    onError: (error) => {
-      tiled.lastError = error.message || String(error);
-      if (!tiled.errorShown) { tiled.errorShown = true; toast(tiled.lastError, 9000); }
-      void recoverEngine().catch(() => {});                // the retry then reads from the restarted engine
-    } });
-  tileSchedulers.set(tiled.pyramid, scheduler);
-  return scheduler;
-}
-
-/** Tiles show the source's pixels: drawn only while the working image under them shows them too (no filter). Masks are drawn over them. */
-function tilesShowSource(s) {
-  return S.showOrig || !Object.keys(DEFAULT_FILTERS).some((key) => s.filters[key] !== DEFAULT_FILTERS[key]);
-}
+/** Card M8.4.30 step 4: the viewer of tiled sections (working image, pixel tiles, mask overlay, build dialog) lives in tiledview.js. */
+const { tiledWorkingImage, tileCache, tileSchedulers, tilesShowSource, drawTiles, tileBuildDialog } = createTiledView({
+  TILES, get view() { return view; }, get vctx() { return vctx; }, toast, requestRender, esc: (text) => esc(text), maskLoader: (q) => maskLoader(q), recoverEngine: () => recoverEngine(),
+});
 
 /** Put one mask tile of a tiled section in the page (card M8.4.16): the tile cache, and the reduced copy in the working image (decision D). */
 function putMaskTile(s, row, col, labels, exclude) {
@@ -483,80 +436,6 @@ const { startTiledStroke, moveTiledStroke, finishTiledStroke, tiledExcludeRect, 
   six: (s) => six(s), subPx: (op, i, id) => subPx(op, i, id),
   tiledStatsRunner, updateHistoryButtons, sourceBox, sourceRoi,
 });
-
-/* The masks of a tiled section over its pixel tiles (card M8.4.16 step 2): one RGBA layer (`overlayLayout`, `paintOverlay`) drawn over them. */
-const maskLayer = { canvas: /** @type {HTMLCanvasElement | null} */ (null), data: /** @type {ImageData | null} */ (null) };
-
-function drawMaskOverlay(s, k, rect, viewWidth, viewHeight) {
-  if (k === 0 && s.maskTiles.stored.size) {
-    const range = windowRange(s.maskTiles, { x0: rect.x0 * s.ds, y0: rect.y0 * s.ds, x1: rect.x1 * s.ds, y1: rect.y1 * s.ds }, 1), missing = [];
-    for (let row = range.row0; row <= range.row1; row++) for (let col = range.col0; col <= range.col1; col++) if (s.maskTiles.state(row, col) === 'missing') missing.push([row, col]);
-    if (missing.length && TILES) void maskLoader(s).want(missing).catch(() => {});   // drawn as empty until they arrive
-  }
-  const layout = overlayLayout(s, S.view, k, rect, viewWidth, viewHeight);
-  if (!layout) return;
-  const { sx0, sy0, cw, ch } = layout, canvas = maskLayer.canvas ||= document.createElement('canvas');
-  if (canvas.width < cw || canvas.height < ch) { canvas.width = Math.max(cw, canvas.width); canvas.height = Math.max(ch, canvas.height); }
-  const context = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
-  if (maskLayer.data?.width !== cw || maskLayer.data.height !== ch) maskLayer.data = context.createImageData(cw, ch);
-  const inSel = new Uint8Array(s.nextId + 1); for (const id of S.multi) if (id <= s.nextId) inSel[id] = 1;
-  paintOverlay({ ...layout, out: maskLayer.data.data, px0: sx0, py0: sy0, style: { fill: s.lutFill, line: s.lutLine, sty: s.lutStyle, stacks: s.stacks, selected: S.selected, inSel } });
-  context.putImageData(maskLayer.data, 0, 0);
-  vctx.drawImage(canvas, 0, 0, cw, ch, sx0, sy0, cw, ch);
-}
-
-/**
- * Draw the full-resolution tiles of a tiled section over its working image, inside the analysis area, when the zoom needs a level finer than
- * the working image. A tile not loaded yet is drawn from the nearest finer-than-working level already cached, else the working image shows.
- */
-function drawTiles(s, cw, ch) {
-  if (s.tiled.missing) return;                               // card M8.4.18a: no pyramid and no source; the grey working image stays
-  const tiled = s.tiled, levels = tiled.levels, { x: vx, y: vy, zoom: z } = S.view, ds = s.ds, roi = s.roi, scheduler = tileScheduler(s);
-  const k = levelForZoom(levels, z / ds);
-  if (k >= tiled.level || !tilesShowSource(s)) { scheduler.want(k, []); return; }
-  const x0 = Math.max(vx, roi.x0), y0 = Math.max(vy, roi.y0), x1 = Math.min(vx + cw / z, roi.x1), y1 = Math.min(vy + ch / z, roi.y1);
-  if (x1 <= x0 || y1 <= y0) { scheduler.want(k, []); return; }
-  const rect = { x0: x0 * ds, y0: y0 * ds, x1: x1 * ds, y1: y1 * ds }, visible = tileRange(levels, k, rect, 0), prefix = tiled.pyramid + '/';
-  const protect = new Set();
-  for (let row = visible.row0; row <= visible.row1; row++) for (let col = visible.col0; col <= visible.col1; col++) protect.add(prefix + tileKey(k, row, col));
-  scheduler.want(k, tilesByDistance(tileRange(levels, k, rect, 1), { x: (rect.x0 + rect.x1) / 2, y: (rect.y0 + rect.y1) / 2 }), protect);
-  const placement = { vx, vy, zoom: z, workingLevel: tiled.level };
-  vctx.save();
-  vctx.beginPath(); vctx.rect((x0 - vx) * z, (y0 - vy) * z, (x1 - x0) * z, (y1 - y0) * z); vctx.clip();
-  vctx.imageSmoothingEnabled = false;                    // nearest pixel, as the working image is drawn
-  for (let row = visible.row0; row <= visible.row1; row++) {
-    for (let col = visible.col0; col <= visible.col1; col++) {
-      const at = tilePlacement(levels, k, row, col, placement);
-      const dx = Math.round(at.dx), dy = Math.round(at.dy), dw = Math.round(at.dx + at.dw) - dx, dh = Math.round(at.dy + at.dh) - dy;   // no seams
-      const bitmap = tileCache.get(prefix + tileKey(k, row, col));
-      if (bitmap) { vctx.drawImage(bitmap, 0, 0, at.w, at.h, dx, dy, dw, dh); continue; }
-      const cover = coarserCover(levels, k, row, col, (key) => tileCache.has(prefix + key));
-      if (cover && cover.k < tiled.level) vctx.drawImage(tileCache.get(prefix + cover.key), cover.sx, cover.sy, cover.sw * at.w / TILE, cover.sh * at.h / TILE, dx, dy, dw, dh);
-    }
-  }
-  drawMaskOverlay(s, k, { x0, y0, x1, y1 }, cw, ch);
-  vctx.restore();
-}
-
-/** A small modal with the pyramid's progress and a Cancel button. */
-function tileBuildDialog(name, onCancel, title = t('tiles.building', { n: name })) {
-  const dlg = document.createElement('dialog');
-  dlg.innerHTML = `<div style="display:grid;gap:10px;min-width:340px"><h3 style="margin:0">${esc(title)}</h3>
-    <progress id="tbProgress" max="1" value="0" style="width:100%"></progress><span class="note" id="tbStage"></span>
-    <div class="row" style="justify-content:flex-end"><button class="btn" id="tbCancel">${esc(t('cl.cancel'))}</button></div></div>`;
-  document.body.appendChild(dlg);
-  dlg.addEventListener('cancel', (e) => { e.preventDefault(); onCancel(); });
-  dlg.querySelector('#tbCancel').addEventListener('click', () => { /** @type {HTMLButtonElement} */ (dlg.querySelector('#tbCancel')).disabled = true; onCancel(); });
-  dlg.showModal();
-  return {
-    update({ stage, completed, total }) {
-      const bar = /** @type {HTMLProgressElement} */ (dlg.querySelector('#tbProgress'));
-      bar.value = total ? completed / total : 0;
-      dlg.querySelector('#tbStage').textContent = t('tiles.stage.' + stage);
-    },
-    close() { dlg.close(); dlg.remove(); },
-  };
-}
 
 /* Card M8.4.18b: the original image of a tiled section (locate it when it moved, copy it into the project); see tiledsource.js. A section
    locked because its image was missing is opened again from its saved record once the image is found (it cannot have changed meanwhile). */

@@ -96,16 +96,16 @@ matching tier and the Python API the **last**; the kernel takes `precedence="fir
 
 | Kind | Rule | Examples |
 |---|---|---|
-| Pure modules | No `document`, `window` or DOM types; state arrives as arguments. Tested with Node in `tests/app/` | `core.js`, `sectiondepth.js`, `sectionanalysis.js`, `maskchanges.js`, `tiledsection.js`, `tilecache.js`, `tiledmasks.js`, `tiledit.js`, `tiledcounts.js`, `tiledsync.js`, `tiledundo.js`, `singleflight.js`, `taxa.js`, `coremerge.js`, `engineclient.js`, `engineanalysis.js`, `edit.js`, `imageproc.js`, `learn.js`, `log.js`, `geo.js`, `interp.js`, `locmap.js`, `plot.js`, `sheet.js`, `exportio.js`, `zip.js`, `unet.js`, `unetmodel.js`, `navpreview.js`, `figview.js`, `tableview.js` |
+| Pure modules | No `document`, `window` or DOM types; state arrives as arguments. Tested with Node in `tests/app/` | `core.js`, `sectiondepth.js`, `sectionanalysis.js`, `maskchanges.js`, `tiledsection.js`, `tilecache.js`, `tiledmasks.js`, `tiledit.js`, `tiledcounts.js`, `tiledsync.js`, `tiledundo.js`, `singleflight.js`, `taxa.js`, `coremerge.js`, `engineclient.js`, `engineanalysis.js`, `edit.js`, `imageproc.js`, `learn.js`, `log.js`, `geo.js`, `interp.js`, `locmap.js`, `plot.js`, `sheet.js`, `exportio.js`, `zip.js`, `unet.js`, `unetmodel.js`, `navpreview.js`, `figview.js` |
 | State | The shared project state `S` and small helpers | `state.js` |
-| Controllers and views | Read and change `S`, call pure modules, build DOM/SVG, wire events | `app.js`, `columns.js`, `datatab.js`, `figures.js`, `multiproxy.js`, `panels.js`, `diagnostics.js`, `tiledproject.js`, `tiledstate.js`, `tiledtools.js` |
+| Controllers and views | Read and change `S`, call pure modules, build DOM/SVG, wire events | `app.js`, `columns.js`, `datatab.js`, `figures.js`, `multiproxy.js`, `panels.js`, `diagnostics.js`, `tiledproject.js`, `tiledstate.js`, `tiledtools.js`, `tiledview.js`, `tableview.js` |
 | Storage | IndexedDB project library | `storage.js` |
 
 Rules:
 
 1. **No new scientific calculation in JavaScript.** New methods are written in Python (§5.1). Existing JavaScript
    calculations change only to fix or preserve current behaviour, until their M8 slice replaces them.
-2. **`app.js` only shrinks.** It has about 4,200 lines and mixes many workflows. A task that changes a workflow
+2. **`app.js` only shrinks.** It has 4,666 lines (20 Nov 2026, after card M8.4.30); `tests/app/architecture.test.mjs` fails when it grows beyond that ceiling, which each card that shortens it lowers, and checks this table's pure modules for DOM use and imports of controllers. It still mixes many workflows. A task that changes a workflow
    inside `app.js` first moves that workflow's logic into a pure module, without changing behaviour (§5.2), then
    makes its change there. Do not add new logic to `app.js` beyond wiring.
 3. A pure module never imports a controller. Controllers may import each other only for names used inside

@@ -82,8 +82,9 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: M8.4.32** (the tiled tests run on GitHub on three systems; **model: most capable tier, effort medium**), then M8.4.33, M8.4.30
-  and the rest of order O; Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
+- **Next step: Q5** (long series: `extent()` without spreads, decimation on screen, the data record saved in parts; **model: most capable tier,
+  effort medium**), then M8.4.29 and the rest of order O; M8.4.30 is done except its size target (decision R); M8.4.33 is done; M8.4.32 waits
+  for a green run on three systems; Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
   council audit, below). **V0.152** (decision J) was prepared on 20 Nov 2026 at the maintainer's request ("Publica la 0.152 y haz un release"):
   full checks passed on the version commit (Windows: pytest 885 passed / 9 skipped, npm 478, typecheck, sync_version, ruff, standalone build,
   runtime rebuilt, desktop.mjs off and on, tiled-sections.mjs). **Published on 20 Nov 2026:** `master` `8ee9776`, tag `V0.152`, GitHub Release
@@ -129,6 +130,9 @@ Updated 18 November 2026.
   8. **Can we move to the next phases?** No. M8.5 needs the milestone gates of part C (M8.4.19) and part B (M8.4.11). Order recommended:
      M8.4.28 (finishing) → **M8.4.30** → M8.4.29 (needs decision G) → M8.4.18c → M8.4.18d → M8.4.19 (with decision I) → M8.4.20 → part B as
      decided by I → M8.5. Decisions G, H, I and J were approved the same day (below); J publishes V0.152 after M8.4.28.
+- **Decision R waiting for the maintainer (card M8.4.30, 20 Nov 2026):** the card's target of fewer than 4,344 lines for `app.js` cannot be
+  met by moving tiled-section code alone (it is out: 5,390 → 4,666). *Recommended:* accept 4,666 as the ceiling enforced by
+  `tests/app/architecture.test.mjs`, lowered by each later card that moves a workflow, rather than a separate move of unrelated code now.
 - **Second council audit of 19 November 2026** (the maintainer's prompt: four independent experts, a senior sedimentologist and
   palaeoclimatologist, a scientific-software architect, a UX/UI specialist for complex technical software and a data-integrity and QA engineer,
   read the repository without running anything, then critiqued the others anonymised and argued the trade-offs; the design session checked
@@ -1967,7 +1971,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   six ordinary sections, no tiled one, one `left_out` entry, and the message is shown; `desktop.mjs`: a project without tiled sections has no
   `left_out`). Two page hooks for the tests (`exportedProject`, `packageNow`). The full backup of every project uses the same function.
 
-##### M8.4.30 - The tiled-section controller leaves `app.js` — state: In progress (step 1 done 20 Nov 2026: `tiledproject.js`, `app.js` 5,390 → 5,256 lines; step 2: `tiledstate.js`, 5,256 → 5,125; step 3: `tiledtools.js`, 5,125 → 4,787; after each, desktop.mjs off and on and tiled-sections.mjs pass) (written by the audit of 19 Nov 2026, finding 1)
+##### M8.4.30 - The tiled-section controller leaves `app.js` — state: Done except its size target (20 Nov 2026, development gate; decision R below)
 
 - **Goal:** the tiled-section workflow lives in its own controller modules, `app.js` only wires them, and `app.js` is back below its size of
   13 November 2026 (4,344 lines); no behaviour changes.
@@ -1992,6 +1996,17 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 - **Tests:** unchanged `npm test`, `npm run typecheck` (no new diagnostics), `tests/e2e/tiled-sections.mjs`, `tests/e2e/desktop.mjs` with
   the engine off and on; the new size check.
 - **Done when:** `app.js` has fewer than 4,344 lines, every test passes unchanged, the standalone build works; development gate.
+- *As built (20 Nov 2026):* four controller modules, each receiving what it needs from `app.js` in one context object (getters for values
+  that change, such as the drag in progress, the view and the save deadline): `tiledproject.js` (reopening, locks, store folder, the store's
+  part of a save), `tiledstate.js` (statistics runner, row counts, pixel and mask reads, mask sends), `tiledtools.js` (strokes, undo and redo of
+  tiled edits, wand, lasso, scissors, object operations), `tiledview.js` (working image, tile cache and schedulers, mask overlay, build
+  dialog). Code moved, not rewritten; `sourceBox` and `sourceRoi` stay in `app.js` because two modules use them. `app.js`: 5,390 → 4,666 lines.
+  `tests/app/architecture.test.mjs`: the lists of ARCHITECTURE §3.2 name existing files; pure modules use no DOM and import no controller
+  (`tableview.js`, which uses the DOM, moved to the controllers); `app.js` at or below 4,666 lines. Checks: after each step `desktop.mjs` with
+  the engine off and on and `tiled-sections.mjs` passed (Windows); full checks in the status. **Not met: fewer than 4,344 lines.** The
+  tiled-section code that remained in `app.js` was about 770 lines; the rest of part C's growth (saving, tests hooks, the import, unit and
+  class changes of cards Q1-Q4) is not tiled-section code. Decision R (proposed): accept 4,666 as the new ceiling, lowered by each later card
+  that moves a workflow (U1-U3 move dialogs and messages; A2 moves runtime caches), instead of a further move now.
 
 ##### M8.4.29 - Reopening without reading every stored tile — state: after M8.4.30; decision G approved by the maintainer on 19 Nov 2026 (written 18 Nov 2026 for finding 3 of M8.4.18a)
 

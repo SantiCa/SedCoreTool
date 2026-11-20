@@ -21,6 +21,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.30 step 4 and checks: `tiledview.js` (`createTiledView`) moved out of `app.js` (4,787 -> 4,666 lines); `tests/app/architecture.test.mjs` checks the pure modules of ARCHITECTURE §3.2 for DOM use and imports of controllers and holds `app.js` at or below 4,666 lines; `tableview.js` is listed as a controller (it uses the DOM).
 - Card M8.4.30 step 3: `tiledtools.js` (`createTiledTools`: strokes, undo and redo of tiled edits, wand, lasso, scissors, object operations) moved out of `app.js`.
 - Card M8.4.30 step 2: `tiledstate.js` (`createTiledState`: statistics runner, row counts, pixel and mask reads, mask sends) moved out of `app.js`.
 - Card M8.4.30 step 1: `tiledproject.js` (`createTiledProject`: reopening, locks, store folder, the store's part of a save) moved out of `app.js` without changing behaviour.

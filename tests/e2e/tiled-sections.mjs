@@ -113,10 +113,12 @@ try {
       await window.ichantool.saveNow();                                  // card M8.4.18a: a tiled section is saved like the others
       for (let k = 0; k < 600 && !window.ichantool.masksSettled(); k++) await new Promise((r) => setTimeout(r, 100));
     }
-    const project = window.ichantool.serialize();
-    return { names: project.cores.flatMap((core) => core.sections.map((q) => q.name)), version: project.version, manifests: window.ichantool.tiledSaved() };
+    const project = window.ichantool.serialize(), q = window.ichantool.S.sections.at(-1);
+    return { names: project.cores.flatMap((core) => core.sections.map((q) => q.name)), version: project.version, manifests: window.ichantool.tiledSaved(),
+      why: { saveState: document.getElementById('saveState')?.dataset.state, settled: window.ichantool.masksSettled(), sync: q._maskSync ? { manifest: q._maskSync.manifest,
+        running: !!q._maskSync.running, wanted: q._maskSync.wanted, stopped: q._maskSync.stopped, failures: q._maskSync.failures } : null, frozen: q.frozen ?? null } };
   });
-  assert.equal(saved.names.length, 7, 'the tiled section is saved with the six others');
+  assert.equal(saved.names.length, 7, 'the tiled section is saved with the six others: ' + JSON.stringify(saved.why) + ' ' + JSON.stringify(toasts.slice(-4)));
   // Card M8.4.33: a package leaves the tiled section out, names it in `left_out` and tells the user before it is written.
   const toastsBeforePackage = toasts.length;
   const exported = await on.page.evaluate(async () => { const json = window.ichantool.exportedProject(); await window.ichantool.packageNow();
