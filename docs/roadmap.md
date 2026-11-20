@@ -83,7 +83,7 @@ Updated 18 November 2026.
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
 - **Next step: Q5** (long series: `extent()` without spreads, decimation on screen, the data record saved in parts; **model: most capable tier,
-  effort medium**), then M8.4.29 and the rest of order O; M8.4.30 is done except its size target (decision R); M8.4.33 is done; M8.4.32 is done
+  effort medium**), then M8.4.29 and the rest of order O; M8.4.30 is done (its size target replaced by the ceiling of decision R, approved 20 Nov 2026); decisions S, T and the four design choices of M8.4.34 were approved the same day; M8.4.33 is done; M8.4.32 is done
   (green on three systems, commit `4a20dfd`); M8.4.29 and M8.4.34 are done at the development gate on 20 Nov 2026 (the GitHub run of their commits is pending); Q5 parts 1-2 are done (part 3 changes the saved format: waits for the maintainer); P1 is done on 20 Nov 2026 (`figsize.js`, `pngmeta.js`, PNG at 300/600 dpi; `npm test` 507, typecheck and standalone build pass; the 600 dpi check added to `tests/e2e/figure-composition.mjs` (run by `smoke.mjs`) **has not been run**: the permission system refused to start the local server for it, so it runs in the next session or on the maintainer's computer); Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
   council audit, below). **V0.152** (decision J) was prepared on 20 Nov 2026 at the maintainer's request ("Publica la 0.152 y haz un release"):
   full checks passed on the version commit (Windows: pytest 885 passed / 9 skipped, npm 478, typecheck, sync_version, ruff, standalone build,
@@ -130,9 +130,10 @@ Updated 18 November 2026.
   8. **Can we move to the next phases?** No. M8.5 needs the milestone gates of part C (M8.4.19) and part B (M8.4.11). Order recommended:
      M8.4.28 (finishing) → **M8.4.30** → M8.4.29 (needs decision G) → M8.4.18c → M8.4.18d → M8.4.19 (with decision I) → M8.4.20 → part B as
      decided by I → M8.5. Decisions G, H, I and J were approved the same day (below); J publishes V0.152 after M8.4.28.
-- **Decision R waiting for the maintainer (card M8.4.30, 20 Nov 2026):** the card's target of fewer than 4,344 lines for `app.js` cannot be
+- **Decision R, approved by the maintainer on 20 Nov 2026 ("apruebo R"), as recommended (card M8.4.30):** the card's target of fewer than 4,344 lines for `app.js` cannot be
   met by moving tiled-section code alone (it is out: 5,390 → 4,666). *Recommended:* accept 4,666 as the ceiling enforced by
   `tests/app/architecture.test.mjs`, lowered by each later card that moves a workflow, rather than a separate move of unrelated code now.
+  The ceiling is 4,666 (`APP_JS_CEILING`); card M8.4.30's size target is closed by this decision.
 - **Second council audit of 19 November 2026** (the maintainer's prompt: four independent experts, a senior sedimentologist and
   palaeoclimatologist, a scientific-software architect, a UX/UI specialist for complex technical software and a data-integrity and QA engineer,
   read the repository without running anything, then critiqued the others anonymised and argued the trade-offs; the design session checked
@@ -360,6 +361,9 @@ or a version with the engine is published. Tick an item only with recorded evide
 - [ ] Engine start-up with all CPUs saturated: runtime verification took 16 s median before pruning and the
       verification record; repeat `tools/measure_engine_lifecycle.mjs --load 16`.
 - [ ] Installer and portable sizes recorded for every platform.
+- [ ] Deadlines of the mask-store operations (`STORE_DEADLINES_MS`, card M8.4.34; 30-300 s, chosen with a margin, not measured): measure
+      `mask.commit`, `mask.copy`, `mask.retain` and `mask.derived.put` of a 10 % `rgb8g` section on a slow disk (USB or network folder) and
+      keep each deadline above the measured time with a stated margin (approved as built on 20 Nov 2026, on condition of this measurement).
 - [ ] Interactive targets of contract §7 (part C) on macOS and Linux hardware and on a computer with 16 GiB of memory; the targets are
       decided on the primary reference host only, and shared CI runners cannot measure them reliably.
 
@@ -1988,7 +1992,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   six ordinary sections, no tiled one, one `left_out` entry, and the message is shown; `desktop.mjs`: a project without tiled sections has no
   `left_out`). Two page hooks for the tests (`exportedProject`, `packageNow`). The full backup of every project uses the same function.
 
-##### M8.4.30 - The tiled-section controller leaves `app.js` — state: Done except its size target (20 Nov 2026, development gate; decision R below)
+##### M8.4.30 - The tiled-section controller leaves `app.js` — state: Done (20 Nov 2026, development gate; size target replaced by decision R, approved)
 
 - **Goal:** the tiled-section workflow lives in its own controller modules, `app.js` only wires them, and `app.js` is back below its size of
   13 November 2026 (4,344 lines); no behaviour changes.
@@ -2090,7 +2094,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   of `app:` (added to the page's `<meta>` policy, which keeps the two CDNs for the browser build, so the browser build is unchanged), navigation
   guards on every window, `confirm` message box. `tile-ipc.js`: `opened` / `known` sets, `announceProjects`, the guards of delete, copy and retain.
   `engine.js`: `STORE_DEADLINES_MS`. `app.js` stays at 4,666 lines. Documented in SECURITY.md, technical manual §28 and contract §8.7.
-- **Decisions of the design that the card left open, for the maintainer to review:** (1) the main process cannot read the page's library, so the
+- **Decisions of the design that the card left open, approved by the maintainer on 20 Nov 2026 ("apruebo … lo de M8.4.34"), as built:** (1) the main process cannot read the page's library, so the
   page announces its listing (`announceProjects`); a script could announce too, which is why a store that was only announced needs the user's
   answer in a window of the main process (default Cancel) and an unknown identifier is refused; (2) deleting a project from the library that was not
   opened in this session therefore shows that window once (the page's own confirmation comes first); (3) `mask.retain` is limited to projects
@@ -2438,10 +2442,11 @@ Written from the council audit (status block). Each card names its model; the sc
       effort medium. After M8.4.30.
 - **Publication layout of figures (cards P1-P5).** The maintainer asked on 20 November 2026 that figures can be chosen to come out "with
   publication structure", laid out for an A4 scientific journal page. Design, journal comparison with sources, presets, interface and
-  architecture: [design-publication-figures.md](design-publication-figures.md). **Decisions waiting for the maintainer:** **S** the font of
-  publication figures (*recommended:* bundle Liberation Sans or Arimo, metric-compatible with Arial, about 1.2 MB, offline; the smallest
+  architecture: [design-publication-figures.md](design-publication-figures.md). **Decisions approved by the maintainer on 20 Nov 2026
+  ("apruebo S, T"), as recommended:** **S** the font of publication figures (*approved:* bundle Liberation Sans or Arimo, metric-compatible with Arial, about 1.2 MB, offline; the smallest
   alternative embeds the bundled IBM Plex Sans, accepted everywhere but not the Arial/Helvetica that GSA, Nature and Copernicus name); **T**
-  the new optional saved fields `fig.publish` and `fig.plate` (a saved-format change, AGENTS §3 item 5; older versions ignore them). Order:
+  the new optional saved fields `fig.publish` and `fig.plate` (a saved-format change, AGENTS §3 item 5; older versions ignore them; approved,
+  with save-and-reopen tests in P2 and P5; the font is a bundled dependency recorded by the card that adds it). Order:
   P1 at any time (pure, no saved field); P2-P5 after M8.4.30 and U1-U3, which move the dialogs and messages they use.
 - [x] **P1 - Physical sizes, presets and PNG resolution** (done 20 Nov 2026, development gate; see CHANGELOG, card P1; the e2e check is pending, see the status). Pure `figsize.js` (journal presets, `mmToPt`, `widthMm`, `pixelsFor`, the text,
       line and raster audits, `panelLabel`, `fitWidths`, `OKABE_ITO`) and `pngmeta.js` (`crc32`, `withPhys`, `withText`); the PNG export can
