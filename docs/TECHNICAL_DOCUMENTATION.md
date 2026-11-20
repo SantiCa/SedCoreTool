@@ -1470,7 +1470,10 @@ The **Plots** view of the Data tab (`plot.js`, pure) keeps a list of plots per p
   ln y, y > 0), power `y = a·x^b` (on ln x and ln y), logarithmic `y = a + b·ln x`, and a centred moving average of
   `w` points; `R² = 1 − SS_res / SS_tot` in the original scale. A table gives the equation, R² and n.
 - **Statistics per series:** n, mean, standard deviation (n − 1), minimum, median, maximum and, in XY, Pearson's r.
-- Export to SVG, PNG (×3) and CSV (core, axis, variable, value).
+- **On screen,** the lines of line, step and area series are thinned per pixel column of their ordering axis (X, or the vertical
+  axis of a stratigraphic panel): of the consecutive points whose screen coordinate falls in one pixel column, the first, the lowest,
+  the highest and the last are drawn, in their order (`plot.js::decimatePerPixel`). Points of scatter series are not thinned.
+- Export to SVG, PNG (×3) and CSV (core, axis, variable, value); SVG and PNG are built again with every point.
 
 ---
 

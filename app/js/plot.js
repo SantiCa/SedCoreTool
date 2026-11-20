@@ -84,13 +84,37 @@ function plotSymbol(kind, x, y, r, col) {
 }
 const SYMS = ['circle', 'square', 'triangle', 'diamond'];
 
+/**
+ * Card Q5: a line for the screen, at most four points per pixel column of its ordering axis (the first, lowest, highest and last there, in
+ * their order), so a series of 10^6 points draws as fast as one of a few thousand and looks the same. `points` are screen [x, y] sorted along
+ * `along` (0: x, 1: y); the other coordinate is the value. The export draws every point (`spec.decimate` unset).
+ * @param {readonly (readonly [number, number])[]} points
+ * @param {0 | 1} along
+ * @returns {(readonly [number, number])[]}
+ */
+export function decimatePerPixel(points, along) {
+  const value = 1 - along, out = [];
+  for (let start = 0; start < points.length;) {
+    const column = Math.floor(points[start][along]);
+    let end = start + 1, low = start, high = start;
+    for (; end < points.length && Math.floor(points[end][along]) === column; end++) {
+      if (points[end][value] < points[low][value]) low = end;
+      if (points[end][value] > points[high][value]) high = end;
+    }
+    for (const k of [...new Set([start, low, high, end - 1])].sort((a, b) => a - b)) out.push(points[k]);
+    start = end;
+  }
+  return out;
+}
+
 /** One series drawn with scale functions sx, sy (data → px). Series {x, y, type, color, width, size, symbol, dash, base}. */
-function drawSeries(se, sx, sy, horizontal = false) {
+function drawSeries(se, sx, sy, horizontal = false, decimate = false) {
   const P = xyPairs(se.x, se.y), out = [], col = se.color, w = se.width ?? 1.4, r = se.size ?? 2.6;
   if (!P.length) return '';
   const pt = ([a, b]) => (horizontal ? [sx(b), sy(a)] : [sx(a), sy(b)]); // stratigraphic panels: x = value, y = depth
   const sorted = [...P].sort((p, q) => p[0] - q[0]), dash = se.dash ? ` stroke-dasharray="${se.dash}"` : '';
-  const path = (pts) => pts.map((p, k) => `${k ? 'L' : 'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join('');
+  const thin = (pts) => (decimate ? decimatePerPixel(pts, horizontal ? 1 : 0) : pts);
+  const path = (pts) => thin(pts).map((p, k) => `${k ? 'L' : 'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join('');
   if (se.type === 'area') {
     const base = horizontal ? sx(se.base ?? 0) : sy(se.base ?? 0), pts = sorted.map(pt);
     const poly = horizontal ? [[base, pts[0][1]], ...pts, [base, pts[pts.length - 1][1]]] : [[pts[0][0], base], ...pts, [pts[pts.length - 1][0], base]];
@@ -142,7 +166,7 @@ export function buildXYPlot(spec) {
   const fits = [], st = [];
   spec.series.forEach((se, i) => {
     const color = se.color || PLOT_COLORS[i % PLOT_COLORS.length], ser = { ...se, color, symbol: se.symbol || SYMS[i % SYMS.length] }, ys = se.y2 ? sy2 : sy;
-    s.push(drawSeries(ser, sx, ys));
+    s.push(drawSeries(ser, sx, ys, false, !!spec.decimate));
     if (se.fit && se.fit !== 'none') { const f = fitCurve(se.x, se.y, se.fit, { deg: se.deg, window: se.window }); if (f) { s.push(drawFit(ser, f, sx, ys, xr[0], xr[1])); fits.push({ name: se.name, eq: f.eq, r2: f.r2, n: f.n }); } }
     st.push({ name: se.name, ...plotStats(se.y), r: pearson(se.x, se.y) });
   });
@@ -185,7 +209,7 @@ export function buildStratPlot(spec) {
     p.series.forEach((se, i) => {
       const color = se.color || PLOT_COLORS[i % PLOT_COLORS.length]; names.set(se.core || se.name, color);
       const ser = { ...se, color, symbol: se.symbol || SYMS[i % SYMS.length] };
-      s.push(drawSeries(ser, sx, sv, true));
+      s.push(drawSeries(ser, sx, sv, true, !!spec.decimate));
       if (p.fit && p.fit !== 'none') { const f = fitCurve(se.x, se.y, p.fit === 'movavg' ? 'movavg' : p.fit, { deg: p.deg, window: p.window }); if (f) { s.push(drawFit(ser, f, sx, sv, vr[0], vr[1], true)); fits.push({ name: `${p.label} · ${se.name}`, eq: f.eq, r2: f.r2, n: f.n }); } }
       st.push({ name: `${p.label} · ${se.name}`, ...plotStats(se.y) });
     });

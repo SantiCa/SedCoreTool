@@ -2366,8 +2366,12 @@ Written from the council audit (status block). Each card names its model; the sc
       not rewrite every table (a reproducible save benchmark first, AGENTS §4). *Model:* most capable, effort medium.
       *Part 1 done (20 Nov 2026, development gate):* `minOf`/`maxOf` in `core.js` replace the 68 spread calls (`Math.min(...x)`,
       `Math.max(c, ...x)`) in 11 modules, exact by construction (`Math.min` applied pairwise); `tests/app/extent.test.mjs`. Checks: npm 493,
-      typecheck, standalone build, `desktop.mjs` engine off and on (Windows). *Remaining:* part 2, decimation per pixel on screen (plots and
-      core-column curves; export at full resolution); part 3, the data record saved in parts, after its save benchmark.
+      typecheck, standalone build, `desktop.mjs` engine off and on (Windows). *Part 2 done for the Data-tab plots (20 Nov 2026):* `plot.js::decimatePerPixel` (first, lowest, highest
+      and last point per pixel column), on screen only; SVG and PNG exports build the plot again with every point; tests in
+      `tests/app/plot.test.mjs`; npm 495, typecheck, standalone build, `desktop.mjs` (Windows). The Data-tab plot is not exercised by an
+      end-to-end test. *Remaining:* the record curves of the core column (`log.js`, column `rec`) are not thinned, because the figure tabs
+      save and export the same SVG that the screen shows: thinning them needs a screen-only build of figures (design question, to settle
+      with card P2's publication mode); part 3, the data record saved in parts, after its save benchmark.
 - [ ] **Q6 - Tests that find what examples miss.** Property-based tests (a test-only dependency, AGENTS §3 item 9: fast-check for Node,
       Hypothesis for Python) for `parseTable`, `parseAgeModel`, `interpAge` against `interpolate_age`, `binRows` against `bin_edges`; a corpus
       of 10-15 real laboratory files (scanner XRF, MSCL, IODP LIMS, Bacon output; public or anonymised); project files saved by old versions
