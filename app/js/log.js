@@ -58,11 +58,25 @@ function recordShadingSVG(shade, { column, points, sx, y, from, to, lanes, area 
   return `${clip}<g data-role="event-shading"${clipAttribute}>${rectangles.join('')}</g>`;
 }
 
-/** Parse CSV / TXT tables: delimiter , ; tab | or spaces; optional header; decimal comma; '#' comments. */
-export function parseTable(text) {
-  const lines = String(text || '').replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => l.trim() && !/^\s*#/.test(l));
-  if (!lines.length) return { headers: [], rows: [], text: [], dropped: 0, droppedCols: [] };
-  const head = lines.slice(0, 6);
+/** Card Q2: numeric codes that mean "no value" in laboratory files (-999 of many instruments, -999.25 of LAS, -9999). */
+export const MISSING_CODES = Object.freeze([-999, -999.25, -9999]);
+/** Card Q2: text that means "below the detection limit" when it has no number: bdl, b.d.l., n.d., <dl, <ld. */
+const CENSORED_TEXT = /^(b\.?d\.?l\.?|n\.?d\.?|<\s*(d\.?l\.?|l\.?d\.?))$/i;
+
+/**
+ * Parse CSV / TXT tables: delimiter , ; tab | or spaces; optional header; decimal comma; '#' comments.
+ * Card Q2: lines before the first line with the table's shape are a preamble and are skipped; the decimal separator is decided per column
+ * ("0.500" is never 500; "1,250" in a column without other evidence is reported as ambiguous); values equal to a missing-value code are
+ * empty; values below a detection limit ("<0.01", "bdl") follow `censored` (decision M: `empty` by default, `half` or `limit` of the stated
+ * limit); repeated header names get a suffix; every cell read as empty, row skipped or name changed is counted in the result.
+ * @param {string} text
+ * @param {{missing?: readonly number[], censored?: 'empty' | 'half' | 'limit'}} [options]
+ */
+export function parseTable(text, { missing = MISSING_CODES, censored = 'empty' } = {}) {
+  const all = String(text || '').replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim() && !/^\s*#/.test(l));
+  const empty = { headers: [], rows: [], text: [], dropped: 0, droppedCols: [], short: 0, long: 0, preamble: 0, missingCodes: 0, censored: 0,
+    renamed: [], ambiguousCols: [] };
+  if (!all.length) return empty;
   // V0.38: fields between double quotes may contain the delimiter ("a, b") and "" for a quote
   const splitQ = (l, d) => {
     if (!l.includes('"')) return l.split(d);
@@ -76,40 +90,87 @@ export function parseTable(text) {
     }
     out.push(cur); return out;
   };
-  // the delimiter splits the first line and all but at most one of the next lines (a stray last line is tolerated)
-  const delim = ['\t', ';', ',', '|'].find((d) => splitQ(head[0], d).length > 1 && head.filter((l) => splitQ(l, d).length > 1).length >= head.length - (head.length > 2 ? 1 : 0)) || /\s+/;
+  // Card Q2: the delimiter is the one giving the same number (> 1) of fields on most of the first 30 lines; lines before the first line with
+  // that number are a preamble (a title, an instrument's notes). Without such a delimiter: spaces, as before.
+  const probe = all.slice(0, 30);
+  const mode = (counts) => { const f = new Map(); for (const c of counts) if (c > 1) f.set(c, (f.get(c) || 0) + 1); return [...f].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0] || [0, 0]; };
+  const choices = ['\t', ';', ',', '|'].map((d) => { const [n, k] = mode(probe.map((l) => splitQ(l, d).length)); return { d, n, k }; });
+  const best = choices.filter((c) => c.n > 1 && c.k >= Math.max(1, probe.length - (probe.length > 2 ? 1 : 0) - choices.reduce(() => 0, 0)) * 0.5)
+    .sort((a, b) => b.k - a.k)[0];
+  const delim = best ? best.d : /\s+/;
+  const width = (l) => (delim instanceof RegExp ? l.trim().split(delim).length : splitQ(l, delim).length);
+  let skip = 0;
+  if (best) while (skip < all.length - 1 && width(all[skip]) < best.n) skip++;
+  const lines = all.slice(skip);
   const split = (l) => (delim instanceof RegExp ? l.trim().split(delim) : splitQ(l, delim)).map((c) => c.trim().replace(/^"(.*)"$/, '$1'));
-  const sample = lines.slice(0, 30).flatMap(split);   // V0.38: "1,5" means decimal comma; "1,234.5" means thousands
-  const decimalComma = delim !== ',' && sample.some((c) => /^[-+]?\d+,\d+$/.test(c) || /^[-+]?\d{1,3}(\.\d{3})+,\d+$/.test(c)) && !sample.some((c) => /^[-+]?\d{1,3}(,\d{3})+\.\d+$/.test(c));
-  const num = (c) => {
-    if (c == null || c === '') return null;
+  const firstCells = split(lines[0]);
+  const looksNumber = (c) => /^[-+]?(\d[\d., ]*|\.\d+)([eE][-+]?\d+)?$/.test(c);
+  const hasHeader = firstCells.some((c) => c !== '' && !looksNumber(c) && !CENSORED_TEXT.test(c) && !/^<\s*[\d.,]+$/.test(c));
+  const names = hasHeader ? firstCells : firstCells.map((_, i) => `col${i + 1}`);
+  const seen = new Map(), renamed = [];
+  const headers = names.map((h) => {                                   // card Q2: a repeated name gets " (2)", " (3)"…
+    const k = (seen.get(h) || 0) + 1; seen.set(h, k);
+    if (k === 1) return h;
+    renamed.push(h); return `${h} (${k})`;
+  });
+  const body = (hasHeader ? lines.slice(1) : lines).map(split);
+  const cells = body.map((c) => headers.map((_, i) => c[i] ?? ''));
+  // Card Q2: decimal separator per column. Evidence for a decimal comma: "1,5", "12,3456", "1.234,5"; for a decimal point: "1.5", "1,234.5".
+  // A column whose only commas are "1,250"-like (three digits after each comma) has no evidence: ambiguous, read as before (decimal comma
+  // unless the delimiter is a comma) and reported.
+  const commaDecimal = /^[-+]?\d+,(\d{1,2}|\d{4,})$|^[-+]?\d{1,3}(\.\d{3})+,\d+$/, pointDecimal = /^[-+]?\d*\.\d+$|^[-+]?\d{1,3}(,\d{3})+\.\d+$/;
+  const threeAfterComma = /^[-+]?\d{1,3}(,\d{3})+$/;
+  const ambiguousCols = [];
+  const columnComma = headers.map((h, i) => {
+    if (delim === ',') return false;
+    const col = cells.map((r) => r[i].replace(/^</, '').trim()).filter(Boolean);
+    const comma = col.some((c) => commaDecimal.test(c)), point = col.some((c) => pointDecimal.test(c) && !/^[-+]?0\.\d{3}$/.test(c) || /^[-+]?\d{1,3}(,\d{3})+\.\d+$/.test(c));
+    if (comma && !point) return true;
+    if (point && !comma) return false;
+    if (!comma && !point && col.some((c) => threeAfterComma.test(c))) { ambiguousCols.push(h); return true; }
+    return comma;
+  });
+  let missingCodes = 0, censoredCount = 0;
+  const number = (c, comma) => {
     let x = c.replace(/^\+/, '');
-    // V0.38: thousands separators ("1.234,5" with decimal comma, "1,234.5" otherwise) and spaces inside numbers
-    if (decimalComma && /^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(x)) x = x.replace(/\./g, '');
-    else if (!decimalComma && delim !== ',' && /^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(x)) x = x.replace(/,/g, '');
+    if (comma && /^-?[1-9]\d{0,2}(\.\d{3})+(,\d+)?$/.test(x)) x = x.replace(/\./g, '');                 // "1.234,5"; "0.500" is never 500
+    else if (!comma && delim !== ',' && /^-?[1-9]\d{0,2}(,\d{3})+(\.\d+)?$/.test(x)) x = x.replace(/,/g, ''); // "1,234.5"
     if (/^-?\d{1,3}( \d{3})+([.,]\d+)?$/.test(x)) x = x.replace(/ /g, '');
-    const v = Number(decimalComma ? x.replace(',', '.') : x);
+    const v = Number(comma ? x.replace(',', '.') : x);
     return Number.isFinite(v) ? v : null;
   };
-  const first = split(lines[0]);
-  const hasHeader = first.some((c) => c !== '' && num(c) === null);
-  const headers = hasHeader ? first : first.map((_, i) => `col${i + 1}`);
-  const body = (hasHeader ? lines.slice(1) : lines).map(split);
-  const rows = body.map((c) => headers.map((_, i) => num(c[i])));
-  const cells = body.map((c) => headers.map((_, i) => c[i] ?? ''));
+  const value = (c, i) => {
+    if (c == null || c === '') return null;
+    if (CENSORED_TEXT.test(c)) { censoredCount++; return null; }
+    const below = /^<\s*(.+)$/.exec(c);
+    if (below) {
+      const limit = number(below[1], columnComma[i]);
+      if (limit == null) return null;
+      censoredCount++;
+      return censored === 'limit' ? limit : censored === 'half' ? limit / 2 : null;
+    }
+    const v = number(c, columnComma[i]);
+    if (v != null && missing.includes(v)) { missingCodes++; return null; }
+    return v;
+  };
+  const rows = cells.map((r) => r.map((c, i) => value(c, i)));
   // V0.38: cells with text in mostly numeric columns are read as empty: counted so the interface can warn
   let dropped = 0; const droppedCols = [];
   headers.forEach((h, i) => {
-    const filled = cells.filter((r) => r[i] !== ''), ok = rows.filter((r) => r[i] != null).length, bad = filled.length - ok;
+    const filled = cells.filter((r) => r[i] !== '' && !CENSORED_TEXT.test(r[i]) && !/^<\s*/.test(r[i]) && !missing.includes(number(r[i], columnComma[i]) ?? NaN));
+    const ok = rows.filter((r) => r[i] != null).length, bad = filled.length - Math.min(ok, filled.length);
     if (bad > 0 && ok >= bad) { dropped += bad; droppedCols.push(h); }
   });
-  const short = body.filter((c) => c.length < headers.length).length;
-  return { headers, rows, text: cells, dropped, droppedCols, short };
+  const short = body.filter((c) => c.length < headers.length).length, long = body.filter((c) => c.length > headers.length).length;
+  return { headers, rows, text: cells, dropped, droppedCols, short, long, preamble: skip, missingCodes, censored: censoredCount, renamed, ambiguousCols };
 }
 
 /** V0.38: text of a file, as UTF-8 or, if it is not valid UTF-8 (e.g. Excel CSV on Windows), as Windows-1252. */
 export function decodeText(buf) {
   const b = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  // Card Q2: Excel's "Unicode text" and other UTF-16 files start with a byte-order mark
+  if (b[0] === 0xff && b[1] === 0xfe) return new TextDecoder('utf-16le').decode(b.subarray(2));
+  if (b[0] === 0xfe && b[1] === 0xff) return new TextDecoder('utf-16be').decode(b.subarray(2));
   try { return new TextDecoder('utf-8', { fatal: true }).decode(b); } catch { return new TextDecoder('windows-1252').decode(b); }
 }
 

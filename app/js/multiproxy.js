@@ -467,14 +467,31 @@ function openGeoImport(kind, tabs, names) {
 }
 /** V0.38: table file (CSV/TXT as UTF-8 or Windows-1252, or Excel/ODS); warns about text cells read as empty. */
 export async function readTableFile(f) {
-  let tab;
+  let tab, sheets = 1;
   if (/\.xlsx?$|\.ods$/i.test(f.name)) {
     if (!window.XLSX) await loadLib('xlsx.full.min.js');
     const wb = window.XLSX.read(await f.arrayBuffer(), { type: 'array' });
-    tab = parseTable(window.XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]], { FS: '\t' }));
+    sheets = wb.SheetNames.length;
+    // card Q2: the stored numbers, not the text the sheet's format shows (12.3456 shown as 12.35)
+    tab = parseTable(/** @type {any} */ (window).XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]], { FS: '\t', rawNumbers: true }));
   } else tab = parseTable(decodeText(await f.arrayBuffer()));
-  if (tab.dropped || tab.short) toast(`«${f.name}»: ` + [tab.dropped ? t('imp.dropped', { n: tab.dropped, c: tab.droppedCols.slice(0, 4).join(', ') }) : '', tab.short ? t('imp.short', { r: tab.short }) : ''].filter(Boolean).join('; ') + '.', 8000);
+  const notes = importNotes(tab, sheets);
+  if (notes.length) toast(`«${f.name}»: ` + notes.join('; ') + '.', 12000);
   return tab;
+}
+/** Card Q2: what the reader did with the file, in the user's words (one entry per kind of change, none when nothing was changed). */
+function importNotes(tab, sheets) {
+  return [
+    sheets > 1 ? t('imp.sheets', { n: sheets }) : '',
+    tab.preamble ? t('imp.preamble', { n: tab.preamble }) : '',
+    tab.missingCodes ? t('imp.missing', { n: tab.missingCodes }) : '',
+    tab.censored ? t('imp.censored', { n: tab.censored }) : '',
+    tab.dropped ? t('imp.dropped', { n: tab.dropped, c: tab.droppedCols.slice(0, 4).join(', ') }) : '',
+    tab.ambiguousCols?.length ? t('imp.ambiguous', { c: tab.ambiguousCols.slice(0, 4).join(', ') }) : '',
+    tab.renamed?.length ? t('imp.renamed', { c: tab.renamed.slice(0, 4).join(', ') }) : '',
+    tab.short ? t('imp.short', { r: tab.short }) : '',
+    tab.long ? t('imp.long', { r: tab.long }) : '',
+  ].filter(Boolean);
 }
 
 const norm = (s) => String(s ?? '').trim().toLowerCase();

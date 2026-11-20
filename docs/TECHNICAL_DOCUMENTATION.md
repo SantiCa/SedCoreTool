@@ -1329,22 +1329,30 @@ When an age-only table is combined with a depth-based table, the core's age mode
 Implementation: `log.js::parseTable, decodeText, guessAxisColumn`, `exportio.js::recordSeries` and `app.js` (records
 dialog). External records are any measured down-core series added to a core (XRF, colour, susceptibility…).
 
-- **Formats:** CSV, TXT, TSV or DAT, and spreadsheets (`.xlsx`, `.xls`, `.ods`; first sheet) read with SheetJS
+- **Formats:** CSV, TXT, TSV or DAT, and spreadsheets (`.xlsx`, `.xls`, `.ods`; the first sheet, with a warning when there are more;
+  the stored numbers, not the text the cell's format shows: `rawNumbers`, card Q2) read with SheetJS
   0.20.3, bundled from `cdn.sheetjs.com/xlsx-0.20.3` with its Apache-2.0 licence (SHA-256 of the bundled file
   `cc015130aa8521e7f088f88898eba949ccdcbfb38df0bd129b44b7273c3a6f41`; the online fallback uses the same version
   with an SRI SHA-384 check). This version fixes CVE-2023-30533 and CVE-2024-22363.
-- **Text encoding:** UTF-8 and, if the file is not valid UTF-8 (CSV files saved by Excel on Windows), Windows-1252.
-- **Reading** (`parseTable`):
-  - the separator is detected among tab, semicolon, comma or vertical bar: the first one that splits the first line
-    and all but one of the other first 6 lines; otherwise spaces;
+- **Text encoding:** UTF-16 when the file starts with its byte-order mark (Excel's "Unicode text"); otherwise UTF-8 and, if
+  the file is not valid UTF-8 (CSV files saved by Excel on Windows), Windows-1252.
+- **Reading** (`parseTable`; card Q2 for the rules marked *):
+  - the separator is the one among tab, semicolon, comma or vertical bar that gives the same number of fields (more than one) on most of
+    the first 30 lines; otherwise spaces; * lines before the first line with that number of fields (a title, an instrument's notes) are a
+    preamble, skipped and counted;
   - fields in double quotes may contain the separator and `""`;
-  - decimal comma if the separator is not the comma and a cell like `1,5` or `1.234,5` appears, and none like
-    `1,234.5`;
-  - thousands separators: `1.234,5` with decimal comma, `1,234.5` without it, and `1 234,5`;
-  - header if the first row contains any non-numeric text;
+  - * the decimal separator is decided for each column (never with a comma separator): a decimal comma when the column has a cell like
+    `1,5`, `12,3456` or `1.234,5` and none like `1.5` or `1,234.5`; a decimal point in the opposite case; a column whose only commas are
+    like `1,250` is ambiguous (1.25 or 1250): it is read with a decimal comma, as before, and named in the warning;
+  - thousands separators: `1.234,5` with decimal comma, `1,234.5` without it, and `1 234,5`; * a first group of `0` is never a
+    thousands group (`0.500` is 0.5);
+  - header if the first row contains any non-numeric text; * repeated header names get ` (2)`, ` (3)`…;
   - lines starting with `#` are ignored;
-  - non-numeric cells are treated as empty; they are counted (`dropped`, in mostly numeric columns) together with
-    rows shorter than the header (`short`), and the user is warned on import.
+  - * cells equal to a missing-value code (-999, -999.25, -9999; `MISSING_CODES`) are empty;
+  - * values below a detection limit (`<0.01`, `bdl`, `b.d.l.`, `n.d.`, `<DL`) are empty by default (decision M of the maintainer, 19 Nov
+    2026); the reader can also give half the stated limit or the limit (`censored: 'half' | 'limit'`; a code without a number stays empty);
+  - other non-numeric cells are treated as empty and counted (`dropped`, in mostly numeric columns); rows shorter or longer than the header
+    (`short`, `long`) are counted; on import one message lists every kind of change with its count.
 - **Axis column:** the first header that looks like depth (depth, prof, mbsf, CSF, CCSF, mcd, m, cm) is proposed or,
   if none, age (age, edad, ka, Ma, yr, cal). The user can change it and say whether it is depth or age.
 - **Series:** each chosen column is a series of (axis, value) pairs without empty values, sorted by axis. Each series
@@ -3560,8 +3568,8 @@ The percentage difference comes from the JPEG decoder (§3.4), not from the meth
     with hundreds of thousands of samples); MDI importance is biased among correlated proxies; everything is computed
     on the user's computer.
 11. **Known defects, with cards in the roadmap** (found by the audits of 19 November 2026; each item is removed when its card is done):
-    missing-value codes such as -999 are read as values (Q2); spreadsheets are read from their first sheet, with the numbers as the sheet
-    formats them (Q2); changing a section's unit does not convert its depths (Q3);
+    spreadsheets are read from their first sheet only, with a warning (Q2, import panel); changing a section's unit does not convert its
+    depths (Q3);
     joined projects keep the first core's units (Q3); backups and packages leave tiled sections out (M8.4.33).
 
 ## 33. Reproducibility

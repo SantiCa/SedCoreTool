@@ -82,11 +82,13 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: Q2** (the import panel and the readers: missing-value codes, Excel sheets and raw numbers, decimal separators, dropped rows,
-  censored values with decision M; **model: most capable tier, effort medium**), then the order O approved on 19 November 2026 (second
+- **Next step: Q2, second delivery** (the import panel: preview, sheet choice, censored-value rule per column, "Undo import"; **model: most
+  capable tier, effort medium**); its first delivery (the readers) is done, then the order O approved on 19 November 2026 (second
   council audit, below). **V0.152** (decision J) was prepared on 20 Nov 2026 at the maintainer's request ("Publica la 0.152 y haz un release"):
   full checks passed on the version commit (Windows: pytest 885 passed / 9 skipped, npm 478, typecheck, sync_version, ruff, standalone build,
-  runtime rebuilt, desktop.mjs off and on, tiled-sections.mjs); integration into `master` and the tag follow the GitHub checks. Q4 is done (CSV with 15
+  runtime rebuilt, desktop.mjs off and on, tiled-sections.mjs). **Published on 20 Nov 2026:** `master` `8ee9776`, tag `V0.152`, GitHub Release
+  with 8 files (Desktop builds run 44644183590: Windows, macOS and Linux built, release job passed). `tools/release.sh` failed to find
+  `DELIVERY` (now an export); its steps were run by hand with Python 3.12 and the script is fixed on the work branch. Q4 is done (CSV with 15
   significant digits; the core-column CSV with interval means, a gap limit, reversals marked; development gate), and the retries of card A2
   were brought forward. Q1 is done (deleting an ichnotaxon reaches every core, asks first, can be restored; orphaned labels repaired on opening;
   development gate). Full checks of Q4 and A2 (20 Nov 2026, Windows): `py -3.12 -m pytest -q` 885 passed / 9 skipped; `npm test` 478
@@ -2274,7 +2276,14 @@ Written from the council audit (status block). Each card names its model; the sc
       `.deleting-*` and its removal failed (`deleteProjectStore` calls `fs.rmSync` without retries, `fs.renameSync` without retries; a file still
       held for a moment on Windows makes them fail). Nothing of Q1 runs in that step. No data is lost (the program says the folder was not
       deleted, and removes the remainder at its next start). The retries are part of card A2; bringing them forward is proposed to the maintainer.
-- [ ] **Q2 - The import panel and the readers.** One import panel with a preview of the first rows as read and counts: missing-value codes
+- [~] **Q2 - The import panel and the readers.** *First delivery done 20 Nov 2026 (the readers; development gate):* `parseTable` with
+      missing-value codes, censored values (decision M: empty by default; `half` and `limit` available to callers), decimal separators per
+      column with ambiguous columns reported, preamble, repeated names, longer rows, all counted; `decodeText` with UTF-16; spreadsheets with
+      `rawNumbers`; one message on import listing every change. Tests: Node (`tests/app/log.test.mjs`, each case above; the V0.38 test now
+      counts "n.d." as below the detection limit instead of as text). *Still to do (second delivery):* the import panel with a preview, the choice
+      of sheet and of the censored-value rule per column, interrupting only for an ambiguity, and "Undo import".
+      Full checks of the first delivery (20 Nov 2026, Windows): pytest 885 passed / 9 skipped, npm 479, typecheck, sync_version, ruff, standalone
+      build, runtime rebuilt (it no longer matched `src/` after the release steps on `master`), desktop.mjs off and on, tiled-sections.mjs. One import panel with a preview of the first rows as read and counts: missing-value codes
       (a configurable list, by default -999, -999.25, -9999), censored values (decision M), rows dropped and why (`parseAgeModelDetailed`,
       `coreFromRows`, `coresFromLongTable`, `intervalsFromTable`, which also reverses from > to silently, `buildSamples` with log of v ≤ 0),
       decimal separator decided per column (decision M approved: censored values empty by default with a visible count, half the limit or the
