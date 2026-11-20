@@ -4,6 +4,8 @@
 // save (settle every section, then keep only the saved versions). app.js passes what these need from the page in one context object.
 import { MaskTiles, reduceTile } from './tiledmasks.js';
 import { tileHistogram } from './tiledcounts.js';
+import { TiledObjectStats } from './tiledit.js';
+import { CacheRejected, decodeReopenCache, encodeReopenCache, statsCover } from './tiledcache.js';
 import { features } from './imageproc.js';
 import { pxPerCm } from './sectiondepth.js';
 import { t } from './i18n.js';
@@ -13,18 +15,20 @@ import { APP, S } from './state.js';
  * @param {{TILES: any, readonly settleDeadlineMs: number, toast: (text: string, ms?: number) => void, storeProject: (id: string) => string,
  *   maskSync: (s: any) => any, maskLoader: (s: any) => any, newSection: (options: any) => any, sectionFields: (q: any) => any,
  *   greyRgba: (w: number, h: number) => Uint8ClampedArray, sourceRoi: (s: any) => any, tileBuildDialog: (name: string, onCancel: () => void, title?: string) => any,
- *   tiledCounts: (s: any) => any, tiledStatsRunner: (s: any) => any, tiledWorkingImage: (tiled: any) => Promise<any>, serTiledSection: (s: any, manifest: string) => any}} ctx
+ *   tiledCounts: (s: any) => any, tiledStatsRunner: (s: any) => any, tiledWorkingImage: (tiled: any) => Promise<any>, serTiledSection: (s: any, manifest: string) => any,
+ *   hexDigest: (bytes: Uint8Array) => Promise<string>}} ctx
  */
 export function createTiledProject(ctx) {
   const { toast, storeProject, maskSync, maskLoader, newSection, sectionFields, greyRgba, sourceRoi, tileBuildDialog, tiledCounts, tiledStatsRunner,
-    tiledWorkingImage, serTiledSection } = ctx;
+    tiledWorkingImage, serTiledSection, hexDigest } = ctx;
   const validTiledRecord = (r) => r && r.version === 1 && r.store === 2 && /^[0-9a-f]{64}$/.test(r.manifest || '') && /^[0-9a-f]{64}$/.test(r.source?.sha256 || '')
     && Number.isSafeInteger(r.width) && r.width > 0 && Number.isSafeInteger(r.height) && r.height > 0 && Number.isSafeInteger(r.level) && r.level >= 0;
 
   /**
    * A saved tiled section (card M8.4.18a): its pyramid from the engine's cache or built again from the remembered source (a grey image and no edits when
-   * neither is there), its masks from the stored version, every stored tile read back once for the reduced copy and the row counts, and the statistics
-   * of its objects computed again from the tiles in the background (saved ones are shown meanwhile).
+   * neither is there), its masks from the stored version, and the three things derived from the stored tiles: the reduced copy, the row histograms and the
+   * statistics of its objects. Card M8.4.29: they come from the reopening cache saved with the version when it passes its checks (`tiledcache.js`); otherwise
+   * every stored tile is read back once for the first two and the statistics are computed again in the background (saved ones are shown meanwhile).
    */
   async function loadTiledSection(q) {
     const rec = q.tiled, project = storeProject(S.id);
@@ -60,6 +64,7 @@ export function createTiledProject(ctx) {
       // The tiles of the stored version, then every one read back once: the reduced copy for the overview and the row counts (card M8.4.17).
       // Card M8.4.27: a stored version that is missing or damaged locks the section (no masks, no table, record saved back as read).
       const positions = /** @type {[number, number][]} */ ([]);
+      let cache = null;
       try {
       for (let start = 0; start !== null;) {
         const page = await ctx.TILES.maskInfo(project, rec.manifest, start);
@@ -71,14 +76,23 @@ export function createTiledProject(ctx) {
       maskSync(s).manifest = rec.manifest;
       s._savedRecord = q;
       const { counts } = tiledCounts(s), area = sourceRoi(s);
-      counts.setArea(area);
-      for (let i = 0; i < positions.length; i += 16) {
-        dialog.update({ stage: 'masks', completed: i, total: positions.length });
-        const batch = positions.slice(i, i + 16);
+      cache = await readReopenCache(s, rec, project);
+      let todo = positions;
+      if (cache) {                                                    // card M8.4.29: nothing read from the tiles, except those of changed analysis columns
+        s.labels.set(cache.labels); s.exclude.set(cache.exclude);
+        counts.restore(cache.columns, cache.hists);
+        counts.setArea(area);
+        todo = positions.filter(([row, col]) => counts.needed.has(s.maskTiles.index(row, col)));
+        if (!tiled.missing) for (const [tile, perTile] of cache.stats) tiledStatsRunner(s).stats.replaceTile(tile, perTile);
+        s._reopenCached = rec.manifest;
+      } else counts.setArea(area);
+      for (let i = 0; i < todo.length; i += 16) {
+        dialog.update({ stage: 'masks', completed: i, total: todo.length });
+        const batch = todo.slice(i, i + 16);
         await maskLoader(s).want(batch);
         for (const [row, col] of batch) {
           const entry = s.maskTiles.get(row, col);
-          reduceTile(s, s.ds, row, col, entry?.labels || null, entry?.exclude || null);
+          if (!cache) reduceTile(s, s.ds, row, col, entry?.labels || null, entry?.exclude || null);
           counts.commit(s.maskTiles.index(row, col), tileHistogram(entry, row, col, rec.width, rec.height, area.x0, area.x1));
         }
       }
@@ -86,9 +100,65 @@ export function createTiledProject(ctx) {
         if (!['INVALID_REQUEST', 'INVALID_BUFFER'].includes(/** @type {any} */ (error)?.code)) throw error;
         return storeLocked(s, q);
       }
-      if (!tiled.missing && positions.length) void tiledStatsRunner(s).queue(positions);   // only the tiles: an object without pixels is kept, as saved
+      if (!cache && !tiled.missing && positions.length) void tiledStatsRunner(s).queue(positions);   // only the tiles: an object without pixels is kept, as saved
       return s;
     } finally { stop(); dialog.close(); }
+  }
+
+  /**
+   * Card M8.4.29: the reopening cache of a stored version, decoded and checked against the section being opened and against the objects of its record;
+   * null when there is none, or it is refused (the reason goes to the console and everything is rebuilt from the tiles, as without a cache). Nothing of
+   * the section is changed here.
+   */
+  async function readReopenCache(s, rec, project) {
+    if (!ctx.TILES.derivedGet || s.labels?.length !== s.w * s.h) return null;
+    try {
+      const got = await ctx.TILES.derivedGet(project, rec.manifest, 'reopen');
+      if (got.error) throw Object.assign(new Error(got.error.code), got.error);
+      if (!got.ok.found) return null;
+      const b = got.ok.bytes, bytes = b instanceof Uint8Array ? b : new Uint8Array(b.buffer || b, b.byteOffset || 0, b.byteLength);
+      const cache = await decodeReopenCache(bytes, { manifest: rec.manifest, source: rec.source.sha256, ds: s.ds, width: rec.width, height: rec.height,
+        working: { w: s.w, h: s.h }, stored: s.maskTiles.stored }, hexDigest);
+      const totals = new TiledObjectStats();
+      for (const [tile, perTile] of cache.stats) totals.replaceTile(tile, perTile);
+      for (const id of totals.tilesOf.keys()) {                       // the statistics must be the ones the record was saved with
+        const o = s.objects.get(id), a = totals.total(id);
+        if (o && (!o.stats || !a || o.stats.n !== a.n || o.stats.x0 !== a.x0 || o.stats.x1 !== a.x1 || o.stats.y0 !== a.y0 || o.stats.y1 !== a.y1)) throw new CacheRejected('objects');
+      }
+      return cache;
+    } catch (error) {
+      console.warn('reopening cache not used:', error?.reason || error?.code || error);
+      return null;
+    }
+  }
+
+  /**
+   * Card M8.4.29: after a save, the reopening cache of each tiled section's saved version, unless this session has already read or written it. It is
+   * written only while the page still holds exactly that version (the send is settled on the saved manifest, every tile counted, no statistic waiting),
+   * checked again after the encoding; a failure is logged and the next save tries again, because the cache only saves time.
+   */
+  async function writeReopenCaches() {
+    if (!ctx.TILES?.derivedPut) return;
+    for (const q of S.cores.flatMap((c) => c.sections)) {
+      const rec = q._savedRecord?.tiled, manifest = rec?.manifest;
+      if (!manifest || !q.tiled || q.frozen || !q.maskTiles || q._reopenCached === manifest || q._reopenWriting || q.labels?.length !== q.w * q.h) continue;
+      const holds = () => !!q._maskSync?.settled && q._maskSync.manifest === manifest && !!q._statsRunner?.idle && !q._statsRunner.failed.size && !!q._counts?.counts.ready
+        && q._savedRecord?.tiled?.manifest === manifest;
+      if (!holds()) continue;
+      q._reopenWriting = true;
+      try {
+        const snapshot = q._counts.counts.snapshot();
+        if (!snapshot || !statsCover(snapshot.hists, q._statsRunner.stats.byTile)) continue;   // objects saved without statistics: rebuilt at the next opening, which computes them
+        const bytes = await encodeReopenCache({ manifest, source: rec.source.sha256, ds: q.ds, width: rec.width, height: rec.height, working: q,
+          columns: snapshot.columns, hists: snapshot.hists, stats: q._statsRunner.stats.byTile }, hexDigest);
+        if (!holds()) continue;                                       // edited while the cache was being made: the next save writes it
+        const result = await ctx.TILES.derivedPut(storeProject(S.id), manifest, 'reopen', bytes);
+        if (result.error) console.warn('reopening cache not saved:', result.error);
+        else q._reopenCached = manifest;
+      } catch (error) {
+        console.warn('reopening cache not saved:', error?.name === 'CacheTooLarge' ? 'it would exceed the limit' : error);
+      } finally { q._reopenWriting = false; }
+    }
   }
 
   /** Card M8.4.27: the store folder of a deleted project goes too, once the sends of its sections that were open have stopped. */
@@ -166,6 +236,7 @@ export function createTiledProject(ctx) {
     }
     const result = await ctx.TILES.maskRetain(storeProject(S.id), [...keep]).catch((error) => ({ error }));
     if (result?.error) console.warn('retain', result.error);
+    await writeReopenCaches();                                           // after the clean-up, so that it never removes a cache that was just written
   }
 
   return { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, retainStore };

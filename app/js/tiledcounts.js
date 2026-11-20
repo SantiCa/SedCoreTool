@@ -120,6 +120,28 @@ export class TiledRowCounts {
     this.fresh.set(tile, hist);
     if (hist) this.bytes += hist.bytes;
   }
+  /**
+   * The histograms as they are now, counted ones included, for the reopening cache (card M8.4.29); null while a tile still has to be counted
+   * or no area is set, because such a state is not one a saved version corresponds to.
+   * @returns {{columns: [number, number], hists: Map<number, TileHistogram>} | null}
+   */
+  snapshot() {
+    if (!this.ready || !this.columns) return null;
+    const hists = new Map(this.hists);
+    for (const [tile, hist] of this.fresh) { if (hist) hists.set(tile, hist); else hists.delete(tile); }
+    return { columns: [this.columns[0], this.columns[1]], hists };
+  }
+  /**
+   * Take the histograms of a reopening cache (card M8.4.29) as if every stored tile had been counted for these columns. Only for a fresh section:
+   * it replaces whatever was there. A following `setArea` with other columns counts again the tiles of the columns that differ, as always.
+   * @param {[number, number]} columns @param {Map<number, TileHistogram>} hists
+   */
+  restore(columns, hists) {
+    this.hists = new Map(hists); this.fresh.clear(); this.needed.clear(); this.totals = null; this.stackMemo.clear();
+    this.columns = [columns[0], columns[1]];
+    this.bytes = 0;
+    for (const hist of this.hists.values()) this.bytes += hist.bytes;
+  }
   /** True when every tile that must be counted has been, so the row counts can be asked for. */
   get ready() { return this.needed.size === 0 && this.columns !== null; }
   get overBudget() { return this.bytes > COUNT_HISTOGRAM_BYTES; }

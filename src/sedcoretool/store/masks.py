@@ -49,6 +49,9 @@ MAX_MANIFEST_BYTES = 64 * 2**20
 MAX_RETAINED = 1024                             # manifests one `mask.retain` may keep (card M8.4.18a)
 INFO_PAGE = 2048                                # tile positions per `mask.info` answer (the JSON of an answer stays far below 64 KiB)
 COPY_PAGE = 32                                  # tiles per `mask.copy` answer (card M8.4.27): at most 40 MiB read, verified and written
+DERIVED_KINDS = ('reopen',)                     # card M8.4.29: what the page derived from a stored version (decision G); a cache, never project data
+MAX_DERIVED_BYTES = 128 * 2**20                 # uncompressed; the page's limit is stated in the card before measuring, then recorded against the measurement
+DERIVED_NAME = re.compile(r'([0-9a-f]{64})\.([a-z]{1,16})')
 COMPRESSION_LEVEL = 1
 BLOB_CACHE_BYTES = 64 * 2**20
 HEX64 = re.compile('[0-9a-f]{64}')
@@ -353,6 +356,42 @@ class MaskStore:
         _write_durably(path, data)
         return name
 
+    def derived_path(self, manifest: str, kind: str) -> Path:
+        return self.folder / 'derived' / f'{manifest}.{kind}'
+
+    def put_derived(self, manifest: str, kind: str, data: bytes) -> int:
+        """Store ``data`` as the derived file ``kind`` of a stored manifest (card M8.4.29), replacing one that is there. The bytes are not read.
+        Returns their length. An unknown kind or a manifest that is not stored is ``INVALID_REQUEST``, too many bytes ``LIMIT_EXCEEDED``."""
+        if kind not in DERIVED_KINDS:
+            raise MaskError('INVALID_REQUEST', 'kind')
+        if not 1 <= len(data) <= MAX_DERIVED_BYTES:
+            raise MaskError('LIMIT_EXCEEDED' if len(data) > MAX_DERIVED_BYTES else 'INVALID_BUFFER', 'derived')
+        self.read_manifest(manifest)                     # raises for a manifest that is not stored or is damaged
+        _write_durably(self.derived_path(manifest, kind), zlib.compress(data, COMPRESSION_LEVEL))
+        return len(data)
+
+    def get_derived(self, manifest: str, kind: str) -> bytes | None:
+        """The bytes of a derived file, or None when there is none. A file that does not decompress to a whole stream of at most
+        ``MAX_DERIVED_BYTES`` is ``MaskError('INVALID_BUFFER', 'derived')``. The manifest need not be readable: the file is a cache."""
+        if kind not in DERIVED_KINDS or not isinstance(manifest, str) or not HEX64.fullmatch(manifest):
+            raise MaskError('INVALID_REQUEST', 'kind' if kind not in DERIVED_KINDS else 'manifest')
+        path = self.derived_path(manifest, kind)
+        try:
+            if path.is_symlink():
+                raise MaskError('INVALID_BUFFER', 'derived')
+            if not path.is_file():
+                return None
+            if path.stat().st_size > MAX_DERIVED_BYTES + MAX_DERIVED_BYTES // 100 + 1024:
+                raise MaskError('INVALID_BUFFER', 'derived')
+            raw = path.read_bytes()
+            inflater = zlib.decompressobj()
+            data = inflater.decompress(raw, MAX_DERIVED_BYTES + 1)
+        except (OSError, zlib.error):
+            raise MaskError('INVALID_BUFFER', 'derived') from None
+        if not data or len(data) > MAX_DERIVED_BYTES or not inflater.eof or inflater.unused_data or inflater.unconsumed_tail:
+            raise MaskError('INVALID_BUFFER', 'derived')
+        return data
+
     def blobs_of(self, sha256: str) -> set[str]:
         """Every blob a stored manifest names: its tiles' layers and its tables."""
         manifest, tiles = self.read_manifest(sha256)
@@ -388,6 +427,12 @@ class MaskStore:
                 path.unlink(missing_ok=True)
                 self.manifests.pop(name, None)
                 removed['manifests'] += 1
+        for path in sorted((self.folder / 'derived').glob('*')):                    # card M8.4.29: a derived file goes with its manifest
+            match = DERIVED_NAME.fullmatch(path.name)
+            if path.is_symlink():
+                continue
+            if (match and match.group(2) in DERIVED_KINDS and match.group(1) not in kept) or path.name.endswith('.tmp'):
+                path.unlink(missing_ok=True)                                         # also a temporary file a stop left half-way
         for path in sorted((self.folder / 'blobs').glob('*/*')):
             name = path.name
             if HEX64.fullmatch(name) and path.parent.name == name[:2] and name not in used and not path.is_symlink():

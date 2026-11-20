@@ -172,6 +172,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `singleflight.js` | One run at a time with at most one more run for the requests made meanwhile, if the revision changed (card M8.4.31): project saves | Yes |
 | `tiledundo.js` | Undo and redo of tiled edits (card M8.4.16 step 5): copies of the mask tiles an edit changed, taken before its first write and swapped with the page's tiles (`TileChanges`); the 64 MiB budget of those copies (`trimTileHistory`) | Yes |
 | `tiledcounts.js` | Row counts of tiled sections (card M8.4.17): the histogram of each tile (`tileHistogram`), their sum under the current classes (`TiledRowCounts`) and the queue that counts changed tiles between frames (`TiledCountsRunner`); no DOM |
+| `tiledcache.js` | The reopening cache of a tiled section (card M8.4.29): `encodeReopenCache` and `decodeReopenCache` (every check; a refusal is `CacheRejected`), `statsCover`; no DOM |
 | `tiledsource.js` | The original image of a tiled section in the section form (card M8.4.18b): where it is, "Locate the image…" and "Copy the image into the project", through `window.corantoolDesktop.tiles` (`createTiledSourcePanel`); `sizeText` | — |
 | `tiledsync.js` | Sending the masks of tiled sections to the engine's store (card M8.4.16): rounds of staged version, dirty tiles and tables, commit and acknowledgement, retried after a failure (`MaskSync`); reading back tiles the page dropped (`MaskLoader`); the tables as bytes (`maskTables`) | Yes |
 | `maskchanges.js` | Which rows of each section's label and exclusion masks changed since the engine last received them: `createMaskChanges` (mark, take, restore, mark all) and `indexRangeOfPairs` (the pixels named by an edit-history list). A hint for the engine path, never a proof (§26.2) | Yes |
@@ -3195,12 +3196,34 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   (`mask.retain`); the engine also keeps every version it committed for a section after the newest one named, whose answer may still be on its
   way to the page (card M8.4.31). *Reopening:* the pyramid is taken from the engine's cache, or built again from the file the main process remembered for the project
   (`sources.json`), accepted only if its SHA-256 is the saved one; the working image is read from it at the saved level. The stored version's tiles are
-  listed (`mask.info`) and each is read back once, for the reduced copy of the masks and the row counts of card M8.4.17; the objects come from the
-  record with their saved statistics, which are then computed again from the tiles and pixels in the background. Without the pyramid and the file the
+  listed (`mask.info`). The reduced copy of the masks, the row counts of card M8.4.17 and the statistics of the objects come from the reopening
+  cache of that version when there is one that passes its checks (below); otherwise each tile is read back once for the first two and the statistics
+  are computed again from the tiles and pixels in the background. The objects come from the record with their saved statistics. Without the pyramid and the file the
   section opens with a grey image, its masks, objects and interval table, and cannot be edited ("The original image of this large section cannot be
   found…"). Without the engine (browser, standalone file, engine experiment off) a tiled section is a grey placeholder without masks or table, nothing
   in it can be changed, and its record is saved back exactly as it was read (decision D2). Folder backups and packages leave tiled sections out
   until cards M8.4.18c and M8.4.18d.
+- **Reopening cache** (`tiledcache.js`, `writeReopenCaches` and `readReopenCache` in `tiledproject.js`; card M8.4.29, decision G; contract §8.7). A
+  file `derived/<manifest>.reopen` in the project's mask folder, written through the engine (`mask.derived.put`, zlib-compressed on disk, at most
+  128 MiB uncompressed) and removed with its manifest by `mask.retain`. It is a cache, not project data: none of it is trusted, and a missing, damaged
+  or refused file only means the section is opened as before. *Written:* after a successful save (and after `mask.retain`), for each tiled section
+  whose saved version the page still holds exactly (the send settled on that manifest, every tile counted, no statistic waiting or failed), unless this
+  session already read or wrote it; the bytes are checked again after they are encoded and nothing is written if the section changed meanwhile. A
+  section whose labelled tiles lack statistics (objects saved before their statistics were computed) gets no cache, so that opening it computes them.
+  *Format* (version 1, little-endian): a 152-byte header (`SCRC`, the version, the manifest's and the source's SHA-256, `ds`, the source and working
+  sizes, the analysis area's columns `[x0, x1)` the histograms were clipped to, the body length and the body's SHA-256, reserved zeros), then a body of
+  three parts, each a `u32` length and its bytes: the **histograms** (per tile, ascending: tile index, rows, flags, pair count, the excluded pixels per
+  row as `u16`, the row offsets as `u32`, the labels as `i32` and their pixel counts as `u16`: the layout of `TileHistogram`), the **reduced copy**
+  (labels `i32` then exclusion `u8` at the working size, each as zero runs: `{zeros u32, literal count u32, samples}` until the size is covered
+  exactly) and the **statistics** (per tile, ascending: tile index, object count, then per object, ascending: id and the 17 fields of `TraceStats` as
+  `f64` in the order `n sx sy sxx syy sxy x0 x1 y0 y1 per sL sLL sA sB rL rN`). *Read:* the whole cache is refused if the magic, version, manifest,
+  source, `ds`, source or working size, a reserved byte, the body length or its SHA-256 differ; if a count or offset lies outside its part or a part
+  has bytes left; if a tile is not ascending, outside the grid or not in the stored version; if a histogram's row count is not the tile's, its flags
+  are not 1-3, its offsets do not start at 0, rise and end at the pair count, its labels are zero or not ascending within a row, a count is zero, or a
+  row's excluded pixels and counts exceed the columns inside the area; if the exclusion holds a value other than 0 or 1; if a statistic is not finite,
+  its count is not a positive integer or its box leaves the source; if a labelled tile has no statistics; or if the totals of the objects do not agree
+  (count and box) with the record's. Accepted, the cache fills the reduced copy, `TiledRowCounts` (`restore`) and `TiledObjectStats` without reading
+  a tile; when the analysis area's columns differ from the cache's, `setArea` marks only the tiles of the columns that changed, and only those are read.
 - **The store folder follows its project** (`deleteStoreOf`, `copyTiledStore`, `storeLocked` in `app.js`; `desktop/tile-ipc.js`; card M8.4.27;
   contract §8.7). Deleting a project from the library also deletes its folder on this computer (`<user data>/projects/<id>/`: masks, the record
   of sources, copies of sources), after the sends of its open sections stopped; if that is not possible the project is still deleted and the page

@@ -495,3 +495,111 @@ def test_a_forgotten_project_starts_without_a_session_record(engine):
     assert value.coordinator.session_commits == {}
     value.ok('mask.retain', {'project': 'p1', 'keep': [first]})
     assert stored_names(value)[0] == {first}
+
+
+# ---- Card M8.4.29: derived files (contract §8.7, decision G) ----
+
+def committed_version(value, project='p1', section='s1'):
+    staged = begin(value, project=project, section=section)['staged']
+    data, sha = labels_tile(5)
+    put(value, staged, data, sha)
+    return value.ok('mask.commit', {'staged': staged, 'tables': value.tables()})[0]['manifest']
+
+
+def upload(value, data):
+    """A committed u8 buffer, sent in chunks of at most MAX_CHUNK."""
+    handle = value.ok('buffer.begin', {'dtype': 'u8', 'shape': [len(data)], 'byte_length': len(data), 'sha256': hashlib.sha256(data).hexdigest()})[0]['handle']
+    for offset in range(0, len(data), MAX_CHUNK):
+        part = data[offset:offset + MAX_CHUNK]
+        value.ok('buffer.chunk', {'handle': handle, 'offset': offset, 'byte_length': len(part)}, part)
+    value.ok('buffer.commit', {'handle': handle})
+    return handle
+
+
+def put_derived(value, manifest, data, project='p1', kind='reopen'):
+    return value.ok('mask.derived.put', {'project': project, 'manifest': manifest, 'kind': kind, 'handle': upload(value, data)})[0]
+
+
+def get_derived(value, manifest, project='p1', kind='reopen'):
+    result, binary = value.ok('mask.derived.get', {'project': project, 'manifest': manifest, 'kind': kind})
+    return result, b''.join(binary)
+
+
+def test_a_derived_file_is_stored_with_its_manifest_and_read_back_in_frames(engine):
+    value = engine()
+    manifest = committed_version(value)
+    assert get_derived(value, manifest) == ({'found': False}, b'')
+    body = (b'reopen cache ' + bytes(range(256))) * 9000                       # about 2.4 MB: more than one frame
+    assert put_derived(value, manifest, body) == {'byte_length': len(body)}
+    result, joined = get_derived(value, manifest)
+    assert joined == body and result['found'] is True and result['byte_length'] == len(body)
+    assert result['sha256'] == hashlib.sha256(body).hexdigest() and sum(result['frames']) == len(body) and len(result['frames']) == 3
+    assert all(size <= MAX_CHUNK for size in result['frames'])
+    path = Path(value.coordinator.projects_root) / 'p1' / 'tiles' / 'derived' / f'{manifest}.reopen'
+    assert path.is_file() and path.stat().st_size < len(body)                  # stored compressed
+    assert put_derived(value, manifest, b'second') == {'byte_length': 6} and get_derived(value, manifest)[1] == b'second'   # replaced
+
+
+def test_derived_requests_are_validated(engine):
+    value = engine()
+    manifest = committed_version(value)
+    handle = value.buffer(b'x' * 10, 'u8')
+    base = {'project': 'p1', 'manifest': manifest, 'kind': 'reopen', 'handle': handle}
+    assert value.error('mask.derived.put', {**base, 'kind': 'other'}) == ('INVALID_REQUEST', 'kind')
+    assert value.error('mask.derived.put', {**base, 'manifest': '1' * 64}) == ('INVALID_REQUEST', 'manifest')    # not stored
+    assert value.error('mask.derived.put', {**base, 'manifest': 'xyz'}) == ('INVALID_REQUEST', 'manifest')
+    assert value.error('mask.derived.put', {**base, 'project': 'Bad Name'}) == ('INVALID_REQUEST', 'project')
+    assert value.error('mask.derived.put', {**base, 'handle': 'nope'})[0] == 'INVALID_BUFFER'   # an unknown handle, as for the tables of mask.commit
+    wrong = value.buffer(np.array([1, 2], dtype='<u4').tobytes(), 'u32le')
+    assert value.error('mask.derived.put', {**base, 'handle': wrong}) == ('INVALID_BUFFER', 'derived')            # not u8
+    assert value.error('mask.derived.get', {'project': 'p1', 'manifest': manifest, 'kind': 'other'}) == ('INVALID_REQUEST', 'kind')
+    assert value.error('mask.derived.get', {'project': 'p1', 'manifest': 'abc', 'kind': 'reopen'}) == ('INVALID_REQUEST', 'manifest')
+    assert value.error('mask.derived.get', {'project': 'p1', 'manifest': manifest}) [0] == 'INVALID_REQUEST'
+
+
+def test_the_size_limit_of_a_derived_file(engine, monkeypatch):
+    value = engine()
+    manifest = committed_version(value)
+    monkeypatch.setattr(masks, 'MAX_DERIVED_BYTES', 100)
+    assert put_derived(value, manifest, b'a' * 100) == {'byte_length': 100}
+    handle = value.buffer(b'a' * 101, 'u8')
+    assert value.error('mask.derived.put', {'project': 'p1', 'manifest': manifest, 'kind': 'reopen', 'handle': handle}) == ('LIMIT_EXCEEDED', 'derived')
+    assert get_derived(value, manifest)[1] == b'a' * 100                        # the refused put left the old file
+
+
+def test_a_damaged_derived_file_is_refused_and_replaced_by_the_next_put(engine):
+    value = engine()
+    manifest = committed_version(value)
+    put_derived(value, manifest, b'good data' * 100)
+    path = Path(value.coordinator.projects_root) / 'p1' / 'tiles' / 'derived' / f'{manifest}.reopen'
+    for damaged in (b'not zlib', path.read_bytes()[:-6], path.read_bytes() + b'extra', b''):
+        path.write_bytes(damaged)
+        assert value.error('mask.derived.get', {'project': 'p1', 'manifest': manifest, 'kind': 'reopen'}) == ('INVALID_BUFFER', 'derived')
+    put_derived(value, manifest, b'fresh')
+    assert get_derived(value, manifest)[1] == b'fresh'
+
+
+def test_retain_removes_the_derived_files_of_the_manifests_it_removes_and_leaves_other_files(engine):
+    value = engine()
+    keep, drop = committed_version(value), committed_version(value, section='s2')
+    put_derived(value, keep, b'keep me')
+    put_derived(value, drop, b'drop me')
+    value.close()
+    value = engine()                                                           # a new process has committed nothing: retain removes what it does not name
+    folder = Path(value.coordinator.projects_root) / 'p1' / 'tiles' / 'derived'
+    (folder / 'notes.txt').write_bytes(b'not ours')
+    (folder / f'{keep}.future').write_bytes(b'a kind this version does not know')
+    (folder / f'{drop}.reopen.0123abcd.tmp').write_bytes(b'half written')
+    value.ok('mask.retain', {'project': 'p1', 'keep': [keep]})
+    assert get_derived(value, keep)[1] == b'keep me'
+    assert sorted(path.name for path in folder.iterdir()) == sorted([f'{keep}.reopen', f'{keep}.future', 'notes.txt'])
+    assert value.error('mask.derived.put', {'project': 'p1', 'manifest': drop, 'kind': 'reopen', 'handle': upload(value, b'x')}) == ('INVALID_REQUEST', 'manifest')
+
+
+def test_copy_does_not_carry_derived_files(engine):
+    value = engine()
+    manifest = committed_version(value)
+    put_derived(value, manifest, b'cache')
+    page = value.ok('mask.copy', {'from': 'p1', 'to': 'p2', 'manifest': manifest, 'start': 0})[0]
+    assert page['next'] is None
+    assert get_derived(value, manifest, project='p2') == ({'found': False}, b'')

@@ -84,7 +84,7 @@ Updated 18 November 2026.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
 - **Next step: Q5** (long series: `extent()` without spreads, decimation on screen, the data record saved in parts; **model: most capable tier,
   effort medium**), then M8.4.29 and the rest of order O; M8.4.30 is done except its size target (decision R); M8.4.33 is done; M8.4.32 is done
-  (green on three systems, commit `4a20dfd`); Q5 parts 1-2 are done (part 3 changes the saved format: waits for the maintainer); P1 is done on 20 Nov 2026 (`figsize.js`, `pngmeta.js`, PNG at 300/600 dpi; `npm test` 507, typecheck and standalone build pass; the 600 dpi check added to `tests/e2e/figure-composition.mjs` (run by `smoke.mjs`) **has not been run**: the permission system refused to start the local server for it, so it runs in the next session or on the maintainer's computer); Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
+  (green on three systems, commit `4a20dfd`); M8.4.29 is done at the development gate on 20 Nov 2026 (the GitHub run of its commit is pending); Q5 parts 1-2 are done (part 3 changes the saved format: waits for the maintainer); P1 is done on 20 Nov 2026 (`figsize.js`, `pngmeta.js`, PNG at 300/600 dpi; `npm test` 507, typecheck and standalone build pass; the 600 dpi check added to `tests/e2e/figure-composition.mjs` (run by `smoke.mjs`) **has not been run**: the permission system refused to start the local server for it, so it runs in the next session or on the maintainer's computer); Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
   council audit, below). **V0.152** (decision J) was prepared on 20 Nov 2026 at the maintainer's request ("Publica la 0.152 y haz un release"):
   full checks passed on the version commit (Windows: pytest 885 passed / 9 skipped, npm 478, typecheck, sync_version, ruff, standalone build,
   runtime rebuilt, desktop.mjs off and on, tiled-sections.mjs). **Published on 20 Nov 2026:** `master` `8ee9776`, tag `V0.152`, GitHub Release
@@ -2025,7 +2025,26 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   class changes of cards Q1-Q4) is not tiled-section code. Decision R (proposed): accept 4,666 as the new ceiling, lowered by each later card
   that moves a workflow (U1-U3 move dialogs and messages; A2 moves runtime caches), instead of a further move now.
 
-##### M8.4.29 - Reopening without reading every stored tile — state: after M8.4.30; decision G approved by the maintainer on 19 Nov 2026 (written 18 Nov 2026 for finding 3 of M8.4.18a)
+##### M8.4.29 - Reopening without reading every stored tile — state: Done at the development gate (20 Nov 2026, Windows); decision G approved by the maintainer on 19 Nov 2026 (written 18 Nov 2026 for finding 3 of M8.4.18a)
+
+- **As built (20 Nov 2026).** `tiledcache.js` (format, encode, decode with every check, `statsCover`), `mask.derived.put` / `mask.derived.get` in
+  `masks.py` and `server.py` (limit 128 MiB, stated before measuring), `mask.retain` removes the files of removed manifests, `engine.js`,
+  `tile-ipc.js`, `preload.js`, `TiledRowCounts.snapshot` / `restore`, writing after a save (`writeReopenCaches`) and reading in `loadTiledSection`
+  (`tiledproject.js`). `app.js` stays at 4,666 lines (one test hook added on an existing line). Format and checks: TECHNICAL_DOCUMENTATION
+  («Reopening cache»); operations: contract §8.7. Two rules beyond the card: a cache is also refused when the totals of its statistics disagree
+  with the record's objects, and none is written (or accepted) when a labelled tile has no statistics, so that a section saved without statistics is
+  still rebuilt once.
+- **Measured** (Windows, Ryzen 7 7700X, `rgb8g`, `tools/measure_tiled_reopen.mjs`; records `docs/validation/M8.4.29-reopen-3pct.json` and `-10pct.json`):
+
+  | Fill | Open + table without cache | Open + table from cache | Statistics current without / from cache | Cache on disk / unpacked |
+  |---|---|---|---|---|
+  | 3 % (368 tiles, 4,369 objects) | 5.1 s | **0.53 s** | 37.8 s / 0.53 s | 0.6 MB / 2.4 MB |
+  | 10 % (1,130 tiles, 13,513 objects) | 11.7 s | **1.43 s** | 92.7 s / 1.43 s | 1.8 MB / 7.3 MB |
+
+  Targets stated in the card (under 3 s at 10 %, statistics current when the project opens): **met**. The 128 MiB limit is about 17 times the 10 % cache.
+- **Checks:** `npm test` 521, `pytest` 891 passed / 9 skipped, typecheck, standalone build, `desktop.mjs` engine off and on, `tiled-sections.mjs` with
+  the cache written, used, damaged (refused, rebuilt) and absent. Not run: `smoke.mjs` (needs a local server, refused by the permission system);
+  macOS and Linux (milestone gate, GitHub); `ruff` (not installed on this computer).
 
 - **Goal:** reopening a saved tiled section does not read its stored tiles to rebuild what the page derived from them: the row histograms of
   M8.4.17, the reduced copy of the masks and the per-tile object statistics come back from a cache saved with the stored version, and are rebuilt

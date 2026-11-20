@@ -213,3 +213,40 @@ test('card M8.4.18a: retain and info are checked before they reach the engine', 
   assert.deepEqual(await ipc.call(1, 'maskInfo', 'p1', m, -1), { error: { code: 'INVALID_REQUEST', field: 'start' } });
   assert.deepEqual(await ipc.call(1, 'maskInfo', 'p1', 'x', 0), { error: { code: 'INVALID_REQUEST', field: 'manifest' } });
 });
+
+test('card M8.4.29: derived files are checked before they reach the engine and sent as a u8 buffer in chunks', async () => {
+  const engine = fakeEngine('a'.repeat(64)), request = engine.request.bind(engine), calls = [], m = 'e'.repeat(64);
+  const answer = (value) => { const p = Promise.resolve(value); p.requestId = randomUUID(); return p; };
+  let found = null;
+  engine.request = (op, payload, binary, options) => {
+    if (op.startsWith('buffer.') || op.startsWith('mask.derived')) calls.push({ op, payload, size: binary?.length });
+    if (op === 'buffer.begin') return answer({ handle: 'h1' });
+    if (op === 'buffer.chunk' || op === 'buffer.commit' || op === 'buffer.release') return answer({});
+    if (op === 'mask.derived.put') return answer({ byte_length: payload.handle === 'h1' ? 2_500_000 : 0 });
+    if (op === 'mask.derived.get') return answer(found);
+    return request(op, payload, binary, options);
+  };
+  const ipc = createTileIpc({ engine }), body = Buffer.alloc(2_500_000, 7);
+  assert.deepEqual(await ipc.call(1, 'derivedPut', 'p1', m, 'reopen', body), { ok: { byte_length: 2_500_000 } });
+  const sent = calls.filter((c) => c.op === 'buffer.chunk');
+  assert.deepEqual(sent.map((c) => c.size), [1048576, 1048576, 402848]);
+  assert.deepEqual(calls.find((c) => c.op === 'buffer.begin').payload, { dtype: 'u8', shape: [2_500_000], byte_length: 2_500_000, sha256: sha(body).toString('hex') });
+  assert.deepEqual(calls.find((c) => c.op === 'mask.derived.put').payload, { project: 'p1', manifest: m, kind: 'reopen', handle: 'h1' });
+  assert.ok(calls.some((c) => c.op === 'buffer.release'), 'the buffer is released');
+  const before = calls.length;
+  for (const [args, field] of [[['p1', 'x', 'reopen', body], 'manifest'], [['p1', m, 'other', body], 'kind'], [['p1', m, 'reopen', 'text'], 'bytes'], [['p1', m, 'reopen', Buffer.alloc(0)], 'bytes']]) {
+    assert.deepEqual(await ipc.call(1, 'derivedPut', ...args), { error: { code: 'INVALID_REQUEST', field } });
+  }
+  assert.deepEqual(await ipc.call(1, 'derivedPut', 'P1', m, 'reopen', body), { error: { code: 'INVALID_REQUEST', field: 'project' } });
+  assert.deepEqual(await ipc.call(1, 'derivedPut', 'p1', m, 'reopen', Buffer.alloc(134217729)), { error: { code: 'LIMIT_EXCEEDED', field: 'derived' } });
+  assert.equal(calls.length, before, 'nothing reached the engine');
+  found = { found: false };
+  assert.deepEqual(await ipc.call(1, 'derivedGet', 'p1', m, 'reopen'), { ok: { found: false } });
+  found = { found: true, byte_length: 3, bytes: Buffer.from([1, 2, 3]) };
+  const got = await ipc.call(1, 'derivedGet', 'p1', m, 'reopen');
+  assert.ok(got.ok.found && got.ok.bytes.equals(Buffer.from([1, 2, 3])));
+  found = { found: true, byte_length: 4, bytes: Buffer.from([1, 2, 3]) };
+  assert.deepEqual(await ipc.call(1, 'derivedGet', 'p1', m, 'reopen'), { error: { code: 'INTERNAL', field: 'derived' } });
+  assert.deepEqual(await ipc.call(1, 'derivedGet', 'p1', 'x', 'reopen'), { error: { code: 'INVALID_REQUEST', field: 'manifest' } });
+  assert.deepEqual(await ipc.call(1, 'derivedGet', 'p1', m, 'nope'), { error: { code: 'INVALID_REQUEST', field: 'kind' } });
+});

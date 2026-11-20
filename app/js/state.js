@@ -27,6 +27,7 @@
  *     source?: {name: string, size: number | null}, missing?: boolean},
  *   maskTiles?: import('./tiledmasks.js').MaskTiles,
  *   _statsRunner?: import('./tiledit.js').TiledStatsRunner,
+ *   _reopenCached?: string | null, _reopenWriting?: boolean,
  *   frozen?: 'engine' | 'source' | 'store', placeholder?: any, _savedRecord?: any, _tiledRecord?: any,
  *   _counts?: {counts: import('./tiledcounts.js').TiledRowCounts, runner: import('./tiledcounts.js').TiledCountsRunner, limitShown: boolean},
  *   _maskSync?: import('./tiledsync.js').MaskSync, _maskLoader?: import('./tiledsync.js').MaskLoader, _undoTrimShown?: boolean,

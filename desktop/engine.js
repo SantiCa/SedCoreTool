@@ -10,7 +10,7 @@ const { controlFrame, frame, ControlReader } = require('./engine-protocol');
 const ADVERTISED_METHODS = new Set(['buffer.digest/1', 'section.intervals/1']);
 // The tile-store operations (contract §8) are main-process only: engine-ipc.js never forwards them, and `pyramid.build` carries a path.
 const OPERATIONS = new Set(['hello', 'buffer.begin', 'buffer.derive', 'buffer.chunk', 'buffer.commit', 'buffer.release', 'buffer.read', 'buffer.digest', 'section.analyze', 'job.cancel', 'shutdown',
-  'pyramid.build', 'pyramid.info', 'tile.read', 'mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.forget']);
+  'pyramid.build', 'pyramid.info', 'tile.read', 'mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.forget', 'mask.derived.put', 'mask.derived.get']);
 // Requests followed by one binary frame (a descriptor/binary pair of contract §3); at most two of them wait for an answer at a time.
 const WITH_BINARY = new Set(['buffer.chunk', 'mask.put']);
 // A pyramid build has no fixed length: the engine stops a build whose progress stalls for 60 s. The client fails the session only
@@ -188,6 +188,15 @@ class EngineClient {
       pending.resolve({ ...read, bytes: Buffer.alloc(0) });
       return undefined;
     }
+    if (value.status === 'ok' && pending.op === 'mask.derived.get' && value.result?.found === true) {
+      // Card M8.4.29: the derived file follows as binary frames of at most 1 MiB that add up to its length (contract §8.7); a missing one is `{found: false}`.
+      const read = value.result, frames = read.frames;
+      if (Object.keys(read).sort().join() !== 'byte_length,found,frames,sha256' || !Number.isSafeInteger(read.byte_length) || read.byte_length < 1 || read.byte_length > 134217728
+          || !/^[0-9a-f]{64}$/.test(read.sha256) || !Array.isArray(frames) || !frames.length || frames.length > 128
+          || frames.some((size) => !Number.isSafeInteger(size) || size < 1 || size > 1048576) || frames.reduce((sum, size) => sum + size, 0) !== read.byte_length) throw unavailable();
+      this.partial = { pending, id: value.id, result: read, parts: [], remaining: frames.length };
+      return { binaryFrames: frames };
+    }
     clearTimeout(pending.timer); this.pending.delete(value.id);
     if (value.status === 'ok') pending.resolve(value.result);
     else if (value.status === 'cancelled') pending.resolve({ cancelled: true });
@@ -205,7 +214,8 @@ class EngineClient {
       if (--partial.remaining) return;
       const joined = Buffer.concat(partial.parts);
       let offset = 0;
-      for (const tile of partial.result.tiles) {          // the engine verified every tile; this checks the transport kept them apart
+      if (!partial.result.tiles && createHash('sha256').update(joined).digest('hex') !== partial.result.sha256) throw unavailable();   // mask.derived.get
+      for (const tile of partial.result.tiles || []) {          // the engine verified every tile; this checks the transport kept them apart
         if (!tile.byte_length) continue;                   // an empty mask layer (mask.read) has no bytes
         if (createHash('sha256').update(joined.subarray(offset, offset + tile.byte_length)).digest('hex') !== tile.sha256) throw unavailable();
         offset += tile.byte_length;

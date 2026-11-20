@@ -10,6 +10,7 @@ const { copyVerified, freeBytes } = require('./source-copy');
 
 const MAX_SOURCES_PER_PAGE = 64, MAX_BUILDS_PER_PAGE = 4, MAX_STAGED_PER_PAGE = 8, MAX_CHUNK = 1048576;
 // Card M8.4.18a: the main process remembers where the source of each tiled section was, per project; the page never sees it.
+const DERIVED_KINDS = new Set(['reopen']), MAX_DERIVED_BYTES = 134217728;   // card M8.4.29, contract §8.7
 const SOURCES_FILE = 'sources.json', MAX_REMEMBERED_SOURCES = 4096, MAX_RETAINED = 1024;
 // Card M8.4.18b: copies of sources inside the project, named by their SHA-256 and the original extension; the disk keeps 1 GiB free.
 const SOURCES_DIR = 'sources', COPY_NAME = /^[0-9a-f]{64}(\.[a-z0-9]{1,8})?$/, COPY_RESERVE = 2 ** 30;
@@ -287,6 +288,39 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
       if (!Array.isArray(r?.positions) || r.positions.length % 3 || !r.positions.every((v) => Number.isSafeInteger(v) && v >= 0)
           || !(r.next === null || Number.isSafeInteger(r.next))) reject('INTERNAL', 'info');
       return { section: r.section, width: r.width, height: r.height, tiles: r.tiles, positions: r.positions, next: r.next };
+    },
+    /**
+     * Card M8.4.29: store `bytes` (1 B to 128 MiB) as the derived file `kind` of a stored version of this project. The engine does not read them;
+     * they travel as a committed `u8` buffer, released afterwards. `{byte_length}`.
+     */
+    async derivedPut(owner, project, manifest, kind, data) {
+      checkProject(project);
+      if (typeof manifest !== 'string' || !SHA256.test(manifest)) reject('INVALID_REQUEST', 'manifest');
+      if (!DERIVED_KINDS.has(kind)) reject('INVALID_REQUEST', 'kind');
+      const bytes = bytesOf(data);
+      if (!bytes || bytes.length < 1) reject('INVALID_REQUEST', 'bytes');
+      if (bytes.length > MAX_DERIVED_BYTES) reject('LIMIT_EXCEEDED', 'derived');
+      const sha256 = createHash('sha256').update(bytes).digest('hex');
+      const { handle } = await engine.request('buffer.begin', { dtype: 'u8', shape: [bytes.length], byte_length: bytes.length, sha256 });
+      try {
+        for (let offset = 0; offset < bytes.length; offset += MAX_CHUNK) {
+          const part = bytes.subarray(offset, offset + MAX_CHUNK);
+          await engine.request('buffer.chunk', { handle, offset, byte_length: part.length }, Buffer.from(part));
+        }
+        await engine.request('buffer.commit', { handle });
+        const result = await engine.request('mask.derived.put', { project, manifest, kind, handle });
+        return { byte_length: result?.byte_length };
+      } finally { engine.request('buffer.release', { handles: [handle] }).catch(() => {}); }
+    },
+    /** Card M8.4.29: the derived file `kind` of a stored version, verified in transport: `{found: false}` or `{found: true, bytes}`. */
+    async derivedGet(owner, project, manifest, kind) {
+      checkProject(project);
+      if (typeof manifest !== 'string' || !SHA256.test(manifest)) reject('INVALID_REQUEST', 'manifest');
+      if (!DERIVED_KINDS.has(kind)) reject('INVALID_REQUEST', 'kind');
+      const result = await engine.request('mask.derived.get', { project, manifest, kind });
+      if (result?.found === false) return { found: false };
+      if (!result?.bytes || result.bytes.length !== result.byte_length) reject('INTERNAL', 'derived');
+      return { found: true, bytes: result.bytes };
     },
     /** Remember, for this project, the file a pyramid this page built came from (its path stays in the main process). */
     async rememberSource(owner, project, pyramid) {

@@ -746,6 +746,7 @@ try {
   });
   const sameAsSaved = async (label) => {
     const index = await on.page.evaluate(() => window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId));
+    await on.page.evaluate((i) => window.ichantool.tiledMasksLoad(i), index);      // reopened from the cache, the stored tiles are not in the page yet
     const after = await dump(index), afterTable = await table(index);
     assert.deepEqual(after.runs, beforeSave.runs, label + ': labels'); assert.deepEqual(after.exRuns, beforeSave.exRuns, label + ': exclusion');
     assert.deepEqual(after.usedStacks, beforeSave.usedStacks, label + ': overlaps'); assert.equal(after.nextId, beforeSave.nextId, label + ': nextId');
@@ -762,12 +763,48 @@ try {
     return index;
   };
   const tiledIndex = await on.page.evaluate(() => window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId));
+  // Card M8.4.29: the reopening cache is written after a save in which every statistic and count is current, and read when the section is opened.
+  await on.page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle(), { polling: 200, timeout: 600000 });
   await on.page.evaluate(() => window.ichantool.saveNow());
   const beforeSave = await dump(tiledIndex), beforeTable = await table(tiledIndex);
   const savedManifests = await on.page.evaluate(() => window.ichantool.tiledSaved());
   assert.deepEqual(await manifestsOnDisk(), [...new Set(savedManifests)].sort(), 'after a save the store holds only the saved versions');
+  const sectionState = () => on.page.evaluate(() => { const q = window.ichantool.S.sections.find((x) => x.id === window.__tiledId); return { saved: q._savedRecord?.tiled?.manifest, cached: q._reopenCached ?? null }; });
+  const cacheFile = async () => path.join(on.profile, 'projects', await on.page.evaluate(() => window.ichantool.storeProject()), 'tiles', 'derived', `${(await sectionState()).saved}.reopen`);
+  const waitForCache = async (file) => {
+    for (let i = 0; i < 600 && !fs.existsSync(file); i++) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(fs.existsSync(file), 'the reopening cache was written after the save: ' + file + ' ' + JSON.stringify(fs.existsSync(path.dirname(file)) ? fs.readdirSync(path.dirname(file)) : 'no folder') + JSON.stringify(await on.page.evaluate(() => {
+      const q = window.ichantool.S.sections.find((x) => x.id === window.__tiledId);
+      return { sync: q._maskSync && { settled: q._maskSync.settled, manifest: q._maskSync.manifest }, saved: q._savedRecord?.tiled?.manifest, idle: q._statsRunner?.idle, failed: q._statsRunner?.failed.size,
+        ready: q._counts?.counts.ready, writing: q._reopenWriting, cached: q._reopenCached, frozen: q.frozen };
+    })));
+  };
+  const cachePath = await cacheFile();
+  await waitForCache(cachePath);
   assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  assert.equal((await sectionState()).cached, (await sectionState()).saved, 'the section was reopened from the cache');
   await sameAsSaved('reopened');
+  // A damaged cache is refused whole: the section is rebuilt from its tiles, equal to what was saved, and the next save writes the cache again
+  // (rebuilding may commit a new version, so the file of the version saved afterwards is the one to look for).
+  const damaged = fs.readFileSync(cachePath);
+  damaged[Math.floor(damaged.length / 2)] ^= 0xff; fs.writeFileSync(cachePath, damaged);
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  assert.equal((await sectionState()).cached, null, 'the damaged cache was not used');
+  await sameAsSaved('damaged cache');
+  await on.page.evaluate(() => window.ichantool.saveNow());
+  await waitForCache(await cacheFile());
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  assert.equal((await sectionState()).cached, (await sectionState()).saved, 'reopened from the cache written again');
+  await sameAsSaved('cache written again');
+  fs.rmSync(await cacheFile());                                     // no cache at all: the same result from the tiles
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  assert.equal((await sectionState()).cached, null, 'no cache, none used');
+  await sameAsSaved('no cache');
+  await on.page.evaluate(() => window.ichantool.saveNow());
+  await waitForCache(await cacheFile());
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  assert.equal((await sectionState()).cached, (await sectionState()).saved, 'reopened from the cache written after a reopening without one');
+  console.log('Reopening cache: written after the save, used on reopening with identical masks, objects and table; a damaged one is refused and rebuilt');
   const pyramid = await on.page.evaluate(() => window.ichantool.S.sections.find((q) => q.id === window.__tiledId).tiled.pyramid);
   fs.rmSync(path.join(on.profile, 'pyramids', pyramid), { recursive: true, force: true });
   assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });

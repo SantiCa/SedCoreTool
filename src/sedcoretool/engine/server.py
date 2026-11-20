@@ -64,7 +64,7 @@ RUNNER_IDLE_SECONDS = 30         # an idle method worker holds memory (NumPy, th
 PROGRESS_EVENT_SECONDS = 0.1     # at most ten progress events per second (§3)
 PYRAMID_NAME = re.compile(r'[^/\\:\x00-\x1f]{1,255}')   # a file name for display: no folder separators or control characters
 MAX_PATH = 4096
-MASK_OPERATIONS = ('mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.forget')
+MASK_OPERATIONS = ('mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.forget', 'mask.derived.put', 'mask.derived.get')
 MAX_STAGINGS = 16                # staged mask versions per session (contract §8.7)
 
 
@@ -369,6 +369,25 @@ class Coordinator:
                 raise RequestError('INVALID_REQUEST', 'to')
             source, target = self.mask_store(payload['from']), self.mask_store(payload['to'])
             return self.masks.write_or_disk_error(target.copy_from, source, payload['manifest'], payload['start'])
+        if operation == 'mask.derived.put':                                     # card M8.4.29: a cache the page derived from a stored version
+            require_fields(payload, ('project', 'manifest', 'kind', 'handle'))
+            value = self.store.get(payload['handle'], committed=True)
+            if value.dtype != 'u8' or len(value.shape) != 1:
+                raise RequestError('INVALID_BUFFER', 'derived')
+            if value.length > self.masks.MAX_DERIVED_BYTES:
+                raise RequestError('LIMIT_EXCEEDED', 'derived')
+            data = value.path.read_bytes()
+            if len(data) != value.length or hashlib.sha256(data).hexdigest() != value.expected_hash:
+                raise RequestError('INTERNAL')
+            store = self.mask_store(payload['project'])
+            return {'byte_length': self.masks.write_or_disk_error(store.put_derived, payload['manifest'], payload['kind'], data)}
+        if operation == 'mask.derived.get':
+            require_fields(payload, ('project', 'manifest', 'kind'))
+            data = self.mask_store(payload['project']).get_derived(payload['manifest'], payload['kind'])
+            if data is None:
+                return {'found': False}
+            self.attachments = [data[start:start + MAX_CHUNK] for start in range(0, len(data), MAX_CHUNK)]
+            return {'found': True, 'byte_length': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'frames': [len(part) for part in self.attachments]}
         if operation == 'mask.forget':                                          # card M8.4.27: the project's folder is about to be deleted
             require_fields(payload, ('project',))
             store = self.mask_store(payload['project'])

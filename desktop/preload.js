@@ -35,6 +35,9 @@ contextBridge.exposeInMainWorld('corantoolDesktop', {
     // Saving and reopening tiled sections (card M8.4.18a): identifiers only; the main process keeps the source's path.
     maskRetain: (project, keep) => ipcRenderer.invoke('tiles:maskRetain', project, keep),
     maskInfo: (project, manifest, start) => ipcRenderer.invoke('tiles:maskInfo', project, manifest, start),
+    // Card M8.4.29: a cache of what the page derived from a stored version (a file the engine keeps next to it).
+    derivedPut: (project, manifest, kind, bytes) => ipcRenderer.invoke('tiles:derivedPut', project, manifest, kind, bytes),
+    derivedGet: (project, manifest, kind) => ipcRenderer.invoke('tiles:derivedGet', project, manifest, kind),
     rememberSource: (project, pyramid) => ipcRenderer.invoke('tiles:rememberSource', project, pyramid),
     reopen: (project, pyramid, key) => ipcRenderer.invoke('tiles:reopen', project, pyramid, key),
     // Card M8.4.18b: a moved source located again (a File the user chose, sent as its path), and a copy of the source into the project.

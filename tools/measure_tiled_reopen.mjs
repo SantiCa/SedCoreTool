@@ -2,12 +2,15 @@
 // 10,928 mask tiles) with masks painted into a stated fraction of its tiles. Measures, from the start of the reopening: the project loaded (pyramid
 // found, stored tiles listed and read back once for the reduced copy and the row counts), the interval table published, and the statistics of the objects
 // computed again from the tiles. Writes a JSON record.
+// Card M8.4.29 (fields `reopenFromCache`, `cache`): the section is reopened twice in the same way, first with no reopening cache (the stored tiles are read back
+// and the statistics computed again; the save at the end of that reopening writes the cache) and then from the cache; `cache` gives its size.
 // Card M8.4.28 (field `deleteAtOnce`): one more object covers the corner of four tiles; the project is reopened a second time and that object is
 // deleted as soon as the project is open, while the reopening's tiles still wait for their statistics: the time from the delete to the object gone.
 //   node tools/measure_tiled_reopen.mjs --fixture C:/sedcore-large-fixtures/rgb8g.tif --fill 0.03 --out docs/validation/M8.4.18a-reopen-3pct.json
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -85,7 +88,7 @@ try {
   }, fill);
   step('painted; reopening');
   // Reopen from the library and time it.
-  const reopen = await page.evaluate(async () => {
+  const measureReopen = () => page.evaluate(async () => {
     const { getProject } = await import(new URL('js/storage.js', location.href).href);
     const project = await getProject(window.ichantool.S.id), started = performance.now();
     await window.ichantool.loadProject(project);
@@ -102,6 +105,16 @@ try {
     await window.ichantool.saveNow();
     return { loadedMs: Math.round(loadedMs), tableMs: Math.round(tableMs), statisticsMs: Math.round(statisticsMs), bins, storedTiles: s.maskTiles.stored.size };
   });
+  step('painted; reopening without a cache');
+  const reopen = await measureReopen();
+  const derivedFolder = path.join(profile, 'projects', await page.evaluate(() => window.ichantool.storeProject()), 'tiles', 'derived');
+  const cacheFiles = () => (fs.existsSync(derivedFolder) ? fs.readdirSync(derivedFolder).filter((f) => f.endsWith('.reopen')) : []);
+  for (let k = 0; k < 1200 && !cacheFiles().length; k++) await new Promise((r) => setTimeout(r, 100));
+  await new Promise((r) => setTimeout(r, 2000));                       // the file is renamed into place whole; this only lets the last write finish
+  const cache = cacheFiles().map((name) => { const file = path.join(derivedFolder, name), packed = fs.readFileSync(file); return { name: name.slice(0, 8) + '…', onDiskBytes: packed.length, bytes: zlib.inflateSync(packed).length }; });
+  step('cache: ' + JSON.stringify(cache) + '; reopening from it');
+  const reopenFromCache = await measureReopen();
+  fs.rmSync(derivedFolder, { recursive: true, force: true });          // the delete-at-once measurement below is the one of card M8.4.28: tiles waiting for their statistics
   step('reopened; reopening again and deleting at once');
   // Card M8.4.28: reopened again, the object over four tiles is deleted at once.
   const deleteAtOnce = await page.evaluate(async (spanId) => {
@@ -121,7 +134,7 @@ try {
   }, painted.spanId);
   const record = {
     date: new Date().toISOString(), computer: `${os.type()} ${os.release()}, ${os.cpus()[0].model.trim()}, ${Math.round(os.totalmem() / 2 ** 30)} GiB`,
-    fixture: path.basename(fixture), fill, addMs, painted: { tiles: painted.tiles, objects: painted.objects }, reopen, deleteAtOnce,
+    fixture: path.basename(fixture), fill, addMs, painted: { tiles: painted.tiles, objects: painted.objects }, reopen, cache, reopenFromCache, deleteAtOnce,
     note: 'loadedMs: the project open (pyramid from the cache, tiles listed and read back once); tableMs: the interval table; statisticsMs: objects recomputed from tiles and pixels; deleteAtOnce: a second reopening, then the object over four tiles deleted at once (deleteMs: from the delete to the object gone, target under 2 s; refused: "try again" shown)',
   };
   console.log(JSON.stringify(record, null, 2));
