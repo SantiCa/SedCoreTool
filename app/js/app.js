@@ -3219,7 +3219,7 @@ async function loadProject(p) {
 }
 
 function resetState() {
-  blankStart = false; clearTimeout(saveTimer);   // V0.36: a pending save of the previous project must not run afterwards
+  blankStart = false; clearTimeout(saveTimer); projectGeneration++;   // V0.36: a pending save of the previous project must not run afterwards (M8.4.35: nor one already waiting)
   deletedClasses.length = 0;                     // card Q1: a deletion is undone only in its own project
   readOnlyProject = false; projectPreview = null; $('projectValidation').hidden = true;
   const maxMP = S.settings.maxMP || 8;
@@ -3277,10 +3277,10 @@ async function saveToDB() {
 async function saveOnce() {
   const finishDiagnostic = diagnosticOperation('save');
   try {
-    setSaveState('saving'); dirty = false;
-    await storePendingImages();
-    const unsaved = await settleTiledSections();
+    setSaveState('saving'); dirty = false; const generation = projectGeneration; await storePendingImages();
+    const unsaved = await settleTiledSections(); if (generation !== projectGeneration || loading) { finishDiagnostic(); return; }   // card M8.4.35: S was replaced while this save waited: never write a half-loaded project
     await putProject(projectMeta(), serialize());
+    if (generation !== projectGeneration) { finishDiagnostic(); return; }   // nor clean up the store of a project that is only partly loaded
     for (const q of S.sections.length ? S.cores.flatMap((c) => c.sections) : []) if (q.tiled && q._tiledRecord) q._savedRecord = q._tiledRecord;
     void retainStore();
     if (unsaved) { dirty = true; if (!tiledUnsavedShown) { tiledUnsavedShown = true; toast(t('tiles.unsaved'), 12000); } }
@@ -3316,7 +3316,7 @@ async function checkQuota() {
     if (f > 0.8 && !quotaWarned) { quotaWarned = true; toast(t('quota.high', { p: (f * 100).toFixed(0) }), 10000); }
   } catch { /* not available */ }
 }
-let saveCount = 0;
+let saveCount = 0, projectGeneration = 0;   // card M8.4.35: incremented when S is replaced (resetState)
 async function flushSave() {
   if (saves.running) await saves.running;
   if (dirty) await saveToDB();

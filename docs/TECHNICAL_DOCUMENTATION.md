@@ -3208,7 +3208,9 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   *Saving:* each tiled section's sync must first be settled (every tile and table acknowledged by the store); the record is built at that moment, so
   masks, objects and stacks are one state. A section that does not settle within 15 s keeps its last saved record, the rest of the project is saved,
   the save state stays "unsaved" and the page says so once ("The latest edits of a large section have not reached the engine's store yet…"); the next
-  save tries again (decision D1 of card M8.4.18). The store writes tiles, then the manifest atomically, and the record is written last (ARCHITECTURE
+  save tries again (decision D1 of card M8.4.18). A save reads the project only after that wait; if another project was opened (or the same one
+  opened again) meanwhile, the save writes nothing and does not clean up the store (card M8.4.35: each replacement of the open project increments a
+  counter that the save compares before and after `putProject`). The store writes tiles, then the manifest atomically, and the record is written last (ARCHITECTURE
   §3.4 rule 4). After a successful save the page asks the store to keep only the versions its saved records name and the current acknowledged ones
   (`mask.retain`); the engine also keeps every version it committed for a section after the newest one named, whose answer may still be on its
   way to the page (card M8.4.31). *Reopening:* the pyramid is taken from the engine's cache, or built again from the file the main process remembered for the project

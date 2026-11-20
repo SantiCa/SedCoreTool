@@ -901,6 +901,27 @@ try {
   assert.ok(toasts.some((text) => /almac|store/i.test(text)), 'D1: the user is told the large section was not saved');
   assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
   await sameAsSaved('after D1');
+  // Card M8.4.35: a save still waiting for a tiled section when a project is opened writes nothing: it used to write the half-loaded project over the
+  // stored one (GitHub, Linux and macOS, November 2026: the stored project had no section left, and the next reopening found none).
+  const raced = await on.page.evaluate(async () => {
+    const { getProject, getMeta } = await import(new URL('js/storage.js', location.href).href), id = window.ichantool.S.id;
+    const before = await getProject(id), metaBefore = await getMeta(id), count = (d) => d.cores.flatMap((c) => c.sections).length;
+    const index = window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId), s = window.ichantool.S.sections[index];
+    window.ichantool.selectSection(index);
+    window.ichantool.stopMaskSync();                                      // the section cannot settle: the save waits for its deadline
+    window.ichantool.putMaskTile(2, 0, new Int32Array(512 * 512).fill(s.nextId - 1), null);
+    window.ichantool.settleDeadline(2000);
+    const saving = window.ichantool.saveNow();
+    await new Promise((r) => setTimeout(r, 300));
+    const opening = window.ichantool.loadProject(before);                 // opened while the save waits
+    await Promise.all([saving, opening]);
+    window.ichantool.settleDeadline(15000);
+    const after = await getProject(id), metaAfter = await getMeta(id);
+    return { sections: [count(before), count(after)], unchanged: JSON.stringify(after) === JSON.stringify(before), written: metaAfter.updated !== metaBefore.updated };
+  });
+  assert.deepEqual(raced, { sections: [raced.sections[0], raced.sections[0]], unchanged: true, written: false }, 'a save overtaken by an opening writes nothing');
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  await sameAsSaved('after a save overtaken by an opening');
   // D2: the same project in a program without tiled sections: a placeholder whose record is saved back byte for byte.
   projectRecord = await on.page.evaluate(async () => { const { getProject } = await import(new URL('js/storage.js', location.href).href); return JSON.parse(JSON.stringify(await getProject(window.ichantool.S.id))); });
   console.log('Saving and reopening: identical masks, objects and table after a reopen, a rebuilt pyramid and a missing source (grey, locked); the moved image located (another file refused), copied into the project and reopened from the copy; D1 keeps the saved version');
