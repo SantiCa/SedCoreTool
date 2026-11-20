@@ -400,10 +400,14 @@ try {
   // undone and redone. Expected areas follow from the rules of `polygonPixels` (pixel centres) and `splitPieces` (cut pixels join the piece on
   // their left first).
   const ops = await (async () => {
-    const page = on.page, box = await page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
+    // The canvas is measured before every stroke: on GitHub's machines it is taller than the window and its pane scrolled by about 29 px between
+    // the lasso and the scissors, so positions measured once put the cut 29 px too low (card M8.4.32, 20 Nov 2026).
+    const page = on.page, viewBox = () => page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
+    let box = await viewBox();
     const idle = () => page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.masksSettled() && !window.ichantool.objectsWaiting(), { polling: 50, timeout: 60000 });
     const path = async (tool, points, keys = []) => {
       await page.evaluate((tool) => window.ichantool.setTool(tool), tool);
+      box = await viewBox();
       for (const key of keys) await page.keyboard.down(key);
       await page.mouse.move(box.left + points[0][0], box.top + points[0][1]); await page.mouse.down();
       for (let k = 1; k < points.length; k++) {
@@ -467,6 +471,7 @@ try {
     const redone = await state();
     const count = await page.evaluate(() => window.ichantool.S.sections.at(-1).objects.size);
     await page.evaluate(() => window.ichantool.setTool('wand'));
+    box = await viewBox();
     await page.mouse.click(box.left + 400, box.top + 650);
     await page.waitForFunction((n) => window.ichantool.S.sections.at(-1).objects.size > n, { polling: 50, timeout: 60000 }, count);
     await idle();
@@ -632,10 +637,13 @@ try {
       S.active = S.classes[0].id; S.sections[index].roi = { x0: 0, y0: 3000, x1: 620, y1: 4400 };   // bounds the wand and the lasso alike on both paths
       window.ichantool.requestRender();
     }, index);
-    const box = await page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
+    // Measured before every stroke, as in the editing steps above (the pane may scroll; card M8.4.32).
+    const viewBox = () => page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
+    let box = await viewBox();
     const idle = () => page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.masksSettled() && !window.ichantool.objectsWaiting(), { polling: 50, timeout: 60000 });
     const draw = async (tool, points) => {
       await page.evaluate((tool) => window.ichantool.setTool(tool), tool);
+      box = await viewBox();
       await page.mouse.move(box.left + points[0][0], box.top + points[0][1]); await page.mouse.down();
       for (let k = 1; k < points.length; k++) {
         const [ax, ay] = points[k - 1], [bx, by] = points[k];
@@ -657,6 +665,7 @@ try {
     await page.evaluate((ids) => window.ichantool.mergeObjects(ids.slice(-2)), ids); await idle();
     await page.evaluate(() => { const { S } = window.ichantool; S.selected = 0; });
     await page.evaluate(() => window.ichantool.setTool('wand'));
+    box = await viewBox();
     await page.mouse.click(box.left + 500, box.top + 700); await idle();
     await page.evaluate((id) => window.ichantool.assignClass(id, window.ichantool.S.classes[1].id), ids[0]); await idle();
     await page.evaluate((id) => window.ichantool.deleteObjects([id]), ids[1]); await idle();

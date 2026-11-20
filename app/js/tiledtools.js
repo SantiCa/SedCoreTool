@@ -365,8 +365,9 @@ export function createTiledTools(ctx) {
     });
   }
 
-  /** Card M8.4.28: whether an object operation is waiting for its objects' tiles (tests). */
-  const objectsWaiting = () => !!statsWait;
+  /** Card M8.4.28: whether an object operation is waiting for its objects' tiles, or the wand for the pixels it reads (card M8.4.32: a test step
+   *  that followed a wand click ran before the wand had drawn; tests). */
+  const objectsWaiting = () => !!statsWait || wandBusy;
   return { startTiledStroke, moveTiledStroke, finishTiledStroke, tiledExcludeRect, swapTiledStep, tiledPlan, objectsReady, objectsWaiting, deleteTiledObjects,
     mergeTiledObjects, tiledSameTaxonGroups, splitTiled, tiledLasso, tiledWand, windowSection };
 }
