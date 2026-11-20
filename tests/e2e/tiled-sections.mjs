@@ -67,6 +67,9 @@ async function program(tiled) {
   page.on('dialog', (dialog) => dialog.accept().catch(() => {}));
   await page.waitForFunction(() => !!window.ichantool, { timeout: 60000 });
   await page.waitForFunction(async () => (await window.corantoolDesktop.engine.status()).state === 'ready', { timeout: 90000 });
+  // The project opened at start must finish loading before the test adds a section: on GitHub's machines it finished later and made another
+  // section the current one, so the probe and the strokes met a different image (card M8.4.32, screenshot of 20 Nov 2026).
+  await page.waitForFunction(() => { const b = window.ichantool.saveBlockers(); return !b.loading && (b.id || b.blankStart); }, { polling: 200, timeout: 240000 });
   return { page, errors, pid: child.pid, profile, async close() {
     try { browser.disconnect(); } catch { /* ignore */ }
     if (child.exitCode === null) child.kill();
@@ -111,8 +114,6 @@ try {
   assert.ok(toasts.some((text) => text.includes(String(section.full.h))), 'the user is told what a tiled section is: ' + JSON.stringify(toasts));
   // D1: a save waits up to 15 s for the section's masks to reach the store and otherwise keeps it for the next save; on GitHub's machines the
   // first round of a new section can take longer, so the test saves again, as the program does, until the section is in the record.
-  // The test project may still be loading on slower machines (seen on GitHub, 20 Nov 2026: `loading` true), and nothing is saved during a load.
-  await on.page.waitForFunction(() => !window.ichantool.saveBlockers().loading, { polling: 200, timeout: 240000 });
   const saved = await on.page.evaluate(async () => {
     for (let attempt = 0; attempt < 10 && !window.ichantool.tiledSaved().some(Boolean); attempt++) {
       await window.ichantool.saveNow();                                  // card M8.4.18a: a tiled section is saved like the others
@@ -201,6 +202,9 @@ try {
     }
     for (const p of drawn.probes) assert.deepEqual(p.screen, p.source, `${label}: drawn pixel = source pixel at ` + JSON.stringify({ ...p, evidence: drawn.evidence }));
   };
+  // Card M8.4.32: the probe and the strokes read the last section; it must be the one on screen.
+  const current = await on.page.evaluate(() => { const { S } = window.ichantool; return { cur: S.cur, last: S.sections.length - 1, name: S.sections[S.cur]?.name }; });
+  assert.equal(current.cur, current.last, 'the tiled section is the current section: ' + JSON.stringify(current));
   const drawn = await probe();
   await checkProbe(drawn, 'probe');
   const repeat = Number(process.env.SEDCORETOOL_PROBE_REPEAT || 0);
