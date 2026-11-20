@@ -7,7 +7,7 @@ import { applyPanels } from './panels.js';
 import { disposeDataTable, renderData } from './datatab.js';
 import { FIG_PANELS, arrowMarksSVG, axisErr, coreRatio, editSVGLabels, figTraces, panelDataURL, renderFigPanel, renderFigure, scheduleFigure } from './figures.js';
 
-import { UNIT_TO_CM, interpAge, topAt } from './core.js';
+import { UNIT_TO_CM, interpAge, topAt, guessRecordUnit, unitFactor, rangeOverlaps } from './core.js';
 import { validSavedRegion } from './edit.js';
 import { LOG_STYLE, ND_STYLE, mergedStyle, taxaOptions, validHexColor, buildLogSVG, compositeRows, guessAxisColumn, invertModel, orderCols, rowsRange, toAxis, windowCSV } from './log.js';
 import { t } from './i18n.js';
@@ -563,15 +563,30 @@ $('logCSVBtn').addEventListener('click', () => {
 const REC_COLORS = ['#0b5394', '#1b7f6a', '#8c2d5a', '#5c4ea0', '#0e7490', '#3c7d22', '#6b5e4b'];
 let pendingTable = null;
 
-export function addRecordFromTable(name, tab, xCol, axis, yCols) {
-  const n0 = S.records.reduce((k, r) => k + r.series.length, 0);
-  const series = recordSeries(tab, xCol, yCols, REC_COLORS, n0);   // V0.44: exportio.js
+export function addRecordFromTable(name, tab, xCol, axis, yCols, unit = null) {
+  const n0 = S.records.reduce((k, r) => k + r.series.length, 0), target = recordAxisUnit(axis);
+  const series = recordSeries(tab, xCol, yCols, REC_COLORS, n0, unit ? unitFactor(unit, target, axis) : 1);   // V0.44: exportio.js; card Q3: converted
   if (!series.length) return false;
-  S.records.push({ id: uid(), name, axis, series });
+  S.records.push({ id: uid(), name, axis, series, ...(unit ? { unit } : {}) });
+  if (unit && !recordAxisOverlaps(series, axis)) toast(t('rec.outside', { u: unit, t: target }), 12000);
   renderRecList(); markDirty(); scheduleLog();
   return true;
 }
 
+/** Card Q3: the unit a record's axis is stored in: the open core's depth unit (that of its uppermost section) or the age model's unit. */
+function recordAxisUnit(axis) {
+  if (axis === 'age') return S.age.units || 'ka';
+  const top = [...S.sections].sort((a, b) => a.top * UNIT_TO_CM[a.units] - b.top * UNIT_TO_CM[b.units])[0];
+  return top?.units || 'cm';
+}
+/** Card Q3: whether a converted record lies, at least in part, within the open core's depths or the age model's ages. */
+function recordAxisOverlaps(series, axis) {
+  const xs = series.flatMap((s) => s.x);
+  if (axis === 'age') { const ages = (S.age.model?.age || []).filter((a) => a != null); return !ages.length || rangeOverlaps(xs, Math.min(...ages), Math.max(...ages)); }
+  if (!S.sections.length) return true;
+  const unit = recordAxisUnit('depth'), f = (s) => UNIT_TO_CM[s.units] / UNIT_TO_CM[unit];
+  return rangeOverlaps(xs, Math.min(...S.sections.map((s) => s.top * f(s))), Math.max(...S.sections.map((s) => s.bottom * f(s))));
+}
 /** Card Q2: the record added by the last import of this session, which «Undo import» removes without asking. */
 let lastImported = null;
 export function renderRecList() {
@@ -618,11 +633,18 @@ function openRecordImport(tab, fileName) {
   /** @type {any} */ ($('recName')).value = fileName.replace(/\.[^.]+$/, '');
   $('recX').innerHTML = tab.headers.map((h, i) => `<option value="${i}" ${i === g.col ? 'selected' : ''}>${esc(h)}</option>`).join('');
   /** @type {any} */ ($('recAxis')).value = g.axis;
+  // card Q3: the unit of the axis column, proposed from its header (or the core's own unit), converted when the record is added
+  const fillUnits = () => {
+    const axis = /** @type {any} */ ($('recAxis')).value, header = tab.headers[+(/** @type {any} */ ($('recX')).value)] || '';
+    const units = axis === 'age' ? ['a', 'ka', 'Ma'] : ['mm', 'cm', 'm'], guess = guessRecordUnit(header, axis) || recordAxisUnit(axis);
+    $('recUnit').innerHTML = units.map((u) => `<option value="${u}" ${u === guess ? 'selected' : ''}>${u}</option>`).join('');
+  };
+  $('recAxis').onchange = fillUnits;
   const fillCols = () => {
     const xc = +$('recX').value;
     $('recCols').innerHTML = tab.headers.map((h, i) => i === xc ? '' : `<label class="chk"><input type="checkbox" value="${i}" ${tab.rows.some((r) => r[i] != null) ? 'checked' : 'disabled'}><span>${esc(h)}</span></label>`).join('');
   };
-  $('recX').onchange = fillCols; fillCols();
+  $('recX').onchange = () => { fillCols(); fillUnits(); }; fillCols(); fillUnits();
   const dialog = /** @type {any} */ ($('recDlg'));
   if (!dialog.open) dialog.showModal();
 }
@@ -631,7 +653,7 @@ $('recAdd').addEventListener('click', () => {
   if (!pendingTable) return;
   const cols = [...$('recCols').querySelectorAll('input:checked')].map((i) => +i.value);
   const field = (id) => /** @type {any} */ ($(id)).value;
-  if (addRecordFromTable(field('recName').trim() || 'Registro', pendingTable, +field('recX'), field('recAxis'), cols)) {
+  if (addRecordFromTable(field('recName').trim() || 'Registro', pendingTable, +field('recX'), field('recAxis'), cols, field('recUnit'))) {
     lastImported = S.records.at(-1)?.id ?? null; renderRecList(); /** @type {any} */ ($('recDlg')).close();
   }
   else toast(t('rec.err', { m: t('rec.short') }));

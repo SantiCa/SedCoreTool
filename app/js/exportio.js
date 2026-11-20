@@ -43,9 +43,10 @@ export function objectsTable(items) {
  * Series of a record from a parsed table (log.js parseTable): x from column xCol, one series per column in yCols;
  * rows without x or y are left out and points are sorted by x. Series without points are dropped.
  */
-export function recordSeries(tab, xCol, yCols, colors, start = 0) {
+export function recordSeries(tab, xCol, yCols, colors, start = 0, factor = 1) {
   return yCols.map((c, k) => {
-    const pts = tab.rows.map((r) => [r[xCol], r[c]]).filter((p) => p[0] != null && p[1] != null && Number.isFinite(p[0]) && Number.isFinite(p[1])).sort((a, b) => a[0] - b[0]);
+    // card Q3: the axis in the core's unit (`factor`)
+    const pts = tab.rows.map((r) => [r[xCol] == null ? null : r[xCol] * factor, r[c]]).filter((p) => p[0] != null && p[1] != null && Number.isFinite(p[0]) && Number.isFinite(p[1])).sort((a, b) => a[0] - b[0]);
     return { name: tab.headers[c], x: pts.map((p) => p[0]), y: pts.map((p) => p[1]), color: colors[(start + k) % colors.length], show: true, reverse: false };
   }).filter((s) => s.x.length);
 }

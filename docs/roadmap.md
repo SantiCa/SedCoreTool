@@ -82,8 +82,8 @@ Updated 18 November 2026.
   100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: Q3** (units: external records declare and convert theirs, joined projects convert, a section's unit change asks; **model: most
-  capable tier, effort medium**); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
+- **Next step: M8.4.32** (the tiled tests run on GitHub on three systems; **model: most capable tier, effort medium**), then M8.4.33, M8.4.30
+  and the rest of order O; Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
   council audit, below). **V0.152** (decision J) was prepared on 20 Nov 2026 at the maintainer's request ("Publica la 0.152 y haz un release"):
   full checks passed on the version commit (Windows: pytest 885 passed / 9 skipped, npm 478, typecheck, sync_version, ruff, standalone build,
   runtime rebuilt, desktop.mjs off and on, tiled-sections.mjs). **Published on 20 Nov 2026:** `master` `8ee9776`, tag `V0.152`, GitHub Release
@@ -2296,11 +2296,22 @@ Written from the council audit (status block). Each card names its model; the sc
       UTF-16 byte-order marks, a preamble before the header, repeated header names, rows longer than the header; Excel: the sheet chosen and
       raw numbers (`rawNumbers: true`). It interrupts only when something is ambiguous; otherwise a data report remains with "Undo import".
       *Model:* most capable, effort medium (data correctness). *Tests:* Q6 corpus and property tests.
-- [ ] **Q3 - Units.** External records declare their depth or age unit on import (proposed from the header, `mbsf` → m, confirmed with one
+- [x] **Q3 - Units.** Done 20 Nov 2026 (development gate); *As built* at the end of this card. External records declare their depth or age unit on import (proposed from the header, `mbsf` → m, confirmed with one
       click), are converted with `UNIT_TO_CM`, and a record whose range does not overlap its core's is reported; joining projects converts
       units and refuses or reports different age units and counts value conflicts (`mergeImp` and `buildMultiProject` move to a pure module
       with tests; cores are matched by identifier where they have one, not only by name); changing a section's unit asks whether to convert its
       depths or only correct the label. *Model:* most capable, effort medium (silent 10-100× errors). *Tests:* Node, per case.
+      *As built (20 Nov 2026):* records: a unit selector in the record dialog proposed from the header (`guessRecordUnit`), conversion on
+      adding (`recordSeries` with `unitFactor`) to the unit of the open core's uppermost section or of the age model, the unit kept as
+      `record.unit`, a record wholly outside the core reported (`rangeOverlaps`). Sections: changing the unit asks (OK converts, Cancel only
+      relabels; native `confirm` until U2). Joined projects: `coremerge.js` (`mergeImp` moved out of `app.js` with a count of disagreeing
+      values; `joinCoreTables` converts depths and ages to the first project's units); the light copy keeps `ageUnits` (older light copies
+      have none: their ages are not converted). Cores are still matched by name (`coreKey`); matching by identifier is left out (light copies
+      have no shared identifier across projects). Tests: Node (`tests/app/units.test.mjs` 3, `tests/app/coremerge.test.mjs` 4: units proposed
+      from headers, factors, a metre record stored in centimetres and its range, the merge as before without conversion, metres and years
+      converted, a disagreement counted). `app.js`: 5,383 lines before, 5,377 after.
+      Full checks (20 Nov 2026, Windows): pytest 885 passed / 9 skipped, npm 486, typecheck, sync_version, ruff, standalone build (after
+      renaming two functions that clashed with `multiproxy.js`), desktop.mjs off and on, tiled-sections.mjs.
 - [x] **Q4 - Exports keep the data** (decisions N and P, approved 19 Nov 2026). Done 20 Nov 2026 (development gate); *As built* below. Numbers in CSV with 15 significant digits, non-finite values as empty cells, the
       Python export the same (shared-definition rule); the core-column CSV (`windowCSV`) with the gap limit of the cursor and an interval-mean
       mode with the number of samples per cell, intervals outside the age model or reversed marked instead of dropped. *Model:* most capable,

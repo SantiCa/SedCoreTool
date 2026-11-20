@@ -163,6 +163,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `tilecache.js` | Which tiles of a tiled section the viewer needs (card M8.4.15): the level for a zoom (`levelForZoom`: the coarsest with at least one level pixel per screen pixel), the visible tiles plus one ring, nearest the centre first, a coarser cached tile to draw while one is missing (`coarserCover`), a 256 MiB least-recently-used cache that keeps the tiles on screen (`TileCache`) and batched requests, 16 tiles each, two at a time, dropping tiles no longer wanted (`TileScheduler`, keys prefixed per pyramid); where a tile goes on screen (`tilePlacement`) | Yes |
 | `tiledmasks.js` | Masks of tiled sections in the page (card M8.4.16): the cache of level-0 mask tiles (`MaskTiles`: all-zero layers kept as nothing, tiles changed and not acknowledged by the engine never dropped, pinned tiles kept, clean tiles dropped least recently used first beyond 128 MiB), the reduced copy in the working image (`reduceTile`), and the mask layer painted over pixel tiles (`overlayLayout`, `axisMap`, `paintOverlay`) | Yes |
 | `tiledit.js` | Editing the masks of tiled sections (card M8.4.16): the edit window (`EditWindow`: whole level-0 mask tiles as flat arrays, written back tile by tile; `windowRange`, `WINDOW_TILES`) and object statistics kept per tile and summed per object (`tileStats`, `TiledObjectStats`, `affectedTiles`, `tilesUnder`, `TiledStatsRunner`: published per object only when current, tiles prioritised for an operation, card M8.4.28) | Yes |
+| `coremerge.js` | Joining the tables of one core from several projects in the units of the first one, with disagreeing values counted (card Q3; moved out of `app.js`) | Yes |
 | `taxa.js` | The ichnotaxa of a project (card Q1): use of a class across cores, deleting it from every core and restoring it, repairing labels of classes that no longer exist | Yes |
 | `singleflight.js` | One run at a time with at most one more run for the requests made meanwhile, if the revision changed (card M8.4.31): project saves | Yes |
 | `tiledundo.js` | Undo and redo of tiled edits (card M8.4.16 step 5): copies of the mask tiles an edit changed, taken before its first write and swapped with the page's tiles (`TileChanges`); the 64 MiB budget of those copies (`trimTileHistory`) | Yes |
@@ -293,6 +294,9 @@ accepts unloaded sections, and the existing pixel-loading service makes pixels r
 Pixels are assumed square (same scale horizontally and vertically), which holds for photographs and corrected line
 scans. If they were not, physical areas would carry a constant factor, but percentages would not change, because
 they are proportions of pixels.
+
+Changing a section's depth unit in its form asks first (card Q3): **OK** converts top and bottom to the new unit (100–200 cm become 1–2 m,
+the same position; 12 significant digits), **Cancel** only corrects the unit and keeps the numbers (the section is then at 100–200 m).
 
 ---
 
@@ -1363,8 +1367,11 @@ dialog). External records are any measured down-core series added to a core (XRF
   if none, age (age, edad, ka, Ma, yr, cal). The user can change it and say whether it is depth or age.
 - **Series:** each chosen column is a series of (axis, value) pairs without empty values, sorted by axis. Each series
   has a colour, visibility and an option to reverse its axis.
-- **Units:** a depth column must be in the same units as the core and an age column in the units of the age model.
-  External records are not converted.
+- **Units** (card Q3): the dialog asks the unit of the axis column (mm, cm or m for depth; a, ka or Ma for age), proposed from its header
+  (`core.js::guessRecordUnit`: `mbsf`, `mcd`, `CCSF`, `(m)` → m; `cm`; `mm`; `ka`, `kyr` → ka; `Ma` → Ma; `yr`, `BP` → a) or, when the header
+  does not say, the core's own unit. The axis is converted on adding (`unitFactor`) to the unit of the open core's uppermost section, or to
+  the age model's unit, and the chosen unit is kept with the record (`unit`). A record that then lies wholly outside the core's depths (or
+  the age model's ages) is reported («check the unit»). Records added before card Q3 have no `unit` and are left as they were.
 
 ---
 
@@ -2178,6 +2185,11 @@ These settings only affect the drawing, never the result tables or the indices.
 - **Core key:** `coreKey(name)` = lower case, without accents (NFD) and only letters a–z and digits (any other
   character is removed). `sharedCores(lites)` → `Map(coreKey → Map(projectId → projectName))` over projects that are not
   cross-project analyses. A core is shared when it is present in ≥ 2 projects.
+- **The same core in several projects** (`coremerge.js::joinCoreTables`, card Q3): when a multi-project analysis joins a core chosen from
+  several projects, the depths and ages of the others are first converted to the units of the first one (the light copy of each project
+  keeps its depth unit and, since card Q3, its age unit `ageUnits`; copies written before have none and are not converted for age); rows at
+  the same depth (within 1e-6) are merged, and a value that differs from the first project's at the same depth is counted: the message says,
+  per core, how many tables were converted and how many values disagreed (the first project's value is kept).
 - **Map of all cores:** points with the same key are merged; in value mode, the arithmetic mean of the values of the
   projects with data in the window, `n` = sum of samples.
 
@@ -3574,8 +3586,7 @@ The percentage difference comes from the JPEG decoder (§3.4), not from the meth
     with hundreds of thousands of samples); MDI importance is biased among correlated proxies; everything is computed
     on the user's computer.
 11. **Known defects, with cards in the roadmap** (found by the audits of 19 November 2026; each item is removed when its card is done):
-    changing a section's unit does not convert its depths (Q3);
-    joined projects keep the first core's units (Q3); backups and packages leave tiled sections out (M8.4.33).
+    backups and packages leave tiled sections out (M8.4.33).
 
 ## 33. Reproducibility
 

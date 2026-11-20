@@ -14,11 +14,13 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### For users
 
+- Units: adding an external record now asks the unit of its depth or age column (proposed from the header, such as "mbsf" for metres) and converts it to the core's unit; a record that then lies wholly outside the core is reported. Changing a section's unit now asks whether to convert its depths (100–200 cm become 1–2 m) or only correct the label. Joining the same core from several projects converts their depths and ages to the units of the first one and says how many values disagreed.
 - Importing a table now shows «How the file was read» in the import dialog: what was changed, with counts, the first rows as read, the choice of sheet in a workbook and of how values below a detection limit are read (empty, half the limit or the limit). An external record just imported can be removed with «Undo import».
 - Tables of records read more of what laboratories write: -999, -999.25 and -9999 are now empty instead of values; values below a detection limit ("<0.01", "bdl", "n.d.") are empty and counted; a title or notes before the table are skipped; "0.500" in a file with decimal commas is no longer read as 500, and a column where "1,250" could be 1.25 or 1250 is named in the message; repeated column names are kept apart; files saved as "Unicode text" open; spreadsheets give their stored numbers instead of the rounded text a cell shows. One message after import says what was changed, with counts.
 
 ### Internal
 
+- Card Q3: `guessRecordUnit`, `unitFactor`, `rangeOverlaps` and `AGE_YEARS` in `core.js`; `recordSeries` takes a factor; `coremerge.js` (`mergeImp` moved out of `app.js`, with a count of disagreeing values, and `joinCoreTables`); the light copy of a project keeps `ageUnits`.
 - Card Q2 (second delivery, the import report): `readTableFile` returns a table that can be read again (`read({sheet, censored})`), `importNotes` and `renderImportReport` in `multiproxy.js`, used by the records and multiproxy import dialogs; «Undo import» for records.
 - Card Q2 (first delivery, the readers): `parseTable(text, {missing, censored})` with per-column decimal separators, preamble, missing-value codes, censored values, repeated names and counts; `decodeText` reads UTF-16 with its byte-order mark; `readTableFile` reads spreadsheets with `rawNumbers` and lists every change; `tools/release.sh` finds `export const DELIVERY` and takes `PYTHON` for an interpreter with the test extras.
 

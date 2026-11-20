@@ -1,5 +1,5 @@
 // SedCoreTool web (antes CorAnTool e IchAnTool) — application (UI, state, tools, rendering, files).
-import { rleValid, baconToAgeText, BI, II, UNIT_TO_CM, idsAt, topAt, hasId, stackIndex, codeFor, withoutId, renameId, compactStacks, parseAgeModel, parseAgeModelDetailed, interpAge, toCSV, rleEncode, rleDecode } from './core.js';
+import { rleValid, baconToAgeText, BI, II, UNIT_TO_CM, idsAt, topAt, hasId, stackIndex, codeFor, withoutId, renameId, compactStacks, parseAgeModel, parseAgeModelDetailed, interpAge, toCSV, rleEncode, rleDecode, unitFactor } from './core.js';
 import { pxPerCm, depthAtRow, rowAtDepth } from './sectiondepth.js';
 import { effectiveClassId, effectiveClassIndex, computeSectionBins, binsFromRowCounts, binRowsOfSection } from './sectionanalysis.js';
 import { createEngineClient } from './engineclient.js';
@@ -30,6 +30,7 @@ import { assembleLevel, imageDimensions, levelPositions, proxyLevel, tileRgba, T
 import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlacement, tileRange, tilesByDistance } from './tilecache.js';
 import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks.js';
 import { singleFlight } from './singleflight.js';
+import { joinCoreTables } from './coremerge.js';
 import { classUse, deleteClass, restoreClass, repairOrphanLabels } from './taxa.js';
 import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, tilesUnder, windowRange, planWindows, pinRanges, toWindowRect, windowRgba } from './tiledit.js';
 import { MaskLoader, MaskSync, buildMaskTables, classesText } from './tiledsync.js';
@@ -3253,9 +3254,15 @@ $('secSel').addEventListener('change', (e) => selectSection(+e.target.value));
 $('secName').addEventListener('input', (e) => { const s = sec(); if (!s) return; s.name = e.target.value; $('secSel').options[S.cur].textContent = s.name; });
 for (const id of ['secTop', 'secBottom', 'secUnits']) $(id).addEventListener('change', () => {
   const s = sec(); if (!s) return;
-  const top = parseFloat($('secTop').value), bottom = parseFloat($('secBottom').value);
+  const field = (id) => /** @type {any} */ ($(id)).value;
+  let top = parseFloat(field('secTop')), bottom = parseFloat(field('secBottom'));
+  const unit = field('secUnits');
+  if (unit !== s.units && Number.isFinite(top) && Number.isFinite(bottom)) {   // card Q3: convert the depths, or only correct the label
+    const f = unitFactor(s.units, unit, 'depth'), r = (v) => +(v * f).toPrecision(12);
+    if (confirm(t('sec.unitAsk', { a: top, b: bottom, u: s.units, c: r(top), d: r(bottom), v: unit }))) { top = r(top); bottom = r(bottom); }
+  }
   if (Number.isFinite(top) && Number.isFinite(bottom) && bottom > top) { s.top = top; s.bottom = bottom; }
-  s.units = $('secUnits').value;
+  s.units = unit;
   recomputeFeatures(s); renderSectionForm(); scheduleLearn(); scheduleAnalysis(); requestRender();
 });
 $('secDel').addEventListener('click', (e) => {
@@ -3571,7 +3578,7 @@ function liteSnapshot() {
     examples: S.cores.flatMap((c) => c.sections.flatMap((s) => [...s.objects.values()].filter((o) => o.cls && !o.nt && clsById(o.cls) && (o.feat || o.emb)).map((o) => ({   // V0.17: both vector sets
       key: `${S.id}|${c.id}|${s.id}|${o.id}`, name: clsById(o.cls).name, x: o.feat ? vec(o.feat).map((v) => +v.toFixed(4)) : null, ...(o.emb ? { xv: o.emb } : {}), core: c.name, thumb: thumbOf(s, o) })))),
     layers: S.geo.layers, intervals: S.geo.intervals, geo: (({ cores: _c, ...g }) => g)(S.geo),
-    cores: S.cores.map((c) => ({ id: c.id, name: c.name, lat: c.lat, lon: c.lon, units: c.units, ageText: c.ageText, depth: c.depth, age: c.age, proxies: c.proxies, src: c.src, nImages: c.sections.length })),
+    cores: S.cores.map((c) => ({ id: c.id, name: c.name, lat: c.lat, lon: c.lon, units: c.units, ageUnits: S.age.units, ageText: c.ageText, depth: c.depth, age: c.age, proxies: c.proxies, src: c.src, nImages: c.sections.length })),
   };
 }
 
@@ -5098,22 +5105,6 @@ $('mlBody').addEventListener('click', (e) => {
 /* ───────────── multiproject analysis (V17): cores of several projects in one analysis project ───────────── */
 const mpSel = new Set(); // keys 'projectId|coreId'
 /** Same core found in two projects (V23): one series on a common axis; rows at the same depth/age are fused (first non-empty value wins). */
-function mergeImp(a, b) {
-  const rows = [], add = (t0) => (t0.depth || t0.age || []).forEach((_, i) => rows.push({ d: t0.depth?.[i] ?? null, a: t0.age?.[i] ?? null, t: t0, i }));
-  add(a); add(b);
-  const names = [...new Set([...Object.keys(a.proxies || {}), ...Object.keys(b.proxies || {})])];
-  // sort on depth only if every row has one, else on age if every row has one; otherwise keep the two series one after the other
-  const key = rows.every((r) => r.d != null) ? 'd' : rows.every((r) => r.a != null) ? 'a' : null;
-  if (key) rows.sort((x, y) => x[key] - y[key]);
-  const out = [];
-  for (const r of rows) {
-    const v = Object.fromEntries(names.map((n) => [n, r.t.proxies?.[n]?.[r.i] ?? null])), last = out[out.length - 1];
-    if (key && last && Math.abs(last[key] - r[key]) < 1e-6) { for (const n of names) if (last.v[n] == null) last.v[n] = v[n]; if (last.d == null) last.d = r.d; if (last.a == null) last.a = r.a; }
-    else out.push({ d: r.d, a: r.a, v });
-  }
-  const P = Object.fromEntries(names.map((n) => [n, out.map((r) => r.v[n])]));
-  return { depth: out.some((r) => r.d != null) ? out.map((r) => r.d) : null, age: out.some((r) => r.a != null) ? out.map((r) => r.a) : null, proxies: P };
-}
 /** Build (or refresh) a project of kind 'multi' from the light copies of the chosen cores; layers and categories are merged by name. */
 async function buildMultiProject(name, keys, keepId = null) {
   const lites = (await listLite().catch(() => [])).filter((l) => l.kind !== 'multi');
@@ -5136,12 +5127,14 @@ async function buildMultiProject(name, keys, keepId = null) {
   for (const m of layers.values()) { m.parent = m.parentName ? layers.get(m.parentName)?.id || null : null; delete m.parentName; }
   // cores: the same core chosen from several projects (same name, coreKey) becomes ONE core whose table joins the
   // rows of every project (no duplicated core, no double weight in models or maps)
-  const coreId = new Map(), byKey = new Map();
+  const coreId = new Map(), byKey = new Map(), mergeNotes = [];
   for (const { l, c } of chosen) { const k = coreKey(c.name) || `${l.id}|${c.id}`; if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push({ l, c }); }
   S.cores = [...byKey.values()].map((grp) => {
     const { c } = grp[0], projects = grp.map((q) => q.l.name);
-    let imp = { depth: c.depth, age: c.age, proxies: c.proxies || {} };
-    for (const { c: o } of grp.slice(1)) imp = mergeImp(imp, { depth: o.depth, age: o.age, proxies: o.proxies || {} });
+    // card Q3: the tables of the other projects in the units of the first one; disagreeing values counted (coremerge.js)
+    const joined = joinCoreTables(grp.map(({ c: o }) => ({ depth: o.depth, age: o.age, proxies: o.proxies || {}, units: o.units, ageUnits: o.ageUnits })));
+    const imp = joined.table;
+    if (joined.converted || joined.conflicts) mergeNotes.push(t('mp.joined', { c: c.name, v: joined.converted, n: joined.conflicts }));
     const core = makeCore({ name: c.name, lat: c.lat ?? grp.find((q) => q.c.lat != null)?.c.lat, lon: c.lon ?? grp.find((q) => q.c.lon != null)?.c.lon, units: c.units, source: 'multi',
       notes: t('mp.from', { p: projects.join(', ') }), imp, age: { text: c.ageText || grp.find((q) => q.c.ageText)?.c.ageText || '' } });
     core.origin = grp.map((q) => ({ project: q.l.id, core: q.c.id }));
@@ -5165,6 +5158,7 @@ async function buildMultiProject(name, keys, keepId = null) {
   S.curCore = S.cores[0].id; activateCore(S.curCore, true); renderCoreBar();
   geoReset(); geoMarkDirty();
   await saveToDB(); updateProjHeader();
+  if (mergeNotes.length) toast(mergeNotes.join(' '), 12000);   // card Q3
   return true;
 }
 async function updateMultiProject(id) {

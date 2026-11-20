@@ -137,6 +137,46 @@ export function compactStacks(labels, stacks, step = 1) {
 }
 
 export const UNIT_TO_CM = { mm: 0.1, cm: 1, m: 100 };
+/** Years per age unit of the program (`a`, `ka`, `Ma`). */
+export const AGE_YEARS = { a: 1, ka: 1000, Ma: 1e6 };
+
+/**
+ * Card Q3: the unit a record's axis column is probably in, from its header ("Depth (mbsf)" → m, "depth_cm" → cm, "Age (ka BP)" → ka);
+ * null when the header does not say.
+ * @param {string} header @param {'depth' | 'age'} axis @returns {string | null}
+ */
+export function guessRecordUnit(header, axis) {
+  const h = String(header || '').toLowerCase();
+  if (axis === 'depth') {
+    if (/\bmm\b|_mm\b|\(mm\)/.test(h)) return 'mm';
+    if (/\bcm\b|_cm\b|\(cm\)/.test(h)) return 'cm';
+    if (/mbsf|mcd|ccsf|csf|\bm\b|_m\b|\(m\)|metres|meters/.test(h)) return 'm';
+    return null;
+  }
+  if (/\bma\b|myr|\(ma\)|_ma\b/.test(h)) return 'Ma';
+  if (/\bka\b|kyr|\(ka|_ka\b|cal ka/.test(h)) return 'ka';
+  if (/\byr|years|años|\ba\b|\bbp\b|\(a\)|cal yr/.test(h)) return 'a';
+  return null;
+}
+
+/**
+ * Card Q3: the factor that turns values in `from` into `to` (depth units or age units); 1 when either is unknown.
+ * @param {string} from @param {string} to @param {'depth' | 'age'} axis
+ */
+export function unitFactor(from, to, axis) {
+  const table = /** @type {Record<string, number>} */ (axis === 'depth' ? UNIT_TO_CM : AGE_YEARS);
+  return table[from] && table[to] ? table[from] / table[to] : 1;
+}
+
+/**
+ * Card Q3: whether two ranges overlap (a record that lies wholly outside its core's range is probably in another unit).
+ * @param {readonly number[]} xs @param {number} lo @param {number} hi
+ */
+export function rangeOverlaps(xs, lo, hi) {
+  let min = Infinity, max = -Infinity;
+  for (const x of xs) { if (x < min) min = x; if (x > max) max = x; }
+  return xs.length > 0 && max >= Math.min(lo, hi) && min <= Math.max(lo, hi);
+}
 
 /**
  * Per-row pixel counts inside the ROI.
