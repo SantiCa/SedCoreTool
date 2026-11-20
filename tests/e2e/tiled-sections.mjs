@@ -59,6 +59,9 @@ async function program(tiled) {
   const browser = await puppeteer.connect({ browserWSEndpoint: endpoint, defaultViewport: null, protocolTimeout: 600000 });
   const page = await (await browser.waitForTarget((t) => t.url().startsWith('app://corantool/app/index.html'), { timeout: 60000 })).page();
   page.setDefaultTimeout(600000);
+  // The strokes, lasso and scissors below are drawn at screen positions: the same view on every machine (the headless window of the
+  // maintainer's computer, where the expected values were measured; GitHub's runners have larger screens, card M8.4.32).
+  await page.setViewport({ width: 884, height: 561 });
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message + ' @ ' + String(error.stack).split('\n').slice(1, 4).join(' | ')));
   page.on('dialog', (dialog) => dialog.accept().catch(() => {}));
@@ -108,6 +111,8 @@ try {
   assert.ok(toasts.some((text) => text.includes(String(section.full.h))), 'the user is told what a tiled section is: ' + JSON.stringify(toasts));
   // D1: a save waits up to 15 s for the section's masks to reach the store and otherwise keeps it for the next save; on GitHub's machines the
   // first round of a new section can take longer, so the test saves again, as the program does, until the section is in the record.
+  // The test project may still be loading on slower machines (seen on GitHub, 20 Nov 2026: `loading` true), and nothing is saved during a load.
+  await on.page.waitForFunction(() => !window.ichantool.saveBlockers().loading, { polling: 200, timeout: 240000 });
   const saved = await on.page.evaluate(async () => {
     for (let attempt = 0; attempt < 10 && !window.ichantool.tiledSaved().some(Boolean); attempt++) {
       await window.ichantool.saveNow();                                  // card M8.4.18a: a tiled section is saved like the others
