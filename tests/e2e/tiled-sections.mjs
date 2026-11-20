@@ -67,9 +67,6 @@ async function program(tiled) {
   page.on('dialog', (dialog) => dialog.accept().catch(() => {}));
   await page.waitForFunction(() => !!window.ichantool, { timeout: 60000 });
   await page.waitForFunction(async () => (await window.corantoolDesktop.engine.status()).state === 'ready', { timeout: 90000 });
-  // The project opened at start must finish loading before the test adds a section: on GitHub's machines it finished later and made another
-  // section the current one, so the probe and the strokes met a different image (card M8.4.32, screenshot of 20 Nov 2026).
-  await page.waitForFunction(() => { const b = window.ichantool.saveBlockers(); return !b.loading && (b.id || b.blankStart); }, { polling: 200, timeout: 240000 });
   return { page, errors, pid: child.pid, profile, async close() {
     try { browser.disconnect(); } catch { /* ignore */ }
     if (child.exitCode === null) child.kill();
@@ -81,6 +78,9 @@ async function program(tiled) {
 async function addImage(page) {
   await page.evaluate(() => document.getElementById('openTest').click());
   await page.waitForFunction(() => window.ichantool.S.sections.length === 6, { timeout: 120000 });
+  // The six sections appear before the test project has finished loading (detection, records); its end selects the first section. On GitHub's
+  // machines that came after the tiled section was added, so the probe and the strokes met another image (card M8.4.32, 20 Nov 2026).
+  await page.waitForFunction(() => !window.ichantool.saveBlockers().loading && document.getElementById('busy').hidden, { polling: 200, timeout: 600000 });
   assert.equal(await page.evaluate(() => window.ichantool.serialize().version), 5, 'card M8.4.18a: a project without tiled sections stays format version 5');
   await (await page.$('#addImg')).uploadFile(image);
   await page.waitForSelector('#pcOk', { timeout: 30000 });
