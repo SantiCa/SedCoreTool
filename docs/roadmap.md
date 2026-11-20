@@ -83,8 +83,8 @@ Updated 18 November 2026.
   complexity that is independent of the tile store.
 - **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
 - **Next step: Q5** (long series: `extent()` without spreads, decimation on screen, the data record saved in parts; **model: most capable tier,
-  effort medium**), then M8.4.29 and the rest of order O; M8.4.30 is done except its size target (decision R); M8.4.33 is done; M8.4.32 waits
-  for a green run on three systems; Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
+  effort medium**), then M8.4.29 and the rest of order O; M8.4.30 is done except its size target (decision R); M8.4.33 is done; M8.4.32 is done
+  (green on three systems, commit `4a20dfd`); Q5 parts 1-2 are done (part 3 changes the saved format: waits for the maintainer); Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
   council audit, below). **V0.152** (decision J) was prepared on 20 Nov 2026 at the maintainer's request ("Publica la 0.152 y haz un release"):
   full checks passed on the version commit (Windows: pytest 885 passed / 9 skipped, npm 478, typecheck, sync_version, ruff, standalone build,
   runtime rebuilt, desktop.mjs off and on, tiled-sections.mjs). **Published on 20 Nov 2026:** `master` `8ee9776`, tag `V0.152`, GitHub Release
@@ -1922,7 +1922,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   Not done: macOS, Linux; a measured interleaving of a real commit and a real retain in the desktop program (the Python tests drive the
   coordinator in that order deterministically).
 
-##### M8.4.32 - The tiled tests run on GitHub on three systems — state: In progress (20 Nov 2026: three runs on three systems, failures below)
+##### M8.4.32 - The tiled tests run on GitHub on three systems — state: Done (20 Nov 2026, development gate; Desktop builds run 44741543925)
 
 - **Goal:** the milestone gate covers the tile store: `tests/e2e/tiled-sections.mjs` and `tests/e2e/interrupted-saves.mjs` run in the
   *Desktop builds* workflow on Windows, macOS and Linux, on a fixture generated in the job, and the Python tests of the store cannot skip
@@ -1961,6 +1961,15 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   after the load fix: the pixel probe draws [106,79,35] where the source is [14,14,14] (sx 230, sy 570), tile state not cached, not in
   flight; first time the probe runs on those systems; not diagnosed. Next: record the scissors' input polyline and the section under the
   pointer on Windows, and a screenshot of the probe on macOS/Linux as a workflow artifact.
+- *Diagnosis and result (20 Nov 2026):* screenshots of failed steps, uploaded as the artifact `tiled-shots-<os>`, showed three causes, all
+  in the test: (a) the test project's load ended after the large image was added and selected its first section, so the probe and the strokes
+  met another image (the test now waits for the load after the six sections appear and checks that the tiled section is current); (b) on
+  GitHub's taller windows the canvas pane scrolled by about 29 px between the lasso and the scissors, so a canvas position measured once put
+  the cut inside the trace (measured before every stroke now); (c) the idle wait did not include a tiled wand still reading pixels, so the
+  next step could run first (`objectsWaiting` in `tiledtools.js` now includes it; found locally once the timing changed). On macOS, 100 ms
+  timers took about 135 ms, so the 20 s edit-and-save race gave 148 edits: it now counts 150 edits and 75 saves, thresholds unchanged.
+  **Result:** `tests` and *Desktop builds* green on Windows, macOS and Linux on commit `4a20dfd` (runs of 20 Nov 2026). The failing runs of
+  the same day (44725565822 and four more) showed red at this step, which stands for the deliberately failing run of the card.
 
 ##### M8.4.33 - Backups and packages say what they leave out — state: Done (20 Nov 2026, development gate; council audit of 19 Nov 2026)
 
