@@ -942,16 +942,17 @@ try {
   assert.deepEqual(await dump(quick.index), slowDump, 'the same result after reading the masks back');
   assert.ok(!toasts.slice(toastsBeforeQuick).some((text) => text === tBusy || text === tLoading), 'never "try again"');
   console.log('Reopened, an object spanning two tiles deleted at once (' + quick.ms + ' ms, ' + quick.waitingAtStart + ' tiles waiting at the start, ' + quick.waitingAfter + ' after): equal to the deletion with every statistic current');
-  // Card M8.4.31: edits and saves overlap for 20 s (a tile changes every 100 ms, a save is requested every 200 ms without waiting for the
-  // previous one), so that clean-ups of the store run while versions are being committed. After a final save the store holds exactly the
+  // Card M8.4.31: 150 edits and 75 saves overlap (a tile changes every 100 ms, a save is requested every 200 ms without waiting for the
+  // previous one; about 20 s), so that clean-ups of the store run while versions are being committed. The loop counts edits rather than
+  // running for 20 s: on GitHub's macOS machines 100 ms timers took about 135 ms and 20 s gave 148 edits (card M8.4.32, 20 Nov 2026). After a final save the store holds exactly the
   // saved versions and the reopened section has the masks it had.
   const race = await on.page.evaluate(async () => {
     const { S } = window.ichantool, app = await import(new URL('js/app.js', location.href).href);
     const index = S.sections.findIndex((q) => q.id === window.__tiledId), s = S.sections[index];
     window.ichantool.selectSection(index);
-    const id = [...s.objects.keys()][0], until = performance.now() + 20000, requests = [];
+    const id = [...s.objects.keys()][0], requests = [];
     let edits = 0;
-    while (performance.now() < until) {
+    while (edits < 150) {
       const row = edits % s.maskTiles.rows, col = Math.floor(edits / s.maskTiles.rows) % s.maskTiles.cols, labels = new Int32Array(512 * 512);
       const width = Math.min(512, s.maskTiles.width - col * 512), height = Math.min(1 + (edits % 50), s.maskTiles.height - row * 512);
       for (let y = 0; y < height; y++) labels.fill(id, y * 512, y * 512 + width);   // a band inside the section whose height changes with every edit
