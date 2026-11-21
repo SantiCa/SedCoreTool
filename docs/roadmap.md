@@ -29,8 +29,8 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Authorised run of 21 Nov 2026 ("sigue con el resto") finished:** `Q9`, `M8.4.39`, `M8.4.40`, `M8.4.37` done. **Next: `M8.4.19`**, the
   milestone gate of part C (needs the maintainer's go-ahead; it also measures the synthetic section with its image, which M8.4.37 extrapolated).
   Then part B as decided by I at the review of M8.4.19, then M8.5 (needs A1). `Q10` before V0.153; `A4` after M8.4.19.
-- **Decisions waiting (21 Nov 2026):** X1-X4 for splitting a section too dense for its object statistics (cards M8.4.41-M8.4.43,
-  asked by the maintainer after M8.4.37; recommendations above the cards).
+- **Splitting a section too dense for its object statistics:** cards M8.4.41-M8.4.43 after M8.4.19 (asked by the maintainer after
+  M8.4.37); decisions X1-X4 approved on 21 Nov 2026 as recommended.
 - **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) in its last cards; part B not started; M8.5 must not start.
   The engine path fails the timing gate of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates)
   for whole sections; the tile store (decision of 15 Nov 2026) is the answer for large images.
@@ -395,7 +395,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 **Splitting a section too dense for its object statistics (requested by the maintainer on 21 Nov 2026, after M8.4.37).** When the statistics
 of a tiled section go beyond `STATS_BUDGET_BYTES`, reopening does not help: they trip again at every opening, and delete, merge and cut stay
 refused. The program should suggest splitting the section and then do it. Three cards, in this order, after M8.4.19 (not part of its gate).
-Decisions **X1-X4** (below) are waiting for the maintainer; M8.4.42 and M8.4.43 do not start before them.
+Decisions **X1-X4** below were **approved by the maintainer on 21 Nov 2026, as recommended** (X1 b, X2 a, X3 a, X4).
 
 - **X1 (number of parts):** (a) always two, as first asked; (b) **recommended:** the number of parts the estimate says each needs to fit with a
   margin (at least 2), offered only up to 8 parts; beyond 8 the message says that splitting would not be enough (masks this dense usually come
@@ -424,7 +424,7 @@ Decisions **X1-X4** (below) are waiting for the maintainer; M8.4.42 and M8.4.43 
   M8.4.37 checks the new text.
 - **Done when:** the tests pass and the message no longer promises that reopening helps; development gate.
 
-##### M8.4.42 - A tiled section can show a row window of its image — state: Blocked on X2 and X4 (21 Nov 2026)
+##### M8.4.42 - A tiled section can show a row window of its image — state: Ready after M8.4.41 (X2, X4 approved 21 Nov 2026)
 
 - **Goal:** a tiled section can cover only source rows `y0`-`y1` of its stored image (`tiled.window`, X2a): the viewer, the mask tiles, the
   counts, the statistics, the source reads and the depths all work in the window's coordinates; a section without a window is unchanged.
@@ -440,7 +440,7 @@ Decisions **X1-X4** (below) are waiting for the maintainer; M8.4.42 and M8.4.43 
   (byte-equal record); a format-7 project opens read-only in a build that knows only format 6 (simulated).
 - **Done when:** the tests pass; development gate. Nothing in the interface creates a window yet.
 
-##### M8.4.43 - Split a tiled section into parts — state: Blocked on X1-X4 and M8.4.42 (21 Nov 2026)
+##### M8.4.43 - Split a tiled section into parts — state: Ready after M8.4.42 (X1-X4 approved 21 Nov 2026)
 
 - **Goal:** from the message of M8.4.41 (and from the section's menu), the user splits a tiled section into the parts X1 gives, at mask-tile
   boundaries near equal heights; each part keeps its objects (same ids, classes, ichnotaxa), its depths at its rows and its share of the
