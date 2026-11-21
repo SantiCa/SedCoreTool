@@ -3316,7 +3316,9 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   they are rebuilt from all the histograms when the class of an object that existed changes, the number of classes changes or the area's rows change; a
   change of the area's columns counts again the non-empty tiles of the tile columns whose columns inside the area differ, reading back those the page dropped.
   A stack code of a tiled section keeps its members for the life of the section (`compactSectionStacks` does nothing for it). The histograms may hold 64 MiB
-  per section (`COUNT_HISTOGRAM_BYTES`); beyond it no table is computed and the page says so. Until every tile that has to be counted is, the table is empty,
+  per section (`COUNT_HISTOGRAM_BYTES`); beyond it they are all dropped and none is kept until the section is opened again (card M8.4.36: masks with
+  many objects in every row make histograms larger than the tiles, about 11 GB for 7,168 tiles of random labels), no table is computed, no reopening
+  cache is written, and the page says so. Until every tile that has to be counted is, the table is empty,
   never partial. Measured on the size of the `rgb8g` fixture: [sparse](validation/M8.4.17-tiled-counts.json), [dense](validation/M8.4.17-tiled-counts-dense.json).
 - **Wand, lasso, scissors and object operations on tiled sections** (`planWindows`, `pinRanges`, `toWindowRect`, `windowRgba` in `tiledit.js`;
   `tiledPlan` and the following functions in `app.js`; card M8.4.16 step 6): each runs today's function (`regionGrow`, `polygonPixels`,

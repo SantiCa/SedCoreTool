@@ -1,0 +1,46 @@
+{
+  "started": "2026-11-21T12:34:52.232Z",
+  "host": {
+    "os": "Windows_NT 10.0.26300",
+    "cpu": "AMD Ryzen 7 7700X 8-Core Processor             ",
+    "cpus": 16,
+    "memory_gib": 31
+  },
+  "commit": "a9692e6d38236745714fc8258f785006dc1298fc",
+  "electron_node": "v24.22.2",
+  "grid": {
+    "cols": 64,
+    "rows": 112
+  },
+  "version": {
+    "manifest": "5eac9b684be00e54a0ed09cb469d5dc02bd0ad33f8b21673a878a175e60ac08e",
+    "section": "synthetic",
+    "width": 32768,
+    "height": 57344,
+    "tiles": 7168,
+    "objects": 65535,
+    "stored_bytes": 4964279517,
+    "seconds": 139.7,
+    "generated_s": 140.8
+  },
+  "package": {
+    "bytes": 4968642003,
+    "zip64": true,
+    "seconds": 94.6
+  },
+  "restore": {
+    "project": "large-package-check",
+    "found": true,
+    "frozen": "source",
+    "stored": 7168,
+    "toast": "1 proyectos y 0 ajustes restaurados",
+    "seconds_with_opening": 561.9
+  },
+  "compared": {
+    "files": 7174,
+    "blobs_decompressed_and_hashed": 64,
+    "manifest_identical": true
+  },
+  "result": "passed",
+  "finished": "2026-11-21T12:48:27.047Z"
+}
