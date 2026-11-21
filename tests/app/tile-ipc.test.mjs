@@ -344,3 +344,63 @@ test('card M8.4.40: a table buffer whose chunk or commit fails is released, with
     assert.ok(!engine.calls.some((c) => c.op === 'mask.commit'), 'the commit is not sent');
   }
 });
+
+/** Card Q13: an engine stand-in whose requests named in `refuse` are rejected with the codes listed for them, one per call, then answered. */
+function refusingEngine(refuse) {
+  const engine = fakeEngine('a'.repeat(64)), request = engine.request.bind(engine), discarded = [];
+  const answer = (value) => { const p = Promise.resolve(value); p.requestId = randomUUID(); return p; };
+  let next = 0;
+  engine.request = (op, payload, binary, options) => {
+    if (op === 'mask.discard') discarded.push(payload.staged);
+    const code = refuse[op]?.shift();
+    if (code) { const p = Promise.reject(Object.assign(new Error(code), { code })); p.requestId = randomUUID(); return p; }
+    if (op === 'mask.begin') return answer({ staged: randomUUID(), rows: 1, cols: 2 });
+    if (op === 'mask.commit') return answer({ manifest: 'f'.repeat(64) });
+    if (op === 'mask.discard') return answer({});
+    if (op === 'buffer.begin') return answer({ handle: `h${++next}` });
+    if (op.startsWith('buffer.')) return answer({});
+    return request(op, payload, binary, options);
+  };
+  return { engine, discarded };
+}
+
+test('card Q13: a commit that fails before the engine answers closes its staged version with mask.discard', async (t) => {
+  const tables = { object_ids: new Uint32Array([1]) };
+  for (const failing of ['mask.commit', 'buffer.chunk', 'buffer.begin']) {
+    const { engine, discarded } = refusingEngine({ [failing]: ['BUSY'] });
+    const ipc = createTileIpc({ engine, projectsRoot: temporary(t) });
+    const { staged } = (await ipc.call(1, 'maskBegin', 'p1', 's1', 600, 300, null)).ok;
+    assert.deepEqual(await ipc.call(1, 'maskCommit', staged, tables), { error: { code: 'BUSY' } }, failing);
+    assert.deepEqual(discarded, [staged], `${failing}: the staged version is discarded before the failure reaches the page`);
+    // The record is gone as before: the page's own discard is refused, and closing the page sends nothing more.
+    assert.deepEqual(await ipc.call(1, 'maskDiscard', staged), { error: { code: 'INVALID_REQUEST', field: 'staged' } });
+    ipc.releasePage(1);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(discarded, [staged], `${failing}: nothing is left for the page's closing`);
+  }
+});
+
+test('card Q13: a successful commit sends no discard', async (t) => {
+  const { engine, discarded } = refusingEngine({});
+  const ipc = createTileIpc({ engine, projectsRoot: temporary(t) });
+  const { staged } = (await ipc.call(1, 'maskBegin', 'p1', 's1', 600, 300, null)).ok;
+  assert.deepEqual(await ipc.call(1, 'maskCommit', staged, { object_ids: new Uint32Array([1]) }), { ok: { manifest: 'f'.repeat(64) } });
+  ipc.releasePage(1);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(discarded, []);
+});
+
+test('card Q13: a discard refused with BUSY is tried again; one refused otherwise keeps the record so it can be tried again', async (t) => {
+  const busy = refusingEngine({ 'mask.discard': ['BUSY', 'BUSY'] });
+  const ipc = createTileIpc({ engine: busy.engine, projectsRoot: temporary(t) });
+  const { staged } = (await ipc.call(1, 'maskBegin', 'p1', 's1', 600, 300, null)).ok;
+  assert.deepEqual(await ipc.call(1, 'maskDiscard', staged), { ok: {} });
+  assert.deepEqual(busy.discarded, [staged, staged, staged], 'two refusals, then the discard that reached the engine');
+
+  const failing = refusingEngine({ 'mask.discard': ['INTERNAL'] });
+  const other = createTileIpc({ engine: failing.engine, projectsRoot: temporary(t) });
+  const second = (await other.call(1, 'maskBegin', 'p1', 's1', 600, 300, null)).ok.staged;
+  assert.deepEqual(await other.call(1, 'maskDiscard', second), { error: { code: 'INTERNAL' } });
+  assert.deepEqual(await other.call(1, 'maskDiscard', second), { ok: {} }, 'the record was kept, so the page may try again');
+  assert.deepEqual(failing.discarded, [second, second]);
+});

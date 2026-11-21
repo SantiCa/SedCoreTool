@@ -31,7 +31,10 @@ export const validTiledRecord = (r) => !!r && r.version === 1 && r.store === 2 &
  * Whether a saved record fits the pyramid the engine has: the same width, and the window (or the whole record) within its height.
  * @param {any} r the `tiled` object of a saved section @param {{width: number, height: number}} info the pyramid's level 0
  */
-export const recordFitsPyramid = (r, info) => info.width === r.width && (r.window ? r.window.y1 <= info.height : info.height === r.height);
+export function recordFitsPyramid(r, info) {
+  const { window: win } = r;          // the record's row window (read so, the architecture test reserves `window.` for the browser's object)
+  return info.width === r.width && (win ? win.y1 <= info.height : info.height === r.height);
+}
 
 /**
  * The record of a tiled section (card M8.4.18a; moved from app.js by card M8.4.42): like any section, without the mask arrays, which are in the
@@ -63,12 +66,12 @@ export const projectFormatVersion = (records, tiledInside, plain, tiled) => (rec
 /** A project written by a newer SedCoreTool than one that knows formats up to `newestKnown` opens read-only (V0.36). @param {any} version @param {number} newestKnown */
 export const opensReadOnly = (version, newestKnown) => (Number(version) || 0) > newestKnown;
 
-/** The first source row of a tiled section's window (0 without one). @param {{window?: {y0: number}}} tiled */
-export const windowTop = (tiled) => tiled.window?.y0 ?? 0;
+/** The first source row of a tiled section's window (0 without one). @param {any} tiled */
+export const windowTop = (tiled) => { const { window: win } = tiled; return win ? win.y0 : 0; };
 
 /**
  * Level-0 tile positions of a section (its mask-tile grid) as positions of the pyramid: the rows shift by the window's first tile row.
- * @param {{window?: {y0: number}}} tiled @param {[number, number][]} positions @returns {[number, number][]}
+ * @param {any} tiled @param {[number, number][]} positions @returns {[number, number][]}
  */
 export function pyramidPositions(tiled, positions) {
   const shift = windowTop(tiled) / TILE;
@@ -78,7 +81,7 @@ export function pyramidPositions(tiled, positions) {
 /**
  * One level-0 tile's samples as a section with a window sees them: rows of the tile below the window's last row are zero, as the padding of a
  * source that ends there. `row` is the tile row in the section's grid. The bytes are returned unchanged when the whole tile is inside.
- * @param {{window?: {y0: number, y1: number}}} tiled @param {number} row @param {Uint8Array} bytes @param {number} channels @param {number} bits
+ * @param {any} tiled @param {number} row @param {Uint8Array} bytes @param {number} channels @param {number} bits
  */
 export function windowTileBytes(tiled, row, bytes, channels, bits) {
   const win = tiled.window;

@@ -18,22 +18,18 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.152, `8ee9776`) is contained in it.
 - **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153; Q10 must be done before it.
-- **Last verified code commit:** M8.4.41 (this commit; see `git log`). Full checks on Windows: `npm test` 586; typecheck; `pytest -q` 924
-  passed / 9 skipped; ruff; `sync_version --check`; `tiled-sections.mjs`; `desktop.mjs` engine off and on.
-- **GitHub:** `f896132` (code of M8.4.37): all green on three systems (milestone gate of part C). `89d080b` (documents only, same code):
-  `tests` green; *Desktop builds* green on Windows and Linux, **failed twice on macOS** (run and rerun) in `tiled-sections.mjs`: "reopened, no
-  redraw by hand: drawn pixel = source pixel" (screen `[0,0,0]`, source `[255,255,255]`, tile state cached and idle). Not caused by a code
-  change; not diagnosed. **Open question for the maintainer:** a card to diagnose it (the check comes from M8.4.39).
-- **Checks due:** GitHub on `cb3e240` (M8.4.41): `tests` green; *Desktop builds* green on Windows and Linux, macOS failed again (third time) in
-  the same `tiled-sections.mjs` probe. M8.4.42 is committed locally, not pushed (blocked by Q13, decision below).
+- **Last verified code commit:** Q13 + M8.4.42 (this commit; see `git log`). Full checks on Windows: `npm test` 596; typecheck; `pytest -q`
+  924 passed / 9 skipped; ruff; `sync_version --check`; `tiled-sections.mjs`; `desktop.mjs` engine off and on.
+- **GitHub:** `f896132` (code of M8.4.37): all green on three systems (milestone gate of part C). Since `89d080b`, *Desktop builds* fails on
+  **macOS only** (3 commits, `cb3e240` included) in `tiled-sections.mjs`: "reopened, no redraw by hand: drawn pixel = source pixel" (screen
+  `[0,0,0]`, source `[255,255,255]`, tile state cached and idle); `tests` green. Not diagnosed. **Open question for the maintainer:** a card to
+  diagnose it (the check comes from M8.4.39).
+- **Checks due:** the GitHub result of this commit.
 - **Found by the run, not in it:** **Q11** (hostile ML settings stop the classifier; from Q9), **Q12** (an evicted placeholder section cannot
-  rebuild its grey image; from M8.4.39), **Q13** (found by M8.4.42, 21 Nov 2026: after a mask round fails with BUSY, its staged version can
-  stay in the engine (`MaskSync.round` discards it once, errors ignored), and deleting the project then leaves its folder: "BUSY").
+  rebuild its grey image; from M8.4.39). **Q13** done (21 Nov 2026, maintainer's choice: before finishing M8.4.42).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 (splitting a too-dense section) approved as recommended.
-- **Decision waiting (21 Nov 2026):** fix Q13 first (a card on `tiledsync.js` and the desktop's request limits, most capable, high) and then
-  finish M8.4.42, or finish M8.4.42 with its end-to-end block in a test of its own.
-- **Next:** **M8.4.42** (blocked, above), then M8.4.43, then part B as decided
+- **Next:** **M8.4.43** (split a tiled section into parts; most capable, effort high, to a fresh sub-agent), then part B as decided
   by I, then M8.5 (needs A1). `Q10` before V0.153; `A4` open.
 - **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) done, milestone gate met (M8.4.19); part B not started; M8.5 must not start.
   The engine path fails the timing gate of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates)
@@ -426,19 +422,22 @@ Decisions **X1-X4** below were **approved by the maintainer on 21 Nov 2026, as r
 
 - [x] **M8.4.41 - The message of a section too dense for its object statistics suggests splitting it** (done 21 Nov 2026, development gate; record: [history](roadmap-history.md#m8441---the-message-of-a-section-too-dense-for-its-object-statistics-suggests-splitting-it)).
 
-##### M8.4.42 - A tiled section can show a row window of its image — state: In progress (code and tests written, commit not pushed); Blocked by Q13 (below)
+##### M8.4.42 - A tiled section can show a row window of its image — state: Done (21 Nov 2026, development gate)
 
-- **As built (21 Nov 2026, not finished):** new pure module `tiledrecord.js` (record written and validated, moved from `app.js` and
+- **As built (21 Nov 2026):** new pure module `tiledrecord.js` (record written and validated, moved from `app.js` and
   `tiledproject.js`; format 7 and read-only of newer formats; translation of level-0 tile rows, zero rows below the window in its last tile,
   the working image's band); wired in `loadTiledSection`, `level0Rgba`, `tiledWorkingImage` and `drawTiles`. `app.js` 4457 → 4445 lines.
   `MaskSync.lastError` kept for reports. Tests: `tests/app/tiledrecord.test.mjs` (7; they fail with the row translation removed); the new
   block of `tests/e2e/tiled-sections.mjs` (rows 4096-9096 cut from the image and added twice, one record pointed at the whole pyramid with the
   window: identical working image, 2,253 label runs, objects with statistics and 300 bins, exactly; saved as format 7) **passes**. Windows: `npm
   test` 593, typecheck, `pytest -q` 924 / 9 skipped, ruff, `sync_version --check`.
-- **Blocked:** with that block, the later existing step "(3) deleting a project deletes its folder" fails on Windows, 3 runs of 3:
-  `mask.forget` answers BUSY. Diagnosis: during the block two sections' rounds failed with BUSY (the desktop's limit of requests in flight while
-  both sections send and read tiles) and recovered; the engine then still holds a staged version of the project (Q13). Moving the block to the
-  end of the test was tried; there the first brush stroke was refused in the imported project and the block could not run. Not pushed.
+  `tiledrecord.js` reads the record's `window` by destructuring, as the architecture test reserves `window.` for the browser's object.
+- **Was blocked by Q13** (found here): with the block, the later step "(3) deleting a project deletes its folder" failed 3 runs of 3
+  (`mask.forget` BUSY): two sections' mask rounds had been refused with BUSY by the desktop's limit of requests in flight, and
+  `desktop/tile-ipc.js` forgot the staged version when a commit failed before reaching the engine, or when its discard was refused, so the
+  engine kept it open. **Q13 done** (21 Nov 2026; Opus sub-agent, high, reviewed line by line): `discardStaged` retries `mask.discard` on
+  BUSY; a failed commit closes its staged version; a refused discard keeps the record for a later try. 3 tests in `tests/app/tile-ipc.test.mjs`
+  (2 failed before the fix). With it, `tiled-sections.mjs` passes whole on Windows.
 
 - **Goal:** a tiled section can cover only source rows `y0`-`y1` of its stored image (`tiled.window`, X2a): the viewer, the mask tiles, the
   counts, the statistics, the source reads and the depths all work in the window's coordinates; a section without a window is unchanged.

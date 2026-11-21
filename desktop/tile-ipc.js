@@ -150,6 +150,17 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
     if (!entry || entry.owner !== owner) reject('INVALID_REQUEST', 'staged');
     return entry;
   };
+  /** Card Q13: close a staged version in the engine. desktop/engine.js refuses a request locally with BUSY while two sections send and read
+   *  at once; a staged version left open would make the deletion of its project fail (mask.forget answers BUSY), so BUSY is tried again
+   *  after short pauses. Any other failure, or the last BUSY, is thrown. mask.discard of an unknown version answers `{}`. */
+  async function discardStaged(id) {
+    for (let attempt = 0; ; attempt++) {
+      try { return await engine.request('mask.discard', { staged: id }); } catch (error) {
+        if (error?.code !== 'BUSY' || attempt >= RETRY_MS.length) throw error;
+        await pause(RETRY_MS[attempt]);
+      }
+    }
+  }
   const checkProject = (project) => {
     if (typeof project !== 'string' || !PROJECT.test(project) || WINDOWS_DEVICES.has(project)) reject('INVALID_REQUEST', 'project');
   };
@@ -327,15 +338,20 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
         if (typeof result?.manifest !== 'string' || !SHA256.test(result.manifest)) reject('INTERNAL', 'manifest');
         recordWritten(project, result.manifest);
         return { manifest: result.manifest };
+      } catch (error) {
+        // Card Q13: the engine closes a staged version on a commit it received, but a table upload or the commit itself may have been
+        // refused before reaching it (BUSY), and the record goes below; so the version is closed here before the failure reaches the page.
+        await discardStaged(id).catch(() => {});
+        throw error;
       } finally {
-        staged.delete(id);                                         // the engine closes a staged version on commit, also when it fails
+        staged.delete(id);                                         // closed by the engine's commit, or by the discard above
         if (uploaded.length) engine.request('buffer.release', { handles: uploaded }).catch(() => {});
       }
     },
     async maskDiscard(owner, id) {
       ownedStaging(owner, id);
-      staged.delete(id);
-      await engine.request('mask.discard', { staged: id });
+      await discardStaged(id);
+      staged.delete(id);                                           // card Q13: kept after a failure, so the page or its closing can try again
       return {};
     },
     /** Verified mask tiles of a stored version: `{tiles: [{row, col, byte_length}], bytes}`; an empty layer has byte_length 0. */
@@ -710,7 +726,7 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
       pyramids.delete(owner);
       for (const name of [...builds.keys()]) if (name.startsWith(`${owner}/`)) builds.delete(name);
       for (const [name, controller] of copies) if (name.startsWith(`${owner}/`)) { controller.abort(); copies.delete(name); }
-      for (const [id, entry] of staged) if (entry.owner === owner) { staged.delete(id); engine.request('mask.discard', { staged: id }).catch(() => {}); }
+      for (const [id, entry] of staged) if (entry.owner === owner) { staged.delete(id); discardStaged(id).catch(() => {}); }   // card Q13: BUSY tried again
       for (const [token, job] of [...imports]) if (job.owner === owner) dropImport(token);
     },
     OPERATIONS: Object.keys(operations),
