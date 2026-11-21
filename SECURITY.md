@@ -23,6 +23,10 @@ that page (the code builds a few hundred fragments of HTML), these limits apply 
 - **Scripts.** Pages served from `app://corantool` carry a content security policy header that allows scripts from the program itself only
   (`script-src 'self' 'wasm-unsafe-eval'`), in addition to the policy in the page, which also names `cdn.jsdelivr.net` and `cdn.sheetjs.com`
   for the browser build. A script from any other origin is blocked on the desktop. The desktop build carries every library it needs (`app/vendor`).
+- **Markup from project data (card Q9).** Text that comes from a project file, a table, settings or presets is escaped before it becomes
+  HTML (element text and quoted attributes); plot colours must be `#rgb`/`#rrggbb` and sizes finite numbers. Image URLs from a project must be
+  `data:image/png|jpeg|webp;base64,...`; others are dropped on import and on opening. A static test (`tests/app/html-safety.test.mjs`) fails
+  when an attribute of the view modules interpolates a value without escaping, and an end-to-end test imports a hostile project.
 - **Navigation and links.** Navigation (also by redirect, and in the program's own extra windows) to an address outside the app origin is
   refused. Links that open outside the program go to the system only if they are `https:`, `http:` or `mailto:`; `file:`, `javascript:`, `data:`,
   other custom schemes and another `app:` host open nothing.

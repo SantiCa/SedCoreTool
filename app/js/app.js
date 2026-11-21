@@ -1,5 +1,5 @@
 // SedCoreTool web (antes CorAnTool e IchAnTool) — application (UI, state, tools, rendering, files).
-import { rleValid, baconToAgeText, BI, II, UNIT_TO_CM, idsAt, topAt, hasId, stackIndex, codeFor, withoutId, renameId, compactStacks, parseAgeModel, parseAgeModelDetailed, interpAge, toCSV, rleEncode, rleDecode, unitFactor, minOf, maxOf } from './core.js';
+import { rleValid, safeImageURL, sanitizeThumbs, baconToAgeText, BI, II, UNIT_TO_CM, idsAt, topAt, hasId, stackIndex, codeFor, withoutId, renameId, compactStacks, parseAgeModel, parseAgeModelDetailed, interpAge, toCSV, rleEncode, rleDecode, unitFactor, minOf, maxOf } from './core.js';
 import { pxPerCm, depthAtRow, rowAtDepth } from './sectiondepth.js';
 import { effectiveClassId, effectiveClassIndex, computeSectionBins, binsFromRowCounts, binRowsOfSection } from './sectionanalysis.js';
 import { createEngineClient } from './engineclient.js';
@@ -366,7 +366,7 @@ function b64decode(str) { const s = atob(str), out = new Uint8Array(s.length); f
 function pickCore(n) {
   return new Promise((resolve) => {
     const dlg = document.createElement('dialog');
-    const opts = S.cores.map((c) => `<option value="${c.id}" ${c.id === S.curCore ? 'selected' : ''}>${esc(c.name)} (${t('home.nImg', { n: c.sections.length })})</option>`).join('');
+    const opts = S.cores.map((c) => `<option value="${esc(c.id)}" ${c.id === S.curCore ? 'selected' : ''}>${esc(c.name)} (${t('home.nImg', { n: c.sections.length })})</option>`).join('');
     dlg.innerHTML = `<form method="dialog" style="display:grid;gap:10px;min-width:320px"><h3 style="margin:0">${esc(t('sec.pickCoreTitle', { n }))}</h3>
       <label class="f"><span>${esc(t('sec.pickCore'))}</span><select id="pcSel">${opts}<option value="__new">${esc(t('sec.newCore'))}</option></select></label>
       <label class="f" id="pcNewBox" hidden><span>${esc(t('sec.newCoreName'))}</span><input type="text" id="pcNew"></label>
@@ -1015,18 +1015,18 @@ function renderTrain() {
   if (!st) h += `<p class="note">${t('busy')}</p>`;
   else if (!st.installed) {
     h += st.python && st.error ? `<p class="note">${esc(st.error)}</p>` : '';
-    h += st.system || st.python ? `<p>${t('tr.noModule', { v: st.system?.version || '' })}</p><button class="btn primary" id="trInstall" ${TR.running ? 'disabled' : ''}>${t('tr.install')}</button>`
+    h += st.system || st.python ? `<p>${t('tr.noModule', { v: esc(st.system?.version || '') })}</p><button class="btn primary" id="trInstall" ${TR.running ? 'disabled' : ''}>${t('tr.install')}</button>`
       : `<p>${t('tr.noPython')}</p>`;
-  } else h += `<p>${t('tr.device', { n: esc(st.device?.name || '?'), d: st.device?.device || '?' })}</p>${st.device?.device === 'cpu' ? `<p class="note">${t('tr.cpu')}</p>` : ''}`;
+  } else h += `<p>${t('tr.device', { n: esc(st.device?.name || '?'), d: esc(st.device?.device || '?') })}</p>${st.device?.device === 'cpu' ? `<p class="note">${t('tr.cpu')}</p>` : ''}`;
   h += `<h3>2. ${t('tr.data')}</h3>`;
   if (!cores.length) h += `<p class="note">${t('u.noReviewed')}</p>`;
-  else h += `<p class="note">${t('tr.roles')}</p><table class="dtable mtab"><thead><tr><th>${t('tr.core')}</th><th>${t('tr.imgs')}</th><th>${t('tr.traces')}</th><th>${t('tr.role')}</th></tr></thead><tbody>${cores.map(({ c, imgs, traces }) => `<tr><td class="txt">${esc(c.name)}</td><td>${imgs}</td><td>${traces}</td><td><select data-trrole="${esc(c.name)}">${['auto', 'val', 'test'].map((r) => `<option value="${r}" ${(roles[c.name] || 'auto') === r ? 'selected' : ''}>${t('tr.r.' + r)}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table>`;
+  else h += `<p class="note">${t('tr.roles')}</p><table class="dtable mtab"><thead><tr><th>${t('tr.core')}</th><th>${t('tr.imgs')}</th><th>${t('tr.traces')}</th><th>${t('tr.role')}</th></tr></thead><tbody>${cores.map(({ c, imgs, traces }) => `<tr><td class="txt">${esc(c.name)}</td><td>${imgs}</td><td>${traces}</td><td><select data-trrole="${esc(c.name)}">${['auto', 'val', 'test'].map((r) => `<option value="${esc(r)}" ${(roles[c.name] || 'auto') === r ? 'selected' : ''}>${t('tr.r.' + r)}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table>`;
   const o = (S.settings.trainOpt ||= { name: safe(S.name || 'modelo'), epochs: 60, pretrained: true });
   h += `<h3>3. ${t('tr.train')}</h3><div class="row" style="align-items:end;gap:12px"><label class="f"><span>${t('tr.name')}</span><input type="text" data-tropt="name" value="${esc(o.name)}"></label>
-    <label class="f"><span>${t('tr.epochs')}</span><input type="number" data-tropt="epochs" min="1" max="500" value="${o.epochs}" style="width:80px"></label>
+    <label class="f"><span>${t('tr.epochs')}</span><input type="number" data-tropt="epochs" min="1" max="500" value="${esc(o.epochs)}" style="width:80px"></label>
     <label class="chk"><input type="checkbox" data-tropt="pretrained" ${o.pretrained ? 'checked' : ''}><span>${t('tr.pretrained')}</span></label></div>
     <div class="row">${TR.running ? `<button class="btn" id="trCancel">${t('tr.cancel')}</button>` : `<button class="btn primary" id="trGo" ${st?.installed && cores.length ? '' : 'disabled'}>${t('tr.go')}</button><button class="btn" id="trResume" ${st?.installed ? '' : 'disabled'}>${t('tr.resume')}</button>`}</div>`;
-  if (TR.prog) { const p = TR.prog; h += `<p><progress max="${p.epochs}" value="${p.epoch}" style="width:100%"></progress><br>${t('tr.prog', { e: p.epoch, n: p.epochs, d: fmt(p.val_dice, 3), b: fmt(p.best, 3), be: p.best_epoch, dev: p.device })}</p>`; }
+  if (TR.prog) { const p = TR.prog; h += `<p><progress max="${esc(p.epochs)}" value="${esc(p.epoch)}" style="width:100%"></progress><br>${t('tr.prog', { e: p.epoch, n: p.epochs, d: fmt(p.val_dice, 3), b: fmt(p.best, 3), be: p.best_epoch, dev: p.device })}</p>`; }
   if (TR.last?.evaluation) { const q = TR.last.evaluation.pooled; h += `<p><b>${t('tr.test', { c: TR.last.evaluation.cores.join(', '), d: fmt(q.dice, 3), i: fmt(q.iou, 3) })}</b></p>`; }
   if (TR.log.length) h += `<details ${TR.running ? 'open' : ''}><summary>${t('tr.log')}</summary><pre class="trlog">${esc(TR.log.slice(-60).join('\n'))}</pre></details>`;
   const ms = st?.models || [];
@@ -1169,7 +1169,7 @@ export function runFinalGeo(c) {
 export function finalTestsHTML(kind) {
   const list = (S.finalTests || []).filter((q) => q.kind === kind).slice(-8).reverse();
   if (!list.length) return `<p class="note">${t('ft.none')}</p>`;
-  return `<table class="tbl"><tr><th>${t('ft.when')}</th><th>${t('ft.what')}</th><th>${t('geo.bacc')}</th><th>${t('geo.acc')}</th><th>n</th></tr>${list.map((q) => `<tr><td>${esc(q.at.slice(0, 16).replace('T', ' '))}${q.repeat ? ` <span class="warn" title="${esc(t('ft.repeatTip'))}">(${q.repeat + 1}.ª)</span>` : ''}</td><td>${esc(q.target)} · ${esc(q.method)}${q.scope ? ' · ' + esc(q.scope) : ''}${q.classifier ? ' · ' + esc(q.classifier) : ''}<br><span class="note">${esc(q.cores.join(', '))}</span></td><td><b>${fmt(q.balanced * 100, 1)} %</b></td><td>${fmt(q.accuracy * 100, 1)} %</td><td>${q.n}</td></tr>`).join('')}</table>`;
+  return `<table class="tbl"><tr><th>${t('ft.when')}</th><th>${t('ft.what')}</th><th>${t('geo.bacc')}</th><th>${t('geo.acc')}</th><th>n</th></tr>${list.map((q) => `<tr><td>${esc(q.at.slice(0, 16).replace('T', ' '))}${q.repeat ? ` <span class="warn" title="${esc(t('ft.repeatTip'))}">(${esc(q.repeat + 1)}.ª)</span>` : ''}</td><td>${esc(q.target)} · ${esc(q.method)}${q.scope ? ' · ' + esc(q.scope) : ''}${q.classifier ? ' · ' + esc(q.classifier) : ''}<br><span class="note">${esc(q.cores.join(', '))}</span></td><td><b>${fmt(q.balanced * 100, 1)} %</b></td><td>${fmt(q.accuracy * 100, 1)} %</td><td>${esc(q.n)}</td></tr>`).join('')}</table>`;
 }
 export function holdoutHTML() {
   if (S.cores.some((c) => c.holdout)) mlSets();   // updates the count of external examples left out
@@ -1434,11 +1434,11 @@ function renderComments() {
   const s = sec(), f = $('cmtFilter')?.value || 'all', fmtD = (d) => new Date(d).toLocaleString();
   const list = (S.comments || []).map((c, i) => ({ c, n: i + 1 })).filter(({ c }) => f === 'all' || (f === 'open' && !c.done) || (f === 'sec' && s && c.sec === s.id));
   const where = (c) => { const q = c.sec && S.cores.flatMap((k) => k.sections.map((x) => ({ k, x }))).find((o) => o.x.id === c.sec); return q ? `${esc(q.k.name)} · ${esc(q.x.name)}${c.depth != null ? ` · ${fmt(c.depth, 4)} ${esc(q.x.units)}` : ''}` : esc(t('cmt.general')); };
-  box.innerHTML = list.length ? list.map(({ c, n }) => `<div class="cmt ${c.done ? 'done' : ''}" data-id="${c.id}" style="border:1px solid var(--line,#d7ddda);border-radius:8px;padding:8px;margin:6px 0;${c.done ? 'opacity:.6' : ''}">
+  box.innerHTML = list.length ? list.map(({ c, n }) => `<div class="cmt ${c.done ? 'done' : ''}" data-id="${esc(c.id)}" style="border:1px solid var(--line,#d7ddda);border-radius:8px;padding:8px;margin:6px 0;${c.done ? 'opacity:.6' : ''}">
       <div class="row" style="justify-content:space-between;gap:6px"><b>#${n} ${esc(c.author || '—')}</b><span class="note">${fmtD(c.date)}</span></div>
       <div class="note">${where(c)} ${c.sec ? `<button class="btn small" data-act="go">${t('cmt.go')}</button>` : ''}</div>
       <div style="white-space:pre-wrap;margin:4px 0">${esc(c.text)}</div>
-      ${(c.replies || []).map((r) => `<div data-rid="${r.id}" style="margin-left:14px;border-left:3px solid var(--line,#d7ddda);padding-left:8px;margin-top:4px"><div class="row" style="justify-content:space-between"><b>${esc(r.author || '—')}</b><span class="note">${fmtD(r.date)} <button class="btn small ghost" data-act="delr" title="${esc(t('cmt.del'))}">✕</button></span></div><div style="white-space:pre-wrap">${esc(r.text)}</div></div>`).join('')}
+      ${(c.replies || []).map((r) => `<div data-rid="${esc(r.id)}" style="margin-left:14px;border-left:3px solid var(--line,#d7ddda);padding-left:8px;margin-top:4px"><div class="row" style="justify-content:space-between"><b>${esc(r.author || '—')}</b><span class="note">${fmtD(r.date)} <button class="btn small ghost" data-act="delr" title="${esc(t('cmt.del'))}">✕</button></span></div><div style="white-space:pre-wrap">${esc(r.text)}</div></div>`).join('')}
       <div class="row" style="gap:6px;margin-top:6px"><input type="text" data-reply placeholder="${esc(t('cmt.replyPh'))}" style="flex:1"><button class="btn small" data-act="reply">${t('cmt.reply')}</button>
       <button class="btn small" data-act="done">${t(c.done ? 'cmt.reopen' : 'cmt.resolve')}</button><button class="btn small danger" data-act="del">${t('cmt.del')}</button></div></div>`).join('')
     : `<p class="note">${t('cmt.none')}</p>`;
@@ -1824,7 +1824,7 @@ prof.addEventListener('dblclick', (e) => { if (e.offsetX <= PROF_EDGE) { delete 
 function renderProfMenu() {
   const box = $('profRecs'); if (!box) return;
   const names = [...new Set((S.records || []).flatMap((r) => r.series.map((x) => x.name)))], on = new Set(S.settings.sideRecs || []), hid = new Set(S.settings.sideHide || []), SW = S.settings.sideW || {};
-  const row = (id, label, checked, attr) => `<div class="row" style="gap:6px;flex-wrap:nowrap"><label class="chk" style="flex:1;min-width:0"><input type="checkbox" ${attr} ${checked ? 'checked' : ''}><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(label)}</span></label><input type="number" data-sw="${esc(id)}" min="16" max="800" step="5" value="${SW[id] ?? ''}" placeholder="${t('fig.auto2')}" title="${esc(t('p.width'))}" style="width:62px"></div>`;
+  const row = (id, label, checked, attr) => `<div class="row" style="gap:6px;flex-wrap:nowrap"><label class="chk" style="flex:1;min-width:0"><input type="checkbox" ${attr} ${checked ? 'checked' : ''}><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(label)}</span></label><input type="number" data-sw="${esc(id)}" min="16" max="800" step="5" value="${esc(SW[id] ?? '')}" placeholder="${t('fig.auto2')}" title="${esc(t('p.width'))}" style="width:62px"></div>`;
   box.innerHTML = `<b style="font-size:11px">${t('p.tracks')}</b>${row('pct', t('p.pct'), !hid.has('pct'), 'data-sh="pct"')}${row('BI', 'BI', !hid.has('BI'), 'data-sh="BI"')}${row('ii', 'ii', !hid.has('ii'), 'data-sh="ii"')}
     <b style="font-size:11px;margin-top:4px">${t('log.records')}</b>${names.length ? names.map((n) => row('rec:' + n, n, on.has(n), `data-rec="${esc(n)}"`)).join('') : `<p class="note">${t('p.noRecs')}</p>`}
     <p class="note">${t('p.widthNote')}</p>`;
@@ -2248,7 +2248,7 @@ function renderObjectList(s) {
   items.innerHTML = objs.map((o) => {
     const name = clsById(o.cls || o.pred)?.name || t('obj.unassigned');
     const depth = `${fmt(depthAtRow(s, o.bbox[1]), 3)}–${fmt(depthAtRow(s, o.bbox[3] + 1), 3)} ${s.units}`;
-    return `<button class="btn small" data-obj-id="${o.id}" title="${esc(t(selected ? 'obj.listFocus' : 'obj.listSelect'))}">#${o.id} · ${esc(name)} · ${esc(depth)}</button>`;
+    return `<button class="btn small" data-obj-id="${esc(o.id)}" title="${esc(t(selected ? 'obj.listFocus' : 'obj.listSelect'))}">#${esc(o.id)} · ${esc(name)} · ${esc(depth)}</button>`;
   }).join('') || `<p class="note">${t('obj.listEmpty')}</p>`;
 }
 $('objList').addEventListener('toggle', () => renderObjectList(sec()));
@@ -2269,16 +2269,16 @@ function renderObject() {
   const st = status(o), ppu = pxPerCm(s), f = o.feat || {}, [, y0, , y1] = o.bbox || [];   // no box yet: a tiled object whose statistics are on their way
   const opts = [`<option value="">${t('obj.unassigned')}</option>`].concat(S.classes.map((c) => `<option value="${esc(c.id)}" ${c.id === o.cls ? 'selected' : ''}>${keyOf(c) ? esc(keyOf(c)) + ' · ' : ''}${esc(c.name)}</option>`)).join('');
   const sugg = o.pred ? `<span class="swatch" style="background:${validHexColor(clsById(o.pred)?.color, '#777777')}"></span>${esc(clsById(o.pred)?.name || '')} · ${Math.round(o.conf * 100)}%` : 'novel' in o && o.novel ? t('obj.novel') : '—';
-  const u = s.units, toU = (cm) => cm / UNIT_TO_CM[u];
+  const u = esc(s.units), toU = (cm) => cm / UNIT_TO_CM[u];   // card Q9: u is shown as markup below
   box.innerHTML = `
     <dl class="kv">
       <dt>${t('obj.class')}</dt><dd><select id="objCls">${opts}</select></dd>
-      <dt>${t('obj.status')}</dt><dd><span class="pill ${st}">${t('obj.' + st)}</span></dd>
+      <dt>${t('obj.status')}</dt><dd><span class="pill ${esc(st)}">${t('obj.' + st)}</span></dd>
       ${o.cls ? '' : `<dt>${t('obj.suggest')}</dt><dd>${sugg}</dd>`}
       ${o.cls || !xOf(o) ? '' : `<dt>${t('obj.probs')}</dt><dd>${probTable(o)}</dd>`}
       <dt>${t('obj.depth')}</dt><dd>${o.bbox ? `${fmt(depthAtRow(s, y0), 3)}–${fmt(depthAtRow(s, y1 + 1), 3)} ${u}` : '—'}</dd>
       <dt>${t('obj.size')}</dt><dd>${fmt(toU(f.majorCm), 3)} × ${fmt(toU(f.minorCm), 3)} ${u}</dd>
-      <dt>${t('obj.area')}</dt><dd>${fmt(o.area / (ppu * ppu) / UNIT_TO_CM[u] ** 2, 4)} ${u}² · ${o.area} px</dd>
+      <dt>${t('obj.area')}</dt><dd>${fmt(o.area / (ppu * ppu) / UNIT_TO_CM[u] ** 2, 4)} ${u}² · ${esc(o.area)} px</dd>
       <dt>${t('obj.shape')}</dt><dd>${t('obj.elong')} ${fmt(f.elong, 1)} · ${t('obj.vert')} ${fmt(f.vert, 2)}</dd>
     </dl>
     <div class="row">${o.pred && !o.cls ? `<button class="btn small primary" id="objAccept">${t('obj.accept')}</button>` : ''}<button class="btn small" id="objDel">${t('obj.delete')}</button></div>
@@ -2303,14 +2303,14 @@ function probTable(o) {
   if (!names.length) return '—';
   const sc = S.settings.clfScope || 'project', col = (n) => validHexColor(S.classes.find((c) => c.name === n)?.color, '#999999');
   return `<table class="dtable mtab"><thead><tr><th></th>${CLF_SCOPES.map((k) => `<th${k === sc ? ' class="on"' : ''}>${t('l.scope.' + k)}</th>`).join('')}</tr></thead><tbody>${
-    names.map((n) => `<tr><td class="txt"><span class="swatch" style="background:${col(n)}"></span>${esc(n)}</td>${CLF_SCOPES.map((k) => `<td${k === sc ? ' class="on"' : ''}>${P[k] ? Math.round((P[k].probs[n] || 0) * 100) + '%' : '—'}</td>`).join('')}</tr>`).join('')}${
+    names.map((n) => `<tr><td class="txt"><span class="swatch" style="background:${esc(col(n))}"></span>${esc(n)}</td>${CLF_SCOPES.map((k) => `<td${k === sc ? ' class="on"' : ''}>${P[k] ? Math.round((P[k].probs[n] || 0) * 100) + '%' : '—'}</td>`).join('')}</tr>`).join('')}${
     CLF_SCOPES.some((k) => P[k]?.novel) ? `<tr><td class="txt" colspan="4">${t('obj.novelBy', { m: CLF_SCOPES.filter((k) => P[k]?.novel).map((k) => t('l.scope.' + k)).join(', ') })}</td></tr>` : ''}</tbody></table>`;
 }
 
 function renderLearn() {
   const counts = clf.counts || {}, total = clf.n || 0, s = sec();
   const sc = S.settings.clfScope || 'project';
-  $('clfScopeBox').innerHTML = `<p class="note" style="margin:0">${t('ml.p.method')}: <b>${t('ml.m.' + (S.settings.ml?.method || 'knn'))}</b></p><label class="f"><span>${t('l.scope')}</span><select id="clfScope">${CLF_SCOPES.map((k) => `<option value="${k}" ${k === sc ? 'selected' : ''}>${t('l.scope.' + k)}</option>`).join('')}</select></label>
+  $('clfScopeBox').innerHTML = `<p class="note" style="margin:0">${t('ml.p.method')}: <b>${esc(t('ml.m.' + (S.settings.ml?.method || 'knn')))}</b></p><label class="f"><span>${t('l.scope')}</span><select id="clfScope">${CLF_SCOPES.map((k) => `<option value="${esc(k)}" ${k === sc ? 'selected' : ''}>${t('l.scope.' + k)}</option>`).join('')}</select></label>
     <table class="dtable mtab"><thead><tr><th></th>${CLF_SCOPES.map((k) => `<th>${t('l.scope.' + k)}</th>`).join('')}</tr></thead><tbody>
     <tr><td class="txt">${t('l.examples')}</td>${CLF_SCOPES.map((k) => `<td>${clfs[k].n || 0}</td>`).join('')}</tr>
     <tr><td class="txt">${t('l.accuracy')}</td>${CLF_SCOPES.map((k) => `<td>${clfs[k].accuracy == null ? '—' : Math.round(clfs[k].accuracy * 100) + '%'}</td>`).join('')}</tr></tbody></table>`;
@@ -2343,15 +2343,15 @@ function renderResults() {
     .map(({ c, p }) => `<div><span>${esc(c.name)}<i style="width:${Math.max(2, p)}%;background:${validHexColor(c.color, '#777777')}"></i></span><em>${fmt(p, 2)}%</em></div>`).join('');
   sum.innerHTML = `
     <div class="stat"><div><b>${fmt(v ? (b / v) * 100 : null, 1)}%</b><span>${t('r.mean')}</span></div>
-      <div><b>${fmt(area, area < 10 ? 2 : 0)}</b><span>${t('r.area')} (${s.units}²)</span></div>
+      <div><b>${fmt(area, area < 10 ? 2 : 0)}</b><span>${t('r.area')} (${esc(s.units)}²)</span></div>
       <div><b>${nObj}</b><span>${t('r.objects')}</span></div></div>
     ${bars ? `<div class="lbl">${t('r.byClass')}</div><div class="bars">${bars}</div>` : ''}`;
   const MAX = 600, hasAge = !!S.age.model;
   const opt = (lo, val) => `<option value=""></option>` + Array.from({ length: 7 - lo }, (_, k) => k + lo).map((n) => `<option ${val === n ? 'selected' : ''}>${n}</option>`).join('');
-  const rows = s.bins.slice(0, MAX).map((x) => `<tr data-i="${x.index}"><td>${fmt(x.depth, 3)}</td>${hasAge ? `<td>${fmt(x.age, 3)}</td>` : ''}<td>${fmt(x.pct, 2)}</td>
+  const rows = s.bins.slice(0, MAX).map((x) => `<tr data-i="${esc(x.index)}"><td>${fmt(x.depth, 3)}</td>${hasAge ? `<td>${fmt(x.age, 3)}</td>` : ''}<td>${fmt(x.pct, 2)}</td>
     <td>${x.BI ?? '—'}</td><td><select data-k="BI" aria-label="BI ${t('r.manual')}">${opt(0, x.BIm)}</select></td>
     <td>${x.ii ?? '—'}</td><td><select data-k="ii" aria-label="ii ${t('r.manual')}">${opt(1, x.iim)}</select></td></tr>`).join('');
-  tab.innerHTML = `<div class="tablewrap"><table><thead><tr><th>${t('r.depth')} (${s.units})</th>${hasAge ? `<th>${t('r.age')} (${esc(S.age.units)})</th>` : ''}<th>%</th><th>BI</th><th>BI ${t('r.manual')}</th><th>ii</th><th>ii ${t('r.manual')}</th></tr></thead><tbody>${rows}</tbody></table></div>
+  tab.innerHTML = `<div class="tablewrap"><table><thead><tr><th>${t('r.depth')} (${esc(s.units)})</th>${hasAge ? `<th>${t('r.age')} (${esc(S.age.units)})</th>` : ''}<th>%</th><th>BI</th><th>BI ${t('r.manual')}</th><th>ii</th><th>ii ${t('r.manual')}</th></tr></thead><tbody>${rows}</tbody></table></div>
     ${s.bins.length > MAX ? `<p class="note">${t('r.tooMany', { n: MAX })}</p>` : ''}`;
 }
 $('resTable').addEventListener('change', (e) => {
@@ -2367,7 +2367,7 @@ function renderSectionForm() {
   $('secMaskWarning').hidden = !s?.loadWarnings?.mask;
   $('secDepthWarning').hidden = !s || (Number.isFinite(s.top) && Number.isFinite(s.bottom)
     && s.bottom > s.top && Object.hasOwn(UNIT_TO_CM, s.units));
-  $('secSel').innerHTML = S.sections.map((x, k) => `<option value="${k}" ${k === S.cur ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+  $('secSel').innerHTML = S.sections.map((x, k) => `<option value="${esc(k)}" ${k === S.cur ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
   for (const id of ['secName', 'secTop', 'secBottom', 'secUnits', 'secDel', 'roiBtn', 'roiReset', 'rotL', 'rotR', 'detectBtn', 'clearCand', 'secRes', 'resAll']) $(id).disabled = !s;
   if (!s) { void tiledSource.render(null); return; }
   // kept byte for byte (D2), or locked until its image is located (card M8.4.18a-b): its saved record is what a save writes
@@ -2386,11 +2386,11 @@ function renderResForm(s) {
   const sel = $('secRes'); sel.disabled = $('resAll').disabled = !s; if (!s) return;
   const span = s.crop ? { w: s.crop.x1 - s.crop.x0, h: s.crop.y1 - s.crop.y0 } : s.full;
   const ppcFull = pxPerCm(s) * s.ds;   // px/cm of the original file
-  if (!span) { sel.innerHTML = `<option>${t('sec.resUnknown', { k: s.ds })}</option>`; $('resNote').textContent = ''; return; }
+  if (!span) { sel.innerHTML = `<option>${t('sec.resUnknown', { k: esc(s.ds) })}</option>`; $('resNote').textContent = ''; return; }
   const ks = RES_FACTORS.filter((k) => k === s.ds || Math.min(span.w, span.h) / k >= 20);
   sel.innerHTML = ks.map((k) => {
     const W = Math.floor(span.w / k), H = Math.floor(span.h / k), tooBig = k !== s.ds && workingBytes(W, H, !!s.orig16) > WORKING_MEMORY_LIMIT;
-    return `<option value="${k}" ${k === s.ds ? 'selected' : ''} ${tooBig ? 'disabled' : ''}>${k === 1 ? t('sec.resFull') : '1/' + k} · ${fmt(ppcFull / k, 3)} px/cm · ${fmt((W * H) / 1e6, 2)} MP${tooBig ? ' · ' + t('sec.resTooBig') : ''}</option>`;
+    return `<option value="${esc(k)}" ${k === s.ds ? 'selected' : ''} ${tooBig ? 'disabled' : ''}>${k === 1 ? t('sec.resFull') : '1/' + k} · ${fmt(ppcFull / k, 3)} px/cm · ${fmt((W * H) / 1e6, 2)} MP${tooBig ? ' · ' + t('sec.resTooBig') : ''}</option>`;
   }).join('');
   $('resNote').textContent = t('sec.resNote', { mb: Math.round((13 * s.w * s.h) / 2 ** 20) });
 }
@@ -2460,13 +2460,13 @@ const FILTER_SLIDERS = [['blackPoint', 0, 254, 1], ['whitePoint', 1, 255, 1], ['
 const BUILTIN_PRESETS = ['none', 'dorador2014', 'clahe2019', 'levels', 'local', 'strong'];
 const DETECT_SLIDERS = [['offset', 1, 80, 1, 'adaptive'], ['radius', 3, 200, 1, 'adaptive'], ['threshold', 0, 255, 1, 'global'], ['pThr', 0.05, 0.95, 0.05, 'unet'], ['minArea', 1, 2000, 1], ['smooth', 0, 4, 1]];
 let userPresets = [];
-const slider = (prefix, [k, min, max, step]) => `<div class="slider" data-only="${''}"><span data-i18n="${prefix}.${k}" id="${prefix}l-${k}">${t(prefix + '.' + k)}</span><output id="${prefix}o-${k}" for="${prefix}-${k}"></output><input type="range" id="${prefix}-${k}" data-k="${k}" min="${min}" max="${max}" step="${step}" aria-labelledby="${prefix}l-${k}"></div>`;   // V0.39: accessible name
+const slider = (prefix, [k, min, max, step]) => `<div class="slider" data-only="${''}"><span data-i18n="${esc(prefix)}.${esc(k)}" id="${esc(prefix)}l-${esc(k)}">${t(prefix + '.' + k)}</span><output id="${esc(prefix)}o-${esc(k)}" for="${esc(prefix)}-${esc(k)}"></output><input type="range" id="${esc(prefix)}-${esc(k)}" data-k="${esc(k)}" min="${esc(min)}" max="${esc(max)}" step="${esc(step)}" aria-labelledby="${esc(prefix)}l-${esc(k)}"></div>`;   // V0.39: accessible name
 
 function buildForms() {
   $('filterCtl').innerHTML = FILTER_SLIDERS.map((d) => slider('f', d)).join('');
   $('detectCtl').innerHTML = DETECT_SLIDERS.map((d) => slider('d', d).replace('data-only=""', `data-only="${d[4] || ''}"`)).join('');
   renderPresetOptions();
-  $('fChannel').innerHTML = ['rgb', 'gray', 'r', 'g', 'b'].map((c) => `<option value="${c}">${t('ch.' + c)}</option>`).join('');
+  $('fChannel').innerHTML = ['rgb', 'gray', 'r', 'g', 'b'].map((c) => `<option value="${esc(c)}">${t('ch.' + c)}</option>`).join('');
 }
 
 function renderFilterForm() {
@@ -2575,8 +2575,8 @@ $('dFill').addEventListener('change', (e) => { const s = sec(); if (s) s.detect.
 /* user presets: enhancement + detection settings saved by the user, shared by all projects */
 function renderPresetOptions() {
   const cur = $('fPreset').value;
-  $('fPreset').innerHTML = `<optgroup label="${t('f.builtin')}">${BUILTIN_PRESETS.map((p) => `<option value="${p}">${t('f.p.' + p)}</option>`).join('')}</optgroup>`
-    + (userPresets.length ? `<optgroup label="${t('f.mine')}">${userPresets.map((u) => `<option value="u:${u.id}">${esc(u.name)}</option>`).join('')}</optgroup>` : '')
+  $('fPreset').innerHTML = `<optgroup label="${t('f.builtin')}">${BUILTIN_PRESETS.map((p) => `<option value="${esc(p)}">${t('f.p.' + p)}</option>`).join('')}</optgroup>`
+    + (userPresets.length ? `<optgroup label="${t('f.mine')}">${userPresets.map((u) => `<option value="u:${esc(u.id)}">${esc(u.name)}</option>`).join('')}</optgroup>` : '')
     + `<option value="custom">${t('f.p.custom')}</option>`;
   if (cur) $('fPreset').value = cur;
 }
@@ -3000,7 +3000,7 @@ function broadcast(msg) { try { bc?.postMessage(msg); } catch { /* channel unava
 /* core bar in the header */
 export function renderCoreBar() {
   const sel = $('coreSel'); if (!sel) return;
-  sel.innerHTML = S.cores.map((c) => `<option value="${c.id}" ${c.id === S.curCore ? 'selected' : ''}>${esc(c.name)}${c.sections.length ? ` · ${c.sections.length} img` : ''}</option>`).join('');
+  sel.innerHTML = S.cores.map((c) => `<option value="${esc(c.id)}" ${c.id === S.curCore ? 'selected' : ''}>${esc(c.name)}${c.sections.length ? ` · ${c.sections.length} img` : ''}</option>`).join('');
 }
 $('coreSel').addEventListener('change', (e) => { activateCore(e.target.value); });
 $('coreAdd').addEventListener('click', () => openCoreDlg(null));
@@ -3166,7 +3166,7 @@ async function loadProject(p) {
   engineAnalysis?.releaseAll();   // the engine keeps the masks of the sections it analysed; the old project's are no longer needed
   readOnlyProject = (p?.version || 0) > FORMAT_VERSION_TILED;   // V0.36: written by a newer SedCoreTool
   try {
-    p = upgradeProject(p);
+    p = sanitizeThumbs(upgradeProject(p));   // card Q9: thumbnails of older stored projects too
     S.id = p.id || uid(); S.name = p.name || APP; S.notes = p.notes || ''; S.comments = p.comments || [];
     S.classes = p.classes || defaultClasses(); S.active = p.active || 'undet';
     Object.assign(S.settings, p.settings || {}); S.library = p.library || []; S.kind = p.projectKind || 'normal'; S.multiSource = p.multiSource || null; S.plots = p.plots || []; S.plotCur = p.plotCur || 0; S.coreModels = p.models?.cores || {};
@@ -3383,7 +3383,7 @@ function renderAnalyses(list, q = '') {
   const box = $('mpList'); if (!box) return;
   const shown = list.filter((p) => !q || coreKey(p.name).includes(q) || (p.coreNames || []).some((n) => coreKey(n).includes(q)));
   $('mpSaved').hidden = !list.length;
-  box.innerHTML = shown.map((p) => `<article class="pcard ${p.id === S.id ? 'current' : ''}" data-id="${p.id}" tabindex="0" aria-label="${esc(p.name)}">
+  box.innerHTML = shown.map((p) => `<article class="pcard ${p.id === S.id ? 'current' : ''}" data-id="${esc(p.id)}" tabindex="0" aria-label="${esc(p.name)}">
     <h3>${esc(p.name)}</h3>
     <p class="facts"><span>${t('home.cores', { n: p.cores ?? (p.coreNames || []).length })}</span><span class="note">${esc((p.coreNames || []).slice(0, 8).join(', '))}${(p.coreNames || []).length > 8 ? '…' : ''}</span>${p.id === S.id ? `<span>${t('proj.current')}</span>` : ''}</p>
     <div class="pacts"><button class="btn small primary" data-act="open">${t('proj.open')}</button><button class="btn small" data-act="mpupdate">${t('mp.update')}</button><button class="btn small" data-act="rename">${t('proj.rename')}</button><button class="btn small" data-act="del">${t('proj.del')}</button></div>
@@ -3416,10 +3416,10 @@ async function renderProjects() {
       const others = [...(shared.get(coreKey(c.name)) || new Map()).entries()].filter(([id]) => id !== p.id).map(([, n]) => n);
       const h = len(c) ? Math.max(16, Math.round((len(c) / maxLen) * 60)) : 30;
       const tip = `${c.name}${len(c) ? ` — ${fmt(len(c), 3)} ${c.units || ''}` : ''}${c.nImages ? `, ${t('home.nImg', { n: c.nImages })}` : ''}${Object.keys(c.proxies || {}).length ? `, ${t('home.nVar', { n: Object.keys(c.proxies).length })}` : ''}${others.length && p.kind !== 'multi' ? `. ${t('home.alsoIn', { p: others.join(', ') })}` : ''}`;
-      return `<span class="liner ${c.nImages ? 'img' : ''} ${ivCores.has(c.id) ? 'iv' : ''} ${others.length && p.kind !== 'multi' ? 'shared' : ''}" style="height:${h}px" title="${esc(tip)}"></span>`;
+      return `<span class="liner ${c.nImages ? 'img' : ''} ${ivCores.has(c.id) ? 'iv' : ''} ${others.length && p.kind !== 'multi' ? 'shared' : ''}" style="height:${esc(h)}px" title="${esc(tip)}"></span>`;
     }).join('') + (cores.length > 22 ? `<span class="more">+${cores.length - 22}</span>` : '') || `<span class="emptytray">${t('home.noCores')}</span>`;
     const kind = p.kind === 'multi' ? t('mp.badge') : p.kind === 'tutorial' ? t('home.kindTutorial') : '';
-    return `<article class="pcard ${p.id === S.id ? 'current' : ''}" data-id="${p.id}" tabindex="0" aria-label="${esc(p.name)}">
+    return `<article class="pcard ${p.id === S.id ? 'current' : ''}" data-id="${esc(p.id)}" tabindex="0" aria-label="${esc(p.name)}">
       <div class="tray" aria-hidden="true">${liners}</div>
       <h3>${esc(p.name)}</h3>
       <p class="facts"><span>${t('home.cores', { n: p.cores ?? cores.length })}</span><span>${t('home.nImg', { n: p.sections ?? 0 })}</span>${nShared && p.kind !== 'multi' ? `<span class="warnshare">${t('home.shared', { n: nShared })}</span>` : ''}<span>${p.id === S.id ? t('proj.current') : rel(p.updated)}</span></p>
@@ -3818,7 +3818,7 @@ async function restoreFiles(files) {
   /** @type {any} Last project accepted by the asynchronous import callback. */
   let lastLoaded = null;
   const existing = storageOK ? new Set((await listProjects()).map((m) => m.id)) : new Set();
-  const addProject = async (p, getBlob = null) => {
+  const addProject = async (p, getBlob = null) => { sanitizeThumbs(p);   // card Q9: no hostile image URL is stored
     for (const c of p.cores || [{ sections: p.sections }]) for (const q of c.sections || [])   // V0.36: a damaged file is not stored
       for (const k of ['labels', 'exclude']) if (q.w && q.h && q[k] != null && !rleValid(q[k], q.w * q.h)) { rejected++; toast(t('load.failed', { e: t('load.badMask', { s: q.name || '?', k }) }), 9000); return; }
     // Verify and ingest the images before changing any existing project or its pending save.
@@ -3973,7 +3973,7 @@ async function renderAllProjects() {
   const rows = allLite.flatMap((l) => l.cores.map((c) => ({ l, c }))).filter(({ l, c }) => !q || coreKey(c.name).includes(q) || coreKey(l.name).includes(q))
     .sort((a, b) => coreKey(a.c.name).localeCompare(coreKey(b.c.name)) || a.l.name.localeCompare(b.l.name));
   $('allTable').innerHTML = `<thead><tr><th></th><th>${t('geo.core')}</th><th>${t('home.project')}</th><th>Lat</th><th>Lon</th><th>${t('home.nVars')}</th><th>${t('geo.ivs')}</th><th>${t('home.images')}</th></tr></thead><tbody>${
-    rows.map(({ l, c }) => { const n = shared.get(coreKey(c.name))?.size || 1; return `<tr data-p="${l.id}" data-c="${c.id}" style="cursor:pointer"><td><input type="checkbox" class="mpchk" ${mpSel.has(`${l.id}|${c.id}`) ? 'checked' : ''}></td><td class="txt">${esc(c.name)}${n > 1 ? ` <span class="sharedtag" title="${esc(t('home.alsoIn', { p: [...shared.get(coreKey(c.name)).values()].filter((x) => x !== l.name).join(', ') }))}">${t('home.inN', { n })}</span>` : ''}</td><td class="txt">${esc(l.name)}</td><td>${fmt(c.lat, 3)}</td><td>${fmt(c.lon, 3)}</td><td>${Object.keys(c.proxies || {}).length}</td><td>${(l.intervals || []).filter((iv) => iv.core === c.id).length}</td><td>${c.nImages || 0}</td></tr>`; }).join('')}</tbody>`;
+    rows.map(({ l, c }) => { const n = shared.get(coreKey(c.name))?.size || 1; return `<tr data-p="${esc(l.id)}" data-c="${esc(c.id)}" style="cursor:pointer"><td><input type="checkbox" class="mpchk" ${mpSel.has(`${l.id}|${c.id}`) ? 'checked' : ''}></td><td class="txt">${esc(c.name)}${n > 1 ? ` <span class="sharedtag" title="${esc(t('home.alsoIn', { p: [...shared.get(coreKey(c.name)).values()].filter((x) => x !== l.name).join(', ') }))}">${t('home.inN', { n })}</span>` : ''}</td><td class="txt">${esc(l.name)}</td><td>${fmt(c.lat, 3)}</td><td>${fmt(c.lon, 3)}</td><td>${Object.keys(c.proxies || {}).length}</td><td>${(l.intervals || []).filter((iv) => iv.core === c.id).length}</td><td>${c.nImages || 0}</td></tr>`; }).join('')}</tbody>`;
   redrawAllMap();
 }
 
@@ -4061,7 +4061,7 @@ function syncAllMarkerFields() {
   const project = isProject ? null : allMarkers.get('project:' + projectId);
   const i = allLite.findIndex((l) => l.id === projectId);
   $('amMarkerColor').value = own?.color || project?.color || GROUP_COLORS[Math.max(0, i) % GROUP_COLORS.length];
-  $('amMarkerSymbol').innerHTML = `<option value="">${t('mp.markerDefault')}</option>` + MAP_SYMBOLS.map((k) => `<option value="${k}">${t('ms.sym.' + k)}</option>`).join('');
+  $('amMarkerSymbol').innerHTML = `<option value="">${t('mp.markerDefault')}</option>` + MAP_SYMBOLS.map((k) => `<option value="${esc(k)}">${t('ms.sym.' + k)}</option>`).join('');
   $('amMarkerSymbol').value = own?.symbol || '';
   $('amMarkerReset').disabled = !own;
 }
@@ -4266,8 +4266,8 @@ function mlRecommendation() {
 }
 
 function mlTrainHTML() {
-  const m = { ...ML_DEFAULT, ...(S.settings.ml || {}) }, num = (k, a, b, st) => `<input type="number" data-ml="${k}" min="${a}" max="${b}" step="${st}" value="${m[k]}" style="width:80px">`;
-  const methods = ['knn', 'rf', 'nb'].map((k) => `<label class="mlm ${m.method === k ? 'on' : ''}"><input type="radio" name="mlMethod" data-ml="method" value="${k}" ${m.method === k ? 'checked' : ''}><b>${t('ml.m.' + k)}</b><span class="note">${t('ml.d.' + k)}</span></label>`).join('');
+  const m = { ...ML_DEFAULT, ...(S.settings.ml || {}) }, num = (k, a, b, st) => `<input type="number" data-ml="${esc(k)}" min="${esc(a)}" max="${esc(b)}" step="${esc(st)}" value="${esc(m[k])}" style="width:80px">`;
+  const methods = ['knn', 'rf', 'nb'].map((k) => `<label class="mlm ${m.method === k ? 'on' : ''}"><input type="radio" name="mlMethod" data-ml="method" value="${esc(k)}" ${m.method === k ? 'checked' : ''}><b>${t('ml.m.' + k)}</b><span class="note">${t('ml.d.' + k)}</span></label>`).join('');
   const params = m.method === 'knn' ? `<label class="f"><span>${t('ml.p.k')}</span>${num('k', 1, 25, 1)}</label><label class="f"><span>${t('ml.p.weights')}</span><select data-ml="weights"><option value="distance" ${m.weights === 'distance' ? 'selected' : ''}>${t('ml.p.wDist')}</option><option value="uniform" ${m.weights === 'uniform' ? 'selected' : ''}>${t('ml.p.wUni')}</option></select></label>`
     : m.method === 'rf' ? `<label class="f"><span>${t('ml.p.trees')}</span>${num('trees', 10, 500, 10)}</label><label class="f"><span>${t('ml.p.depth')}</span>${num('maxDepth', 2, 30, 1)}</label><label class="f"><span>${t('ml.p.leaf')}</span>${num('minLeaf', 1, 20, 1)}</label><label class="chk"><input type="checkbox" data-ml="balanced" ${m.balanced ? 'checked' : ''}><span>${t('ml.p.balanced')}</span></label>`
       : `<label class="f"><span>${t('ml.p.priors')}</span><select data-ml="priors"><option value="uniform" ${m.priors === 'uniform' ? 'selected' : ''}>${t('ml.p.pUni')}</option><option value="empirical" ${m.priors === 'empirical' ? 'selected' : ''}>${t('ml.p.pEmp')}</option></select></label>`;
@@ -4283,10 +4283,10 @@ function mlTrainHTML() {
       <details><summary>${t('ml.cm')}</summary><p class="note">${t('ml.cmNote')}</p><div class="tablewrap"><table class="dtable mtab"><thead><tr><th>${t('ml.real')} \\ ${t('ml.pred')}</th>${cm.classes.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${cm.classes.map((c, i) => `<tr><td class="txt">${esc(c)}</td>${cm.cm[i].map((v, j) => `<td class="${i === j ? 'on' : ''}">${v}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>` : ''}`;
   }
   const fset = m.features || 'shape', pend = fset === 'vision' ? pendingEmb() : 0;   // V0.17: input vectors
-  const feats = `<h3>${t('vis.title')}</h3><div class="mlmethods">${['shape', 'vision'].map((k) => `<label class="mlm ${fset === k ? 'on' : ''}"><input type="radio" name="mlFeat" data-ml="features" value="${k}" ${fset === k ? 'checked' : ''}><b>${t('vis.f.' + k)}</b><span class="note">${t('vis.d.' + k)}</span></label>`).join('')}</div>`
-    + (fset === 'vision' ? `<p class="note">${VIS ? t('vis.ready', { n: esc(VIS.src) }) + (VIS.sha256 ? ` <span class="note" title="SHA-256 ${VIS.sha256}">(${VIS.sha256.slice(0, 12)}…)</span>` : '') : t('vis.none', { mb: VISION_MODEL.mb })} ${t('vis.pending', { n: pend })}</p><div class="row">${VIS ? '' : `<button class="btn small primary" id="visDl">${t('vis.dl', { mb: VISION_MODEL.mb })}</button><label class="btn small file"><span>${t('vis.file')}</span><input type="file" id="visFile" accept=".onnx"></label>`}<button class="btn small" id="visCalc" ${VIS && pend ? '' : 'disabled'}>${t('vis.calc', { n: pend })}</button></div>` : '');
+  const feats = `<h3>${t('vis.title')}</h3><div class="mlmethods">${['shape', 'vision'].map((k) => `<label class="mlm ${fset === k ? 'on' : ''}"><input type="radio" name="mlFeat" data-ml="features" value="${esc(k)}" ${fset === k ? 'checked' : ''}><b>${t('vis.f.' + k)}</b><span class="note">${t('vis.d.' + k)}</span></label>`).join('')}</div>`
+    + (fset === 'vision' ? `<p class="note">${VIS ? t('vis.ready', { n: esc(VIS.src) }) + (VIS.sha256 ? ` <span class="note" title="SHA-256 ${esc(VIS.sha256)}">(${VIS.sha256.slice(0, 12)}…)</span>` : '') : t('vis.none', { mb: VISION_MODEL.mb })} ${t('vis.pending', { n: pend })}</p><div class="row">${VIS ? '' : `<button class="btn small primary" id="visDl">${t('vis.dl', { mb: VISION_MODEL.mb })}</button><label class="btn small file"><span>${t('vis.file')}</span><input type="file" id="visFile" accept=".onnx"></label>`}<button class="btn small" id="visCalc" ${VIS && pend ? '' : 'disabled'}>${t('vis.calc', { n: pend })}</button></div>` : '');
   return `${feats}<h3>${t('ml.tab.train')}</h3><p class="note">${t('ml.trainIntro')}</p><div class="mlmethods">${methods}</div><div class="row" style="align-items:end;gap:12px">${params}
-    <label class="f"><span>${t('l.novelty')}</span><input type="number" data-ml="novelty" min="1" max="8" step="0.5" value="${S.settings.novelty}" style="width:80px"></label></div>
+    <label class="f"><span>${t('l.novelty')}</span><input type="number" data-ml="novelty" min="1" max="8" step="0.5" value="${esc(S.settings.novelty)}" style="width:80px"></label></div>
     <p class="note">${t('ml.paramHelp.' + m.method)} ${t('ml.noveltyHelp')}</p>
     <div class="row"><button class="btn primary" id="mlEvalBtn">${t('ml.eval')}</button><label class="f"><span>${t('ml.cvGroup')}</span><select data-ml="cvGroup">${['section', 'core'].map((g) => `<option value="${g}" ${(m.cvGroup || 'section') === g ? 'selected' : ''}>${t('ml.cvGroup.' + g)}</option>`).join('')}</select></label><span class="note">${t('ml.evalHint')}</span></div>${ev}
     <h3>${t('ft.title')}</h3><p class="note">${t('ft.intro')}</p>${holdoutHTML()}
@@ -4318,10 +4318,10 @@ function mlExamplesHTML() {
   if (sc === 'all') list = list.concat(otherExamples.filter((e) => !list.some((q) => q.key === e.key)).map((e) => ({ ...e, other: true, excluded: mlExcluded.has(e.key) })));
   const by = {}; for (const e of list) (by[e.y] ||= []).push(e);
   const used = sets[sc].length;
-  const card = (e) => `<figure class="mlx ${e.excluded ? 'off' : ''}" data-key="${esc(e.key)}">${e.thumb ? `<img src="${e.thumb}" alt="" ${e.o ? 'data-go="1"' : ''}>` : `<div class="noimg">${t('ml.noImg')}</div>`}
+  const card = (e) => `<figure class="mlx ${e.excluded ? 'off' : ''}" data-key="${esc(e.key)}">${safeImageURL(e.thumb) ? `<img src="${safeImageURL(e.thumb)}" alt="" ${e.o ? 'data-go="1"' : ''}>` : `<div class="noimg">${t('ml.noImg')}</div>`}
     <figcaption title="${esc(e.where)}">${esc(e.where)}</figcaption>
     <div class="row">${e.lib ? `<button class="btn small ghost" data-act="libdel">${t('ml.remove')}</button>` : `<label class="chk"><input type="checkbox" data-act="use" ${e.excluded ? '' : 'checked'}><span>${t('ml.use')}</span></label>`}</div></figure>`;
-  return `<div class="row" style="align-items:end"><label class="f"><span>${t('ml.exScope')}</span><select id="mlScopeSel">${CLF_SCOPES.map((k) => `<option value="${k}" ${k === sc ? 'selected' : ''}>${t('l.scope.' + k)}</option>`).join('')}</select></label>
+  return `<div class="row" style="align-items:end"><label class="f"><span>${t('ml.exScope')}</span><select id="mlScopeSel">${CLF_SCOPES.map((k) => `<option value="${esc(k)}" ${k === sc ? 'selected' : ''}>${t('l.scope.' + k)}</option>`).join('')}</select></label>
     <span class="note">${t('ml.exCount', { n: used, t: list.length })}</span></div><p class="note">${t('ml.exHelp')}</p>
     ${Object.keys(by).sort().map((y) => `<h3>${esc(y)} <span class="note">${by[y].filter((e) => !e.excluded).length}/${by[y].length}${by[y].filter((e) => !e.excluded).length < 10 ? ' · ' + t('ml.fewWarn') : ''}</span></h3><div class="mlgrid">${by[y].map(card).join('')}</div>`).join('') || `<p class="note">${t('l.none')}</p>`}`;
 }
@@ -4332,9 +4332,9 @@ function mlOthersHTML() {
   if (!projs.some(([id]) => id === mlOtherProj)) mlOtherProj = projs[0][0];
   const inLib = new Set(S.library.map((e) => e.key)), list = otherExamples.filter((e) => e.project === mlOtherProj);
   const by = {}; for (const e of list) (by[e.y] ||= []).push(e);
-  return `<p class="note">${t('ml.othersIntro')}</p><div class="row" style="align-items:end"><label class="f"><span>${t('home.project')}</span><select id="mlOtherSel">${projs.map(([id, n]) => `<option value="${id}" ${id === mlOtherProj ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
+  return `<p class="note">${t('ml.othersIntro')}</p><div class="row" style="align-items:end"><label class="f"><span>${t('home.project')}</span><select id="mlOtherSel">${projs.map(([id, n]) => `<option value="${esc(id)}" ${id === mlOtherProj ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
     <button class="btn small" id="mlPickAll">${t('mp.all')}</button><button class="btn small" id="mlPickNone">${t('mp.none')}</button><button class="btn small primary" id="mlAddLib">${t('ml.addLib', { n: mlPicked.size })}</button></div>
-    ${Object.keys(by).sort().map((y) => `<h3>${esc(y)} <span class="note">${by[y].length}</span></h3><div class="mlgrid">${by[y].map((e) => `<figure class="mlx ${inLib.has(e.key) ? 'off' : ''}" data-key="${esc(e.key)}">${e.thumb ? `<img src="${e.thumb}" alt="">` : `<div class="noimg">${t('ml.noImg')}</div>`}<figcaption>${esc(e.where)}</figcaption>
+    ${Object.keys(by).sort().map((y) => `<h3>${esc(y)} <span class="note">${by[y].length}</span></h3><div class="mlgrid">${by[y].map((e) => `<figure class="mlx ${inLib.has(e.key) ? 'off' : ''}" data-key="${esc(e.key)}">${safeImageURL(e.thumb) ? `<img src="${safeImageURL(e.thumb)}" alt="">` : `<div class="noimg">${t('ml.noImg')}</div>`}<figcaption>${esc(e.where)}</figcaption>
       <div class="row">${inLib.has(e.key) ? `<span class="note">${t('ml.inLib')}</span>` : `<label class="chk"><input type="checkbox" data-act="pick" ${mlPicked.has(e.key) ? 'checked' : ''}><span>${t('ml.pick')}</span></label>`}</div></figure>`).join('')}</div>`).join('')}`;
 }
 

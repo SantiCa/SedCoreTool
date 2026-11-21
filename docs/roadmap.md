@@ -23,8 +23,10 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
   passed on Windows, macOS and Linux. Since then: documents, and H9 (`bfbc6b4`, `tools/check_all.py`, a tool only; its run on
   Windows: `pytest` 906 passed / 9 skipped, `npm test` 557, typecheck, `sync_version`, ruff, all passed; no end-to-end test needed).
 - **Checks due:** none.
-- **Authorised run (maintainer, 21 Nov 2026, "sigue con el resto"; AGENTS §6 *Authorised runs*):** `Q9` (in progress; escape the
-  `innerHTML` sites; P0 security) → `M8.4.39` → `M8.4.40` (with decision V) → `M8.4.37`. Each card goes to a fresh sub-agent of its tier
+- **Q9 done** (development gate, Windows): `npm test` 563, typecheck, `desktop.mjs` engine off; its browser test `html-injection.mjs` runs
+  inside `smoke.mjs`, which was **not run locally** (starting the local server was refused): the `e2e` job of GitHub runs it on the push.
+  Q9 found card **Q11** (hostile ML settings stop the classifier; not in the run).
+- **Authorised run (maintainer, 21 Nov 2026, "sigue con el resto"; AGENTS §6 *Authorised runs*):** `Q9` (done) → **`M8.4.39`** (next) → `M8.4.40` (with decision V) → `M8.4.37`. Each card goes to a fresh sub-agent of its tier
   and effort; one commit, push and short report per card; stop only for *Stop and ask*. Then **`M8.4.19`**, the milestone gate of part C
   (not part of the run). Then part B as decided by I at the review of M8.4.19, then M8.5 (needs A1). `Q10` before V0.153; `A4` after M8.4.19.
 - **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) in its last cards; part B not started; M8.5 must not start.
@@ -734,19 +736,13 @@ Written from the council audit (status block). Each card names its model; the sc
 Runtime frontend + backend audit (status block). Part C / desktop-security / engine cards (`M8.4.38`–`M8.4.40`) sit above under part C;
 web/frontend security, UI correctness and architecture cards sit here.
 
-- [ ] **Q9 - Sanitize `innerHTML` injection surfaces across project, data, ML and multiproxy views (P0 security).**
-  - *Goal:* opening a hostile `.sedcoretool` project file or laboratory table cannot inject HTML or break out of attributes anywhere in the UI.
-  - *Read first:* `app/js/app.js` (lines 1437, 1441, 2279-2281, 2346, 2354, 2579, 3003, 3386, 3422, 3976, 4269, 4289, 4321, 4335, 4337);
-    `app/js/datatab.js` (lines 53, 55, 62, 130, 176, 195, 342, 346); `app/js/multiproxy.js` (lines 308, 363, 378, 382-383, 455, 1611);
-    `app/js/core.js` (`esc`).
-  - *Change:* escape every interpolated ID, unit, name, numeric/color field and tooltip across `app.js`, `datatab.js`, `multiproxy.js` (and audit
-    remaining `innerHTML` sites in `figures.js`, `columns.js`, `panels.js`); validate `thumb` URLs (`data:image/(jpeg|png|webp);base64,...` only)
-    in `mlExamplesHTML`/`mlOthersHTML` and on project import; keep `app.js` at or below `APP_JS_CEILING`.
-  - *Do not touch:* saved project schema, visual layout, DOM element IDs.
-  - *Model:* most capable, effort medium (security boundary across UI modules).
-  - *Tests:* Node & browser regression tests loading a crafted project JSON with `"><img src=x onerror=...>` payloads in project/core/section/
-    comment/layer/preset IDs, `units`, `L.name`, `y.color` and `library[].thumb`, asserting zero unexpected elements/attributes and clean rendering.
-  - *Done when:* all hostile-payload tests pass and a static check confirms no unescaped dynamic attribute interpolation remains; development gate.
+- [x] **Q9 - Sanitize `innerHTML` injection surfaces across project, data, ML and multiproxy views (P0 security)** (done 21 Nov 2026, development gate; record: [history](roadmap-history.md#q9---sanitize-innerhtml-injection-surfaces-across-project-data-ml-and-multiproxy-views-p0-security)).
+
+- [ ] **Q11 - A hostile or old ML setting stops the classifier** (found by Q9, 21 Nov 2026; fast tier, effort medium). A project whose
+  `settings.ml.k` is not a number, or whose `settings.ml.method` is unknown, makes the classifier fail with a page error (`learn.js` vote;
+  `geo.js` `fitModel` reading `defaults`). *Change:* validate `settings.ml` (and the classifier `params`) where a project is loaded, falling back
+  to the defaults with a visible note; *Tests:* Node tests with a non-numeric `k` and an unknown method; *Do not touch:* the classifier's
+  results for valid settings. *Done when:* the tests pass and `tests/e2e/html-injection.mjs` can use hostile `k` and `method` too.
 
 - [ ] **Q10 - Data-tab edit precision, virtualized table cap, engine-refresh/CSV races & SVG PNG Blob export.**
   - *Goal:* fix verified runtime, UX and data-accuracy defects across the Data tab, Core log, Figures and pointer interactions.

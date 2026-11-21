@@ -3343,3 +3343,31 @@ Updated 21 November 2026.
       `--ruff`, `--log-dir`, `--only`, `--list`, `--desktop`, `--tiled`, `--smoke`, `--large16`, `--e2e`, `--prepare` (runs `node
       desktop/scripts/prepare.js --with-examples` before the desktop end-to-end tests). Each end-to-end test runs once, as DEVELOPMENT §3
       lists it (the engine-on run of `desktop.mjs` is not a separate step).
+
+### Q9 - Sanitize innerHTML injection surfaces across project, data, ML and multiproxy views (P0 security)
+
+- [ ] **Q9 - Sanitize `innerHTML` injection surfaces across project, data, ML and multiproxy views (P0 security).**
+  - *Goal:* opening a hostile `.sedcoretool` project file or laboratory table cannot inject HTML or break out of attributes anywhere in the UI.
+  - *Read first:* `app/js/app.js` (lines 1437, 1441, 2279-2281, 2346, 2354, 2579, 3003, 3386, 3422, 3976, 4269, 4289, 4321, 4335, 4337);
+    `app/js/datatab.js` (lines 53, 55, 62, 130, 176, 195, 342, 346); `app/js/multiproxy.js` (lines 308, 363, 378, 382-383, 455, 1611);
+    `app/js/core.js` (`esc`).
+  - *Change:* escape every interpolated ID, unit, name, numeric/color field and tooltip across `app.js`, `datatab.js`, `multiproxy.js` (and audit
+    remaining `innerHTML` sites in `figures.js`, `columns.js`, `panels.js`); validate `thumb` URLs (`data:image/(jpeg|png|webp);base64,...` only)
+    in `mlExamplesHTML`/`mlOthersHTML` and on project import; keep `app.js` at or below `APP_JS_CEILING`.
+  - *Do not touch:* saved project schema, visual layout, DOM element IDs.
+  - *Model:* most capable, effort medium (security boundary across UI modules).
+  - *Tests:* Node & browser regression tests loading a crafted project JSON with `"><img src=x onerror=...>` payloads in project/core/section/
+    comment/layer/preset IDs, `units`, `L.name`, `y.color` and `library[].thumb`, asserting zero unexpected elements/attributes and clean rendering.
+  - *Done when:* all hostile-payload tests pass and a static check confirms no unescaped dynamic attribute interpolation remains; development gate.
+  - *As built (reviewed line by line by the director; development gate, Windows):* `esc` lives in `app.js` (not `core.js`). Every interpolation in a double-quoted
+    HTML attribute of `app.js` (54), `datatab.js` (25), `multiproxy.js` (47), `columns.js` (26) and `figures.js` (34) now goes through `esc(...)`
+    (also constant loop keys, so the static check needs only 7 reviewed exceptions); text sinks fixed: units (`objInfo`, results tables),
+    `finalTestsHTML` counts, object ids in `renderObjectList`, `t()` values in `renderTrainer`, `clfScopeBox`, `sec.resUnknown`, `cl.copyOne/All`,
+    `cl.dragHere`, `cv.cover`, `cl.mlpInfo`. `datatab.js` plot colour input uses `validHexColor`; `plot.js` accepts only hex colours and finite
+    sizes (valid input gives byte-identical SVG, checked by hash). Thumbnails: `safeImageURL`/`sanitizeThumbs` (`core.js`), applied in
+    `restoreFiles`→`addProject`, `loadProject` and at both `<img src>` of `mlExamplesHTML`/`mlOthersHTML`. Audited, no change needed:
+    `tableview.js`, `tiledview.js`, `panels.js`, `eventShadeFormHTML`, `log.js` (`opacity` and column widths are coerced to numbers).
+    Tests: `tests/app/html-safety.test.mjs` (6), `tests/e2e/html-injection.mjs` called from `smoke.mjs`. `app.js` 4,664 → 4,664 lines.
+    Checks (Windows): `npm test` 563/563, typecheck no new diagnostics, `desktop.mjs` (engine off) passed; `html-injection.mjs` passed in
+    headless Chrome with an in-test file responder; `smoke.mjs` not run (starting the local server was refused in that session).
+    Found, not fixed (outside the card): a non-numeric `settings.ml.k` or unknown `ml.method` in a project stops the classifier with an error.

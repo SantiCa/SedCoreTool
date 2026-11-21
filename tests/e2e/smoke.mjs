@@ -16,6 +16,7 @@ import { verifyMultiproxyFigure } from './multiproxy-figure.mjs';
 import { verifyProxyMapCoverage } from './proxy-map-coverage.mjs';
 import { verifyEventShading } from './event-shading.mjs';
 import { verifyFigureComposition } from './figure-composition.mjs';
+import { verifyHtmlInjection } from './html-injection.mjs';
 const { default: puppeteer } = await import(process.env.PUPPETEER_MODULE || 'puppeteer-core');
 
 const URL = process.env.APP_URL || 'http://localhost:8765/app/index.html';
@@ -61,6 +62,11 @@ try {
   await verifyProxyMapCoverage(b, URL);
   await verifyEventShading(b, URL);
   await verifyFigureComposition(b, URL);
+  { // card Q9: a hostile project file, in a fresh storage so the other checks never see it
+    const context = await b.createBrowserContext(), page = await context.newPage();
+    page.on('dialog', (d) => d.accept());
+    try { await page.goto(URL, { waitUntil: 'networkidle0' }); await verifyHtmlInjection(page); } finally { await context.close(); }
+  }
   await p.goto(URL, { waitUntil: 'networkidle0' });
   assert.equal(await p.evaluate(async () => {
     const app = await import('./js/app.js'), depth = await import('./js/sectiondepth.js');

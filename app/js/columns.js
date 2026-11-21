@@ -207,7 +207,7 @@ export function logRecords(D, lv = S.logView, records = S.records, selected = nu
 /** V0.23: which image panels the core column shows and how wide the image is. */
 function renderImgPanelsForm() {
   const lv = S.logView, st = lv.style || {}, on = new Set(Array.isArray(lv.imgPanels) ? lv.imgPanels : []), asp = st.imgAspect || 'keep';
-  $('logImgPanels').innerHTML = `<div class="f"><span>${t('log.panels')}</span><div class="chk2">${FIG_PANELS.map((p) => `<label class="chk"><input type="checkbox" data-imgp="${p}" ${on.has(p) ? 'checked' : ''}><span>${t('fig.p.' + p)}</span></label>`).join('')}</div><p class="note">${t('log.panelsNote')}</p></div>
+  $('logImgPanels').innerHTML = `<div class="f"><span>${t('log.panels')}</span><div class="chk2">${FIG_PANELS.map((p) => `<label class="chk"><input type="checkbox" data-imgp="${esc(p)}" ${on.has(p) ? 'checked' : ''}><span>${t('fig.p.' + p)}</span></label>`).join('')}</div><p class="note">${t('log.panelsNote')}</p></div>
     <div class="grid2" style="grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr)"><label class="f"><span>${t('log.imgAspect')}</span><select data-st="imgAspect"><option value="keep" ${asp === 'keep' ? 'selected' : ''}>${t('log.asp.keep')}</option><option value="fixed" ${asp === 'fixed' ? 'selected' : ''}>${t('log.asp.fixed')}</option></select></label>
     ${asp === 'keep' ? `<label class="f"><span>${t('log.imgStretch')}</span><input type="number" data-st="imgStretch" min="0.05" step="0.1" value="${esc(st.imgStretch ?? '')}" placeholder="1"></label>` : `<label class="f"><span>${t('log.imgW')}</span><input type="number" data-st="imgW" min="8" max="600" step="2" value="${esc(st.imgW ?? '')}" placeholder="64"></label>`}</div>`;
 }
@@ -217,7 +217,7 @@ export function ndFormHTML(st) {
   const q = mergedStyle(raw);
   const stroke = validHexColor(raw.markStroke, '#ffffff');
   return `<div class="f"><span>${t('nd.title')}</span><div class="grid2">
-    <label class="f"><span>${t('nd.fill')}</span><select data-st="ndFill">${['hatch', 'solid', 'none'].map((v) => `<option value="${v}" ${q.ndFill === v ? 'selected' : ''}>${t('nd.f.' + v)}</option>`).join('')}</select></label>
+    <label class="f"><span>${t('nd.fill')}</span><select data-st="ndFill">${['hatch', 'solid', 'none'].map((v) => `<option value="${esc(v)}" ${q.ndFill === v ? 'selected' : ''}>${t('nd.f.' + v)}</option>`).join('')}</select></label>
     <label class="f"><span>${t('nd.colors')}</span><span class="row"><input type="color" data-st="ndColor" value="${esc(q.ndColor)}"><input type="color" data-st="ndLine" value="${esc(q.ndLine)}"></span></label>
     <label class="f"><span>${t('nd.text')}</span><input type="text" data-st="ndText" value="${esc(q.ndText || '')}" placeholder="${esc(t('log.noData'))}"></label>
     <span></span></div><div class="chk2"><label class="chk"><input type="checkbox" data-st="ndShow" ${q.ndShow ? 'checked' : ''}><span>${t('nd.show')}</span></label><label class="chk"><input type="checkbox" data-st="ndLabel" ${q.ndLabel ? 'checked' : ''}><span>${t('nd.label')}</span></label><label class="chk"><input type="checkbox" data-st="ndImage" ${q.ndImage ? 'checked' : ''}><span>${t('nd.image')}</span></label></div></div>
@@ -229,7 +229,7 @@ export function ndFormHTML(st) {
 export function arrowFormHTML() {
   const F = S.fig, ex = new Set(Array.isArray(F.arrowExcl) ? F.arrowExcl : []);
   const stroke = validHexColor(F.markStroke, '#ffffff'), labelColor = validHexColor(F.labelColor, '#1c2422');
-  return `<div class="grid2"><label class="f"><span>${t('ar.src')}</span><select id="figArrowSrc">${['all', 'marks', 'objects'].map((v) => `<option value="${v}" ${(F.arrowSrc || 'all') === v ? 'selected' : ''}>${t('ar.src.' + v)}</option>`).join('')}</select></label>
+  return `<div class="grid2"><label class="f"><span>${t('ar.src')}</span><select id="figArrowSrc">${['all', 'marks', 'objects'].map((v) => `<option value="${esc(v)}" ${(F.arrowSrc || 'all') === v ? 'selected' : ''}>${t('ar.src.' + v)}</option>`).join('')}</select></label>
     <label class="f"><span>${t('ar.objScale')}</span><input type="number" id="figObjScale" min="0.2" max="3" step="0.1" value="${esc(F.objScale ?? 1)}"></label>
     <label class="f"><span>${t('mk.size')}</span><input type="number" id="figMarkScale" min="0.2" max="5" step="0.1" value="${esc(F.markScale ?? 1)}"></label>
     <label class="f"><span>${t('mk.stroke')}</span><span class="row"><input type="color" id="figMarkStroke" value="${esc(stroke)}"><input type="number" id="figMarkStrokeW" min="0" max="4" step="0.2" value="${esc(F.markStrokeW ?? 0.8)}" style="width:60px" title="${esc(t('mk.strokeW'))}"></span></label>
@@ -363,7 +363,7 @@ const COLOR_FIELDS = {
 };
 export function colorsFormHTML(style, kind) {
   const st = mergedStyle(style), fields = COLOR_FIELDS[kind] || COLOR_FIELDS.log;
-  return `<div class="f"><span>${t('color.title')}</span><div class="grid2">${fields.map((key) => `<label class="f"><span>${t('color.' + key)}</span><input type="color" data-st="${key}" value="${esc(st[key])}"></label>`).join('')}</div><button type="button" class="btn small" data-colreset="${esc(kind)}">${t('color.reset')}</button><p class="note">${t('color.note')}</p></div>`;
+  return `<div class="f"><span>${t('color.title')}</span><div class="grid2">${fields.map((key) => `<label class="f"><span>${t('color.' + key)}</span><input type="color" data-st="${esc(key)}" value="${esc(st[key])}"></label>`).join('')}</div><button type="button" class="btn small" data-colreset="${esc(kind)}">${t('color.reset')}</button><p class="note">${t('color.note')}</p></div>`;
 }
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-colreset]'); if (!b) return;
@@ -376,7 +376,7 @@ document.addEventListener('click', (e) => {
 });
 /** V0.69: ruler-style vertical scale — number, long, medium and short ticks, each with its own interval and length. */
 export function tickFieldsHTML(st) {
-  const f = (k, step, min, ph) => `<label class="f"><span>${t('st.' + k)}</span><input type="number" data-st="${k}" step="${step}" min="${min}" value="${esc(st?.[k] ?? '')}" placeholder="${esc(ph)}"></label>`;
+  const f = (k, step, min, ph) => `<label class="f"><span>${t('st.' + k)}</span><input type="number" data-st="${esc(k)}" step="${esc(step)}" min="${esc(min)}" value="${esc(st?.[k] ?? '')}" placeholder="${esc(ph)}"></label>`;
   const none = t('st.none'), auto = t('fig.auto2'), au = t('st.auto');
   return `${f('yStep', 'any', 0, au)}${f('yDiv', 1, 1, au)}${f('yMajor', 'any', 0, none)}${f('yMedium', 'any', 0, none)}${f('yMinor', 'any', 0, none)}<span></span>
     ${f('yLabelLen', 0.5, 0.5, 6)}${f('yMajorLen', 0.5, 0.5, 6)}${f('yMediumLen', 0.5, 0.5, 4.5)}${f('yMinorLen', 0.5, 0.5, 3)}
@@ -397,9 +397,9 @@ document.addEventListener('click', (e) => {
   }
 });
 export function styleFormHTML(showTaxa = true, lv = S.logView, kind = 'log') {
-  const st = mergedStyle(lv?.style), num = (k, lab, step = 'any', min = 0) => `<label class="f"><span>${t(lab)}</span><input type="number" data-st="${k}" step="${step}" min="${min}" value="${esc(st[k] ?? '')}" placeholder="${esc(t('fig.auto2'))}"></label>`;
-  const chk = (k, lab) => `<label class="chk"><input type="checkbox" data-st="${k}" ${st[k] ? 'checked' : ''}><span>${t(lab)}</span></label>`;
-  const sel = (k, lab, opts) => `<label class="f"><span>${t(lab)}</span><select data-st="${k}">${opts.map(([v, l]) => `<option value="${v}" ${String(st[k] ?? '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`;
+  const st = mergedStyle(lv?.style), num = (k, lab, step = 'any', min = 0) => `<label class="f"><span>${t(lab)}</span><input type="number" data-st="${esc(k)}" step="${esc(step)}" min="${esc(min)}" value="${esc(st[k] ?? '')}" placeholder="${esc(t('fig.auto2'))}"></label>`;
+  const chk = (k, lab) => `<label class="chk"><input type="checkbox" data-st="${esc(k)}" ${st[k] ? 'checked' : ''}><span>${t(lab)}</span></label>`;
+  const sel = (k, lab, opts) => `<label class="f"><span>${t(lab)}</span><select data-st="${esc(k)}">${opts.map(([v, l]) => `<option value="${esc(v)}" ${String(st[k] ?? '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`;
   return `${colOrderHTML(kind)}<div class="grid2">
     ${sel('yUnit', 'st.yUnit', [['', t('st.native')], ['m', 'm'], ['cm', 'cm'], ['mm', 'mm']])}
     ${sel('yUnitAge', 'st.yUnitAge', [['', t('st.native')], ['a', 'a'], ['ka', 'ka'], ['Ma', 'Ma']])}
@@ -416,10 +416,10 @@ export function speciesFormHTML(st) {
 }
 /** Figure-specific controls use the same vocabulary and settings as the core column. */
 export function taxaFormHTML(q, scope = 'figure') {
-  const select = (key, choices) => `<label class="f"><span>${t('taxa.' + key)}</span><select data-taxa="${key}">${choices.map((value) =>
-    `<option value="${value}" ${q[key] === value ? 'selected' : ''} ${key === 'layout' && value === 'stack' && ['none', 'kite'].includes(q.abundance) ? 'disabled' : ''}>${t('taxa.' + key + '.' + value)}</option>`).join('')}</select></label>`;
+  const select = (key, choices) => `<label class="f"><span>${t('taxa.' + key)}</span><select data-taxa="${esc(key)}">${choices.map((value) =>
+    `<option value="${esc(value)}" ${q[key] === value ? 'selected' : ''} ${key === 'layout' && value === 'stack' && ['none', 'kite'].includes(q.abundance) ? 'disabled' : ''}>${t('taxa.' + key + '.' + value)}</option>`).join('')}</select></label>`;
   const names = S.classes.filter((c) => c.id !== 'artifact').map((c) => c.name), hidden = new Set(q.hidden);
-  return `<div class="f" data-taxa-scope="${scope}"><span>${t('sp.title')}</span><div class="grid2">
+  return `<div class="f" data-taxa-scope="${esc(scope)}"><span>${t('sp.title')}</span><div class="grid2">
     ${select('layout', ['stack', 'overlay', 'separate'])}${select('abundance', ['none', 'bars', 'line', 'area', 'kite'])}
     ${select('occurrence', ['none', 'symbols', 'names', 'both'])}${select('source', ['all', 'objects', 'marks'])}
     ${select('scale', ['auto', 'percent'])}<label class="f"><span>${t('taxa.opacity')}</span><input type="number" data-taxa="opacity" min="0" max="100" step="5" value="${Math.round(q.opacity * 100)}"></label></div>
@@ -477,10 +477,10 @@ export function axesFormHTML(only = null, lv = S.logView, recNames = null) {
     if (id === 'secs') return `<tr class="axsub"><td></td><td colspan="8"><span style="display:grid;gap:6px;width:270px;max-width:100%;text-align:left"><label class="f"><span>${t('st.secOrient')}</span><select data-st="secOrient"><option value="v" ${stl.secOrient !== 'h' ? 'selected' : ''}>${t('st.secV')}</option><option value="h" ${stl.secOrient === 'h' ? 'selected' : ''}>${t('st.secH')}</option></select></label><label class="f"><span>${t('st.secLabel')}</span><select data-st="secLabel"><option value="name" ${stl.secLabel !== 'num' ? 'selected' : ''}>${t('st.secName')}</option><option value="num" ${stl.secLabel === 'num' ? 'selected' : ''}>${t('st.secNum')}</option></select></label></span></td></tr>`;
     if (id !== 'total' && id !== 'species') return '';
     const title = id === 'total' ? 'totalTitle' : 'speciesTitle', lab = id === 'total' ? 'st.totalTitle' : 'st.speciesTitle', ph = id === 'total' ? 'log.total' : 'log.species';
-    const shape = id === 'total' ? `<label class="f"><span>${t('st.totalStyle')}</span><select data-st="totalStyle">${['barsline', 'bars', 'line', 'points'].map((v) => `<option value="${v}" ${(stl.totalStyle || 'barsline') === v ? 'selected' : ''}>${t('st.ts.' + v)}</option>`).join('')}</select></label>` : '';
-    return `<tr class="axsub"><td></td><td colspan="8"><span style="display:grid;gap:6px;width:270px;max-width:100%;text-align:left"><label class="f"><span>${t(lab)}</span><input type="text" data-st="${title}" value="${esc(stl[title] || '')}" placeholder="${esc(t(ph))}"></label>${shape}</span></td></tr>`;
+    const shape = id === 'total' ? `<label class="f"><span>${t('st.totalStyle')}</span><select data-st="totalStyle">${['barsline', 'bars', 'line', 'points'].map((v) => `<option value="${esc(v)}" ${(stl.totalStyle || 'barsline') === v ? 'selected' : ''}>${t('st.ts.' + v)}</option>`).join('')}</select></label>` : '';
+    return `<tr class="axsub"><td></td><td colspan="8"><span style="display:grid;gap:6px;width:270px;max-width:100%;text-align:left"><label class="f"><span>${t(lab)}</span><input type="text" data-st="${esc(title)}" value="${esc(stl[title] || '')}" placeholder="${esc(t(ph))}"></label>${shape}</span></td></tr>`;
   };
-  const cell = (id, k, ph, step = 'any') => `<input type="number" data-ax="${esc(id)}" data-k="${k}" step="${step}" value="${esc(ax[id]?.[k] ?? '')}" placeholder="${esc(ph)}" aria-label="${esc(id + ' ' + k)}" style="width:100%;min-width:54px">`;
+  const cell = (id, k, ph, step = 'any') => `<input type="number" data-ax="${esc(id)}" data-k="${esc(k)}" step="${esc(step)}" value="${esc(ax[id]?.[k] ?? '')}" placeholder="${esc(ph)}" aria-label="${esc(id + ' ' + k)}" style="width:100%;min-width:54px">`;
   return `<div class="f"><span>${t('st.axes')}</span><div style="overflow-x:auto"><table class="axtab" style="font-size:11px;border-collapse:collapse;width:100%">
     <tr><th></th><th>${t('st.ax.w')}</th><th>${t('st.ax.min')}</th><th>${t('st.ax.max')}</th><th>${t('st.ax.div')}</th><th>${t('st.ax.dec')}</th><th>${t('edit.step')}</th><th title="${esc(t('st.ax.revTip'))}">⇄</th><th title="${esc(t('st.ax.logTip'))}">log</th></tr>
     ${cols.filter(([id]) => !only || only.includes(id)).map(([id, name, w]) => `<tr><td title="${esc(name)}" style="max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</td>
@@ -595,9 +595,9 @@ export function renderRecList() {
       <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><b>${esc(r.name)}</b><button class="btn small ghost" data-del="1" aria-label="${esc(t('a11y.delete'))}">✕</button></div>
       ${r.id === lastImported ? `<div class="row"><span class="note">${t('imp.justAdded')}</span><button class="btn small" data-undo="1">${t('imp.undo')}</button></div>` : ''}
       <span class="note">${t(r.axis === 'age' ? 'log.age' : 'log.depth')} · ${r.series[0]?.x.length || 0} ${t('log.points')}</span>
-      ${r.series.map((s, i) => `<div class="row srow"><label class="chk"><input type="checkbox" data-s="${i}" data-k="show" ${s.show ? 'checked' : ''}><span>${esc(s.name)}</span></label>
-        <input type="color" data-s="${i}" data-k="color" value="${esc(validHexColor(s.color, REC_COLORS[i % REC_COLORS.length]))}" aria-label="${esc(t('a11y.color'))}">
-        <label class="chk note"><input type="checkbox" data-s="${i}" data-k="reverse" ${s.reverse ? 'checked' : ''}>${t('log.reverse')}</label></div>`).join('')}
+      ${r.series.map((s, i) => `<div class="row srow"><label class="chk"><input type="checkbox" data-s="${esc(i)}" data-k="show" ${s.show ? 'checked' : ''}><span>${esc(s.name)}</span></label>
+        <input type="color" data-s="${esc(i)}" data-k="color" value="${esc(validHexColor(s.color, REC_COLORS[i % REC_COLORS.length]))}" aria-label="${esc(t('a11y.color'))}">
+        <label class="chk note"><input type="checkbox" data-s="${esc(i)}" data-k="reverse" ${s.reverse ? 'checked' : ''}>${t('log.reverse')}</label></div>`).join('')}
     </div>`).join('') || `<p class="note">${t('log.noRecords')}</p>`;
 }
 $('recList').addEventListener('change', (e) => {
@@ -631,18 +631,18 @@ function openRecordImport(tab, fileName) {
   renderImportReport($('recReport'), tab, (next) => { try { openRecordImport(next, fileName); } catch (err) { toast(t('rec.err', { m: err.message || err })); } });
   const g = guessAxisColumn(tab.headers);
   /** @type {any} */ ($('recName')).value = fileName.replace(/\.[^.]+$/, '');
-  $('recX').innerHTML = tab.headers.map((h, i) => `<option value="${i}" ${i === g.col ? 'selected' : ''}>${esc(h)}</option>`).join('');
+  $('recX').innerHTML = tab.headers.map((h, i) => `<option value="${esc(i)}" ${i === g.col ? 'selected' : ''}>${esc(h)}</option>`).join('');
   /** @type {any} */ ($('recAxis')).value = g.axis;
   // card Q3: the unit of the axis column, proposed from its header (or the core's own unit), converted when the record is added
   const fillUnits = () => {
     const axis = /** @type {any} */ ($('recAxis')).value, header = tab.headers[+(/** @type {any} */ ($('recX')).value)] || '';
     const units = axis === 'age' ? ['a', 'ka', 'Ma'] : ['mm', 'cm', 'm'], guess = guessRecordUnit(header, axis) || recordAxisUnit(axis);
-    $('recUnit').innerHTML = units.map((u) => `<option value="${u}" ${u === guess ? 'selected' : ''}>${u}</option>`).join('');
+    $('recUnit').innerHTML = units.map((u) => `<option value="${esc(u)}" ${u === guess ? 'selected' : ''}>${u}</option>`).join('');
   };
   $('recAxis').onchange = fillUnits;
   const fillCols = () => {
     const xc = +$('recX').value;
-    $('recCols').innerHTML = tab.headers.map((h, i) => i === xc ? '' : `<label class="chk"><input type="checkbox" value="${i}" ${tab.rows.some((r) => r[i] != null) ? 'checked' : 'disabled'}><span>${esc(h)}</span></label>`).join('');
+    $('recCols').innerHTML = tab.headers.map((h, i) => i === xc ? '' : `<label class="chk"><input type="checkbox" value="${esc(i)}" ${tab.rows.some((r) => r[i] != null) ? 'checked' : 'disabled'}><span>${esc(h)}</span></label>`).join('');
   };
   $('recX').onchange = () => { fillCols(); fillUnits(); }; fillCols(); fillUnits();
   const dialog = /** @type {any} */ ($('recDlg'));

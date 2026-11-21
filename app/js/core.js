@@ -506,3 +506,29 @@ export function rleDecode(rle, n, Type = Int32Array) {
   for (let k = 0; k < rle.length; k += 2) { out.fill(rle[k], p, p + rle[k + 1]); p += rle[k + 1]; }
   return out;
 }
+
+/** Card Q9: the only image URLs a project may carry (thumbnails written by `canvas.toDataURL`). */
+const SAFE_IMAGE_URL = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+/**
+ * Card Q9: `s` when it is a base64 PNG, JPEG or WebP data URL, else ''. Any other scheme (`javascript:`, `http:`, `data:image/svg+xml`, ...)
+ * or a value with quotes or spaces is refused, so a thumbnail from a project file can be put in `<img src>` safely.
+ * @param {unknown} s
+ * @returns {string}
+ */
+export function safeImageURL(s) { return typeof s === 'string' && SAFE_IMAGE_URL.test(s) ? s : ''; }
+
+/**
+ * Card Q9: remove every thumbnail of a project (library examples, objects of sections) that `safeImageURL` refuses. Changes `project` in
+ * place and returns it; valid thumbnails are kept unchanged. Readers treat a missing thumbnail as "no image".
+ * @template T
+ * @param {T} project
+ * @returns {T}
+ */
+export function sanitizeThumbs(project) {
+  const p = /** @type {any} */ (project);
+  if (!p || typeof p !== 'object') return project;
+  for (const e of Array.isArray(p.library) ? p.library : []) if (e?.thumb && !safeImageURL(e.thumb)) delete e.thumb;
+  const sections = [...(Array.isArray(p.sections) ? p.sections : []), ...(Array.isArray(p.cores) ? p.cores : []).flatMap((/** @type {any} */ c) => (Array.isArray(c?.sections) ? c.sections : []))];
+  for (const q of sections) for (const o of Array.isArray(q?.objects) ? q.objects : []) if (o?.th && !safeImageURL(o.th)) delete o.th;
+  return project;
+}

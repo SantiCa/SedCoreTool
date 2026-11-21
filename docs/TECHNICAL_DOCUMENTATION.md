@@ -1084,6 +1084,9 @@ browser (`ml.excluded`). Library examples can be removed.
 **Examples from other projects:** the `lite` index stores, for each labelled trace, `{key, name, x, core, thumb}`
 (`key = project|core|section|object`). They can be added to the project library (`library: {key, name, x, thumb,
 from}`); if the taxon does not exist, it is created with that name.
+A thumbnail (`library[].thumb`, object `th`, `lite` example `thumb`) is used only when it is a base64 data URL of a PNG, JPEG or WebP
+image (`safeImageURL` in `core.js`: `^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$`); any other value is dropped when a project
+is imported or opened (`sanitizeThumbs`) and is not drawn.
 
 **Stored weights** (`Classifier.toJSON`): `k`, `ν`, mean and standard deviation of each descriptor, novelty scale `m`,
 accuracy, counts and the examples (descriptors rounded to 5 decimals). The project file stores `models.project` and
