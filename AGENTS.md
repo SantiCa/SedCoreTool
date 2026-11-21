@@ -205,17 +205,22 @@ Done when:    observable acceptance criteria.
   written in terms of tiers, not products. When the main session runs on the **most capable tier** and its client can
   start sub-agents, the session acts as **director** and **prefers delegating to smaller, faster sub-agents whenever the
   task allows it, to save tokens and quota** on the most capable model. Without asking again, it delegates any authorised
-  `fast`-tier card, and the bounded sub-tasks of a larger card, to a sub-agent pinned to the smallest tier that fits:
-  - **Smallest tier** (for example Claude Haiku, Gemini Flash-Lite, the smallest GPT model): read-only search and
-    inventories, trivial edits, high-volume or repetitive lookups.
-  - **Fast tier** (see above): bounded implementation following an exact brief, mechanical edits across many sites,
-    documentation, repetitive tests, scripted measurements.
-  - **Most capable tier** as a sub-agent: only when a delegated sub-task needs it.
-  - **Setting the model and effort.** Use the client's own mechanism to choose the sub-agent's model and, where it
-    exists, its effort (for example the `model` of Claude Code's sub-agent tool, `Model` of Antigravity's
-    `invoke_subagent`, the model and reasoning effort of a Codex sub-agent). If the client cannot pin a model, say so
-    once and use the closest option it offers. If it cannot start sub-agents at all, the session does the work itself;
-    nothing else in these rules changes.
+  `fast`-tier card, and the bounded sub-tasks of a larger card, to a sub-agent pinned to the smallest tier **and the
+  lowest effort** that fit (effort levels as defined under *Which model*):
+  - **Smallest tier, effort low** (for example Claude Haiku, Gemini Flash-Lite, the smallest GPT model): read-only
+    search and inventories that only locate code, trivial edits, high-volume or repetitive lookups, running scripted
+    checks and reporting their result.
+  - **Fast tier, effort low:** documentation, running a scripted measurement or gate.
+  - **Fast tier, effort medium:** bounded implementation following an exact brief, mechanical edits across many
+    sites, writing repetitive tests, read-only inventories that must classify what they find (for example whether a
+    value can come from an imported file).
+  - **Most capable tier** as a sub-agent: only when a delegated sub-task needs it, at the effort the card's `Model:`
+    field asks for.
+  - **Setting the model and effort.** State both in every delegation and set them with the client's own mechanism
+    (for example the `model` and `effort` of Claude Code's sub-agent tool, `Model` of Antigravity's `invoke_subagent`,
+    the model and reasoning effort of a Codex sub-agent). If the client cannot pin a sub-agent's model or effort, say
+    so once and use the closest option it offers (a smaller model rather than a larger one with less effort). If it
+    cannot start sub-agents at all, the session does the work itself; nothing else in these rules changes.
   - **Critical cards** (`most capable` in the `Model:` field: security, saving, formats, packaging, dependencies) stay
     with the director for design, decisions, the acceptance tests that define the card's criterion, and the review.
     Within them, only read-only exploration and mechanical edits that follow the director's exact list may be
