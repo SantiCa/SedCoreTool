@@ -36,6 +36,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.42: a tiled section can cover a row window of its stored image (`tiled.window`; a project with one is saved as format 7, which older builds open read-only); new pure module `tiledrecord.js`; nothing in the interface creates a window yet. Details in the card's *As built*.
 - Card M8.4.41: estimate of a tiled section's object statistics at the budget trip and the number of parts to split it into (`estimateSectionStatsBytes`, `partsToFitStats` in `tiledit.js`, `MaskTiles.labelledTileCount`); new tests in `tests/app/tiledstatsbudget.test.mjs` and the M8.4.37 block of `tests/e2e/tiled-sections.mjs`. Details in the card's *As built*.
 - Card M8.4.19: milestone gate of part C (tile store) met: GitHub checks on Windows, macOS and Linux and the interactive targets of the tiled viewer on Windows (`docs/validation/M8.4.19-*.json`). Details in the card's *As built*.
 - Card M8.4.37: memory budget of `TiledObjectStats` (`STATS_BUDGET_BYTES`, 256 MiB) measured with `tools/measure_tiled_stats_memory.mjs` (records in `docs/validation/M8.4.37-*.json`); new tests in `tests/app/tiledstatsbudget.test.mjs` and `tests/e2e/tiled-sections.mjs`. Details in the card's *As built*.

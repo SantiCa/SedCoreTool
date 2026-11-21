@@ -7,23 +7,27 @@ import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlac
 import { TILE, assembleLevel, levelPositions, tileRgba } from './tiledsection.js';
 import { overlayLayout, paintOverlay } from './tiledmasks.js';
 import { windowRange } from './tiledit.js';
+import { bandPositions, cropRows, windowTop, workingBand } from './tiledrecord.js';
 import { t } from './i18n.js';
 import { $, S, sec } from './state.js';
 
 /** @param {any} ctx the view, the bridge and the page functions the viewer uses (see the call in app.js) */
 export function createTiledView(ctx) {
   const { toast, requestRender, esc, maskLoader, recoverEngine } = ctx;
-  /** The working image of a tiled section: its proxy level of the pyramid, read through the engine in batches of 16 verified tiles. */
+  /** The working image of a tiled section: its proxy level of the pyramid, read through the engine in batches of 16 verified tiles. Card M8.4.42:
+   *  with a window, only the tile rows under it are read and the window's rows are cut from them (`workingBand`). */
   async function tiledWorkingImage(tiled) {
-    const level = tiled.levels[tiled.level], positions = levelPositions(level), tiles = [];
+    const level = tiled.levels[tiled.level], band = workingBand(level, tiled.level, tiled.window), positions = band ? bandPositions(band) : levelPositions(level), tiles = [];
+    const firstRow = band ? band.row0 : 0;
     for (let i = 0; i < positions.length; i += 16) {
       const batch = positions.slice(i, i + 16), read = await ctx.TILES.read(tiled.pyramid, tiled.level, batch);
       if (read.error) throw new Error(t('tiles.err', { code: read.error.code }));
       const bytes = new Uint8Array(read.ok.bytes.buffer || read.ok.bytes, read.ok.bytes.byteOffset || 0, read.ok.bytes.byteLength);
       let offset = 0;
-      read.ok.tiles.forEach((tile, k) => { tiles.push({ row: batch[k][0], col: batch[k][1], bytes: bytes.subarray(offset, offset + tile.byte_length) }); offset += tile.byte_length; });
+      read.ok.tiles.forEach((tile, k) => { tiles.push({ row: batch[k][0] - firstRow, col: batch[k][1], bytes: bytes.subarray(offset, offset + tile.byte_length) }); offset += tile.byte_length; });
     }
-    return assembleLevel(tiles, level, tiled.channels, tiled.bits);
+    if (!band) return assembleLevel(tiles, level, tiled.channels, tiled.bits);
+    return cropRows(assembleLevel(tiles, band.level, tiled.channels, tiled.bits), band.cropY, band.height);
   }
 
   /* The viewer's full-resolution tiles (card M8.4.15 step 4): one page cache with one budget, one scheduler per pyramid. A tile becomes an
@@ -114,11 +118,12 @@ export function createTiledView(ctx) {
     if (k >= tiled.level || !tilesShowSource(s)) { scheduler.want(k, []); return; }
     const x0 = Math.max(vx, roi.x0), y0 = Math.max(vy, roi.y0), x1 = Math.min(vx + cw / z, roi.x1), y1 = Math.min(vy + ch / z, roi.y1);
     if (x1 <= x0 || y1 <= y0) { scheduler.want(k, []); return; }
-    const rect = { x0: x0 * ds, y0: y0 * ds, x1: x1 * ds, y1: y1 * ds }, visible = tileRange(levels, k, rect, 0), prefix = tiled.pyramid + '/';
+    // Card M8.4.42: tiles are chosen and placed in the pyramid's rows, the section's rows shifted by its window (the clip stays in the section's)
+    const oy = windowTop(tiled), rect = { x0: x0 * ds, y0: y0 * ds + oy, x1: x1 * ds, y1: y1 * ds + oy }, visible = tileRange(levels, k, rect, 0), prefix = tiled.pyramid + '/';
     const protect = new Set();
     for (let row = visible.row0; row <= visible.row1; row++) for (let col = visible.col0; col <= visible.col1; col++) protect.add(prefix + tileKey(k, row, col));
     scheduler.want(k, tilesByDistance(tileRange(levels, k, rect, 1), { x: (rect.x0 + rect.x1) / 2, y: (rect.y0 + rect.y1) / 2 }), protect);
-    const placement = { vx, vy, zoom: z, workingLevel: tiled.level };
+    const placement = { vx, vy: vy + oy / ds, zoom: z, workingLevel: tiled.level };
     ctx.vctx.save();
     ctx.vctx.beginPath(); ctx.vctx.rect((x0 - vx) * z, (y0 - vy) * z, (x1 - x0) * z, (y1 - y0) * z); ctx.vctx.clip();
     ctx.vctx.imageSmoothingEnabled = false;                    // nearest pixel, as the working image is drawn

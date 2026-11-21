@@ -178,6 +178,7 @@ export class MaskSync {
         if (this.stopped) break;
         if (/** @type {any} */ (error)?.local) { this.onState({ state: 'limit', manifest: this.manifest, error }); break; }   // waits for the next change
         this.wanted = true;
+        this.lastError = { code: /** @type {any} */ (error)?.code ?? null, field: /** @type {any} */ (error)?.field ?? null, message: String(/** @type {any} */ (error)?.message ?? error).slice(0, 200) };   // for reports and tests
         this.onState({ state: 'failed', manifest: this.manifest, error });
         const pause = this.retryMs[Math.min(this.failures, this.retryMs.length - 1)];
         this.failures++;

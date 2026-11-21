@@ -9,6 +9,7 @@ import { binRowsOfSection, binsFromRowCounts } from './sectionanalysis.js';
 import { features } from './imageproc.js';
 import { pxPerCm } from './sectiondepth.js';
 import { tileRgba } from './tiledsection.js';
+import { pyramidPositions, windowTileBytes } from './tiledrecord.js';
 import { t } from './i18n.js';
 import { S, sec } from './state.js';
 
@@ -20,15 +21,19 @@ import { S, sec } from './state.js';
 export function createTiledState(ctx) {
   const { toast, afterChange, analysisProject, analyze, effClassArray, renderResults, requestRender, sourceBox, sourceRoi } = ctx;
   /** Object statistics of a tiled section, per tile and from the level-0 pixels (card M8.4.16 step 3); bounding boxes also in working pixels. */
-  /** RGBA level-0 pixel tiles of a tiled section, read through the engine in batches of 16. */
+  /** RGBA level-0 pixel tiles of a tiled section, read through the engine in batches of 16. `positions` are in the section's grid; card M8.4.42:
+   *  with a window they are read shifted to its rows, and rows below the window come back as a source ending there pads them (zero). */
   async function level0Rgba(s, positions) {
     const tiled = s.tiled, out = [];
     for (let i = 0; i < positions.length; i += 16) {
-      const batch = positions.slice(i, i + 16), read = await ctx.TILES.read(tiled.pyramid, 0, batch);
+      const batch = positions.slice(i, i + 16), read = await ctx.TILES.read(tiled.pyramid, 0, pyramidPositions(tiled, batch));
       if (read.error) throw new Error(t('tiles.err', { code: read.error.code, field: read.error.field || '' }));
       const bytes = new Uint8Array(read.ok.bytes.buffer || read.ok.bytes, read.ok.bytes.byteOffset || 0, read.ok.bytes.byteLength);
       let offset = 0;
-      for (const tile of read.ok.tiles) { out.push(tileRgba(bytes.subarray(offset, offset + tile.byte_length), tiled.channels, tiled.bits)); offset += tile.byte_length; }
+      read.ok.tiles.forEach((tile, k) => {
+        out.push(tileRgba(windowTileBytes(tiled, batch[k][0], bytes.subarray(offset, offset + tile.byte_length), tiled.channels, tiled.bits), tiled.channels, tiled.bits));
+        offset += tile.byte_length;
+      });
     }
     return out;
   }

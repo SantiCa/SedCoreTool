@@ -7,6 +7,7 @@ import { tileHistogram } from './tiledcounts.js';
 import { TiledObjectStats } from './tiledit.js';
 import { CacheRejected, decodeReopenCache, encodeReopenCache, statsCover } from './tiledcache.js';
 import { backupTiledSections, restoreVersion, restoreSource, packageTiledSections, keptSourceBytes } from './tiledbackup.js';
+import { recordFitsPyramid, validTiledRecord } from './tiledrecord.js';
 import { features } from './imageproc.js';
 import { pxPerCm } from './sectiondepth.js';
 import { t } from './i18n.js';
@@ -22,8 +23,6 @@ import { APP, S } from './state.js';
 export function createTiledProject(ctx) {
   const { toast, storeProject, maskSync, maskLoader, newSection, sectionFields, greyRgba, sourceRoi, tileBuildDialog, tiledCounts, tiledStatsRunner,
     tiledWorkingImage, serTiledSection, hexDigest } = ctx;
-  const validTiledRecord = (r) => r && r.version === 1 && r.store === 2 && /^[0-9a-f]{64}$/.test(r.manifest || '') && /^[0-9a-f]{64}$/.test(r.source?.sha256 || '')
-    && Number.isSafeInteger(r.width) && r.width > 0 && Number.isSafeInteger(r.height) && r.height > 0 && Number.isSafeInteger(r.level) && r.level >= 0;
 
   /**
    * A saved tiled section (card M8.4.18a): its pyramid from the engine's cache or built again from the remembered source (a grey image and no edits when
@@ -39,14 +38,15 @@ export function createTiledProject(ctx) {
     try {
       const opened = await ctx.TILES.reopen(project, rec.source.sha256, key);
       if (opened.error) throw new Error(t('tiles.err', { code: opened.error.code, field: opened.error.field || '' }));
-      let tiled, working;
+      let /** @type {any} */ tiled, working;
+      const window = rec.window ? { window: { y0: rec.window.y0, y1: rec.window.y1 } } : {};   // card M8.4.42: the rows of the stored image it covers
       if (opened.ok.available) {
         const info = (await ctx.TILES.info(rec.source.sha256)).ok;
-        if (!info || info.width !== rec.width || info.height !== rec.height) throw new Error(t('load.badMask', { s: q.name || '?', k: 'tiled' }));
-        tiled = { pyramid: rec.source.sha256, level: rec.level, levels: info.levels, channels: info.channels, bits: info.bits, source: { name: rec.source.name, size: rec.source.size } };
+        if (!info || !recordFitsPyramid(rec, info)) throw new Error(t('load.badMask', { s: q.name || '?', k: 'tiled' }));
+        tiled = { pyramid: rec.source.sha256, level: rec.level, levels: info.levels, channels: info.channels, bits: info.bits, source: { name: rec.source.name, size: rec.source.size }, ...window };
         working = await tiledWorkingImage(tiled);
       } else {
-        tiled = { pyramid: rec.source.sha256, level: rec.level, levels: null, channels: 3, bits: 8, source: { name: rec.source.name, size: rec.source.size }, missing: true };
+        tiled = { pyramid: rec.source.sha256, level: rec.level, levels: null, channels: 3, bits: 8, source: { name: rec.source.name, size: rec.source.size }, missing: true, ...window };
         working = { w: q.w, h: q.h, rgba: greyRgba(q.w, q.h), rgba16: null };
       }
       const s = newSection({ name: q.name, file: { name: q.file.name, type: q.file.type, tiled: true }, w: working.w, h: working.h, orig: working.rgba,

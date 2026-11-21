@@ -625,10 +625,10 @@ try {
     for (let k = 0; k < out.length; k += 8192) text += String.fromCharCode(...out.subarray(k, k + 8192));
     return btoa(text);
   }, fs.readFileSync(image).toString('base64')), 'base64'));
-  const added = async (force) => {
+  const added = async (force, file = lossless) => {
     await on.page.evaluate((force) => { window.ichantool.forceTiledSections(force); window.ichantool.S.settings.maxMP = 12; }, force);
     const before = await on.page.evaluate(() => window.ichantool.S.sections.length);
-    await (await on.page.$('#addImg')).uploadFile(lossless);
+    await (await on.page.$('#addImg')).uploadFile(file);
     await on.page.waitForSelector('#pcOk', { timeout: 30000 }); await on.page.click('#pcOk');
     await on.page.waitForFunction((n) => window.ichantool.S.sections.length === n + 1, { timeout: 600000, polling: 200 }, before);
     await on.page.waitForFunction(() => document.getElementById('busy').hidden, { timeout: 600000 });
@@ -649,7 +649,13 @@ try {
     // Measured before every stroke, as in the editing steps above (the pane may scroll; card M8.4.32).
     const viewBox = () => page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
     let box = await viewBox();
-    const idle = () => page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.masksSettled() && !window.ichantool.objectsWaiting(), { polling: 50, timeout: 60000 });
+    const idle = () => page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.masksSettled() && !window.ichantool.objectsWaiting(), { polling: 50, timeout: 60000 })
+      .catch(async (error) => {                                          // card M8.4.42: what was still waiting, for the failure message
+        const state = await page.evaluate(() => window.ichantool.S.sections.filter((q) => q.tiled).map((q) => ({ id: q.id, window: q.tiled.window ?? null, frozen: q.frozen ?? null,
+          sync: q._maskSync && { settled: q._maskSync.settled, running: !!q._maskSync.running, failures: q._maskSync.failures, lastError: q._maskSync.lastError ?? null },
+          stats: q._statsRunner && { idle: q._statsRunner.idle, failed: q._statsRunner.failed.size } })));
+        throw new Error(error.message + ' ' + JSON.stringify(state) + ' ' + JSON.stringify(toasts.slice(-4)));
+      });
     const draw = async (tool, points) => {
       await page.evaluate((tool) => window.ichantool.setTool(tool), tool);
       box = await viewBox();
@@ -1224,6 +1230,73 @@ try {
   assert.deepEqual([afterBudget.runs, afterBudget.exRuns], [raceDump.runs, raceDump.exRuns], 'the masks are those saved before');
   assert.ok(await on.page.evaluate((id) => !!window.ichantool.S.sections.find((q) => q.id === window.__tiledId).objects.get(id)?.stats, dropped37.id), 'the statistics are computed again at the next opening');
   console.log('Statistics dropped beyond their budget: "not available" shown, deletion refused with the reason, masks saved unchanged, statistics computed again on reopening');
+  // Card M8.4.42: a section over a row window [y0, y1) of the stored image and a section made from a source holding only those rows. The rows are cut
+  // from the lossless copy by the page (a PNG of the same pixels) and added twice, tiled at factor 1; the saved record of the second is pointed at the
+  // whole image's pyramid with the window (nothing in the interface makes one yet). Its reopening cache names the other source and is refused, so its
+  // statistics are computed from the whole image's level-0 tiles. The same scripted edits on both (the wand reads pixels) must then give identical
+  // working images, masks, objects with their statistics, and interval table: exact equality, both tiled, the same tiles summed in the same order.
+  {
+    const rows = { y0: 4096, y1: 9096 };
+    const cutPng = path.join(os.tmpdir(), `sedcoretool-window-${process.pid}.png`);
+    fs.writeFileSync(cutPng, Buffer.from(await on.page.evaluate(async ([base64, y0, y1]) => {
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)), bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+      const canvas = new OffscreenCanvas(bitmap.width, y1 - y0); canvas.getContext('2d').drawImage(bitmap, 0, y0, bitmap.width, y1 - y0, 0, 0, bitmap.width, y1 - y0);
+      const out = new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer()); let text = '';
+      for (let k = 0; k < out.length; k += 8192) text += String.fromCharCode(...out.subarray(k, k + 8192));
+      return btoa(text);
+    }, [fs.readFileSync(lossless).toString('base64'), rows.y0, rows.y1]), 'base64'));
+    await added(true);                                                   // the whole image again, tiled at factor 1 (its pyramid is in the engine's cache)
+    const wholePyramid = await on.page.evaluate(() => { const q = window.ichantool.S.sections.at(-1); return { sha256: q.tiled.pyramid, level: q.tiled.level, name: q.tiled.source?.name ?? null, size: q.tiled.source?.size ?? null }; });
+    assert.equal(wholePyramid.level, 0, 'the whole image is tiled at factor 1');
+    const lastIds = async () => on.page.evaluate(() => window.ichantool.S.sections.slice(-1).map((q) => q.id)[0]);
+    await added(true, cutPng); const cutId = await lastIds();
+    await added(true, cutPng); const windowId = await lastIds();
+    const saved = await on.page.evaluate(async (ids) => {
+      const inRecord = () => { const p = window.ichantool.serialize(); return ids.every((id) => p.cores.some((c) => c.sections.some((q) => q.id === id))); };
+      for (let attempt = 0; attempt < 10 && !inRecord(); attempt++) {
+        await window.ichantool.saveNow();
+        for (let k = 0; k < 600 && !window.ichantool.masksSettled(); k++) await new Promise((r) => setTimeout(r, 100));
+      }
+      await window.ichantool.saveNow();
+      const { getProject } = await import(new URL('js/storage.js', location.href).href);
+      return JSON.parse(JSON.stringify(await getProject(window.ichantool.S.id)));
+    }, [cutId, windowId]);
+    const record = saved.cores.flatMap((c) => c.sections).find((q) => q.id === windowId);
+    assert.ok(record?.tiled && record.tiled.height === rows.y1 - rows.y0 && record.tiled.window === undefined && saved.version === 6, 'both cut sections saved, format 6');
+    record.tiled.source = { sha256: wholePyramid.sha256, size: wholePyramid.size, name: wholePyramid.name };
+    record.tiled.window = { y0: rows.y0, y1: rows.y1 };
+    const opened = await on.page.evaluate(async ([project, cutId, windowId]) => {
+      await window.ichantool.loadProject(project);
+      for (let i = 0; i < 2400 && !(window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle()); i++) await new Promise((r) => setTimeout(r, 50));
+      const { S } = window.ichantool, a = S.sections.findIndex((q) => q.id === cutId), b = S.sections.findIndex((q) => q.id === windowId), w = S.sections[b];
+      Object.assign(w, { top: S.sections[a].top, bottom: S.sections[a].bottom, units: S.sections[a].units });   // compare on the same depths
+      const digest = async (q) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', q.orig))].map((v) => v.toString(16).padStart(2, '0')).join('');
+      return { a, b, window: w.tiled?.window ?? null, frozen: w.frozen ?? null, cached: w._reopenCached ?? null, sizes: [S.sections[a], w].map((q) => [q.w, q.h, q.full?.w, q.full?.h]),
+        images: [await digest(S.sections[a]), await digest(w)], readOnly: window.ichantool.saveBlockers().readOnlyProject };
+    }, [saved, cutId, windowId]);
+    assert.deepEqual(opened.window, rows, 'the section was opened with its window: ' + JSON.stringify(opened));
+    assert.equal(opened.frozen, null); assert.equal(opened.cached, null, 'the reopening cache of the other source was refused');
+    assert.equal(opened.readOnly, false, 'a format-7 project is edited by this build');
+    assert.deepEqual(opened.sizes[1], opened.sizes[0], 'the same working and full sizes');
+    assert.equal(opened.images[1], opened.images[0], 'identical working images');
+    await script(opened.a); await script(opened.b);
+    const cut = await dump(opened.a), win = await dump(opened.b);
+    assert.ok(cut.runs.length > 50 && cut.exRuns.length > 0 && cut.usedStacks.length > 0 && cut.objects.length >= 2, 'the script made labels, exclusion and overlaps');
+    assert.deepEqual(win.runs, cut.runs, 'window: labels'); assert.deepEqual(win.exRuns, cut.exRuns, 'window: exclusion');
+    assert.deepEqual(win.usedStacks, cut.usedStacks, 'window: overlaps'); assert.equal(win.nextId, cut.nextId, 'window: nextId');
+    assert.deepEqual(win.objects, cut.objects, 'window: objects with their statistics, exactly');
+    const cutTable = await table(opened.a), winTable = await table(opened.b);
+    assert.ok(cutTable.bins.length > 10 && cutTable.bins.some((b) => b.pct > 0), 'an interval table with bioturbation');
+    assert.deepEqual(winTable.bins, cutTable.bins, 'window: interval table');
+    const version = await on.page.evaluate(async () => { await window.ichantool.saveNow(); return window.ichantool.serialize().version; });
+    assert.equal(version, 7, 'a project with a windowed section is saved as format 7');
+    // Every send of the edited sections has finished before the steps below delete this project's folder.
+    await on.page.waitForFunction(() => window.ichantool.S.cores.flatMap((c) => c.sections).every((q) => !q._maskSync || (q._maskSync.settled && !q._maskSync.running)),
+      { polling: 100, timeout: 120000 });
+    console.log('Window block, sends:', JSON.stringify(await on.page.evaluate(() => window.ichantool.S.sections.filter((q) => q._maskSync).map((q) => ({ id: q.id, failures: q._maskSync.failures, lastError: q._maskSync.lastError ?? null })))));
+    fs.rmSync(cutPng, { force: true });
+    console.log(`Row window ${rows.y0}-${rows.y1} of the stored image against a source of only those rows: identical working image, ${cut.runs.length} label runs, ${cut.objects.length} objects with statistics, ${cutTable.bins.length} bins; saved as format 7`);
+  }
   // (3) Deleting a project from the library deletes its folder, and only that one.
   const originalFolder = manifestFile.slice(0, manifestFile.indexOf(path.sep + 'tiles' + path.sep));
   await on.page.evaluate(async (id) => {

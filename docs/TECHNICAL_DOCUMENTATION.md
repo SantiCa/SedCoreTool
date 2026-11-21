@@ -167,6 +167,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `tiledview.js` | The viewer of tiled sections (card M8.4.30 step 4): working image from the pyramid, tile cache and schedulers, mask overlay, the dialog of a long build or copy; context object from `app.js` | No (controller) |
 | `tiledtools.js` | Editing tiled sections (card M8.4.30 step 3): strokes on edit windows, undo and redo of tiled edits, wand, lasso, scissors and object operations, the wait for objects' statistics; context object from `app.js` | No (controller) |
 | `tiledstate.js` | One tiled section's state behind the page (card M8.4.30 step 2): per-tile object statistics, row counts and interval table, reads of level-0 pixels and dropped mask tiles, mask sends to the engine's store; context object from `app.js` | No (controller) |
+| `tiledrecord.js` | The saved record of a tiled section and its row window (card M8.4.42): the record written and validated (`serTiledSection`, `validTiledRecord`), the project's format version (6, or 7 with a window) and whether a newer one opens read-only, and the window's translation of level-0 tile rows, of the last tile and of the working image's band | Yes |
 | `tiledproject.js` | The project side of tiled sections (card M8.4.30 step 1): reopening a saved tiled section, the lock of a missing stored version, the store folder that follows its project, the store's part of a save; it receives what it needs from `app.js` in one context object | No (controller) |
 | `taxa.js` | The ichnotaxa of a project (card Q1): use of a class across cores, deleting it from every core and restoring it, repairing labels of classes that no longer exist | Yes |
 | `singleflight.js` | One run at a time with at most one more run for the requests made meanwhile, if the revision changed (card M8.4.31): project saves; `nestedIndicator`, one busy sign for overlapping operations (card M8.4.39) | Yes |
@@ -3254,13 +3255,23 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   store"). Clean tiles beyond 128 MiB may be dropped from the page; they are read back from the store when the viewer, a stroke or the
   statistics need them (a stroke over a tile not read back yet asks to try again in a moment). The edit window pins its tiles, and writes a layer
   the tile does not hold as a whole.
-- **Saving and reopening tiled sections** (`serTiledSection`, `settleTiledSections`, `retainStore`, `loadTiledSection`, `placeholderSection` in
-  `app.js`; `desktop/tile-ipc.js`; card M8.4.18a; contract §8.7). *Record:* a tiled section is saved like any section without its `labels` and
-  `exclude` arrays, with its overlap stacks as they are (never renumbered) and with `file: {name, type, tiled: true}` and
-  `tiled: {version: 1, store: 2, manifest, width, height, level, source: {sha256, size, name}}`; `manifest` is a stored version that holds every edit
-  of the section. A project that has a tiled section is written as format version 6; every other project stays version 5, unchanged. A build of
+- **Saving and reopening tiled sections** (`serTiledSection` and `validTiledRecord` in `tiledrecord.js`; `settleTiledSections`, `retainStore`,
+  `loadTiledSection` in `tiledproject.js`; `placeholderSection` in `app.js`; `desktop/tile-ipc.js`; card M8.4.18a; contract §8.7). *Record:* a tiled
+  section is saved like any section without its `labels` and `exclude` arrays, with its overlap stacks as they are (never renumbered) and with
+  `file: {name, type, tiled: true}` and `tiled: {version: 1, store: 2, manifest, width, height, level, source: {sha256, size, name}}`, plus
+  `window: {y0, y1}` for a section that has a row window (below); `manifest` is a stored version that holds every edit of the section. A project that
+  has a tiled section is written as format version 6, and as version 7 when one of its sections has a window (card M8.4.42, decision X4); every other
+  project stays version 5, unchanged. A project of a newer version than the build knows opens read-only (version 7 in a build that knows 6). A build of
   version 5 (V0.151 and earlier) does not open a version 6 project: decoding the tiled record's missing image throws, the load reports that it failed
-  and nothing is written (read from its code, not run; a newer version is also opened read-only).
+  and nothing is written (read from its code, not run).
+  *Row window* (`tiledrecord.js`; card M8.4.42, decision X2a): a section can cover only source rows `[y0, y1)` of its stored image. `width` and
+  `height` are then the window's (`height = y1 - y0`), and the masks, objects, statistics, row counts, analysis area and depths are in the window's
+  coordinates, row 0 being source row `y0`, exactly as for a section made from a source holding only those rows. `y0` is a multiple of 512 (a mask
+  tile) and of `2^level` (a working-image pixel); a record that breaks this, or whose `y1` is beyond the pyramid's height, does not open. Level-0
+  pixel reads (statistics, wand) ask for tile row `row + y0 / 512`, and rows of the last tile below the window read as zero, as the padding of a
+  source that ends there. The working image is rows `y0 / 2^level` to that plus `ceil((y1 - y0) / 2^level)` of its level; its last row averages
+  source rows below `y1` when `y1` is not a multiple of `2^level` and is not the image's last row (display only). The viewer chooses and places the
+  pyramid's tiles shifted by `y0` source pixels and clips them to the section's analysis area. Nothing in the interface creates a window yet.
   *Saving:* each tiled section's sync must first be settled (every tile and table acknowledged by the store); the record is built at that moment, so
   masks, objects and stacks are one state. A section that does not settle within 15 s keeps its last saved record, the rest of the project is saved,
   the save state stays "unsaved" and the page says so once ("The latest edits of a large section have not reached the engine's store yet…"); the next

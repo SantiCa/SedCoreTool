@@ -32,6 +32,7 @@ import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks
 import { nestedIndicator, singleFlight } from './singleflight.js';
 import { joinCoreTables } from './coremerge.js';
 import { createTiledProject } from './tiledproject.js';
+import { FORMAT_VERSION_WINDOW, opensReadOnly, projectFormatVersion, serTiledSection } from './tiledrecord.js';
 import { createTiledState } from './tiledstate.js';
 import { createTiledTools } from './tiledtools.js';
 import { createTiledView } from './tiledview.js';
@@ -3051,21 +3052,6 @@ function serSection(s) {
   };
 }
 
-/**
- * The record of a tiled section (card M8.4.18a): like any section, without the mask arrays, which are in the engine's store under `manifest`, and
- * with the overlap stacks as they are (a tiled section never renumbers them, card M8.4.17). `manifest` must hold every edit of the section.
- */
-function serTiledSection(s, manifest) {
-  const o2 = (o) => ({ id: o.id, cls: o.cls, src: o.src, ...(o.nt ? { nt: 1 } : {}), ...(o.stats ? { st: o.stats } : {}), ...(o.cls && o._thumb ? { th: o._thumb } : {}), ...(o.emb ? { em: o.emb } : {}) });
-  return {
-    id: s.id, name: s.name, ds: s.ds, rot: 0, w: s.w, h: s.h, crop: null, full: s.full || null,
-    file: { name: s.file.name, type: s.file.type, tiled: true },
-    top: s.top, bottom: s.bottom, units: s.units, roi: s.roi, filters: s.filters, preset: s.preset, detect: s.detect, manual: s.manual,
-    nextId: s.nextId, objects: [...s.objects.values()].map(o2), stacks: s.stacks, marks: s.marks || [],
-    tiled: { version: 1, store: 2, manifest, width: s.maskTiles.width, height: s.maskTiles.height, level: s.tiled.level,
-      source: { sha256: s.tiled.pyramid, size: s.tiled.source?.size ?? null, name: s.tiled.source?.name ?? s.file.name } },
-  };
-}
 /** What a save writes for a section: today's record, a tiled section's prepared record, or a placeholder's record unchanged (D2). */
 function sectionRecord(q) {
   if (q.frozen === 'engine') return q.placeholder;
@@ -3078,15 +3064,16 @@ function serialize() {
   if (projectPreview) return projectPreview;
   const { cores: _c, ...geo } = S.geo;
   const tiledInside = S.cores.some((c) => c.sections.some((q) => q.tiled || q.frozen === 'engine'));
+  const records = new Map(S.cores.map((c) => [c, c.sections.map(sectionRecord).filter(Boolean)]));
   return {
-    app: APP, kind: 'project', version: tiledInside ? FORMAT_VERSION_TILED : FORMAT_VERSION, appVersion: VERSION, delivery: DELIVERY, saved: new Date().toISOString(),
+    app: APP, kind: 'project', version: projectFormatVersion([...records.values()].flat(), tiledInside, FORMAT_VERSION, FORMAT_VERSION_TILED), appVersion: VERSION, delivery: DELIVERY, saved: new Date().toISOString(),
     id: S.id, name: S.name, notes: S.notes, comments: S.comments || [], classes: S.classes, active: S.active, settings: S.settings, library: S.library,
     projectKind: S.kind || 'normal', multiSource: S.multiSource || null, models: projectModels(), finalTests: S.finalTests || [],
     geo, sheet: S.sheet, fig: S.fig, ...figTabsData(), curCore: S.curCore, plots: S.plots || [], plotCur: S.plotCur || 0,
     cores: S.cores.map((c) => ({
       id: c.id, name: c.name, lat: c.lat, lon: c.lon, waterDepth: c.waterDepth ?? null, units: c.units, source: c.source || null, notes: c.notes || '', holdout: c.holdout || undefined,
       imp: c.imp, user: c.user || {}, edits: c.edits && Object.keys(c.edits).length ? c.edits : undefined, records: c.records, logView: c.logView, age: { text: c.ageModel.text, units: c.ageModel.units, bacon: c.ageModel.bacon || undefined, center: c.ageModel.center || undefined },
-      sections: c.sections.map(sectionRecord).filter(Boolean),
+      sections: records.get(c),
     })),
   };
 }
@@ -3154,7 +3141,8 @@ function placeholderSection(q) {
 
 
 /* V0.36: version 5 = trace overlaps (stacks, V0.20), cell edits (V0.35). A newer file opens read-only. Card M8.4.18a: version 6 = a project with tiled
-   sections, written only when it has one, so every other project stays version 5 byte for byte. */
+   sections, written only when it has one, so every other project stays version 5 byte for byte. Card M8.4.42: version 7 (FORMAT_VERSION_WINDOW,
+   tiledrecord.js) = a project with a section that covers a row window of its stored image. */
 const FORMAT_VERSION = 5, FORMAT_VERSION_TILED = 6;
 let readOnlyProject = false;
 let projectPreview = null;
@@ -3164,7 +3152,7 @@ async function loadProject(p) {
   const source = p;
   blankStart = false;
   resetState(); loading = true; loadMigrated = false; clearTimeout(saveTimer);
-  readOnlyProject = (p?.version || 0) > FORMAT_VERSION_TILED;   // V0.36: written by a newer SedCoreTool
+  readOnlyProject = opensReadOnly(p?.version, FORMAT_VERSION_WINDOW);   // V0.36: written by a newer SedCoreTool
   try {
     p = sanitizeThumbs(upgradeProject(p));   // card Q9: thumbnails of older stored projects too
     S.id = p.id || uid(); S.name = p.name || APP; S.notes = p.notes || ''; S.comments = p.comments || [];
