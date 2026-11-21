@@ -57,12 +57,12 @@ Updated 21 November 2026.
      (`figures.js:724, 965`, `datatab.js:108`, `multiproxy.js:1300`) use `encodeURIComponent` data URIs instead of Blob URLs; missing
      `pointercancel` cleanup (`panels.js:44, 75`, `app.js:1662, 1812, 1820, 4521`). **Card: `Q10`.** Remaining 4,664-line `app.js` split tracked
      as **`A4`** (post-M8.4.19).
-  - **Decisions waiting for the maintainer (proposed 21 Nov 2026):**
-    - **U (order before M8.4.19):** run **`M8.4.38`** and **`Q9`** (P0 security), then **`M8.4.39`** and **`M8.4.40`** (+ `M8.4.37`) before closing
-      the part C milestone gate (`M8.4.19`), and run **`Q10`** before the next public release (`V0.153`). *Recommended: approve.*
+  - **Decisions U and V (approved by the maintainer on 21 Nov 2026, as recommended):**
+    - **U (order before M8.4.19):** run **`M8.4.38`** and **`Q9`** (P0 security), then **`M8.4.39`**, **`M8.4.40`** and **`M8.4.37`** before closing
+      the part C milestone gate (`M8.4.19`), and run **`Q10`** before the next public release (`V0.153`). Next card: **`M8.4.38`**.
     - **V (engine request-limit semantics in M8.4.40):** replace the hard 65,536-request session limit (`server.py:149`) with a bounded sliding
       window (last 65,536 request IDs via `OrderedDict`) so sessions can run indefinitely while duplicate recent IDs are still rejected without
-      breaking string/UUID request IDs. *Recommended: approve.*
+      breaking string/UUID request IDs.
 
 - **Released version:** V0.152 (20 November 2026, `master` `8ee9776`, tag `V0.152`, GitHub Release published with 8 files; see below). Earlier: V0.151 (16 November 2026), integrated into `master` on the maintainer's instruction ("haz push de todo y luego publica en
   master"), which overrides the decision of 14 November 2026 that nothing goes to `master` until M8.4 is finished (part A is done; parts C and B are not). It is `master` commit `e59fff4` (pushed; no tag), whose tree is identical to commit `7aca549` of the work branch, on which `tests` and *Desktop builds* passed on Windows, macOS and Linux. It contains the
@@ -2407,7 +2407,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   Node test for `uploadTable` cleanup on failed chunk; `pytest -q`, `npm test`, `ruff check`, `tests/e2e/tiled-sections.mjs`.
 - **Done when:** all tests pass on Windows and the engine runtime is rebuilt and verified; development gate.
 
-##### M8.4.19 - Milestone gate of part C — state: after M8.4.18d, M8.4.36 and (pending decision U) M8.4.37–M8.4.40 + Q9
+##### M8.4.19 - Milestone gate of part C — state: after M8.4.18d, M8.4.36, M8.4.38, Q9, M8.4.39, M8.4.40 and M8.4.37 (decision U, approved 21 Nov 2026)
 
 - **Model:** fast, effort low (running and recording the gate); the most capable with effort high for the decisions that follow it.
 - Windows, macOS and Linux on one commit (`tests` and *Desktop builds*, including the desktop end-to-end test with the engine experiment and the
