@@ -37,6 +37,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.9: the engine can keep the working pixels of small sections (8-bit, and 16-bit through the new `u16le` buffer type) under a pixel identity, with a 192 MiB budget of its own, through a shared registry of resident buffers (`residentstore.js`, `sectionpixels.js`); no method uses them yet. The 512 MiB session budget stays, by measurement. Details in the card's *As built*.
 - Card M8.4.43: splitting a tiled section into row-windowed parts (`MaskStore.slice_rows`, `mask.slice`, `tiledsplit.js`, `tiledsplitui.js`), reusing tile blobs without re-encoding, filtering object and stack tables, and replacing the section atomically after confirmation (X1–X4); new Python, Node and desktop E2E tests. Details in the card's *As built*.
 - Card Q13: a mask round of a large section refused because the engine was busy no longer leaves a half-sent version in the engine (which made deleting the project leave its folder behind); `desktop/tile-ipc.js`, tests in `tests/app/tile-ipc.test.mjs`.
 - Card M8.4.42: a tiled section can cover a row window of its stored image (`tiled.window`; a project with one is saved as format 7, which older builds open read-only); new pure module `tiledrecord.js`; nothing in the interface creates a window yet. Details in the card's *As built*.

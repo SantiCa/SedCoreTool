@@ -22,5 +22,5 @@ METHOD_INPUTS = {
 }
 SETTINGS_INPUT = 'settings'     # its buffer hash is the request's settings_hash
 
-NUMPY_DTYPES = {'u8': 'u1', 'i32le': '<i4', 'u32le': '<u4', 'u64le': '<u8', 'f64le': '<f8'}
-CONTRACT_DTYPES = {'|u1': 'u8', '<i4': 'i32le', '<u4': 'u32le', '<u8': 'u64le', '<f8': 'f64le'}
+NUMPY_DTYPES = {'u8': 'u1', 'u16le': '<u2', 'i32le': '<i4', 'u32le': '<u4', 'u64le': '<u8', 'f64le': '<f8'}
+CONTRACT_DTYPES = {'|u1': 'u8', '<u2': 'u16le', '<i4': 'i32le', '<u4': 'u32le', '<u8': 'u64le', '<f8': 'f64le'}

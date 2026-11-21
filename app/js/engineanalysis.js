@@ -17,7 +17,8 @@ import { analysisRevision, buildIntervalSnapshot, maskIdentity, resultToBins } f
  * `canDerive` says whether it holds masks that such a change can be applied to.
  * @param {{client: {analyze: (snapshot: any, options: {signal: AbortSignal, owner?: object, maskKey?: string}) => Promise<any>,
  *     hasMasks?: (owner: object, maskKey: string) => boolean, canDerive?: (owner: object, section: any) => boolean, forget?: (owner: object) => void,
- *     releaseAll?: () => void, restart?: (options: {automatic: boolean}) => Promise<void>},
+ *     releaseAll?: () => void, restart?: (options: {automatic: boolean}) => Promise<void>,
+ *     ensurePixels?: (owner: object, section: any, options?: {signal?: AbortSignal}) => Promise<{identity: string, rgba: string, rgba16?: string}>},
  *   project: () => import('./sectionanalysis.js').AnalysisProject, onChange: (section: any) => void,
  *   maskChanges?: ReturnType<typeof import('./maskchanges.js').createMaskChanges>,
  *   onNotice?: (key: 'engine.restarted' | 'engine.restartFailed') => void}} deps
@@ -194,6 +195,11 @@ export function createEngineAnalysis({ client, project, onChange, maskChanges, o
     deriveFallbacks: () => deriveFallbacks,
     /** Counters for tests and measurements: masks sent whole, masks sent as changed rows, changes the engine refused. */
     stats: () => ({ ...(/** @type {any} */ (client).stats?.() ?? {}), deriveFallbacks, recent: recent.map((job) => ({ ...job })) }),
+    /** The working pixels of `section` held by the engine (card M8.4.9; engineclient.js::ensurePixels): their tokens and identity. */
+    ensurePixels: (/** @type {any} */ section, /** @type {{signal?: AbortSignal}} */ options = {}) => {
+      if (!client.ensurePixels) return Promise.reject(new Error('This engine client keeps no pixels'));
+      return client.ensurePixels(section, section, options);
+    },
     /** Lets the engine drop everything it kept for `section` (the section is closed or replaced). */
     forget: (/** @type {any} */ section) => { jobs.get(section)?.controller.abort(); jobs.delete(section); client.forget?.(section); },
     /** @returns {AnalysisState | undefined} */

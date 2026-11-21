@@ -4631,7 +4631,7 @@ initializeDiagnostics({
 const startupReady = startup();
 
 // Exposed for automated tests.
-window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, needPixels, requestRender, setTool, renderSectionForm, t, tilesIdle: () => [...tileSchedulers.values()].every((q) => q.idle),
+window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, enginePixels: (s) => engineAnalysis?.ensurePixels(s) ?? Promise.resolve(null), ready: startupReady, needPixels, requestRender, setTool, renderSectionForm, t, tilesIdle: () => [...tileSchedulers.values()].every((q) => q.idle),
   putMaskTile: (row, col, labels, exclude) => putMaskTile(sec(), row, col, labels, exclude),   // end-to-end tests of tiled masks (card M8.4.16)
   clearTiles: () => { for (const bitmap of tileCache.clear()) bitmap?.close?.(); requestRender(); },   // repeated viewer probes (card M8.4.24)
   tileState: (k, row, col) => { const s = sec(), scheduler = s?.tiled && tileSchedulers.get(s.tiled.pyramid), key = s?.tiled ? s.tiled.pyramid + '/' + tileKey(k, row, col) : '';   // evidence when a probe fails (card M8.4.24)

@@ -3586,3 +3586,53 @@ Updated 21 November 2026.
   - **Checks (Windows, final state):** `npm test` 602 pass / 0 fail; `npm run typecheck` passed; `pytest -q` 927 passed / 9 skipped; `ruff`
     passed; `sync_version --check` passed; `desktop.mjs` engine off and on passed; `tiled-sections.mjs` passed. Not run: macOS and Linux
     (GitHub on push).
+
+### M8.4.9 - Section pixels resident in the engine — state: Done (22 Nov 2026, development gate)
+
+- **Goal:** a section's working pixels (8-bit RGBA `orig` and, when present, 16-bit `orig16`) are in the engine under an identity,
+  so that a method takes handles instead of an upload. No scientific method changes.
+- **Read first:** `app/js/engineclient.js` (the resident-input code of M8.4.2); `app/js/app.js` where pixels are created or replaced
+  (`newSection`, the loader near `s.orig = r.rgba`, `cut` at crop, `rotate90`, the downsample reload near `s.ds = k2`); contract §3
+  (limits) and §4; `src/sedcoretool/engine/buffers.py`, `specs.py`.
+- **Change:**
+  1. Extract the resident-input registry of `engineclient.js` (owner, name, identity, token, bytes, least-recently-used, bounds,
+     eviction, `keep`, `forget`) into a pure module `app/js/residentstore.js` with its own tests; `engineclient.js` uses it. No behaviour
+     change: the existing 47 tests pass unchanged (this is the review's request for modularity: masks, pixels and tables will share it).
+  2. Add the type `u16le` end to end (`buffers.py` `ITEM_BYTES`, `specs.py` `NUMPY_DTYPES`/`CONTRACT_DTYPES`, `engine-ipc.js` `DTYPES`,
+     `engineclient.js` `OUTPUT_TYPES`, contract §3), with the same tests the other types have.
+  3. `sectionanalysis.js` (or a new pure module `sectionpixels.js`): `pixelIdentity(section)`, the SHA-256 of the working array bytes
+     plus its width, height and bit depth, computed when the pixels are loaded or replaced and stored on the section (`s._pxid`), never
+     per analysis (hashing 24 MB costs about 15 ms); `buildPixelBuffers(section)` returns `{rgba: u8[h,w,4], rgba16?: u16le[h,w,4]}` as views.
+  4. `engineclient.js`: `ensurePixels(owner, section)` uploads those buffers when the resident identity differs and returns their tokens;
+     they count against a pixel budget of their own in the registry. A section whose pixels do not fit is not resident (part C).
+  5. Budgets: the engine's session budget is 512 MiB. Masks (up to 256 MiB), pixels (up to 192 MiB) and the transient reserve do not
+     fit together with working copies. Decide with a measurement of the public example and the generated project, then record in
+     contract §3 either lower resident bounds or a session budget of 768 MiB (the disk cap stays 1 GiB). Do not raise it without the
+     measurement.
+- **Do not touch:** the interface's own use of `orig`/`orig16` and its memory management (`MEM`, `pxTouch`): the renderer still holds
+  its copy until part C; the saved project; any method.
+- **Tests:** registry unit tests (eviction order, bounds, identity change replaces and releases, forget); identity changes on
+  crop, rotation, downsampling and reload, and not on a settings change; upload of a 16-bit section end to end through the real
+  engine (bytes read back equal); a section that does not fit is not kept; release on project replacement; mutation tests; the
+  desktop end-to-end with the experiment on and off; memory peak measured with pixels resident (record it, compare with §7).
+- **Done when:** the tests pass, the memory peak is recorded against the §7 limit, and a probe method (a test-only method that
+  sums a region of the resident pixels) reads the same bytes as the interface holds.
+- **As built (22 Nov 2026):** reviewed after part C and implemented as written, with these adaptations: the existing client tests
+  (56, not 47) pass unchanged; the pixel identity is computed at the first `ensurePixels` after the arrays change, once per pair of arrays,
+  and cached in `s._pxid` with weak references (the engine-off path never hashes; the interface never writes `orig`/`orig16` in place, and
+  `_pxid` is not a saved field); the pixel budget is a second `residentstore.js` instance (192 MiB, 16 sections); pixels larger than the
+  bound are refused before upload (`LIMIT_EXCEEDED`, field `pixels`); when the engine's budget is full an analysis drops other sections'
+  pixels and inputs, `ensurePixels` only other sections' pixels (`stats().budgetFull`). The probe is test-only: `tests/test_engine_pixels.py`
+  adds it to the real worker's registry in its own worker script; the engine never offers it. New pure modules `residentstore.js`,
+  `sectionpixels.js`; `u16le` in `buffers.py`, `specs.py`, `engine-ipc.js` (inputs and result columns), `engineclient.js`, contract §3.
+  **Budget (contract §3):** measured with `tools/measure_engine_analysis.mjs --only pixels`: generated project charges at most 464 MiB, 0
+  budget-full events in 4 runs, so 512/256/192 MiB stay (third outcome, not among the card's two; it keeps both bounds). **Memory peak**
+  with pixels resident: public 1,095 MiB (limit 1,168), generated 1,841 MiB (limit 2,042) ([evidence](validation/M8.4.9-pixels-windows.json)).
+  `app.js` 4,647 → 4,647 lines (one test hook on the existing line). Tests: +30 Node (`residentstore`, `sectionpixels`, `engine-pixels`,
+  one through the real engine reading 8- and 16-bit bytes back), +5 Python. Manual mutations: 16 of 18 caught (one equivalent; dropping the
+  bit depth from the identity text is caught only by the formula test). Known limit: two concurrent requests for the same pixels share one
+  upload, so an abort by the first caller also rejects the second.
+  **Checks (Windows, `tools/check_all.py --desktop --tiled`):** `pytest` 932 passed / 9 skipped; `npm test` 632 / 0; typecheck; sync;
+  ruff; `desktop.mjs` engine off and on passed; `tiled-sections.mjs` **failed** at line 1464 (masks of the M8.4.43 split block never
+  settle), also on unmodified `956f3e3` and on GitHub for `956f3e3` on all three systems: not caused by this card (Q14). Not measured:
+  macOS, Linux, a clean machine, 16-bit sections in the reference projects.

@@ -61,7 +61,7 @@ calculates everything itself; with it on, the interval table of each section com
 | Renderer-facing engine bridge (`engine-ipc.js`, `engineclient.js`, `engineanalysis.js`) | **built, experimental, off by default** (M8.3.6–M8.3.7) | §3.2, §3.3 |
 | Section intervals calculated by the engine (`section.intervals/1`) and shown by the interface | **built, experimental, off by default** (M8.3.7); slower than JavaScript, see the M8.3.8 evidence | contract §4–§5 |
 | Section inputs kept in the engine between analyses; edits sent as changed rows (`buffer.derive`); remembered counts; one packed result | **built, experimental, off by default** (M8.4.2-M8.4.5); timing gate of contract §7 not met | §4, contract §3 |
-| Engine restart after a failure (once by itself, then the user's Retry): **built, experimental** (M8.4.7). Engine-held pixels of small sections and record tables (part B, M8.4.9-M8.4.11); several sections in one request (M8.4.6, deferred); remaining methods (M8.5) | **planned** | roadmap |
+| Engine restart after a failure (once by itself, then the user's Retry): **built, experimental** (M8.4.7). Working pixels of small sections held by the engine (`u16le` buffers, `ensurePixels`): **built, experimental, used by no method yet** (M8.4.9). Record tables (M8.4.10) and the gate of part B (M8.4.11); several sections in one request (M8.4.6, deferred); remaining methods (M8.5) | **planned** | roadmap |
 | Tile store for large images (pixel pyramid, versioned mask tiles), tiled viewer and editing, analysis on tiles, saving of large projects | **planned** (part C of M8.4, cards M8.4.12-M8.4.19; chosen 15 Nov 2026) | §3.4 |
 
 The engine experiment is enabled only by the environment variable `SEDCORETOOL_ENGINE_EXPERIMENT=1`. Keep that
@@ -96,7 +96,7 @@ matching tier and the Python API the **last**; the kernel takes `precedence="fir
 
 | Kind | Rule | Examples |
 |---|---|---|
-| Pure modules | No `document`, `window` or DOM types; state arrives as arguments. Tested with Node in `tests/app/` | `core.js`, `sectiondepth.js`, `sectionanalysis.js`, `maskchanges.js`, `tiledsection.js`, `tiledrecord.js`, `tiledsplit.js`, `tilecache.js`, `tiledmasks.js`, `tiledit.js`, `tiledcounts.js`, `tiledcache.js`, `tiledbackup.js`, `tiledsync.js`, `tiledundo.js`, `singleflight.js`, `taxa.js`, `coremerge.js`, `engineclient.js`, `engineanalysis.js`, `edit.js`, `imageproc.js`, `learn.js`, `log.js`, `geo.js`, `interp.js`, `locmap.js`, `plot.js`, `sheet.js`, `exportio.js`, `zip.js`, `figsize.js`, `pngmeta.js`, `unet.js`, `unetmodel.js`, `navpreview.js`, `figview.js` |
+| Pure modules | No `document`, `window` or DOM types; state arrives as arguments. Tested with Node in `tests/app/` | `core.js`, `sectiondepth.js`, `sectionanalysis.js`, `maskchanges.js`, `tiledsection.js`, `tiledrecord.js`, `tiledsplit.js`, `tilecache.js`, `tiledmasks.js`, `tiledit.js`, `tiledcounts.js`, `tiledcache.js`, `tiledbackup.js`, `tiledsync.js`, `tiledundo.js`, `singleflight.js`, `taxa.js`, `coremerge.js`, `residentstore.js`, `sectionpixels.js`, `engineclient.js`, `engineanalysis.js`, `edit.js`, `imageproc.js`, `learn.js`, `log.js`, `geo.js`, `interp.js`, `locmap.js`, `plot.js`, `sheet.js`, `exportio.js`, `zip.js`, `figsize.js`, `pngmeta.js`, `unet.js`, `unetmodel.js`, `navpreview.js`, `figview.js` |
 | State | The shared project state `S` and small helpers | `state.js` |
 | Controllers and views | Read and change `S`, call pure modules, build DOM/SVG, wire events | `app.js`, `columns.js`, `datatab.js`, `figures.js`, `multiproxy.js`, `panels.js`, `diagnostics.js`, `folderversion.js`, `tiledproject.js`, `tiledsplitui.js`, `tiledstate.js`, `tiledtools.js`, `tiledview.js`, `tableview.js` |
 | Storage | IndexedDB project library | `storage.js` |
@@ -123,7 +123,8 @@ Pure modules for M8.3:
   existing `s.bins` array (`resultToBins`), so that tables, columns, figures and exports do not change.
 - `engineclient.js` — uploads typed arrays in chunks of at most 1 MiB, starts and cancels jobs and downloads
   results through an injected bridge object. In the desktop program the bridge is `window.corantoolDesktop.engine`;
-  in Node tests it is a fake.
+  in Node tests it is a fake. What the engine keeps between requests is recorded in two `residentstore.js` registries with
+  their own bounds: the inputs of analyses (M8.4.2) and the working pixels of sections (M8.4.9, described by `sectionpixels.js`).
 - `engineanalysis.js` — per-section state with the engine on: pending, ready or error. It keys each request on
   `analysisRevision`, empties `s.bins` while a result is awaited, queues one analysis at a time, cancels a request that
   an edit made obsolete and publishes a result only if the revision is still current. It never computes bins and never

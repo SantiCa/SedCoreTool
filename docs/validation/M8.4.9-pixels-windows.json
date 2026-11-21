@@ -1,0 +1,1072 @@
+{
+ "schema": 1,
+ "tool": "tools/measure_engine_analysis.mjs",
+ "started": "2026-11-21T23:08:39.829Z",
+ "commit": "956f3e345207f744e65bd1d8da67b37400cea63c",
+ "host": {
+  "os": "Windows_NT 10.0.26300",
+  "cpu": "AMD Ryzen 7 7700X 8-Core Processor             ",
+  "logical_cpus": 16,
+  "memory_gib": 31.1,
+  "node": "v22.23.4",
+  "electron": "45.2.2",
+  "runtime": "3.12.16"
+ },
+ "fixtures": {
+  "synthetic": {
+   "package": "synthetic-m0.1.sedcoretool",
+   "bytes": 12039629,
+   "sha256": "aadd7befe779ba54dd8cf00afdc5ae0007162150b7e354a14ab4bddcf6d9bfbb"
+  }
+ },
+ "parameters": {
+  "pairs": 6,
+  "cycles": 10,
+  "bin_sizes_cm": [
+   2,
+   1.37
+  ]
+ },
+ "results": {
+  "pixels_public": {
+   "pairs": [
+    {
+     "order": [
+      "off",
+      "on"
+     ],
+     "off": {
+      "sizes": [
+       {
+        "w": 346,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10380000,
+        "mask_bytes": 12975008,
+        "table_bytes": 25686
+       },
+       {
+        "w": 351,
+        "h": 7450,
+        "bits": 8,
+        "pixel_bytes": 10459800,
+        "mask_bytes": 13074758,
+        "table_bytes": 26913
+       },
+       {
+        "w": 347,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10410000,
+        "mask_bytes": 13012508,
+        "table_bytes": 25214
+       },
+       {
+        "w": 349,
+        "h": 7450,
+        "bits": 8,
+        "pixel_bytes": 10400200,
+        "mask_bytes": 13000258,
+        "table_bytes": 17598
+       },
+       {
+        "w": 344,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10320000,
+        "mask_bytes": 12900008,
+        "table_bytes": 33782
+       },
+       {
+        "w": 344,
+        "h": 6500,
+        "bits": 8,
+        "pixel_bytes": 8944000,
+        "mask_bytes": 11180008,
+        "table_bytes": 27118
+       }
+      ],
+      "uploads": [],
+      "full_ms": 35.5,
+      "interval_ms": 1.9000000059604645,
+      "pixels_again_ms": null,
+      "after_upload": null,
+      "after_analyses": null,
+      "states": [
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ],
+      "pixels_loaded": true,
+      "idle_memory": {
+       "samples": 20,
+       "peak_mib": 838.4,
+       "median_mib": 838.4,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 51.8
+      },
+      "memory": {
+       "samples": 8,
+       "peak_mib": 912,
+       "median_mib": 877.2,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 25.5
+      }
+     },
+     "on": {
+      "sizes": [
+       {
+        "w": 346,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10380000,
+        "mask_bytes": 12975008,
+        "table_bytes": 25686
+       },
+       {
+        "w": 351,
+        "h": 7450,
+        "bits": 8,
+        "pixel_bytes": 10459800,
+        "mask_bytes": 13074758,
+        "table_bytes": 26913
+       },
+       {
+        "w": 347,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10410000,
+        "mask_bytes": 13012508,
+        "table_bytes": 25214
+       },
+       {
+        "w": 349,
+        "h": 7450,
+        "bits": 8,
+        "pixel_bytes": 10400200,
+        "mask_bytes": 13000258,
+        "table_bytes": 17598
+       },
+       {
+        "w": 344,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10320000,
+        "mask_bytes": 12900008,
+        "table_bytes": 33782
+       },
+       {
+        "w": 344,
+        "h": 6500,
+        "bits": 8,
+        "pixel_bytes": 8944000,
+        "mask_bytes": 11180008,
+        "table_bytes": 27118
+       }
+      ],
+      "uploads": [
+       {
+        "ok": true,
+        "ms": 51.6000000089407,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 45,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 51,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 51.19999998807907,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 46.30000001192093,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 43.400000005960464,
+        "rgba16": false
+       }
+      ],
+      "full_ms": 369,
+      "interval_ms": 185,
+      "pixels_again_ms": 0.09999999403953552,
+      "after_upload": {
+       "fullMaskUploads": 6,
+       "derivations": 0,
+       "budgetFull": 0,
+       "residentBytes": 76298859,
+       "residentPixelBytes": 60914000,
+       "residentPixelSections": 6
+      },
+      "after_analyses": {
+       "fullMaskUploads": 6,
+       "derivations": 6,
+       "budgetFull": 0,
+       "residentBytes": 76298877,
+       "residentPixelBytes": 60914000,
+       "residentPixelSections": 6
+      },
+      "states": [
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready"
+      ],
+      "pixels_loaded": true,
+      "idle_memory": {
+       "samples": 20,
+       "peak_mib": 1008,
+       "median_mib": 1008,
+       "max_processes": 8,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 54
+      },
+      "memory": {
+       "samples": 37,
+       "peak_mib": 1094.7,
+       "median_mib": 977.6,
+       "max_processes": 8,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 61.5
+      }
+     }
+    },
+    {
+     "order": [
+      "on",
+      "off"
+     ],
+     "on": {
+      "sizes": [
+       {
+        "w": 346,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10380000,
+        "mask_bytes": 12975008,
+        "table_bytes": 25686
+       },
+       {
+        "w": 351,
+        "h": 7450,
+        "bits": 8,
+        "pixel_bytes": 10459800,
+        "mask_bytes": 13074758,
+        "table_bytes": 26913
+       },
+       {
+        "w": 347,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10410000,
+        "mask_bytes": 13012508,
+        "table_bytes": 25214
+       },
+       {
+        "w": 349,
+        "h": 7450,
+        "bits": 8,
+        "pixel_bytes": 10400200,
+        "mask_bytes": 13000258,
+        "table_bytes": 17598
+       },
+       {
+        "w": 344,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10320000,
+        "mask_bytes": 12900008,
+        "table_bytes": 33782
+       },
+       {
+        "w": 344,
+        "h": 6500,
+        "bits": 8,
+        "pixel_bytes": 8944000,
+        "mask_bytes": 11180008,
+        "table_bytes": 27118
+       }
+      ],
+      "uploads": [
+       {
+        "ok": true,
+        "ms": 51.599999994039536,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 58.400000005960464,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 48,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 50,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 47.20000000298023,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 41,
+        "rgba16": false
+       }
+      ],
+      "full_ms": 379.40000000596046,
+      "interval_ms": 183.09999999403954,
+      "pixels_again_ms": 0.10000000894069672,
+      "after_upload": {
+       "fullMaskUploads": 6,
+       "derivations": 0,
+       "budgetFull": 0,
+       "residentBytes": 76298859,
+       "residentPixelBytes": 60914000,
+       "residentPixelSections": 6
+      },
+      "after_analyses": {
+       "fullMaskUploads": 6,
+       "derivations": 6,
+       "budgetFull": 0,
+       "residentBytes": 76298877,
+       "residentPixelBytes": 60914000,
+       "residentPixelSections": 6
+      },
+      "states": [
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready"
+      ],
+      "pixels_loaded": true,
+      "idle_memory": {
+       "samples": 20,
+       "peak_mib": 1019.6,
+       "median_mib": 1019.6,
+       "max_processes": 8,
+       "cadence_median_ms": 25.2,
+       "cadence_max_gap_ms": 77.5
+      },
+      "memory": {
+       "samples": 37,
+       "peak_mib": 1095.7,
+       "median_mib": 1001.6,
+       "max_processes": 8,
+       "cadence_median_ms": 25.2,
+       "cadence_max_gap_ms": 58.5
+      }
+     },
+     "off": {
+      "sizes": [
+       {
+        "w": 346,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10380000,
+        "mask_bytes": 12975008,
+        "table_bytes": 25686
+       },
+       {
+        "w": 351,
+        "h": 7450,
+        "bits": 8,
+        "pixel_bytes": 10459800,
+        "mask_bytes": 13074758,
+        "table_bytes": 26913
+       },
+       {
+        "w": 347,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10410000,
+        "mask_bytes": 13012508,
+        "table_bytes": 25214
+       },
+       {
+        "w": 349,
+        "h": 7450,
+        "bits": 8,
+        "pixel_bytes": 10400200,
+        "mask_bytes": 13000258,
+        "table_bytes": 17598
+       },
+       {
+        "w": 344,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10320000,
+        "mask_bytes": 12900008,
+        "table_bytes": 33782
+       },
+       {
+        "w": 344,
+        "h": 6500,
+        "bits": 8,
+        "pixel_bytes": 8944000,
+        "mask_bytes": 11180008,
+        "table_bytes": 27118
+       }
+      ],
+      "uploads": [],
+      "full_ms": 79.09999999403954,
+      "interval_ms": 2.2000000029802322,
+      "pixels_again_ms": null,
+      "after_upload": null,
+      "after_analyses": null,
+      "states": [
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ],
+      "pixels_loaded": true,
+      "idle_memory": {
+       "samples": 20,
+       "peak_mib": 841.5,
+       "median_mib": 841.5,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 52.2
+      },
+      "memory": {
+       "samples": 9,
+       "peak_mib": 959.3,
+       "median_mib": 893.2,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 25.4
+      }
+     }
+    }
+   ],
+   "charge_model": {
+    "masks_mib": 72.6,
+    "tables_mib": 0.1,
+    "table_charge_mib": 9.5,
+    "pixels_mib": 58.1,
+    "resident_charge_mib": 156.2,
+    "during_full_upload_charge_mib": 168.7
+   }
+  },
+  "pixels_synthetic": {
+   "pairs": [
+    {
+     "order": [
+      "off",
+      "on"
+     ],
+     "off": {
+      "sizes": [
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8494
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8497
+       }
+      ],
+      "uploads": [],
+      "full_ms": 102.19999998807907,
+      "interval_ms": 1.5,
+      "pixels_again_ms": null,
+      "after_upload": null,
+      "after_analyses": null,
+      "states": [
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ],
+      "pixels_loaded": true,
+      "idle_memory": {
+       "samples": 20,
+       "peak_mib": 1572.2,
+       "median_mib": 1572.2,
+       "max_processes": 4,
+       "cadence_median_ms": 25.2,
+       "cadence_max_gap_ms": 51.7
+      },
+      "memory": {
+       "samples": 22,
+       "peak_mib": 1804,
+       "median_mib": 1695.3,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 60.7
+      }
+     },
+     "on": {
+      "sizes": [
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8494
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8497
+       }
+      ],
+      "uploads": [
+       {
+        "ok": true,
+        "ms": 106,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 103.1000000089407,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 116.20000000298023,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 103.19999998807907,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 110.30000001192093,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 104.5,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 110.8999999910593,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 100.5,
+        "rgba16": false
+       }
+      ],
+      "full_ms": 1358.699999988079,
+      "interval_ms": 249.40000000596046,
+      "pixels_again_ms": 0.09999999403953552,
+      "after_upload": {
+       "fullMaskUploads": 8,
+       "derivations": 0,
+       "budgetFull": 0,
+       "residentBytes": 245828031,
+       "residentPixelBytes": 196608000,
+       "residentPixelSections": 8
+      },
+      "after_analyses": {
+       "fullMaskUploads": 12,
+       "derivations": 4,
+       "budgetFull": 0,
+       "residentBytes": 245828055,
+       "residentPixelBytes": 196608000,
+       "residentPixelSections": 8
+      },
+      "states": [
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready"
+      ],
+      "pixels_loaded": true,
+      "idle_memory": {
+       "samples": 20,
+       "peak_mib": 1674.7,
+       "median_mib": 1671.4,
+       "max_processes": 8,
+       "cadence_median_ms": 25.1,
+       "cadence_max_gap_ms": 53.8
+      },
+      "memory": {
+       "samples": 111,
+       "peak_mib": 1987.3,
+       "median_mib": 1849.3,
+       "max_processes": 8,
+       "cadence_median_ms": 25.2,
+       "cadence_max_gap_ms": 62.9
+      }
+     }
+    },
+    {
+     "order": [
+      "on",
+      "off"
+     ],
+     "on": {
+      "sizes": [
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8494
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8497
+       }
+      ],
+      "uploads": [
+       {
+        "ok": true,
+        "ms": 103.20000000298023,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 98.6000000089407,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 98.69999998807907,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 99.70000000298023,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 109.5,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 101.79999999701977,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 103.70000000298023,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 101.1000000089407,
+        "rgba16": false
+       }
+      ],
+      "full_ms": 1361,
+      "interval_ms": 248.09999999403954,
+      "pixels_again_ms": 0.10000000894069672,
+      "after_upload": {
+       "fullMaskUploads": 8,
+       "derivations": 0,
+       "budgetFull": 0,
+       "residentBytes": 245828031,
+       "residentPixelBytes": 196608000,
+       "residentPixelSections": 8
+      },
+      "after_analyses": {
+       "fullMaskUploads": 12,
+       "derivations": 4,
+       "budgetFull": 0,
+       "residentBytes": 245828055,
+       "residentPixelBytes": 196608000,
+       "residentPixelSections": 8
+      },
+      "states": [
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready"
+      ],
+      "pixels_loaded": true,
+      "idle_memory": {
+       "samples": 20,
+       "peak_mib": 1701.9,
+       "median_mib": 1701.9,
+       "max_processes": 8,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 56.9
+      },
+      "memory": {
+       "samples": 109,
+       "peak_mib": 1840.9,
+       "median_mib": 1761.2,
+       "max_processes": 8,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 61.3
+      }
+     },
+     "off": {
+      "sizes": [
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8494
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8497
+       }
+      ],
+      "uploads": [],
+      "full_ms": 104.5,
+      "interval_ms": 1.4000000059604645,
+      "pixels_again_ms": null,
+      "after_upload": null,
+      "after_analyses": null,
+      "states": [
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ],
+      "pixels_loaded": true,
+      "idle_memory": {
+       "samples": 20,
+       "peak_mib": 1575.6,
+       "median_mib": 1575.6,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 51.6
+      },
+      "memory": {
+       "samples": 22,
+       "peak_mib": 1786.2,
+       "median_mib": 1699.1,
+       "max_processes": 4,
+       "cadence_median_ms": 25.2,
+       "cadence_max_gap_ms": 56.9
+      }
+     }
+    }
+   ],
+   "charge_model": {
+    "masks_mib": 234.4,
+    "tables_mib": 0.1,
+    "table_charge_mib": 4.1,
+    "pixels_mib": 187.5,
+    "resident_charge_mib": 442,
+    "during_full_upload_charge_mib": 463.6
+   }
+  }
+ },
+ "verdicts": {
+  "pixels_public": {
+   "memory_peak": {
+    "pass": true,
+    "off_mib": 912,
+    "on_mib": 1094.7,
+    "limit_mib": 1168,
+    "basis": "median over the pairs of the peak of each run, from the pixel upload to the end of the analyses",
+    "max_on_mib": 1095.7,
+    "interactive_target_mib": 2048
+   },
+   "all_resident": true,
+   "budget_full_events": 0,
+   "states_ready": true,
+   "charge_model": {
+    "masks_mib": 72.6,
+    "tables_mib": 0.1,
+    "table_charge_mib": 9.5,
+    "pixels_mib": 58.1,
+    "resident_charge_mib": 156.2,
+    "during_full_upload_charge_mib": 168.7
+   },
+   "session_budget_mib": 512
+  },
+  "pixels_synthetic": {
+   "memory_peak": {
+    "pass": true,
+    "off_mib": 1786.2,
+    "on_mib": 1840.9,
+    "limit_mib": 2042.2,
+    "basis": "median over the pairs of the peak of each run, from the pixel upload to the end of the analyses",
+    "max_on_mib": 1987.3,
+    "interactive_target_mib": 2048
+   },
+   "all_resident": true,
+   "budget_full_events": 0,
+   "states_ready": true,
+   "charge_model": {
+    "masks_mib": 234.4,
+    "tables_mib": 0.1,
+    "table_charge_mib": 4.1,
+    "pixels_mib": 187.5,
+    "resident_charge_mib": 442,
+    "during_full_upload_charge_mib": 463.6
+   },
+   "session_budget_mib": 512
+  },
+  "not_measured": [
+   "macOS and Linux",
+   "a clean Windows machine",
+   "cold cache after a reboot",
+   "saturated CPU",
+   "save interrupted during a job (covered separately by tests/e2e/interrupted-saves.mjs)"
+  ]
+ },
+ "finished": "2026-11-21T23:09:29.644Z"
+}

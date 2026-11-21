@@ -1,10 +1,13 @@
 // @ts-check
 // Renderer side of the engine bridge (window.corantoolDesktop.engine, see desktop/engine-ipc.js): uploads the inputs of
 // one section analysis in bounded chunks, requests it, downloads the result columns and always releases every token.
-// Pure: the bridge is passed in, so Node can test it with a fake. No DOM.
+// It also keeps the working pixels of sections in the engine (card M8.4.9). Pure: the bridge is passed in, so Node can test it
+// with a fake. No DOM.
+import { createResidentStore } from './residentstore.js';
+import { describePixels, PIXEL_INPUTS } from './sectionpixels.js';
 
 const CHUNK_BYTES = 1048576;
-const OUTPUT_TYPES = /** @type {const} */ ({ u8: Uint8Array, i32le: Int32Array, u32le: Uint32Array, u64le: BigUint64Array, f64le: Float64Array });
+const OUTPUT_TYPES = /** @type {const} */ ({ u8: Uint8Array, u16le: Uint16Array, i32le: Int32Array, u32le: Uint32Array, u64le: BigUint64Array, f64le: Float64Array });
 const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 
 /** A failure reported by the engine or its bridge: a stable `code` and, for a rejected input, the `field` at fault. */
@@ -34,52 +37,33 @@ const MASK_INPUTS = /** @type {const} */ (['labels', 'exclude', 'stack_offsets',
 const TABLE_INPUTS = /** @type {const} */ (['objects', 'classes', 'settings', 'age_model', 'manual_indices']);
 /** Buffers of sections that the engine keeps between analyses (card M8.4.2): total bytes and number of sections. */
 export const RESIDENT_BYTES = 256 * 1048576, RESIDENT_SECTIONS = 16;
+/** Working pixels of sections that the engine keeps (card M8.4.9): their own byte bound, at most RESIDENT_SECTIONS sections. Contract §3. */
+export const RESIDENT_PIXEL_BYTES = 192 * 1048576;
 
-/**
- * @typedef {{token: string, identity: string, bytes: number}} ResidentInput
- * @typedef {{owner: WeakRef<object>, maskKey: string | null, inputs: Record<string, ResidentInput>, used: number}} ResidentEntry
- */
+/** @typedef {import('./residentstore.js').ResidentInput} ResidentInput @typedef {import('./residentstore.js').ResidentEntry} ResidentEntry */
 
 /**
  * @param {{status: () => Promise<any>, beginBuffer: Function, appendBuffer: Function, commitBuffer: Function,
  *   analyzeSection: Function, cancel: Function, readBuffer: Function, release: Function, deriveBuffer?: Function, restart?: Function}} bridge
- * @param {{readyTimeoutMs?: number, residentBytes?: number, residentSections?: number}} [options]
+ * @param {{readyTimeoutMs?: number, residentBytes?: number, residentSections?: number, pixelBytes?: number}} [options]
  */
-export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentBytes = RESIDENT_BYTES, residentSections = RESIDENT_SECTIONS } = {}) {
+export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentBytes = RESIDENT_BYTES, residentSections = RESIDENT_SECTIONS, pixelBytes = RESIDENT_PIXEL_BYTES } = {}) {
   if (!LITTLE_ENDIAN) throw new Error('The engine transport requires a little-endian computer');
-
-  // Inputs that stay in the engine between analyses of the same section ("owner", the section object). The mask buffers are valid
-  // for one `maskKey` (sectionanalysis.js::maskIdentity); each table is valid for the SHA-256 of its bytes. Entries do not keep their
-  // owner alive: a section that is gone has its buffers released at the next analysis.
-  /** @type {WeakMap<object, ResidentEntry>} */
-  const byOwner = new WeakMap();
-  /** @type {Set<ResidentEntry>} */
-  const entries = new Set();
-  let clock = 0;
-  /** How masks reached the engine so far: whole, or as the changed rows of what it held. */
-  const stats = { fullMaskUploads: 0, derivations: 0 };
 
   /** @param {string[]} tokens */
   async function releaseTokens(tokens) {
     for (let i = 0; i < tokens.length; i += 64) await bridge.release(tokens.slice(i, i + 64)).catch(() => {});
   }
-  const entryBytes = (/** @type {ResidentEntry} */ entry) => Object.values(entry.inputs).reduce((sum, input) => sum + input.bytes, 0);
-  const residentTotal = () => { let sum = 0; for (const entry of entries) sum += entryBytes(entry); return sum; };
-  /** @param {ResidentEntry} entry @param {boolean} [release] false when the tokens are already invalid (the engine session ended) */
-  function drop(entry, release = true) {
-    entries.delete(entry);
-    const owner = entry.owner.deref();
-    if (owner && byOwner.get(owner) === entry) byOwner.delete(owner);
-    if (release) void releaseTokens(Object.values(entry.inputs).map((input) => input.token));
-    entry.inputs = {};
-  }
-  function pruneGone() { for (const entry of [...entries]) if (!entry.owner.deref()) drop(entry); }
-  /** Frees room for `needed` more bytes by dropping the least recently used entries other than `keepEntry`. */
-  function makeRoom(/** @type {ResidentEntry | undefined} */ keepEntry, /** @type {number} */ needed) {
-    pruneGone();
-    const others = [...entries].filter((entry) => entry !== keepEntry).sort((a, b) => a.used - b.used);
-    while (others.length && (residentTotal() + needed > residentBytes || others.length >= residentSections)) drop(/** @type {ResidentEntry} */ (others.shift()));
-  }
+  const release = (/** @type {string[]} */ tokens) => { void releaseTokens(tokens); };
+  // Inputs that stay in the engine between analyses of the same section ("owner", the section object). The mask buffers are valid
+  // for one key (sectionanalysis.js::maskIdentity); each table is valid for the SHA-256 of its bytes (residentstore.js).
+  const resident = createResidentStore({ maxBytes: residentBytes, maxOwners: residentSections, release });
+  // Working pixels of sections (card M8.4.9), valid for one sectionpixels.js::describePixels identity, with a byte budget of their own.
+  const pixels = createResidentStore({ maxBytes: pixelBytes, maxOwners: residentSections, release });
+  /** Uploads of pixels still running, by owner, so that two requests for the same pixels share one upload. @type {WeakMap<object, {identity: string, promise: Promise<any>}>} */
+  const pixelUploads = new WeakMap();
+  /** How masks reached the engine so far (whole, or as the changed rows of what it held), and how often its budget was full (card M8.4.9). */
+  const stats = { fullMaskUploads: 0, derivations: 0, budgetFull: 0 };
 
   /** Waits until the engine process has started or failed; a failed engine is an error, never a fallback. */
   async function ready() {
@@ -103,7 +87,7 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
     if (signal?.aborted) throw abortError();
     const descriptor = { dtype, shape, byte_length: bytes.length, sha256: digest ?? await sha256(bytes) };
     let begun = await bridge.beginBuffer(descriptor);
-    if (isFailure(begun) && begun.error.code === 'LIMIT_EXCEEDED' && makeSpace) { makeSpace(); begun = await bridge.beginBuffer(descriptor); }
+    if (isFailure(begun) && begun.error.code === 'LIMIT_EXCEEDED' && makeSpace) { stats.budgetFull++; makeSpace(); begun = await bridge.beginBuffer(descriptor); }
     const { token } = unwrap(begun);
     tokens.add(token);
     for (let offset = 0; offset < bytes.length; offset += CHUNK_BYTES) {
@@ -181,16 +165,18 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
 
   /** True when the engine already holds the mask buffers of `owner` for `maskKey` (so the snapshot may leave them out). */
   function hasMasks(/** @type {object} */ owner, /** @type {string} */ maskKey) {
-    const entry = byOwner.get(owner);
-    return !!entry && entry.maskKey === maskKey && !!entry.inputs.labels && !!entry.inputs.exclude && !!entry.inputs.stack_offsets;
+    const entry = resident.get(owner);
+    return !!entry && entry.key === maskKey && !!entry.inputs.labels && !!entry.inputs.exclude && !!entry.inputs.stack_offsets;
   }
   /** True when the engine holds complete masks of the size of `section`, so that a change of some rows can be sent instead of all of them. */
   function canDerive(/** @type {object} */ owner, /** @type {{w: number, h: number}} */ section) {
-    const entry = byOwner.get(owner), pixels = section.w * section.h;
-    return !!entry && entry.inputs.labels?.bytes === 4 * pixels && entry.inputs.exclude?.bytes === pixels;
+    const entry = resident.get(owner), area = section.w * section.h;
+    return !!entry && entry.inputs.labels?.bytes === 4 * area && entry.inputs.exclude?.bytes === area;
   }
-  function forget(/** @type {object} */ owner) { const entry = byOwner.get(owner); if (entry) drop(entry); }
-  function releaseAll() { for (const entry of [...entries]) drop(entry); }
+  /** Releases everything the engine holds for `owner`: its analysis inputs and its pixels. */
+  function forget(/** @type {object} */ owner) { resident.forget(owner); pixels.forget(owner); }
+  /** Releases everything the engine holds for this page (a project is being replaced). */
+  function releaseAll() { resident.releaseAll(); pixels.releaseAll(); }
 
   /**
    * The analysis succeeded: the freshly uploaded buffers replace the ones they supersede and stay in the engine, unless the section is
@@ -199,24 +185,78 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
    * @param {string | undefined} maskKey @param {Set<string>} transient
    */
   function keep(owner, entry, fresh, maskKey, transient) {
-    const names = Object.keys(fresh);
-    if (!names.length) { if (entry) entry.used = ++clock; return; }
-    const target = entry ?? { owner: new WeakRef(owner), maskKey: null, inputs: /** @type {Record<string, ResidentInput>} */ ({}), used: 0 };
-    const newMasks = names.some((name) => /** @type {readonly string[]} */ (MASK_INPUTS).includes(name));
-    const superseded = (newMasks ? [...MASK_INPUTS, ...names.filter((name) => !(/** @type {readonly string[]} */ (MASK_INPUTS).includes(name)))] : names).filter((name) => target.inputs[name]);
-    const added = names.reduce((sum, name) => sum + fresh[name].bytes, 0);
-    const freed = superseded.reduce((sum, name) => sum + target.inputs[name].bytes, 0);
-    makeRoom(target, added - freed);
-    if (residentTotal() + added - freed > residentBytes) {   // too large to keep: forget this section, release what it held
-      if (entry) drop(entry);
-      return;
+    const { kept, superseded } = resident.keep(owner, entry, fresh, { group: MASK_INPUTS, key: maskKey ?? null });
+    if (!kept) return;
+    for (const token of superseded) transient.add(token);
+    for (const input of Object.values(fresh)) transient.delete(input.token);
+  }
+
+  /** True when the engine holds the working pixels of `owner` for `identity` (sectionpixels.js::describePixels). */
+  function hasPixels(/** @type {object} */ owner, /** @type {string} */ identity) {
+    const entry = pixels.get(owner);
+    return !!entry && entry.key === identity && !!entry.inputs.rgba;
+  }
+
+  /**
+   * Makes the working pixels of `section` resident in the engine for `owner` (card M8.4.9) and returns their tokens: `rgba`
+   * (`u8[h,w,4]`) and, for a 16-bit image, `rgba16` (`u16le[h,w,4]`). Nothing is uploaded when the engine already holds pixels of the
+   * same identity; otherwise the new buffers replace the old ones of this owner. The pixels must be in memory (`section.orig`).
+   * Pixels larger than the pixel budget are never kept: the call rejects with `LIMIT_EXCEEDED` (field `pixels`) before uploading and
+   * forgets older pixels of the owner (part C keeps large images in the tile store). The tokens stay valid until another section's
+   * pixels push these out of the budget, `forget`, `releaseAll` or a restart; request the method that uses them right away.
+   * @param {object} owner @param {any} section @param {{signal?: AbortSignal}} [options]
+   * @returns {Promise<{identity: string, rgba: string, rgba16?: string}>}
+   */
+  async function ensurePixels(owner, section, { signal } = {}) {
+    const described = await describePixels(section);
+    for (;;) {
+      const running = pixelUploads.get(owner);
+      if (!running) break;
+      if (running.identity === described.identity) return running.promise;
+      await running.promise.catch(() => {});
     }
-    for (const name of superseded) { transient.add(target.inputs[name].token); delete target.inputs[name]; }
-    for (const name of names) { target.inputs[name] = fresh[name]; transient.delete(fresh[name].token); }
-    if (newMasks) target.maskKey = maskKey ?? null;
-    target.used = ++clock;
-    entries.add(target);
-    byOwner.set(owner, target);
+    pixels.pruneGone();
+    const entry = pixels.get(owner);
+    if (entry && entry.key === described.identity && entry.inputs.rgba && !!entry.inputs.rgba16 === !!described.buffers.rgba16) {
+      pixels.touch(entry);
+      return tokensOf(described.identity, entry);
+    }
+    const needed = Object.values(described.buffers).reduce((sum, buffer) => sum + buffer.data.byteLength, 0);
+    if (needed > pixelBytes) { pixels.forget(owner); throw new EngineError('LIMIT_EXCEEDED', 'pixels'); }
+    const promise = uploadPixels(owner, entry, described, needed, signal);
+    pixelUploads.set(owner, { identity: described.identity, promise });
+    try { return await promise; } finally { if (pixelUploads.get(owner)?.promise === promise) pixelUploads.delete(owner); }
+  }
+  /** @param {string} identity @param {ResidentEntry} entry */
+  const tokensOf = (identity, entry) => ({ identity, rgba: entry.inputs.rgba.token, ...(entry.inputs.rgba16 ? { rgba16: entry.inputs.rgba16.token } : {}) });
+
+  /**
+   * @param {object} owner @param {ResidentEntry | undefined} entry
+   * @param {Awaited<ReturnType<typeof describePixels>>} described @param {number} needed @param {AbortSignal | undefined} signal
+   */
+  async function uploadPixels(owner, entry, described, needed, signal) {
+    await ready();
+    const transient = /** @type {Set<string>} */ (new Set());
+    try {
+      pixels.makeRoom(entry, needed);
+      // The engine's budget is full: drop the pixels of other sections (never their analysis inputs) and try once more.
+      const makeSpace = () => pixels.makeRoom(pixels.get(owner), Infinity);
+      /** @type {Record<string, ResidentInput>} */
+      const fresh = {};
+      for (const name of PIXEL_INPUTS) {
+        const buffer = described.buffers[name];
+        if (!buffer) continue;
+        const token = await put(bytesOf(buffer.data), buffer.dtype, buffer.shape, signal, transient, buffer.sha256, makeSpace);
+        fresh[name] = { token, identity: described.identity, bytes: buffer.data.byteLength };
+      }
+      const { kept, superseded } = pixels.keep(owner, pixels.get(owner) ?? entry, fresh, { group: PIXEL_INPUTS, key: described.identity });
+      if (!kept) throw new EngineError('LIMIT_EXCEEDED', 'pixels');
+      for (const token of superseded) transient.add(token);
+      for (const input of Object.values(fresh)) transient.delete(input.token);
+      return tokensOf(described.identity, /** @type {ResidentEntry} */ (pixels.get(owner)));
+    } finally {
+      void releaseTokens([...transient]);
+    }
   }
 
   /**
@@ -240,24 +280,25 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
     const requestKey = crypto.randomUUID();
     const onAbort = () => { void bridge.cancel(requestKey); };
     signal?.addEventListener('abort', onAbort, { once: true });
-    pruneGone();
-    const entry = owner ? byOwner.get(owner) : undefined;
+    resident.pruneGone();
+    const entry = owner ? resident.get(owner) : undefined;
     /** @type {Record<string, ResidentInput>} */
     const fresh = {};
     /** @type {Record<string, string>} */
     const inputs = {};
-    const makeSpace = owner ? () => makeRoom(entry, Infinity) : undefined;
+    // The engine's budget is full: drop the inputs and the pixels of other sections (pixels are only a reserve), then try once more.
+    const makeSpace = owner ? () => { resident.makeRoom(entry, Infinity); pixels.makeRoom(pixels.get(owner), Infinity); } : undefined;
     let reused = false, derivedMasks = false;
     try {
       if (snapshot.labels === null) {
-        if (!owner || !entry || entry.maskKey !== maskKey || !entry.inputs.labels || !entry.inputs.exclude || !entry.inputs.stack_offsets) throw new EngineError('RESIDENT_LOST');
+        if (!owner || !entry || entry.key !== maskKey || !entry.inputs.labels || !entry.inputs.exclude || !entry.inputs.stack_offsets) throw new EngineError('RESIDENT_LOST');
         for (const name of MASK_INPUTS) if (entry.inputs[name]) inputs[name] = entry.inputs[name].token;
         reused = true;
-        entry.used = ++clock;
+        resident.touch(entry);
       } else {
         const masks = MASK_INPUTS.filter((name) => snapshot[name]);
         const sizeOf = (/** @type {any} */ spec) => (spec.derive ? spec.shape.reduce((/** @type {number} */ n, /** @type {number} */ d) => n * d, 1) * (spec.dtype === 'i32le' ? 4 : 1) : bytesOf(spec.data).length);
-        if (owner) makeRoom(entry, masks.reduce((sum, name) => sum + sizeOf(snapshot[name]), 0));
+        if (owner) resident.makeRoom(entry, masks.reduce((sum, name) => sum + sizeOf(snapshot[name]), 0));
         for (const name of masks) {
           const spec = snapshot[name];
           let token;
@@ -325,10 +366,13 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
    */
   async function restart({ automatic = false } = {}) {
     if (typeof bridge.restart !== 'function') throw new EngineError('ENGINE_UNAVAILABLE');
-    for (const entry of [...entries]) drop(entry, false);
+    resident.invalidateAll();
+    pixels.invalidateAll();
     unwrap(await bridge.restart({ automatic }));
     await ready();
   }
 
-  return { analyze, ready, restart, hasMasks, canDerive, forget, releaseAll, residentBytes: residentTotal, residentSections: () => entries.size, stats: () => ({ ...stats }) };
+  return { analyze, ready, restart, hasMasks, canDerive, forget, releaseAll, ensurePixels, hasPixels, residentBytes: resident.bytes, residentSections: resident.owners,
+    residentPixelBytes: pixels.bytes, residentPixelSections: pixels.owners,
+    stats: () => ({ ...stats, residentBytes: resident.bytes(), residentPixelBytes: pixels.bytes(), residentPixelSections: pixels.owners() }) };
 }

@@ -17,10 +17,10 @@ else:
     from protocol import MAX_CHUNK, MAX_METADATA, ProtocolError, RequestError, require_fields, require_integer, strict_json
 
 MAX_BUFFER = 256 * MAX_CHUNK
-MAX_HANDLES = 256     # live buffers: a page keeps the inputs of up to 16 sections (9 buffers each) between analyses (card M8.4.2)
+MAX_HANDLES = 256     # live buffers: a page keeps the inputs (9 buffers) and the pixels (2) of up to 16 sections between requests (M8.4.2, M8.4.9)
 SESSION_BUDGET = 512 * MAX_CHUNK
 TRANSIENT_RESERVE = 16 * MAX_CHUNK
-ITEM_BYTES = {'u8': 1, 'i32le': 4, 'u32le': 4, 'u64le': 8, 'f64le': 8, 'utf8json': 1}
+ITEM_BYTES = {'u8': 1, 'u16le': 2, 'i32le': 4, 'u32le': 4, 'u64le': 8, 'f64le': 8, 'utf8json': 1}   # u16le: 16-bit pixels (card M8.4.9)
 
 
 @dataclass

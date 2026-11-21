@@ -181,6 +181,8 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `tiledsource.js` | The original image of a tiled section in the section form (card M8.4.18b): where it is, "Locate the image…" and "Copy the image into the project", through `window.corantoolDesktop.tiles` (`createTiledSourcePanel`); `sizeText` | — |
 | `tiledsync.js` | Sending the masks of tiled sections to the engine's store (card M8.4.16): rounds of staged version, dirty tiles and tables, commit and acknowledgement, retried after a failure (`MaskSync`); reading back tiles the page dropped (`MaskLoader`); the tables as bytes (`maskTables`) | Yes |
 | `maskchanges.js` | Which rows of each section's label and exclusion masks changed since the engine last received them: `createMaskChanges` (mark, take, restore, mark all) and `indexRangeOfPairs` (the pixels named by an edit-history list). A hint for the engine path, never a proof (§26.2) | Yes |
+| `residentstore.js` | The registry of buffers the engine keeps between requests, per section (card M8.4.9, taken out of `engineclient.js`): `createResidentStore` with a byte bound and an owner bound, least recently used first, a group of buffers replaced together under one key, `forget`, `releaseAll`, `invalidateAll`. `engineclient.js` holds one for analysis inputs and one for pixels | Yes |
+| `sectionpixels.js` | The working pixels of a section as engine buffers (card M8.4.9): `buildPixelBuffers` (views `u8[h,w,4]` and `u16le[h,w,4]`), `describePixels` (the SHA-256 of each buffer and the pixel identity, remembered in `s._pxid`), `pixelIdentity` | Yes |
 | `sectionanalysis.js` | Analysis of one section without the DOM: effective class of each object, class-index table, row counts (cached per section), interval bins with no-data padding, ages and manual indices (§3.2), plus the builders of the engine method's input snapshot and reference result columns (`buildIntervalSnapshot`, `referenceColumns`), the revision key of a section's calculation (`analysisRevision`) and the conversion of engine result columns to `s.bins` (`resultToBins`). `app.js::analyze` passes the project state in | Yes |
 | `imageproc.js` | Enhancement, detection, connected components, magic wand, lasso, descriptors, rotation, downsampling | ✓ |
 | `edit.js` | Editing algorithms: scissors, merging, undo records, project migration | ✓ |
@@ -3005,7 +3007,8 @@ after 30 s. Progress events are not sent yet.
 
 `buffer.begin`, `chunk`, `commit` and `release` stage data in private temporary files. Validate shape/dtype/
 declared size before allocation; enforce exact offsets, length, SHA-256, finite f64 data and strict metadata
-before commit. Buffers are immutable after commit; releasing a queued/active snapshot revokes new access but
+before commit. Numeric types: `u8`, `u16le`, `i32le`, `u32le`, `u64le`, `f64le` (little-endian, C order); `utf8json` for metadata.
+Buffers are immutable after commit; releasing a queued/active snapshot revokes new access but
 keeps its file pinned until admitted work finishes. Limits: 256 live handles, 256 MiB per numeric buffer,
 4 MiB per metadata buffer, 512 MiB admitted session budget with a 16 MiB transient reserve. Metadata reserves
 64 times its byte length for parsing/object overhead. The session's staged bytes fit below the planned 1 GiB
@@ -3044,6 +3047,24 @@ of the snapshot and uploads only the tables whose bytes changed (an interval-siz
 mask identity uploads the four masks and releases the ones they replace. Buffers that the engine no longer knows (it restarted) give
 `RESIDENT_LOST` and the controller uploads a full snapshot once. A failed or cancelled analysis leaves the resident buffers as they
 were and releases what it uploaded. The engine accepts 256 live buffers; the bridge 512 tokens per page.
+
+**Pixels kept in the engine (card M8.4.9).** No engine method uses pixels yet; this is the service the image methods of M8.5 will use.
+`engineclient.js::ensurePixels(owner, section)` (and `engineanalysis.js::ensurePixels(section)`) makes the working image of a section that
+is not tiled resident in the engine and returns its tokens: `rgba`, `u8[h,w,4]` (the 8-bit `orig`), and for a 16-bit source also `rgba16`,
+`u16le[h,w,4]` (`orig16`), both C order with row 0 at the top, exactly the arrays the interface holds after crop, downsampling and rotation
+(`sectionpixels.js::buildPixelBuffers`, views without a copy). Their *pixel identity* (`sectionpixels.js::describePixels`) is the SHA-256 of
+`pixels/1|w|h|bits|<SHA-256 of rgba>|<SHA-256 of rgba16, or empty>`: it changes with any pixel, the size or the bit depth and with nothing
+else. The interface never writes these arrays in place (a crop, a rotation, a new downsampling factor or a reload assigns new arrays), so the
+hashes are computed once per pair of arrays and remembered in `s._pxid` with weak references (never per request, and nothing when the
+engine is off; the first request for a 24.6 MB section, hashing and transfer together, took 100-116 ms on the reference host). A request for pixels of the identity the engine already holds sends nothing, also after the interface
+released and decoded them again; new pixels are sent in chunks of 1 MiB with their SHA-256 and replace both buffers of the old identity,
+which are released. Two requests for the same pixels share one upload. Pixels are bounded separately from the analysis inputs
+(`residentstore.js`, one registry each): 192 MiB and 16 sections, least recently used first; pixels larger than the bound are refused before
+anything is sent (`LIMIT_EXCEEDED`, field `pixels`) and the section's older pixels are released. A tiled section, or one whose pixels are not
+in memory, is refused. A failed or cancelled upload keeps what was resident and releases what it sent. `forget`, `releaseAll` (a project is
+replaced) and a restart of the engine cover the pixels as well. When the engine reports its session budget full, the client drops the pixels
+of other sections (for an analysis also their inputs) and tries once more; `stats().budgetFull` counts it. The budget measurement is in the
+[engine contract §3](roadmap-engine-contract.md#3-private-transport-v1).
 
 The [M8.1 contract](roadmap-engine-contract.md) specifies later scientific inputs/results and predeclared
 acceptance gates. Current transport/worker regression tests exercise corruption, admission, cancellation,

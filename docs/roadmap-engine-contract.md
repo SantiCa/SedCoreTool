@@ -118,7 +118,7 @@ fields rather than silently ignore an unsupported setting. Protocol fixtures in 
 | `job.cancel` | `{request_id}` | `{state:"requested"}` or `{state:"already_terminal"}`; the target still gets its own one terminal response. |
 | `shutdown` | `{}` | `{}` after cancelling/releasing work; main enforces the shutdown deadline. |
 
-Buffer dtypes are `u8`, `i32le`, `u32le`, `u64le`, `f64le` and `utf8json`. Shape is an array of 1–3 positive
+Buffer dtypes are `u8`, `u16le` (added by card M8.4.9 for 16-bit pixels), `i32le`, `u32le`, `u64le`, `f64le` and `utf8json`. Shape is an array of 1–3 positive
 dimensions; numeric buffers are contiguous C order, little-endian, with exact item-size product. `utf8json`
 uses shape `[byte_length]` and the same strict JSON rules, maximum nesting 16; this carries bounded metadata
 tables without expanding control frames. Numeric masks and pixels never become JSON lists or base64 strings.
@@ -139,6 +139,33 @@ Reuse of inputs (card M8.4.2, client side): a client may keep the committed inpu
 `section.analyze` requests, bounded by 16 sections and 256 MiB and valid only for the identity of the data they hold (masks) or the
 SHA-256 of their bytes (tables). Because those buffers stay live, the engine admits 256 handles per session (it was 128) and the bridge 512
 tokens per page; the byte budget is unchanged.
+
+Working pixels of small sections (card M8.4.9, client side): a client may keep the working image of a section that is not tiled (the
+array the interface decoded, after crop, downsampling and rotation) as `rgba` `u8[h,w,4]` and, for a 16-bit source, `rgba16`
+`u16le[h,w,4]`, C order, row 0 at the top, valid for one *pixel identity*: the SHA-256 of `pixels/1|w|h|bits|<SHA-256 of rgba>|<SHA-256 of
+rgba16 or empty>`. They are bounded separately from the inputs: at most 192 MiB and 16 sections, least recently used first; pixels larger
+than 192 MiB are never kept (`LIMIT_EXCEEDED`, field `pixels`; such images belong to the tile store of §8). When the engine reports its
+budget full, a client drops the pixels of other sections (and, for an analysis, their inputs too) and tries once more. With the inputs (9
+buffers) and the pixels (2) of 16 sections a page holds at most 176 live buffers, within the 256 handles.
+
+*Budget decision of card M8.4.9 (measured 22 November 2026, recorded before any bound was changed).* The question was whether masks (256 MiB),
+pixels (192 MiB) and the transient reserve fit the 512 MiB session budget together with working copies, or whether the bounds must be lower or
+the budget 768 MiB. Measured with `tools/measure_engine_analysis.mjs --only pixels --pixel-pairs 2` on the primary reference host (Windows 11,
+Ryzen 7 7700X, 31 GiB, Electron 45.2.2, bundled Python 3.12.16), engine on, every section's pixels made resident through the program's client,
+then every mask sent again (a new mask version everywhere) and the interval size changed with the pixels resident
+([evidence](validation/M8.4.9-pixels-windows.json), working tree of the card on `956f3e3`). Public six-section example (8-bit, 344-351 x
+6,500-7,500): masks 72.6 MiB, tables 0.1 MiB (charged 9.5 MiB at 64 times), pixels 58.1 MiB; engine charge with everything resident 156 MiB,
+169 MiB while every mask is sent again. Generated eight-section project (960 x 6,400, 8-bit): masks 234.4 MiB, tables charged 4.1 MiB, pixels
+187.5 MiB; charge 442 MiB resident and 464 MiB while every mask is sent again (the client's 256 MiB mask bound already holds the old and the
+new copy of a section's masks together, so that bound includes the working copies). In both projects every pixel buffer stayed resident, the
+engine never reported its budget full (0 events in 4 runs with the engine on) and every analysis ended `ready`. **Decision:** the session budget
+stays 512 MiB and the bounds stay 256 MiB (inputs) and 192 MiB (pixels): their sum with the reserve is 464 MiB, which leaves 48 MiB for the
+64-fold charge of metadata tables and for results; a project whose tables need more makes the engine refuse a buffer, and the client then
+drops other sections' pixels and inputs and tries once more (counted as `budgetFull` in the client's statistics). The disk cap stays 1 GiB.
+Process-tree memory over the same runs (sampler of §7 at 25 ms, from the pixel upload to the end of the analyses; nearest-rank median of two
+runs per mode): public 912 MiB engine off, 1,095 MiB engine on with pixels resident (limit 1,168: passes); generated 1,786 and 1,841 MiB
+(limit 2,042: passes; highest single run with the engine on 1,987 MiB). Not measured: macOS, Linux, a clean machine, 16-bit sections in
+these projects (both are 8-bit; 16-bit transfer is covered by tests, not by this measurement).
 
 Initial limits: 256 MiB per buffer; 512 MiB per engine session for all staged/committed buffers, queued-job
 snapshots, results and admitted scratch arrays together; 1 GiB private scratch-disk cap. Admission uses checked

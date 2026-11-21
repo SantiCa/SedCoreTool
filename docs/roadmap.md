@@ -13,30 +13,31 @@ file and leave one line here.
 
 ## Status and handoff
 
-Updated 21 November 2026. Rules for this block: [AGENTS.md §1 step 8](../AGENTS.md#1-every-session-in-this-order) (about 30 lines, rewritten,
+Updated 22 November 2026. Rules for this block: [AGENTS.md §1 step 8](../AGENTS.md#1-every-session-in-this-order) (about 30 lines, rewritten,
 not appended). Earlier status records, check logs and audit texts: [roadmap-history.md § Status log](roadmap-history.md#status-log-until-21-november-2026).
 
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.152, `8ee9776`) is contained in it.
 - **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153; Q10 must be done before it.
-- **Last verified code commit:** M8.4.43 (this commit; see `git log`). Full checks on Windows: `npm test` 602 pass / 0 fail; typecheck;
-  `pytest -q` 927 passed / 9 skipped; ruff; `sync_version --check`; `tiled-sections.mjs`; `desktop.mjs` engine off and on.
-- **GitHub:** `f896132` (code of M8.4.37): all green on three systems (milestone gate of part C). On `4676908` (Q13 + M8.4.42): `tests`
-  green; *Desktop builds* green on Windows, failed in `tiled-sections.mjs` on macOS (same failure since `89d080b`: "reopened, no redraw by
-  hand: drawn pixel = source pixel") and on Linux (run `44951549785`, not diagnosed). **Open question for the maintainer:** a card to
-  diagnose the macOS/Linux `tiled-sections.mjs` failures.
-- **Checks due:** the GitHub result of this commit.
-- **Found by the run, not in it:** **Q11** (hostile ML settings stop the classifier; from Q9), **Q12** (an evicted placeholder section cannot
-  rebuild its grey image; from M8.4.39). **Q13** done (21 Nov 2026).
+- **Last verified code commit:** M8.4.9 (this commit; see `git log`). Full checks on Windows (`tools/check_all.py --desktop --tiled`):
+  `pytest` 932 passed / 9 skipped; `npm test` 632 / 0; typecheck; sync; ruff; `desktop.mjs` engine off and on passed;
+  **`tiled-sections.mjs` failed** (line 1464, M8.4.43 split block), as it does on unmodified `956f3e3`: see **Q14**.
+- **GitHub:** `f896132` (code of M8.4.37): all green on three systems (milestone gate of part C). `956f3e3` (M8.4.43): `tests` green;
+  *Desktop builds* failed in `tiled-sections.mjs` on Windows, macOS and Linux (run `44957994403`). The *As built* of M8.4.43 said it passed
+  on Windows; it does not.
+- **Checks due:** the GitHub result of this commit (expected: `tiled-sections.mjs` still failing until Q14).
+- **Found, not done:** **Q14** (the failure above; most capable, effort high), **Q11** (hostile ML settings stop the classifier), **Q12**
+  (an evicted placeholder section cannot rebuild its grey image).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
-  the release gate. Decisions X1-X4 (splitting a too-dense section) approved as recommended and delivered (M8.4.41–M8.4.43 done).
-- **Next:** part B starting with **M8.4.9** (section pixels resident in the engine; review/implement with most capable, effort high) as decided
-  by I, then M8.5 (needs A1). `Q10` before V0.153; `A4` open.
-- **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) done, milestone gate met (M8.4.19); part B not started; M8.5 must not start.
-  The engine path fails the timing gate of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates)
-  for whole sections; the tile store (decision of 15 Nov 2026) is the answer for large images.
-- **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved
-  format of long series) only if a save benchmark shows a slow save. Every lettered decision up to W is approved (records in the cards and
-  in the status log).
+  the release gate. Decisions X1-X4 (splitting a too-dense section) approved as recommended and delivered (M8.4.41–M8.4.43).
+- **Next:** **Q14** is recommended before M8.4.10 (a red end-to-end test hides new failures); then **M8.4.10** (record tables resident in the
+  engine; most capable, effort medium), **M8.4.11** (gate of part B; fast, effort low), then M8.5 (needs A1). `Q10` before V0.153; `A4` open.
+- **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) done, milestone gate met (M8.4.19); part B: M8.4.9 done
+  (22 Nov 2026); M8.5 must not start. The engine path fails the timing gate of
+  [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates) for whole sections; the tile store is the
+  answer for large images.
+- **Decisions waiting for the maintainer:** whether Q14 goes before M8.4.10; promote or remove the flags marked so in the [flag table](#flags);
+  `Q5` part 3 (saved format of long series) only if a save benchmark shows a slow save. Every lettered decision up to X is approved. M8.4.9 kept
+  the 512 MiB session budget by measurement (a third outcome beside the card's two): recorded in contract §3.
 - **Open pull requests (Dependabot, against `master`, not merged):** #26 Electron 45.2.2 → 45.3.4, #24 `softprops/action-gh-release` 2 → 3.
   They wait for the maintainer (AGENTS §5.1).
 - **Standing reminders:** remind the maintainer to run the release-gate tests (the [release checklist](#release-checklist)) when an M8
@@ -483,38 +484,9 @@ factor) are the authority for what a section's pixels are; a second decoder in t
 for every format and would still disagree on JPEG. The engine decodes files only in part C, where a multi-gigabyte file cannot
 be decoded by the interface at all, and that card will carry the parity evidence.
 
-#### M8.4.9 - Section pixels resident in the engine — state: after part C (reviewed then; may be replaced)
+- [x] **M8.4.9 - Section pixels resident in the engine** (done 22 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased); record: [history](roadmap-history.md#m849---section-pixels-resident-in-the-engine)).
 
-- **Goal:** a section's working pixels (8-bit RGBA `orig` and, when present, 16-bit `orig16`) are in the engine under an identity,
-  so that a method takes handles instead of an upload. No scientific method changes.
-- **Read first:** `app/js/engineclient.js` (the resident-input code of M8.4.2); `app/js/app.js` where pixels are created or replaced
-  (`newSection`, the loader near `s.orig = r.rgba`, `cut` at crop, `rotate90`, the downsample reload near `s.ds = k2`); contract §3
-  (limits) and §4; `src/sedcoretool/engine/buffers.py`, `specs.py`.
-- **Change:**
-  1. Extract the resident-input registry of `engineclient.js` (owner, name, identity, token, bytes, least-recently-used, bounds,
-     eviction, `keep`, `forget`) into a pure module `app/js/residentstore.js` with its own tests; `engineclient.js` uses it. No behaviour
-     change: the existing 47 tests pass unchanged (this is the review's request for modularity: masks, pixels and tables will share it).
-  2. Add the type `u16le` end to end (`buffers.py` `ITEM_BYTES`, `specs.py` `NUMPY_DTYPES`/`CONTRACT_DTYPES`, `engine-ipc.js` `DTYPES`,
-     `engineclient.js` `OUTPUT_TYPES`, contract §3), with the same tests the other types have.
-  3. `sectionanalysis.js` (or a new pure module `sectionpixels.js`): `pixelIdentity(section)`, the SHA-256 of the working array bytes
-     plus its width, height and bit depth, computed when the pixels are loaded or replaced and stored on the section (`s._pxid`), never
-     per analysis (hashing 24 MB costs about 15 ms); `buildPixelBuffers(section)` returns `{rgba: u8[h,w,4], rgba16?: u16le[h,w,4]}` as views.
-  4. `engineclient.js`: `ensurePixels(owner, section)` uploads those buffers when the resident identity differs and returns their tokens;
-     they count against a pixel budget of their own in the registry. A section whose pixels do not fit is not resident (part C).
-  5. Budgets: the engine's session budget is 512 MiB. Masks (up to 256 MiB), pixels (up to 192 MiB) and the transient reserve do not
-     fit together with working copies. Decide with a measurement of the public example and the generated project, then record in
-     contract §3 either lower resident bounds or a session budget of 768 MiB (the disk cap stays 1 GiB). Do not raise it without the
-     measurement.
-- **Do not touch:** the interface's own use of `orig`/`orig16` and its memory management (`MEM`, `pxTouch`): the renderer still holds
-  its copy until part C; the saved project; any method.
-- **Tests:** registry unit tests (eviction order, bounds, identity change replaces and releases, forget); identity changes on
-  crop, rotation, downsampling and reload, and not on a settings change; upload of a 16-bit section end to end through the real
-  engine (bytes read back equal); a section that does not fit is not kept; release on project replacement; mutation tests; the
-  desktop end-to-end with the experiment on and off; memory peak measured with pixels resident (record it, compare with §7).
-- **Done when:** the tests pass, the memory peak is recorded against the §7 limit, and a probe method (a test-only method that
-  sums a region of the resident pixels) reads the same bytes as the interface holds.
-
-#### M8.4.10 - Record tables resident in the engine — state: Ready after M8.4.9
+#### M8.4.10 - Record tables resident in the engine — state: Ready
 
 - **Goal:** the tables that M8.5a, M8.5d and M6 consume (depth/age records, data tables, multiproxy series) can be held in the engine
   in one columnar format, so those methods take handles. No scientific method changes.
@@ -526,6 +498,7 @@ be decoded by the interface at all, and that card will carry the parity evidence
   (`table(inputs, name, columns)`) that rejects a shape, a non-finite valid value or a name that is not allowed, naming the field. Contract
   §4 gets a "tables" paragraph. Resident through `residentstore.js`.
 - **Do not touch:** the interface's tables and formulas; saved projects.
+- **Model:** most capable, effort medium (the engine helper validates tables that may be corrupt or hostile; bounded, exact tests).
 - **Tests:** round trip of random tables with missing values, exact for every value and every missing slot; rejection cases for the
   helper; limits; the identity changes with any value, name or unit and with nothing else; a probe method that returns column sums.
 - **Done when:** the tests pass and the probe through the real engine equals the interface's own sums.
@@ -534,6 +507,7 @@ be decoded by the interface at all, and that card will carry the parity evidence
 
 - **Goal:** the milestone gate (Windows, macOS, Linux on one commit) for part B, and the memory and timing evidence of M8.4.9 (or of its
   replacement) repeated on the final commit. M8.5 may start only after this card and the milestone gate of part C (M8.4.19).
+- **Model:** fast, effort low (running and recording the gate).
 
 ### M8.5 and M8.6 - summaries
 
@@ -755,6 +729,15 @@ web/frontend security, UI correctness and architecture cards sit here.
   error instead of its grey image. *Change:* `ensurePixels` regenerates the grey image for a placeholder, as M8.4.39 did for `s.tiled.missing`;
   *Tests:* a desktop e2e step (or a Node test if the branch moves to a module) that evicts a placeholder and reopens it; *Do not touch:* the
   placeholder's saved record. *Done when:* the evicted placeholder reopens grey without an error.
+
+- [ ] **Q14 - `tiled-sections.mjs` fails in the M8.4.43 split block on all three systems** (found by M8.4.9, 22 Nov 2026; most capable,
+  effort high: mask syncing of split parts, where a mistake could lose user work). On `956f3e3` (M8.4.43) GitHub *Desktop builds* fails in
+  `tiled-sections.mjs` on Windows and macOS (`AssertionError: window: labels`) and on Linux (run `44957994403`: `TimeoutError` waiting 120 s);
+  on the maintainer's Windows workstation it times out at line 1464, the wait for every section's `_maskSync` to be settled after the split
+  and folder-backup steps, on unmodified `956f3e3` too. The *As built* of M8.4.43 recorded the test as passing on Windows. Earlier commits
+  (`89d080b` onwards) failed on macOS and Linux in another step ("reopened, no redraw by hand"). *Change:* diagnose and fix the cause (the
+  window block logs `BUSY` as `lastError` on two sections); never widen the wait. *Done when:* `tiled-sections.mjs` passes on Windows locally
+  and on the three systems on GitHub on one commit.
 
 - [ ] **Q10 - Data-tab edit precision, virtualized table cap, engine-refresh/CSV races & SVG PNG Blob export.**
   - *Goal:* fix verified runtime, UX and data-accuracy defects across the Data tab, Core log, Figures and pointer interactions.

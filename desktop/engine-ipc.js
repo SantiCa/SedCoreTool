@@ -6,7 +6,7 @@ const { randomUUID } = require('node:crypto');
 const MAX_CHUNK = 1048576, MAX_BUFFER = 256 * 1024 * 1024, MAX_TOKENS_PER_PAGE = 512, MAX_RELEASE = 64, MAX_ANALYSES_PER_PAGE = 5;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
-const DTYPES = new Set(['u8', 'i32le', 'u32le', 'u64le', 'f64le', 'utf8json']);
+const DTYPES = new Set(['u8', 'u16le', 'i32le', 'u32le', 'u64le', 'f64le', 'utf8json']);   // mirrors ITEM_BYTES in src/sedcoretool/engine/buffers.py
 // Mirrors METHOD_INPUTS in src/sedcoretool/engine/specs.py; tests/app/engine-ipc.test.mjs compares the two files.
 const ANALYSES = {
   'section.intervals/1': {
@@ -23,7 +23,7 @@ const isCount = (value, minimum = 0) => Number.isSafeInteger(value) && value >= 
 const isPlain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 
 const COLUMN_NAME = /^[A-Za-z][A-Za-z_]{0,63}$/;
-const COLUMN_DTYPES = new Set(['u8', 'i32le', 'u32le', 'u64le', 'f64le']);
+const COLUMN_DTYPES = new Set(['u8', 'u16le', 'i32le', 'u32le', 'u64le', 'f64le']);
 /** The layout of the packed result buffer as the page may see it: only the four known fields of at most 64 columns, nothing else. */
 function cleanLayout(layout) {
   if (!isPlain(layout)) reject('INTERNAL', 'layout');
@@ -226,4 +226,4 @@ function createEngineIpc({ engine }) {
   };
 }
 
-module.exports = { createEngineIpc, ANALYSES, MAX_TOKENS_PER_PAGE };
+module.exports = { createEngineIpc, ANALYSES, MAX_TOKENS_PER_PAGE, DTYPES, COLUMN_DTYPES };
