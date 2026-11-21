@@ -18,17 +18,17 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.152, `8ee9776`) is contained in it.
 - **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153; Q10 must be done before it.
-- **Last verified code commit:** `35c4aa5` (M8.4.38). Full checks on Windows: `pytest -q` 896 passed / 9 skipped; `npm test` 557;
-  typecheck; `sync_version.py --check`; ruff; `desktop.mjs` engine off and on; `tiled-sections.mjs`. GitHub `tests` and *Desktop builds*
-  passed on Windows, macOS and Linux. Since then: documents, and H9 (`bfbc6b4`, `tools/check_all.py`, a tool only; its run on
-  Windows: `pytest` 906 passed / 9 skipped, `npm test` 557, typecheck, `sync_version`, ruff, all passed; no end-to-end test needed).
-- **Checks due:** none.
-- **Q9 done** (development gate, Windows): `npm test` 563, typecheck, `desktop.mjs` engine off; its browser test `html-injection.mjs` runs
-  inside `smoke.mjs`, which was **not run locally** (starting the local server was refused): the `e2e` job of GitHub runs it on the push.
-  Q9 found card **Q11** (hostile ML settings stop the classifier; not in the run).
-- **Authorised run (maintainer, 21 Nov 2026, "sigue con el resto"; AGENTS §6 *Authorised runs*):** `Q9` (done) → **`M8.4.39`** (next) → `M8.4.40` (with decision V) → `M8.4.37`. Each card goes to a fresh sub-agent of its tier
-  and effort; one commit, push and short report per card; stop only for *Stop and ask*. Then **`M8.4.19`**, the milestone gate of part C
-  (not part of the run). Then part B as decided by I at the review of M8.4.19, then M8.5 (needs A1). `Q10` before V0.153; `A4` after M8.4.19.
+- **Last verified code commit:** M8.4.39 (this commit; see `git log`). Full checks on Windows: `npm test` 576; typecheck; `desktop.mjs`
+  engine off and on; `tiled-sections.mjs`; `large-16bit-desktop.mjs`; `pytest -q` 907 passed / 9 skipped, ruff, `sync_version --check`.
+  `smoke.mjs` not run locally. GitHub `tests` (with the `e2e` smoke job) and *Desktop builds* passed on Windows, macOS and Linux on `b991fd9`
+  (contains Q9); the run of the M8.4.39 commit is to be read at the start of the next card.
+- **Checks due:** none locally; read the GitHub result of the M8.4.39 commit.
+- **Found by the run, not in it:** **Q11** (hostile ML settings stop the classifier; from Q9), **Q12** (an evicted placeholder section cannot
+  rebuild its grey image; from M8.4.39).
+- **Authorised run (maintainer, 21 Nov 2026, "sigue con el resto"; AGENTS §6 *Authorised runs*):** `Q9` (done) → `M8.4.39` (done) →
+  **`M8.4.40`** (next, with decision V) → `M8.4.37`. Each card goes to a fresh sub-agent of its tier and effort; one commit, push and short
+  report per card; stop only for *Stop and ask*. Then **`M8.4.19`**, the milestone gate of part C (not part of the run). Then part B as decided
+  by I at the review of M8.4.19, then M8.5 (needs A1). `Q10` before V0.153; `A4` after M8.4.19.
 - **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) in its last cards; part B not started; M8.5 must not start.
   The engine path fails the timing gate of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates)
   for whole sections; the tile store (decision of 15 Nov 2026) is the answer for large images.
@@ -385,33 +385,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 
 - [x] **M8.4.38 - Security hardening: close M8.4.34 store bypass and harden `trainer` IPC** (done 21 Nov 2026; record: [history](roadmap-history.md#m8438---security-hardening-close-m8434-store-bypass-and-harden-trainer-ipc)).
 
-##### M8.4.39 - Frontend lifecycle teardown, tiled-viewer stale closure, multi-core save/backup & memory leaks — state: Ready (third council audit, 21 Nov 2026; P1)
-
-- **Goal:** switching, closing or reopening a project cleanly tears down every background runner, queued engine job and large cache; reopened
-  tiled sections always repaint newly loaded tiles; multi-core saves and backups never skip sections when the active core is empty; memory stays
-  bounded across multi-section tiled editing.
-- **Read first:** `app/js/tiledview.js` (`tileSchedulers`); `app/js/app.js` (`resetState`, `saveOnce`, `backupNow`, `secDel`, `pxTouch`,
-  `ensurePixels`, `presetBest`, `presetAll`, `busy`); `app/js/tiledtools.js` (`editWindow`, `statsWait`); `app/js/tiledit.js`
-  (`TiledStatsRunner.rgba`); `app/js/tiledproject.js` (`readReopenCache`); `app/js/engineanalysis.js` (`releaseAll`); `app/js/storage.js`
-  (`lastSec`); `app/js/columns.js` (`lastImported`); `app/js/figures.js` (`lmBgCache`).
-- **Change:** the modules listed above (keep `app.js` at or below `APP_JS_CEILING`); new and extended Node + desktop e2e tests.
-- **Do not touch:** scientific calculations, saved project schema, tile-store disk format.
-- **Model:** most capable, effort high (project lifecycle, saving/`retainStore` safety, memory management).
-- **Steps:**
-  1. Fix `tiledview.js::tileSchedulers`: resolve the current section dynamically (`sec()?.tiled?.pyramid === tiled.pyramid`) instead of closing
-     over the first `tiled` object, update error state on the live section, and evict/clear schedulers on project reset.
-  2. In `resetState()` (and `secDel`): stop every section's `_maskSync`, `_statsRunner` and `_counts.runner`; cancel/clear queued `engineAnalysis`
-     jobs in `releaseAll()`; release `tiledtools.js` `editWindow` and reset `statsWait`; clear `tileCache` (closing ImageBitmaps), `tileSchedulers`,
-     `storage.js::lastSec` (for closed projects), `columns.js::lastImported`, and bound/clear `figures.js::lmBgCache`; call `markDirty()` in `secDel`.
-  3. Fix multi-core guards in `saveOnce` (`app.js:3285`) and `backupNow` (`app.js:3690`) to inspect all cores (`S.cores.some(c => c.sections.length)`
-     / `S.cores.flatMap(c => c.sections)`) instead of only `S.sections.length`.
-  4. Bound/clear `TiledStatsRunner.rgba` when idle or leaving a section; clear `_lc`/`_lb` in `pxTouch` eviction; guard `ensurePixels` against
-     `s.tiled.missing` (`levels === null`); guard `presetBest` and `presetAll` against tiled sections; make `busy()` use a nesting counter;
-     verify in `readReopenCache` that every object in `s.objects` needing stats is covered by `cache.stats`.
-- **Tests:** Node tests for `tileSchedulers` reopen repaint, `engineAnalysis.releaseAll()` aborting queued jobs, `readReopenCache` missing-object
-  rejection, multi-core `_savedRecord` update when active core has 0 sections, and `busy()` nesting; desktop e2e check reopening a tiled project
-  and verifying high-res tiles repaint without manual pan; `npm test`, `npm run typecheck`, `tests/e2e/tiled-sections.mjs`.
-- **Done when:** every bug above has a failing-before/passing-after test and `app.js` does not grow; development gate.
+- [x] **M8.4.39 - Frontend lifecycle teardown, tiled-viewer stale closure, multi-core save/backup & memory leaks** (done 21 Nov 2026, development gate; record: [history](roadmap-history.md#m8439---frontend-lifecycle-teardown-tiled-viewer-stale-closure-multi-core-savebackup--memory-leaks)).
 
 ##### M8.4.40 - Engine session-request limit, non-blocking store I/O and Windows/handle robustness — state: Ready (third council audit, 21 Nov 2026; P1; decision V)
 
@@ -743,6 +717,13 @@ web/frontend security, UI correctness and architecture cards sit here.
   `geo.js` `fitModel` reading `defaults`). *Change:* validate `settings.ml` (and the classifier `params`) where a project is loaded, falling back
   to the defaults with a visible note; *Tests:* Node tests with a non-numeric `k` and an unknown method; *Do not touch:* the classifier's
   results for valid settings. *Done when:* the tests pass and `tests/e2e/html-injection.mjs` can use hostile `k` and `method` too.
+
+- [ ] **Q12 - A placeholder section cannot rebuild its working image after eviction** (found by M8.4.39, 21 Nov 2026; fast tier, effort medium).
+  A tiled section kept as a placeholder after a failed engine opening (`placeholderSection` in `app.js`: `frozen: 'engine'`, no `tiled`) holds a
+  grey `orig`; when `pxTouch` evicts it, `ensurePixels` calls `decodeWorking`, which throws the "locked" message, so the section shows an
+  error instead of its grey image. *Change:* `ensurePixels` regenerates the grey image for a placeholder, as M8.4.39 did for `s.tiled.missing`;
+  *Tests:* a desktop e2e step (or a Node test if the branch moves to a module) that evicts a placeholder and reopens it; *Do not touch:* the
+  placeholder's saved record. *Done when:* the evicted placeholder reopens grey without an error.
 
 - [ ] **Q10 - Data-tab edit precision, virtualized table cap, engine-refresh/CSV races & SVG PNG Blob export.**
   - *Goal:* fix verified runtime, UX and data-accuracy defects across the Data tab, Core log, Figures and pointer interactions.

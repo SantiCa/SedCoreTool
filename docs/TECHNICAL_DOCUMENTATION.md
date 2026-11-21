@@ -169,7 +169,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `tiledstate.js` | One tiled section's state behind the page (card M8.4.30 step 2): per-tile object statistics, row counts and interval table, reads of level-0 pixels and dropped mask tiles, mask sends to the engine's store; context object from `app.js` | No (controller) |
 | `tiledproject.js` | The project side of tiled sections (card M8.4.30 step 1): reopening a saved tiled section, the lock of a missing stored version, the store folder that follows its project, the store's part of a save; it receives what it needs from `app.js` in one context object | No (controller) |
 | `taxa.js` | The ichnotaxa of a project (card Q1): use of a class across cores, deleting it from every core and restoring it, repairing labels of classes that no longer exist | Yes |
-| `singleflight.js` | One run at a time with at most one more run for the requests made meanwhile, if the revision changed (card M8.4.31): project saves | Yes |
+| `singleflight.js` | One run at a time with at most one more run for the requests made meanwhile, if the revision changed (card M8.4.31): project saves; `nestedIndicator`, one busy sign for overlapping operations (card M8.4.39) | Yes |
 | `tiledundo.js` | Undo and redo of tiled edits (card M8.4.16 step 5): copies of the mask tiles an edit changed, taken before its first write and swapped with the page's tiles (`TileChanges`); the 64 MiB budget of those copies (`trimTileHistory`) | Yes |
 | `tiledcounts.js` | Row counts of tiled sections (card M8.4.17): the histogram of each tile (`tileHistogram`), their sum under the current classes (`TiledRowCounts`) and the queue that counts changed tiles between frames (`TiledCountsRunner`); no DOM |
 | `tiledbackup.js` | Tiled sections in the folder backup and in packages, and back into the store at a restore (cards M8.4.18c-d): `backupTiledSections` (with the project's copies of sources), `packageTiledSections`, `keptSourceBytes`, `restoreVersion`, `restoreSource`, `manifestBlobs`; no DOM (the folder is a directory handle or a read function) |
@@ -3214,7 +3214,8 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   object's statistics are the sum of its tiles' (`TiledObjectStats`; bounding box by minimum and maximum), which equals `objectStats` over the
   whole image (integer sums exactly, the luminance sums within a relative 1e-12, `tests/app/tiledit.test.mjs`). After a stroke the tiles within
   3 pixels of what it changed are recomputed one by one between frames from the level-0 pixels of the tile and its neighbours (read through the
-  engine, 48 tiles cached) and the labels as they are at that moment (`TiledStatsRunner`). An object keeps `area` and `stats` in source pixels,
+  engine, 48 tiles cached; the cache is emptied when the section is left, at once or when the run on its way ends, and when the section is closed
+  or deleted, which also stops the runner: card M8.4.39) and the labels as they are at that moment (`TiledStatsRunner`). An object keeps `area` and `stats` in source pixels,
   `sbox` (source bounding box) and `bbox` in working pixels (`floor(source / ds)`); `feat` uses `pxPerCm(s) · ds` source pixels per centimetre.
   An object left with no pixel is removed. These values change only when the object is *current* (card M8.4.28): none of the tiles under its
   `sbox` (`tilesUnder`, no margin) nor of the tiles queued for it since its last update is waiting, being computed or failed; an object whose
@@ -3270,8 +3271,8 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   has bytes left; if a tile is not ascending, outside the grid or not in the stored version; if a histogram's row count is not the tile's, its flags
   are not 1-3, its offsets do not start at 0, rise and end at the pair count, its labels are zero or not ascending within a row, a count is zero, or a
   row's excluded pixels and counts exceed the columns inside the area; if the exclusion holds a value other than 0 or 1; if a statistic is not finite,
-  its count is not a positive integer or its box leaves the source; if a labelled tile has no statistics; or if the totals of the objects do not agree
-  (count and box) with the record's. Accepted, the cache fills the reduced copy, `TiledRowCounts` (`restore`) and `TiledObjectStats` without reading
+  its count is not a positive integer or its box leaves the source; if a labelled tile has no statistics; if the totals of the objects do not agree
+  (count and box) with the record's; or if an object the record saved with pixels (`st.n > 0`) has no statistics in the cache (card M8.4.39). Accepted, the cache fills the reduced copy, `TiledRowCounts` (`restore`) and `TiledObjectStats` without reading
   a tile; when the analysis area's columns differ from the cache's, `setArea` marks only the tiles of the columns that changed, and only those are read.
 - **The store folder follows its project** (`deleteStoreOf`, `copyTiledStore`, `storeLocked` in `app.js`; `desktop/tile-ipc.js`; card M8.4.27;
   contract §8.7). Deleting a project from the library also deletes its folder on this computer (`<user data>/projects/<id>/`: masks, the record

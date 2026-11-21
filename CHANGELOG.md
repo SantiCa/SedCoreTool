@@ -14,6 +14,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### For users
 
+- Fixed, when a project has several cores: a save made while the core on screen had no sections now also records the saved state of the large (tiled) sections of the other cores, and the automatic copy in a project folder is no longer skipped. Deleting a section now marks the project as unsaved. A large section opened again repaints its sharp tiles by itself, without moving the view. Closing or switching projects now stops the background work of the old project (mask sends, statistics, engine analyses waiting their turn) and frees its tiles and caches. «Best preset» and «Apply to all» no longer change large sections, whose tiles show the original pixels. The busy sign stays visible while any operation still runs.
 - Opening a project or a table from someone else is safer: names, identifiers, units, settings, plot colours and example images in the file can no longer add elements to the program's pages or run code; they are shown as plain text, and an example image that is not a PNG, JPEG or WebP picture is left out.
 - Desktop program, safer stored masks of large (tiled) sections: a save no longer removes the versions stored before the program was started (they go when the project is deleted), and deleting a project saved in an earlier session asks for confirmation in the program's own window, also when it was opened in this session. Starting, checking and cancelling a U-Net training no longer freeze the program, and cancelling stops every process the training started.
 - Fixed: opening a large (tiled) section whose masks hold very many objects in every row could fill the memory of the program for minutes and then fail. The interval table of such a section is not computed (as before, and the program says so), and its counts no longer take memory.
@@ -32,6 +33,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.39: the teardown of a closed project, the multi-core save and backup guards, and bounded caches of tiled editing; new tests in `tests/app/lifecycle.test.mjs` and checks in `tests/e2e/tiled-sections.mjs`. Details in the card's *As built*.
 - Card Q9: text from projects and tables is escaped wherever it becomes HTML, image URLs of a project are checked (`safeImageURL`, `sanitizeThumbs` in `core.js`), plot colours and sizes are validated in `plot.js`; new tests `tests/app/html-safety.test.mjs` (with a static check of attribute interpolations) and `tests/e2e/html-injection.mjs` (in the smoke test). Details in the card's *As built*.
 - Card H9: `tools/check_all.py` runs the full checks one after another and prints one line each (result, count, seconds), with only the tail of a failure and the full output in a log file; the end-to-end tests are options (`--desktop`, `--tiled`, `--smoke`, `--large16`, `--e2e`).
 - Card M8.4.38 (decision W): the desktop's store and training channels check who calls them and what they may remove or run; details in the card's *As built*.

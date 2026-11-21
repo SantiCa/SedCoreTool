@@ -10,7 +10,7 @@ import { withProvenance, ageModelText, bioturbationTable, objectsTable } from '.
 
 import { DEFAULT_FILTERS, FILTER_PRESETS, DEFAULT_DETECT, traceSeparation, localSeparability, applyFilters, detectMask, components, regionGrow, polygonPixels, objectStats, features, rotate90, downsampleRGBA, autoLevels, gammaForMedian, factorThatFits, workingBytes, WORKING_MEMORY_LIMIT } from './imageproc.js';
 import { parseTable, decodeText, invertModel, toAxis, compositeRows, abbrevs, traceSymbolPath, validHexColor } from './log.js';
-import { storageAvailable, listProjects, getProject, putProject, putMeta, deleteProject, getPref, setPref, putLite, listLite, getMeta, putImage, getImage, gcImages } from './storage.js';
+import { storageAvailable, listProjects, getProject, putProject, putMeta, deleteProject, getPref, setPref, putLite, listLite, getMeta, putImage, getImage, gcImages, forgetSections } from './storage.js';
 import { INTERP_DEFAULT } from './interp.js';
 
 import { evalColumn, formulaRefs, fillLinear } from './sheet.js';
@@ -24,12 +24,12 @@ import { IGNORE, doubtful, trainingMask, cropRGBA } from './unet.js';
 import { createUnetController } from './unetmodel.js';
 import { VISION_MODEL, visionFeatureId, traceWindow, traceInput, pickEmbedding } from './vision.js';
 import { coresFromLongTable, applyCatalogue, coreAges, intervalsOnAxis, intervalsFromTable, fitModel, buildMapSVG, mapBBox, predictProba, MAP_STYLE, MAP_SYMBOLS, fitBBoxAspect, validMapCoords } from './geo.js';
-import { $, APP, APP_NAMES, CLF_SCOPES, ML_DEFAULT, S, VERSION, clsById, defaultClasses, fetchAsset, fmt, hex, hideMissingExamples, keyOf, sec, uid } from './state.js';
-import { figTabsData, loadFigTabs, renderFigPanel, renderFigure, resetFigTabs, scheduleFigure, traceCanvas } from './figures.js';
+import { $, APP, APP_NAMES, CLF_SCOPES, ML_DEFAULT, S, VERSION, clsById, defaultClasses, fetchAsset, fmt, hex, hideMissingExamples, keyOf, projectHasData, sec, uid } from './state.js';
+import { figTabsData, forgetMapBackgrounds, loadFigTabs, renderFigPanel, renderFigure, resetFigTabs, scheduleFigure, traceCanvas } from './figures.js';
 import { assembleLevel, imageDimensions, levelPositions, proxyLevel, tileRgba, TILE } from './tiledsection.js';
 import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlacement, tileRange, tilesByDistance } from './tilecache.js';
 import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks.js';
-import { singleFlight } from './singleflight.js';
+import { nestedIndicator, singleFlight } from './singleflight.js';
 import { joinCoreTables } from './coremerge.js';
 import { createTiledProject } from './tiledproject.js';
 import { createTiledState } from './tiledstate.js';
@@ -44,7 +44,7 @@ import { createTiledSourcePanel } from './tiledsource.js';
 import { chooseFolderVersion } from './folderversion.js';
 import { renderData } from './datatab.js';
 import { frameRatio, panelPrefs, savePanels } from './panels.js';
-import { addRecordFromTable, defaultLogView, lastLog, mode, renderLog, renderLogPanel, renderRecList, scheduleLog, sectionCanvas, navigationPreviewCanvas, clearNavigationPreviews, setMode } from './columns.js';
+import { addRecordFromTable, defaultLogView, forgetLastImport, lastLog, mode, renderLog, renderLogPanel, renderRecList, scheduleLog, sectionCanvas, navigationPreviewCanvas, clearNavigationPreviews, setMode } from './columns.js';
 import { GROUP_COLORS, addImported, addNamedIntervals, attachMapZoom, coreListUI, defaultGeo, exportMapPNG, geoComputeSamples, geoLand, geoLayer, geoMarkDirty, geoRT, geoReset, geoTrain, interpUI, loadGeoDemo, loadLand, mapBackground, mapStyleUI, mapTip, normalizeGeo, renderGeo, renderGeoMap, scheduleGeo, valueLayer, initMultiproxy } from './multiproxy.js';
 /** Delivery number (V27…): shown in the header, the start screen, the help, the window title, project files and the name of the offline file. */
 export const DELIVERY = 'V0.152';
@@ -124,7 +124,7 @@ function pxTouch(s) {
   for (let i = 0; i < MEM.px.length && MEM.px.length > 1 && bytes() > MEM.pxBudget;) {
     const x = MEM.px[i];
     if (x === s || keepLoaded(x)) { i++; continue; }
-    x.orig = null; x.orig16 = null; x.enh = null; x._unet = null; x._fc = null; MEM.px.splice(i, 1);
+    x.orig = null; x.orig16 = null; x.enh = null; x._unet = null; x._fc = null; x._lc = null; x._lb = null; MEM.px.splice(i, 1);   // card M8.4.39: _lc, _lb too (counted above)
   }
 }
 /** The original file of a section as a Blob (from memory if not yet stored, else from the image store on disk). */
@@ -147,7 +147,7 @@ function ensurePixels(s) {
   if (s.orig) { pxTouch(s); return Promise.resolve(s); }
   if (s._loading) return s._loading;
   s._loading = (async () => {
-    const r = s.tiled ? await tiledWorkingImage(s.tiled) : await decodeWorking(s, s.ds);
+    const r = s.tiled?.missing ? { w: s.w, h: s.h, rgba: greyRgba(s.w, s.h), rgba16: null } : s.tiled ? await tiledWorkingImage(s.tiled) : await decodeWorking(s, s.ds);   // M8.4.39: no pyramid, grey
     if (r.w !== s.w || r.h !== s.h) console.warn('image size differs from the stored masks', s.name, r.w, r.h, s.w, s.h);
     // V0.44: the enhancement of a section being opened is computed in the worker; orig and enh are set together
     const input = r.rgba16 || r.rgba;
@@ -398,7 +398,7 @@ const TILED_BLOCKED_TOOLS = new Set();
 function tiledRefused(s) { if (!s?.tiled && !s?.frozen) return false; toast(t(s.frozen ? 'tiles.frozen.' + s.frozen : 'tiles.unavailable')); return true; }
 
 /** Card M8.4.30 step 4: the viewer of tiled sections (working image, pixel tiles, mask overlay, build dialog) lives in tiledview.js. */
-const { tiledWorkingImage, tileCache, tileSchedulers, tilesShowSource, drawTiles, tileBuildDialog } = createTiledView({
+const { tiledWorkingImage, tileCache, tileSchedulers, resetTiles, tilesShowSource, drawTiles, tileBuildDialog } = createTiledView({
   TILES, get view() { return view; }, get vctx() { return vctx; }, toast, requestRender, esc: (text) => esc(text), maskLoader: (q) => maskLoader(q), recoverEngine: () => recoverEngine(),
 });
 
@@ -428,14 +428,15 @@ const { level0Rgba, tiledStatsRunner, tiledCounts, queueTileCounts, analyzeTiled
   TILES, get TILES_ONLY() { return TILES_ONLY; }, toast, afterChange, analysisProject: () => analysisProject(), analyze, effClassArray, renderResults, requestRender,
   sourceBox, sourceRoi,
 });
+/** Card M8.4.39: the busy sign stays while any busy operation runs (they overlap: a log redraw during a load, a wait for statistics). */
+const busyShown = nestedIndicator(() => { $('busy').hidden = false; }, () => { $('busy').hidden = true; });
 /** Card M8.4.30 step 3: strokes, wand, lasso, scissors and object operations on tiled sections live in tiledtools.js. */
-const { startTiledStroke, moveTiledStroke, finishTiledStroke, tiledExcludeRect, swapTiledStep, tiledPlan, objectsReady, objectsWaiting, deleteTiledObjects,
+const { resetTiledTools, startTiledStroke, moveTiledStroke, finishTiledStroke, tiledExcludeRect, swapTiledStep, tiledPlan, objectsReady, objectsWaiting, deleteTiledObjects,
   mergeTiledObjects, tiledSameTaxonGroups, splitTiled, tiledLasso, tiledWand, windowSection } = createTiledTools({
   get TILES_ONLY() { return TILES_ONLY; }, get drag() { return drag; }, set drag(value) { drag = value; }, get ovHint() { return ovHint; },
   set ovHint(value) { ovHint = value; }, get view() { return view; }, toast, afterChange, beginOp, busy, level0Rgba, linePixels, maskLoader, newObject,
   paintAt, paintPixels, paintSeg, pixelTarget, queueTileCounts, rebuildLUT, rememberTrace, removeTrace, requestRender, select, setLabel,
-  six: (s) => six(s), subPx: (op, i, id) => subPx(op, i, id),
-  tiledStatsRunner, updateHistoryButtons, sourceBox, sourceRoi,
+  six: (s) => six(s), subPx: (op, i, id) => subPx(op, i, id), tiledStatsRunner, updateHistoryButtons, sourceBox, sourceRoi, busyShown,
 });
 
 /* Card M8.4.18b: the original image of a tiled section (locate it when it moved, copy it into the project); see tiledsource.js. A section
@@ -2446,7 +2447,7 @@ $('resAll').addEventListener('click', () => {
 
 function selectSection(k, fresh = false) {
   if (cropState) endCrop();
-  const prev = sec(); if (prev) prev.view = { ...S.view };
+  const prev = sec(); if (prev) { prev.view = { ...S.view }; if (k !== S.cur) prev._statsRunner?.releasePixels(); }   // card M8.4.39: its level-0 pixels
   S.cur = k; S.selected = 0;
   const s = sec();
   if (s && !s.orig) ensurePixels(s).then(() => { if (sec() === s) { renderSectionForm(); requestRender(); } }).catch(() => requestRender());   // V0.1
@@ -2562,7 +2563,7 @@ function rankPresets(s) {
   return out;
 }
 $('presetBest').addEventListener('click', () => busy(() => {
-  const s = sec(); if (!s?.orig) return;
+  const s = sec(); if (!s?.orig || tiledRefused(s)) return;   // card M8.4.39: the tiles show the source's pixels (no filters)
   const r = rankPresets(s), best = r[0];
   s.preset = best.id; s.filters = { ...best.filters }; if (best.detect) s.detect = { ...DEFAULT_DETECT, ...best.detect };
   renderFilterForm(); renderDetectForm(); refilter();
@@ -2612,10 +2613,10 @@ $('presetDel').addEventListener('click', (e) => {
   storePresets(); renderFilterForm();
 });
 $('presetAll').addEventListener('click', () => {
-  const s = sec(); if (!s) return;
-  busy(() => {
-    for (const o of S.sections) if (o !== s) { o.filters = { ...s.filters }; o.preset = s.preset; o.detect = { ...s.detect }; enhance(o); o.logVer++; }
-    markDirty(); scheduleLog(); toast(t('f.appliedAll', { n: S.sections.length }));
+  const s = sec(); if (!s || tiledRefused(s)) return;
+  busy(() => {   // card M8.4.39: never to a tiled or locked section (its tiles show the source's pixels, with no filter)
+    for (const o of S.sections) if (o !== s && !o.tiled && !o.frozen) { o.filters = { ...s.filters }; o.preset = s.preset; o.detect = { ...s.detect }; enhance(o); o.logVer++; }
+    markDirty(); scheduleLog(); toast(t('f.appliedAll', { n: S.sections.filter((o) => !o.tiled && !o.frozen).length }));
   });
 });
 
@@ -2680,8 +2681,8 @@ for (const id of ['secTop', 'secBottom', 'secUnits']) $(id).addEventListener('ch
 $('secDel').addEventListener('click', (e) => {
   if (!sec()) return;
   if (!armed(e.currentTarget, t('confirm.secDel', { n: [...sec().objects.values()].filter((o) => o.cls).length }))) return;
-  const [removed] = S.sections.splice(S.cur, 1); discardEditHistory(removed); removed._maskSync?.stop();
-  selectSection(Math.min(S.cur, S.sections.length - 1)); scheduleLearn();
+  const [removed] = S.sections.splice(S.cur, 1); discardEditHistory(removed); stopTiledWork(removed); if (removed.tiled) resetTiledTools();   // card M8.4.39
+  selectSection(Math.min(S.cur, S.sections.length - 1)); scheduleLearn(); markDirty();
 });
 $('roiBtn').addEventListener('click', () => setTool('roi'));
 $('roiReset').addEventListener('click', () => { const s = sec(); if (s) setRoi(s, { x0: 0, y0: 0, x1: s.w, y1: s.h }); });
@@ -3136,7 +3137,7 @@ const sectionFields = (q) => ({ id: q.id, rot: 0, crop: null, top: q.top, bottom
   detect: q.detect, manual: q.manual || [], nextId: q.nextId, marks: q.marks || [] });
 let tiledUnsavedShown = false, settleDeadlineMs = 15000;
 /** Card M8.4.30 step 1: the project side of tiled sections lives in tiledproject.js. */
-const { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, retainStore, announceStoreProjects, backupTiledOf, restoreTiledOf, packageTiledPlan } = createTiledProject({
+const { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, markTiledSaved, stopTiledWork, retainStore, announceStoreProjects, backupTiledOf, restoreTiledOf, packageTiledPlan } = createTiledProject({
   TILES, get settleDeadlineMs() { return settleDeadlineMs; }, toast, storeProject, maskSync, maskLoader, newSection, sectionFields, greyRgba, sourceRoi,
   tileBuildDialog, tiledCounts, tiledStatsRunner, tiledWorkingImage, serTiledSection, hexDigest,
 });
@@ -3163,7 +3164,6 @@ async function loadProject(p) {
   const source = p;
   blankStart = false;
   resetState(); loading = true; loadMigrated = false; clearTimeout(saveTimer);
-  engineAnalysis?.releaseAll();   // the engine keeps the masks of the sections it analysed; the old project's are no longer needed
   readOnlyProject = (p?.version || 0) > FORMAT_VERSION_TILED;   // V0.36: written by a newer SedCoreTool
   try {
     p = sanitizeThumbs(upgradeProject(p));   // card Q9: thumbnails of older stored projects too
@@ -3224,9 +3224,10 @@ function resetState() {
   deletedClasses.length = 0;                     // card Q1: a deletion is undone only in its own project
   readOnlyProject = false; projectPreview = null; $('projectValidation').hidden = true;
   const maxMP = S.settings.maxMP || 8;
-  S.id = uid(); S.name = t('proj.untitled'); S.notes = ''; S.comments = []; S.finalTests = [];
+  const closedId = S.id; S.id = uid(); S.name = t('proj.untitled'); S.notes = ''; S.comments = []; S.finalTests = [];
   clearNavigationPreviews();
   MEM.px.length = 0; MEM.mask.length = 0; pxWanted.clear();   // V0.1: pictures of the previous project can be freed
+  for (const q of S.cores.flatMap((c) => c.sections)) stopTiledWork(q); resetTiles(); resetTiledTools(); engineAnalysis?.releaseAll(); forgetSections(closedId); forgetLastImport(); forgetMapBackgrounds();   // card M8.4.39: saved (canLeaveProject) or deleted
   S.selected = 0; S.multi.clear(); S.library = []; S.sheet = { columns: [], cells: {} }; resetFigTabs(); S.kind = 'normal'; S.multiSource = null; S.plots = []; S.plotCur = 0; S.coreModels = {};
   S.geo = defaultGeo(); geoReset();
   S.classes = defaultClasses(); S.active = 'undet';
@@ -3282,8 +3283,7 @@ async function saveOnce() {
     const unsaved = await settleTiledSections(); if (generation !== projectGeneration || loading) { finishDiagnostic(); return; }   // card M8.4.35: S was replaced while this save waited: never write a half-loaded project
     await putProject(projectMeta(), serialize());
     if (generation !== projectGeneration) { finishDiagnostic(); return; }   // nor clean up the store of a project that is only partly loaded
-    for (const q of S.sections.length ? S.cores.flatMap((c) => c.sections) : []) if (q.tiled && q._tiledRecord) q._savedRecord = q._tiledRecord;
-    void retainStore();
+    markTiledSaved(); void retainStore();   // card M8.4.39: the saved versions of every core, also when the one on screen is empty
     if (unsaved) { dirty = true; if (!tiledUnsavedShown) { tiledUnsavedShown = true; toast(t('tiles.unsaved'), 12000); } }
     else tiledUnsavedShown = false;
     try { await putLite(S.id, liteSnapshot()); } catch { /* lite index is optional */ }
@@ -3687,7 +3687,7 @@ function backupNow() {
   backupPromise = (async () => {
     try {
       // Capture live state before yielding; switching projects must not change this run's source or destination.
-      const current = !projectPreview && (S.sections.length || S.records.length) ? serialize() : null;
+      const current = !projectPreview && projectHasData(S) ? serialize() : null;   // card M8.4.39: every core, not only the one on screen
       const settings = JSON.stringify(settingsBundle(), null, 1);
       if (current) await writeProjectFolder(root, current);
       if (storageOK) for (const m of await listProjects()) {
@@ -4567,11 +4567,11 @@ export function toast(msg, ms = 3200) { const el = $('toast'); el.textContent = 
 
 export async function busy(fn, operation = 'work') {
   const finishDiagnostic = diagnosticOperation(operation);
-  $('busy').hidden = false;
+  busyShown.enter();                                   // card M8.4.39: hidden only when the last of overlapping busy operations ends
   await new Promise((r) => setTimeout(r, 30));
   try { await fn(); }
   catch (err) { finishDiagnostic(err); console.error(err); toast(t('err.generic', { e: err?.message || String(err) }), 8000); }   // V0.36: errors are shown
-  finally { finishDiagnostic(); $('busy').hidden = true; }
+  finally { finishDiagnostic(); busyShown.leave(); }
 }
 /* V0.36: errors nobody caught are shown instead of being lost (once every 5 s at most) */
 let lastErrToast = 0;

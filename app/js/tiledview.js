@@ -31,34 +31,50 @@ export function createTiledView(ctx) {
   const tileCache = new TileCache();
   const tileSchedulers = new Map();
 
-  /** @returns {TileScheduler} */
+  /**
+   * The scheduler of a section's pyramid. Card M8.4.39: it keeps only what the pyramid fixes (identifier, channels, bits) and finds the section
+   * it draws for when tiles arrive, so a section opened again (a new object over the same pyramid) is repainted as its tiles load.
+   * @returns {TileScheduler}
+   */
   function tileScheduler(s) {
-    const tiled = s.tiled;
-    let scheduler = tileSchedulers.get(tiled.pyramid);
+    const { pyramid, channels, bits } = s.tiled;
+    let scheduler = tileSchedulers.get(pyramid);
     if (scheduler) return scheduler;
+    const shown = () => sec()?.tiled?.pyramid === pyramid;
+    const liveTiled = () => (shown() ? sec().tiled : S.cores.flatMap((c) => c.sections).find((q) => q.tiled?.pyramid === pyramid)?.tiled ?? null);
     const fetch = async (k, positions) => {
-      const read = await ctx.TILES.read(tiled.pyramid, k, positions);
+      const read = await ctx.TILES.read(pyramid, k, positions);
       if (read.error) throw new Error(t('tiles.err', { code: read.error.code, field: read.error.field || '' }));
       const bytes = new Uint8Array(read.ok.bytes.buffer || read.ok.bytes, read.ok.bytes.byteOffset || 0, read.ok.bytes.byteLength);
       const out = [];
       let offset = 0;
       for (let i = 0; i < read.ok.tiles.length; i++) {
-        const length = read.ok.tiles[i].byte_length, rgba = tileRgba(bytes.subarray(offset, offset + length), tiled.channels, tiled.bits);
+        const length = read.ok.tiles[i].byte_length, rgba = tileRgba(bytes.subarray(offset, offset + length), channels, bits);
         offset += length;
         out.push({ row: positions[i][0], col: positions[i][1], value: await createImageBitmap(new ImageData(rgba, TILE, TILE)), bytes: rgba.byteLength });
       }
       return out;
     };
-    scheduler = new TileScheduler({ fetch, cache: tileCache, prefix: tiled.pyramid + '/',
-      onLoaded: () => { if (sec()?.tiled === tiled) requestRender(); },
-      onRetry: () => { if (sec()?.tiled === tiled) requestRender(); },     // the view asks again for the tiles it still wants
+    scheduler = new TileScheduler({ fetch, cache: tileCache, prefix: pyramid + '/',
+      onLoaded: () => { if (shown()) requestRender(); },
+      onRetry: () => { if (shown()) requestRender(); },     // the view asks again for the tiles it still wants
       onError: (error) => {
-        tiled.lastError = error.message || String(error);
-        if (!tiled.errorShown) { tiled.errorShown = true; toast(tiled.lastError, 9000); }
+        const tiled = liveTiled();
+        if (tiled) {
+          tiled.lastError = error.message || String(error);
+          if (!tiled.errorShown) { tiled.errorShown = true; toast(tiled.lastError, 9000); }
+        }
         void recoverEngine().catch(() => {});                // the retry then reads from the restarted engine
       } });
-    tileSchedulers.set(tiled.pyramid, scheduler);
+    tileSchedulers.set(pyramid, scheduler);
     return scheduler;
+  }
+
+  /** Card M8.4.39: the project is closed: no scheduler asks for more tiles, and the cached tiles are dropped (their bitmaps closed). */
+  function resetTiles() {
+    for (const scheduler of tileSchedulers.values()) scheduler.want(0, []);
+    tileSchedulers.clear();
+    for (const bitmap of tileCache.clear()) bitmap?.close?.();
   }
 
   /** Tiles show the source's pixels: drawn only while the working image under them shows them too (no filter). Masks are drawn over them. */
@@ -140,5 +156,5 @@ export function createTiledView(ctx) {
     };
   }
 
-  return { tiledWorkingImage, tileCache, tileSchedulers, tilesShowSource, drawTiles, tileBuildDialog };
+  return { tiledWorkingImage, tileCache, tileSchedulers, tileScheduler, resetTiles, tilesShowSource, drawTiles, tileBuildDialog };
 }

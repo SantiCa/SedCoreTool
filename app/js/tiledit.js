@@ -322,9 +322,30 @@ export class TiledStatsRunner {
     this.deferred = new Set();
     /** @type {{positions: [number, number][], resolve: () => void}[]} */
     this.waiters = [];
+    /** Card M8.4.39: set by `stop` (the section was closed or deleted): nothing more is computed or reported. */
+    this.stopped = false;
+    /** Card M8.4.39: the pixel cache is emptied once the run on its way ends (`releasePixels` during a run). */
+    this.releaseWhenIdle = false;
+  }
+  /**
+   * Card M8.4.39: the section is closed or deleted. The queue is dropped, the pixel cache emptied, waiting callers released, and nothing is reported
+   * any more (a report would change a section that is no longer in the project). The statistics already computed stay in `stats`.
+   */
+  stop() {
+    this.stopped = true;
+    this.pending.clear(); this.failed.clear(); this.ids.clear(); this.deferred.clear(); this.waitsFor.clear(); this.rgba.clear();
+    const waiters = this.waiters;
+    this.waiters = [];
+    for (const w of waiters) w.resolve();
+  }
+  /** Card M8.4.39: the section is left: its level-0 pixels (up to `cacheTiles` tiles) are dropped now, or when the run on its way ends. */
+  releasePixels() {
+    if (this.running) this.releaseWhenIdle = true;
+    else this.rgba.clear();
   }
   /** @param {[number, number][]} positions @param {Iterable<number>} [ids] */
   queue(positions, ids = []) {
+    if (this.stopped) return Promise.resolve();
     const indices = positions.map(([row, col]) => this.tiles.index(row, col));
     for (const tile of indices) this.pending.add(tile);
     if (positions.length) { for (const tile of this.failed) this.pending.add(tile); this.failed.clear(); }
@@ -370,6 +391,7 @@ export class TiledStatsRunner {
   }
   /** Report the objects that are current among those changed; keep the others for later. */
   publish() {
+    if (this.stopped) return;
     const ready = new Set();
     for (const id of [...this.ids, ...this.deferred]) if (this.isCurrent(id)) ready.add(id); else this.deferred.add(id);
     this.ids = new Set();
@@ -380,7 +402,7 @@ export class TiledStatsRunner {
   retry() { return this.failed.size ? this.queue([...this.failed].map((i) => [Math.floor(i / this.tiles.cols), i % this.tiles.cols])) : Promise.resolve(); }
   async run() {
     const cols = this.tiles.cols;
-    while (this.pending.size) {
+    while (this.pending.size && !this.stopped) {
       const tile = /** @type {number} */ (this.pending.values().next().value);
       this.pending.delete(tile);
       this.computing = tile;
@@ -391,10 +413,11 @@ export class TiledStatsRunner {
         await this.loadMasks(around);
         if (around.some(([r, c]) => this.tiles.state(r, c) === 'missing')) throw new Error('mask tile not loaded');
         if (this.tiles.get(row, col)?.labels) await this.loadPixels(row, col);
+        if (this.stopped) { this.computing = -1; break; }
         const changed = this.stats.replaceTile(tile, tileStats({ width: this.tiles.width, height: this.tiles.height, stacks: this.stacks(),
           labelsAt: (r, c) => this.tiles.get(r, c)?.labels || null, rgbaAt: (r, c) => this.rgba.get(r * cols + c) || null }, row, col));
         for (const id of changed) this.ids.add(id);
-      } catch (error) { this.failed.add(tile); this.onError(error); }
+      } catch (error) { if (!this.stopped) { this.failed.add(tile); this.onError(error); } }
       this.computing = -1;
       const done = this.waiters.filter((w) => !this.pendingIn(w.positions));
       if (!this.pending.size || this.ids.size > 256 || done.length) this.publish();
@@ -402,6 +425,7 @@ export class TiledStatsRunner {
       await new Promise((resolve) => setTimeout(resolve, 0));         // let the page draw and take input between tiles
     }
     this.publish();
+    if (this.stopped || this.releaseWhenIdle) { this.releaseWhenIdle = false; this.rgba.clear(); }
   }
   /** The level-0 pixels of a tile and of its neighbours that hold image. @param {number} row @param {number} col */
   async loadPixels(row, col) {

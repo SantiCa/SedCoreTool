@@ -15,7 +15,7 @@ import { $, S, sec } from './state.js';
 /** @param {any} ctx the page's editing primitives and shared state (see the call in app.js) */
 export function createTiledTools(ctx) {
   const { toast, afterChange, beginOp, level0Rgba, linePixels, maskLoader, newObject, paintAt, paintPixels, paintSeg, pixelTarget, queueTileCounts,
-    rebuildLUT, rememberTrace, removeTrace, requestRender, select, setLabel, six, subPx, tiledStatsRunner, updateHistoryButtons, sourceBox, sourceRoi } = ctx;
+    rebuildLUT, rememberTrace, removeTrace, requestRender, select, setLabel, six, subPx, tiledStatsRunner, updateHistoryButtons, sourceBox, sourceRoi, busyShown } = ctx;
   const NO_PIXEL_LOG = /** @type {any} */ ({ push() { return 0; }, length: 0 });
   const canvasSize = () => { const c = /** @type {HTMLCanvasElement} */ (ctx.view); return { w: c.width, h: c.height }; };
   let editWindow = null;                                   // one window for the page (up to 120 MiB), kept while it stays current
@@ -179,15 +179,15 @@ export function createTiledTools(ctx) {
   /** Show the busy indicator while `work()` runs, then run `again` if the same section is open and Escape was not pressed; always false. */
   function waitThenRun(s, work, again) {
     if (statsWait) return false;                                             // one wait at a time
-    const wait = statsWait = { done: false }, indicator = $('busy');
-    const end = () => {
+    const indicator = $('busy'), wait = statsWait = { done: false, end: () => {} };
+    const end = wait.end = () => {
       if (wait.done) return;
       wait.done = true; statsWait = null;
-      indicator.hidden = true; indicator.textContent = t('busy');
+      indicator.textContent = t('busy'); busyShown.leave();                  // card M8.4.39: hidden only when no other busy operation runs
       document.removeEventListener('keydown', onKey, true);
     };
     const onKey = (e) => { if (e.key === 'Escape') end(); };
-    indicator.textContent = t('tiles.waiting'); indicator.hidden = false;
+    indicator.textContent = t('tiles.waiting'); busyShown.enter();
     document.addEventListener('keydown', onKey, true);
     work().then(() => { if (wait.done) return; end(); if (sec() === s) again(); },
       (error) => { if (wait.done) return; end(); toast(error?.message || String(error), 9000); });
@@ -368,6 +368,13 @@ export function createTiledTools(ctx) {
   /** Card M8.4.28: whether an object operation is waiting for its objects' tiles, or the wand for the pixels it reads (card M8.4.32: a test step
    *  that followed a wand click ran before the wand had drawn; tests). */
   const objectsWaiting = () => !!statsWait || wandBusy;
-  return { startTiledStroke, moveTiledStroke, finishTiledStroke, tiledExcludeRect, swapTiledStep, tiledPlan, objectsReady, objectsWaiting, deleteTiledObjects,
+  /** Card M8.4.39: the project is closed: the edit window (up to 120 MiB of the old section's masks) is released and a wait for statistics ends
+   *  without running its operation. */
+  function resetTiledTools() {
+    editWindow?.release();
+    editWindow = null;
+    statsWait?.end();
+  }
+  return { resetTiledTools, startTiledStroke, moveTiledStroke, finishTiledStroke, tiledExcludeRect, swapTiledStep, tiledPlan, objectsReady, objectsWaiting, deleteTiledObjects,
     mergeTiledObjects, tiledSameTaxonGroups, splitTiled, tiledLasso, tiledWand, windowSection };
 }

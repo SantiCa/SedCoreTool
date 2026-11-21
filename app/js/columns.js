@@ -589,6 +589,8 @@ function recordAxisOverlaps(series, axis) {
 }
 /** Card Q2: the record added by the last import of this session, which «Undo import» removes without asking. */
 let lastImported = null;
+/** Card M8.4.39: the project was closed; its last import can no longer be undone from another one. */
+export function forgetLastImport() { lastImported = null; }
 export function renderRecList() {
   $('recList').innerHTML = S.records.map((r) => `
     <div class="rec" data-id="${esc(r.id)}">

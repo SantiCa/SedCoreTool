@@ -126,6 +126,8 @@ export function createTiledProject(ctx) {
         const o = s.objects.get(id), a = totals.total(id);
         if (o && (!o.stats || !a || o.stats.n !== a.n || o.stats.x0 !== a.x0 || o.stats.x1 !== a.x1 || o.stats.y0 !== a.y0 || o.stats.y1 !== a.y1)) throw new CacheRejected('objects');
       }
+      // Card M8.4.39: and every object saved with pixels must have them in the cache (otherwise its statistics would never be computed again)
+      for (const [id, o] of s.objects) if (o.stats?.n > 0 && !totals.tilesOf.has(id)) throw new CacheRejected('objects');
       return cache;
     } catch (error) {
       console.warn('reopening cache not used:', error?.reason || error?.code || error);
@@ -275,12 +277,27 @@ export function createTiledProject(ctx) {
       if (!sync.settled) void sync.request([]);
       for (;;) {
         if (sync.settled) { q._tiledRecord = serTiledSection(q, sync.manifest); return; }
-        if (performance.now() > until) { unsaved++; return; }
+        if (performance.now() > until || sync.stopped) { unsaved++; return; }   // card M8.4.39: stopped (project closed meanwhile): it never settles
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
     }));
     for (const q of S.cores.flatMap((c) => c.sections)) if (q.frozen === 'source' || q.frozen === 'store') q._tiledRecord = q._savedRecord;   // locked: saved back as it was read
     return unsaved;
+  }
+  /**
+   * Card M8.4.39: a section leaves the page (deleted, or its project closed): its mask sends, statistics and row counts stop. Nothing is lost: a project
+   * is closed only after a save that settled every send (`canLeaveProject`), or deleted on purpose; statistics and counts are derived from the masks
+   * and computed again at the next opening.
+   */
+  function stopTiledWork(q) {
+    q._maskSync?.stop();
+    q._statsRunner?.stop();
+    q._counts?.runner.cancel();
+  }
+  /** After a save that wrote the records `settleTiledSections` made: they are the saved versions now, in every core. Card M8.4.39: not only when the
+   *  core on screen has sections (a save made from an empty core left the others' saved versions behind, and the store kept the old ones). */
+  function markTiledSaved() {
+    for (const q of S.cores.flatMap((c) => c.sections)) if (q.tiled && q._tiledRecord) q._savedRecord = q._tiledRecord;
   }
   /** After a save: the store keeps only the versions the saved records name and the current ones (rule 4: the last good save stays until a newer one). */
   async function retainStore() {
@@ -297,5 +314,6 @@ export function createTiledProject(ctx) {
     await writeReopenCaches();                                           // after the clean-up, so that it never removes a cache that was just written
   }
 
-  return { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, retainStore, announceStoreProjects, backupTiledOf, restoreTiledOf, packageTiledPlan };
+  return { loadTiledSection, readReopenCache, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, markTiledSaved, stopTiledWork, retainStore, announceStoreProjects, backupTiledOf, restoreTiledOf,
+    packageTiledPlan };
 }

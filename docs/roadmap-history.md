@@ -3371,3 +3371,64 @@ Updated 21 November 2026.
     Checks (Windows): `npm test` 563/563, typecheck no new diagnostics, `desktop.mjs` (engine off) passed; `html-injection.mjs` passed in
     headless Chrome with an in-test file responder; `smoke.mjs` not run (starting the local server was refused in that session).
     Found, not fixed (outside the card): a non-numeric `settings.ml.k` or unknown `ml.method` in a project stops the classifier with an error.
+
+### M8.4.39 - Frontend lifecycle teardown, tiled-viewer stale closure, multi-core save/backup & memory leaks
+
+- **Goal:** switching, closing or reopening a project cleanly tears down every background runner, queued engine job and large cache; reopened
+  tiled sections always repaint newly loaded tiles; multi-core saves and backups never skip sections when the active core is empty; memory stays
+  bounded across multi-section tiled editing.
+- **Read first:** `app/js/tiledview.js` (`tileSchedulers`); `app/js/app.js` (`resetState`, `saveOnce`, `backupNow`, `secDel`, `pxTouch`,
+  `ensurePixels`, `presetBest`, `presetAll`, `busy`); `app/js/tiledtools.js` (`editWindow`, `statsWait`); `app/js/tiledit.js`
+  (`TiledStatsRunner.rgba`); `app/js/tiledproject.js` (`readReopenCache`); `app/js/engineanalysis.js` (`releaseAll`); `app/js/storage.js`
+  (`lastSec`); `app/js/columns.js` (`lastImported`); `app/js/figures.js` (`lmBgCache`).
+- **Change:** the modules listed above (keep `app.js` at or below `APP_JS_CEILING`); new and extended Node + desktop e2e tests.
+- **Do not touch:** scientific calculations, saved project schema, tile-store disk format.
+- **Model:** most capable, effort high (project lifecycle, saving/`retainStore` safety, memory management).
+- **Steps:**
+  1. Fix `tiledview.js::tileSchedulers`: resolve the current section dynamically (`sec()?.tiled?.pyramid === tiled.pyramid`) instead of closing
+     over the first `tiled` object, update error state on the live section, and evict/clear schedulers on project reset.
+  2. In `resetState()` (and `secDel`): stop every section's `_maskSync`, `_statsRunner` and `_counts.runner`; cancel/clear queued `engineAnalysis`
+     jobs in `releaseAll()`; release `tiledtools.js` `editWindow` and reset `statsWait`; clear `tileCache` (closing ImageBitmaps), `tileSchedulers`,
+     `storage.js::lastSec` (for closed projects), `columns.js::lastImported`, and bound/clear `figures.js::lmBgCache`; call `markDirty()` in `secDel`.
+  3. Fix multi-core guards in `saveOnce` (`app.js:3285`) and `backupNow` (`app.js:3690`) to inspect all cores (`S.cores.some(c => c.sections.length)`
+     / `S.cores.flatMap(c => c.sections)`) instead of only `S.sections.length`.
+  4. Bound/clear `TiledStatsRunner.rgba` when idle or leaving a section; clear `_lc`/`_lb` in `pxTouch` eviction; guard `ensurePixels` against
+     `s.tiled.missing` (`levels === null`); guard `presetBest` and `presetAll` against tiled sections; make `busy()` use a nesting counter;
+     verify in `readReopenCache` that every object in `s.objects` needing stats is covered by `cache.stats`.
+- **Tests:** Node tests for `tileSchedulers` reopen repaint, `engineAnalysis.releaseAll()` aborting queued jobs, `readReopenCache` missing-object
+  rejection, multi-core `_savedRecord` update when active core has 0 sections, and `busy()` nesting; desktop e2e check reopening a tiled project
+  and verifying high-res tiles repaint without manual pan; `npm test`, `npm run typecheck`, `tests/e2e/tiled-sections.mjs`.
+- **Done when:** every bug above has a failing-before/passing-after test and `app.js` does not grow; development gate.
+- *As built (21 Nov 2026; written by a most-capable sub-agent at high effort, every changed line reviewed by the director; development gate, Windows):*
+  - Step 1, `tiledview.js`: `tileScheduler` keeps only `pyramid`, `channels`, `bits` and finds the section on screen by `sec()?.tiled?.pyramid`;
+    a failed read is recorded on the live section's `tiled`; new `resetTiles()` (called by `resetState`) stops every scheduler, clears
+    `tileSchedulers` and `tileCache` and closes the cached ImageBitmaps.
+  - Step 2: new `stopTiledWork(q)` (`tiledproject.js`) stops `_maskSync`, `_statsRunner` and `_counts.runner` for every section in `resetState`
+    and for the removed section in `secDel`. Nothing is lost: every caller of `resetState` first passes `canLeaveProject` (a save that settles every
+    send, or a refusal), or deletes the project on purpose; statistics and counts are derived from the masks. `engineAnalysis.releaseAll()` aborts the
+    running and queued jobs (a `Map` of unsettled jobs) and moved from `loadProject` into `resetState`, so it also runs for new, deleted,
+    tutorial, test and multi projects. New `resetTiledTools()` (`tiledtools.js`) releases `editWindow` and ends a statistics wait without running
+    its operation. Caches: `forgetSections(id)` (`storage.js`, also used by `deleteProject`) for the closed project's id (the director fixed the
+    sub-agent's call, which passed the new project's id); `forgetLastImport()` (`columns.js`); `lmBgCache` bounded to 8 entries (`lmBgRemember`)
+    and `forgetMapBackgrounds()` (`figures.js`). `secDel` calls `markDirty()`. Extra fix: `settleTiledSections` counts a stopped sync as unsaved at
+    once instead of waiting 15 s (otherwise a save waiting for the old project swallowed the next save request; found by the e2e D1 step).
+  - Step 3: `saveOnce` calls `markTiledSaved()` (`tiledproject.js`, all cores, after `putProject` succeeded); `backupNow` uses `projectHasData(S)`
+    (`state.js`, any core with sections or records). A project with no data in any core is still never written. No schema change.
+  - Step 4: `TiledStatsRunner.stop()` and `releasePixels()` (`tiledit.js`; the pixel cache is emptied when the section is left, at once or at the end
+    of the run on its way, never mid-run, which needs neighbour pixels; not on every idle, which would re-read 9 level-0 tiles after each stroke);
+    `pxTouch` also frees `_lc` and `_lb`; `ensurePixels` makes a grey working image when `s.tiled.missing` (it read `levels[null]`);
+    `presetBest` and `presetAll` refuse on a tiled or locked section and `presetAll` skips them; `busy()` and the statistics wait share
+    `nestedIndicator` (`singleflight.js`); `readReopenCache` rejects a cache that lacks an object saved with pixels (`o.stats.n > 0`).
+  - Files outside the card's list: `singleflight.js` (`nestedIndicator`) and `state.js` (`projectHasData`), two small pure helpers that Node can
+    test (`app.js` cannot be loaded in Node). `app.js` 4,664 → 4,664 lines.
+  - Tests: `tests/app/lifecycle.test.mjs` (13), each shown to fail on the code before the fix (HEAD, or HEAD with empty stubs for a new function)
+    and to pass after; `tests/e2e/tiled-sections.mjs`: repaint after reopening without a redraw by hand (failed before: working-image pixel
+    [34,34,34] where the source is [14,14,14]), `presetBest`/`presetAll` refusal (failed before: "applied to 7 sections"), grey working image
+    of a section without pyramid and source (no failing-before run). Not covered by a failing-before test: `pxTouch`, `secDel` `markDirty`,
+    `presetAll` from a plain section (in `app.js`), `forgetLastImport` and `lmBgCache` (modules need the DOM), `forgetSections` (IndexedDB),
+    `editWindow` release (review only).
+  - Checks (Windows, on the final state): `npm test` 576/576; typecheck passed (no new diagnostics); `desktop.mjs` engine off and on passed;
+    `tiled-sections.mjs` passed; `large-16bit-desktop.mjs` passed; `pytest -q` 907 passed / 9 skipped, ruff and `sync_version --check` passed
+    (before the director's one-line fix, which touches only `app.js`). `smoke.mjs` not run locally (the GitHub `e2e` job runs it).
+  - Found, not fixed (outside the card): card **Q12** (a section kept as a placeholder after a failed engine opening cannot rebuild its working
+    image after eviction); the `lastSec` entries of other projects, read by the backup loop, are kept.

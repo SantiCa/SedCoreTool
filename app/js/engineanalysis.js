@@ -35,6 +35,8 @@ export function createEngineAnalysis({ client, project, onChange, maskChanges, o
   let lastEntry = null;
   /** @type {WeakMap<object, Job>} */
   const jobs = new WeakMap();
+  /** Card M8.4.39: the jobs not settled yet, by section, so that `releaseAll` can cancel them (a WeakMap cannot be listed). @type {Map<object, Job>} */
+  const unsettled = new Map();
   /** Jobs wait here: the engine runs one calculation at a time and a page may hold only a few (engine-ipc.js). */
   /** @type {(() => Promise<void>)[]} */
   const queue = [];
@@ -144,12 +146,14 @@ export function createEngineAnalysis({ client, project, onChange, maskChanges, o
           published = true;
         } finally {
           job.settled = true;
+          if (unsettled.get(section) === job) unsettled.delete(section);
           if (published) onChange(section);
           resolve();
         }
       });
     });
     jobs.set(section, job);
+    unsettled.set(section, job);
     void drain();
     return job.done;
   }
@@ -177,8 +181,15 @@ export function createEngineAnalysis({ client, project, onChange, maskChanges, o
     },
     /** Forgets the state of a section so that the next request runs again (after a failure the user retries). */
     retry: (/** @type {any} */ section) => { jobs.get(section)?.controller.abort(); jobs.delete(section); client.forget?.(section); },
-    /** A project is being replaced: the engine drops everything it kept for the sections of the old one. */
-    releaseAll: () => client.releaseAll?.(),
+    /**
+     * A project is being replaced: the engine drops everything it kept for the sections of the old one. Card M8.4.39: the analysis on its way and
+     * every queued one are cancelled first (a queued job then settles without asking the engine; nothing of the old project is published).
+     */
+    releaseAll: () => {
+      for (const [section, job] of unsettled) { job.controller.abort(); jobs.delete(section); }
+      unsettled.clear();
+      client.releaseAll?.();
+    },
     /** How many changes of some rows the engine refused so far (each cost a full upload instead of a small one). */
     deriveFallbacks: () => deriveFallbacks,
     /** Counters for tests and measurements: masks sent whole, masks sent as changed rows, changes the engine refused. */

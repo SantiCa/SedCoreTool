@@ -130,6 +130,8 @@ export const CLF_SCOPES = ['core', 'project', 'all'];
 export const ML_DEFAULT = { method: 'knn', k: 5, weights: 'distance', trees: 100, maxDepth: 12, minLeaf: 2, balanced: true, priors: 'uniform', features: 'shape' };
 /** @returns {SectionState | undefined} */
 export const sec = () => S.sections[S.cur];
+/** Card M8.4.39: whether the project holds any section or record, in any core (not only the core on screen). @param {{cores: {sections: any[], records?: any[]}[]}} project */
+export const projectHasData = (project) => project.cores.some((c) => c.sections.length > 0 || (c.records?.length ?? 0) > 0);
 export const uid = () => Math.random().toString(36).slice(2, 9);
 /**
  * @param {string} id

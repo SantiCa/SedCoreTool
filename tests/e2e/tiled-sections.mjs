@@ -154,8 +154,9 @@ try {
   await on.page.evaluate(() => new Promise((r) => setTimeout(r, 300)));
   // Card M8.4.24: the probe is a function, so it can be repeated (SEDCORETOOL_PROBE_REPEAT=n) with the tile cache emptied each time; a wait that
   // never completes fails here instead of reading a coarser stand-in tile, and a failed probe keeps its evidence.
-  const probe = (fraction = 1 / 3) => on.page.evaluate(async (fraction) => {
-    const { S } = window.ichantool, s = S.sections.at(-1), canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('view'));
+  // Card M8.4.39: with `redraw` false the view is not drawn again by the probe after the tiles arrive: only the viewer's own repaint shows them.
+  const probe = (fraction = 1 / 3, redraw = true) => on.page.evaluate(async (fraction, redraw) => {
+    const { S } = window.ichantool, s = S.sections[S.cur], canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('view'));   // the last section (asserted below) or the one selected
     const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     // Working pixel (vx, vy) at the top left, integer, so source pixel (vx * ds + sx, vy * ds + sy) is at screen (sx, sy).
     const vx = Math.floor(s.w / 2 - canvas.width / s.ds / 2), vy = Math.floor(s.h * fraction);
@@ -165,7 +166,8 @@ try {
     let waits = 0;
     for (; waits < 1200 && !window.ichantool.tilesIdle(); waits++) await new Promise((r) => setTimeout(r, 25));
     const waitedMs = Math.round(performance.now() - started), completed = window.ichantool.tilesIdle();
-    window.ichantool.requestRender(); await frame();
+    if (redraw) window.ichantool.requestRender();
+    await frame();
     // Probes: source pixels that differ from the working image at the same place, so only a drawn level-0 tile can show them.
     const ctx = canvas.getContext('2d'), probes = [], left = 160;   // left of this: the strip and the ruler
     // Card M8.4.24: never on the first or last source row or column of the analysis area, where the viewer draws its dashed border (#e0995a,
@@ -195,7 +197,7 @@ try {
     const bad = probes.find((p) => p.screen.some((v, i) => v !== p.source[i]));
     const evidence = bad ? window.ichantool.tileState(0, Math.floor((bad.sy + vy * s.ds) / 512), Math.floor((bad.sx + vx * s.ds) / 512)) : null;
     return { probes, level: s.tiled.level, canvas: [canvas.width, canvas.height], view: S.view, roi: s.roi, w: s.w, waitedMs, completed, evidence };
-  }, fraction);
+  }, fraction, redraw);
   const checkProbe = async (drawn, label) => {
     assert.ok(drawn.completed, `${label}: the visible tiles were loaded within 30 s (waited ${drawn.waitedMs} ms): ` + JSON.stringify(drawn.evidence));
     assert.ok(drawn.probes.length >= 10, 'probes where full resolution differs from the working image: ' + JSON.stringify(drawn));
@@ -277,12 +279,13 @@ try {
     }
     window.ichantool.setTool('pan');
     const roi = document.getElementById('roiBtn'); roi.click(); await pause(); out.tools.roi = S.tool === 'roi'; window.ichantool.setTool('pan');
-    const before = { w: s.w, h: s.h, ds: s.ds, rot: s.rot, crop: s.crop, filters: JSON.stringify(s.filters) };
-    for (const id of ['detectBtn', 'cropBtn', 'rotL', 'rotR']) { document.getElementById('toast').textContent = ''; document.getElementById(id).click(); await pause(); out.actions[id] = toastText(); }
+    const before = { w: s.w, h: s.h, ds: s.ds, rot: s.rot, crop: s.crop, filters: JSON.stringify(s.filters), detect: JSON.stringify(s.detect) };
+    // Card M8.4.39: the enhancement presets ("best for this section", "apply to all") refuse on a tiled section too.
+    for (const id of ['detectBtn', 'cropBtn', 'rotL', 'rotR', 'presetBest', 'presetAll']) { document.getElementById('toast').textContent = ''; document.getElementById(id).click(); await pause(); out.actions[id] = toastText(); }
     const select = document.getElementById('secRes'); select.value = String(s.ds * 2); select.dispatchEvent(new Event('change', { bubbles: true })); await pause(); out.actions.secRes = toastText(); out.resValue = select.value;
     const gamma = document.getElementById('f-gamma'); document.getElementById('toast').textContent = '';
     gamma.value = '1.8'; gamma.dispatchEvent(new Event('input', { bubbles: true })); await new Promise((r) => setTimeout(r, 300)); out.actions.filter = toastText();
-    out.unchanged = JSON.stringify(before) === JSON.stringify({ w: s.w, h: s.h, ds: s.ds, rot: s.rot, crop: s.crop, filters: JSON.stringify(s.filters) });
+    out.unchanged = JSON.stringify(before) === JSON.stringify({ w: s.w, h: s.h, ds: s.ds, rot: s.rot, crop: s.crop, filters: JSON.stringify(s.filters), detect: JSON.stringify(s.detect) });
     // A wand chosen on the first section does not follow into the tiled one.
     S.cur = 0; window.ichantool.setTool('wand'); S.cur = S.sections.length - 1; window.ichantool.renderSectionForm?.(); out.carried = S.tool;
     return out;
@@ -803,6 +806,28 @@ try {
   assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
   assert.equal((await sectionState()).cached, (await sectionState()).saved, 'the section was reopened from the cache');
   await sameAsSaved('reopened');
+  // Card M8.4.39: in the reopened project the viewer repaints the full-resolution tiles as they arrive, with no pan and no redraw by hand (the
+  // scheduler of the pyramid used to keep the section object of the first opening and drew only for it). A tiled section whose working image is
+  // a coarser level is put on screen with its masks loaded first, so that no mask read redraws the view meanwhile; the probe reads a row of tiles
+  // inside its analysis area that holds no mask (a drawn mask would differ from the source's pixels).
+  const reopenedShown = await on.page.evaluate(async () => {
+    const { S } = window.ichantool, index = S.sections.findIndex((q) => q.tiled && !q.tiled.missing && q.tiled.level > 0), s = S.sections[index];
+    if (!s) return { index };
+    await window.ichantool.tiledMasksLoad(index);
+    window.ichantool.selectSection(index);
+    for (let i = 0; i < 400 && !s.orig; i++) await new Promise((r) => setTimeout(r, 25));
+    const height = /** @type {HTMLCanvasElement} */ (document.getElementById('view')).height, m = s.maskTiles;
+    const empty = (row) => { for (let col = 0; col < m.cols; col++) { const e = m.get(row, col); if (m.stored.has(row * m.cols + col) || e?.labels || e?.exclude) return false; } return true; };
+    let fraction = null;                                          // the probe's tile row is the one at the middle of the view
+    for (let row = 0; row < m.rows && fraction === null; row++) {
+      const vy = Math.floor((row * 512 + 256 - height / 2) / s.ds);
+      if (empty(row) && vy > s.roi.y0 && vy * s.ds + height < s.roi.y1 * s.ds - 1) fraction = (vy + 0.5) / s.h;
+    }
+    return { index, current: S.cur === index, orig: !!s.orig, fraction };
+  });
+  assert.ok(reopenedShown.index >= 0 && reopenedShown.current && reopenedShown.orig && reopenedShown.fraction !== null, 'a reopened tiled section is on screen: ' + JSON.stringify(reopenedShown));
+  await on.page.evaluate(() => window.ichantool.clearTiles());
+  await checkProbe(await probe(reopenedShown.fraction, false), 'reopened, no redraw by hand');
   // A damaged cache is refused whole: the section is rebuilt from its tiles, equal to what was saved, and the next save writes the cache again
   // (rebuilding may commit a new version, so the file of the version saved afterwards is the one to look for).
   const damaged = fs.readFileSync(cachePath);
@@ -834,6 +859,16 @@ try {
   fs.rmSync(path.join(on.profile, 'pyramids', pyramid), { recursive: true, force: true });
   assert.deepEqual(await reopen(), { frozen: 'source', missing: true, grey: true }, 'no pyramid and no source: grey and locked');
   const lockedIndex = await sameAsSaved('source missing');
+  // Card M8.4.39: its working image, released as the memory budget releases a section that is not on screen, comes back grey and without an error
+  // (it used to be read from a pyramid that is not there).
+  const greyAgain = await on.page.evaluate(async (index) => {
+    const s = window.ichantool.S.sections[index];
+    s.orig = null; s.enh = null; delete s._pxErr;
+    window.ichantool.needPixels(s);
+    for (let i = 0; i < 400 && !s.orig && !s._pxErr; i++) await new Promise((r) => setTimeout(r, 25));
+    return { error: s._pxErr ?? null, grey: !!s.orig && s.orig.subarray(0, 400).every((v, i) => (i % 4 === 3 ? v === 255 : v === 128)) };
+  }, lockedIndex);
+  assert.deepEqual(greyAgain, { error: null, grey: true }, 'a section without pyramid and source reads its grey working image again');
   const nextBefore = await on.page.evaluate((index) => { window.ichantool.S.cur = index; window.ichantool.selectSection(index); const before = window.ichantool.S.sections[index].nextId; window.ichantool.setTool('brush'); return before; }, lockedIndex);
   const viewBox = await on.page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
   await on.page.mouse.move(viewBox.left + 300, viewBox.top + 300); await on.page.mouse.down(); await on.page.mouse.move(viewBox.left + 340, viewBox.top + 300); await on.page.mouse.up();

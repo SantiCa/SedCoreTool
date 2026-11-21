@@ -634,7 +634,14 @@ const lmSet = () => {
   return F.loc;
 };
 const lmPoints = () => S.cores.filter((c) => Number.isFinite(c.lat) && Number.isFinite(c.lon)).map((c) => ({ name: c.name, lat: c.lat, lon: c.lon }));
-const lmBgCache = new Map();
+const lmBgCache = new Map(), LM_BG_KEEP = 8;   // card M8.4.39: at most 8 backgrounds (up to 4096 px each) are kept, the oldest go first
+/** Remember the answer for `url` as the newest entry and drop the oldest finished ones beyond LM_BG_KEEP. */
+function lmBgRemember(url, value) {
+  lmBgCache.delete(url); lmBgCache.set(url, value);
+  for (const [key, entry] of lmBgCache) { if (lmBgCache.size <= LM_BG_KEEP) break; if (entry !== 'pending') lmBgCache.delete(key); }
+}
+/** Card M8.4.39: the project was closed: the map backgrounds of its figures are no longer kept. */
+export function forgetMapBackgrounds() { lmBgCache.clear(); }
 /** Raster base of exactly the frame, asked to Esri in the map CRS (EPSG:4326, 3857 or 326xx/327xx), as a data URL. */
 function locmapBackground(st, r) {
   const def = LM_BASES[st.base]; if (!def) return null;
@@ -644,8 +651,8 @@ function locmapBackground(st, r) {
   if (hit && hit !== 'pending') return hit === 'fail' ? null : hit;
   if (!hit && mapNetConsent()) {
     lmBgCache.set(url, 'pending');
-    fetchImage(url).then((href) => { lmBgCache.set(url, { href, attribution: def.attr }); scheduleFigure(); })
-      .catch(() => { lmBgCache.set(url, 'fail'); toast(t('ms.bgFail')); scheduleFigure(); });
+    fetchImage(url).then((href) => { lmBgRemember(url, { href, attribution: def.attr }); scheduleFigure(); })
+      .catch(() => { lmBgRemember(url, 'fail'); toast(t('ms.bgFail')); scheduleFigure(); });
   }
   return null;
 }
