@@ -79,7 +79,7 @@ Never do any of these without an explicit request from the maintainer in the cur
 7. **Make a failing check pass by weakening it:** no relaxed tolerances, widened deadlines, skipped or deleted
    tests, or reduced integrity checks. Record the failure with its measurement and ask.
 8. **Start work that was not asked for:** unrelated refactors, audits, dependency upgrades, backlog items,
-   sub-agents or automations.
+   sub-agents (except delegating an authorised card under §6 *Director mode*) or automations.
 9. **Add a dependency** without stating the capability it adds, the smallest alternative considered and its cost
    for offline and desktop distribution.
 
@@ -200,6 +200,23 @@ Done when:    observable acceptance criteria.
     or a measurement that is already scripted.
   - A card without a `Model:` field defaults to the most capable tier with high effort for design work, and to the
     fast tier with medium effort for an implementing card that only measures or documents.
+- **Director mode and sub-agent delegation** (decided by the maintainer on 21 November 2026; applies to Antigravity/Gemini,
+  Claude Code and ChatGPT/Codex wherever the client supports spawning sub-agents). When the main session runs on the
+  **most capable tier**, it acts as **director** and may delegate an **authorised** card (or a bounded sub-task of it)
+  to a sub-agent pinned to the model tier — and effort level, where the client exposes it — requested by the card's
+  `Model:` field, without asking again to spawn that sub-agent:
+  - **Antigravity / Gemini:** `invoke_subagent` with `Model` (`pro`, `flash`, `flash_lite`). No separate per-sub-agent
+    effort parameter exists; note that if the card asks for a different effort.
+  - **Claude Code:** sub-agent tool with `model` (`opus`, `sonnet`, `haiku`), plus effort where supported by the client.
+  - **ChatGPT / Codex:** sub-agent / multi-agent spawn with the requested model and reasoning effort where supported.
+  - **Limits and fallback:** the director handles `most capable, effort high` design or critical cards directly when its
+    own session already matches (if the session's effort or tier is lower than what the card asks for and cannot be
+    raised via a sub-agent, state the gap in one line and wait for the maintainer to switch or say "continue").
+    **One editor at a time** still holds strictly: never run two write-enabled sub-agents concurrently on the shared
+    checkout (read-only research sub-agents may run; only one writer runs at a time while the director waits). A
+    sub-agent never redesigns a card and obeys every §3 hard limit. The director owns briefing, reviewing the diff,
+    verifying tests/checks, committing and pushing on the work branch, updating the roadmap and changelog, and
+    reporting to the maintainer in Spanish.
 - **One card at a time,** in roadmap order, and only the card the maintainer authorised. Finish or hand over
   before starting another. If a request combines independent workstreams, split it into cards and do the first.
 - **Interpret a broad request by intent:** choose the smallest concrete scope that satisfies it, state the
