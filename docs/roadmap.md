@@ -13,9 +13,58 @@ file and leave one line here.
 
 ## Status and handoff
 
-Updated 18 November 2026.
+Updated 21 November 2026.
 
-- **Released version:** V0.151 (16 November 2026), integrated into `master` on the maintainer's instruction ("haz push de todo y luego publica en
+- **Third council audit of 21 November 2026 (runtime frontend + backend audit; design session, docs only, commit on `work/2026-11-13`):**
+  four expert perspectives (frontend state/lifecycle/memory, frontend UI/security/performance, Electron shell/IPC security, Python engine/tile store)
+  audited the live code across `app/js/`, `desktop/` and `src/sedcoretool/` (static code audit, no code changed and no test suite re-run).
+  All findings below are code-verified and not covered by earlier cards:
+  1. **P0 — Security bypass of M8.4.34 store protection (`desktop/tile-ipc.js:263, 411, 563`):** `reopen()` and `maskBegin()` add any `project`
+     to `opened` unconditionally without verifying `known` or the project's existence, allowing an injected script to call
+     `tiles.reopen(victim, ...)` followed by `tiles.deleteProjectStore(victim)` or `tiles.maskRetain(victim, [])` with zero main-process
+     confirmation; other project-scoped tile-IPC handlers (`maskImport`, `maskExport`, `derivedPut`/`Get`, `source*`, `locate`, `copySource`)
+     do not check `opened`. In addition, `trainer:*` IPC (`desktop/main.js:277`) omits `senderFrame === mainFrame`, `desktop/trainer.js:133-141`
+     passes CLI options without allowlist/type checks and writes `opt.zip` uncapped, `trainer.js:34-64` runs `spawnSync` up to 120 s (freezing the
+     Electron main process), and `cancel()` (`trainer.js:156`) does not kill the process tree. **Card: `M8.4.38`.**
+  2. **P0 — Frontend XSS / attribute-breakout surfaces in `innerHTML` (125 sites in `app/js/`):** unescaped imported/user fields in HTML strings:
+     `e.thumb` in `<img src="${e.thumb}">` (`app.js:4321, 4337`), imported IDs/units/settings (`app.js:1437, 1441, 2279-2281, 2346, 2354, 2579,
+     3003, 3386, 3422, 3976, 4269, 4289, 4335`), `datatab.js:53, 55, 62, 130, 176, 195, 342, 346`, and `multiproxy.js:308, 363, 378, 382-383,
+     455, 1611` (`L.name` unescaped in `cl.dragHere`). **Card: `Q9`.**
+  3. **P1 — Frontend lifecycle, tiled-viewer stale closure, multi-core save/backup bugs & memory leaks:** `tileSchedulers` (`tiledview.js:32-61`)
+     closes over the first `tiled` object (`sec()?.tiled === tiled`), so reopened sections never re-render loaded high-res tiles until manual
+     pan/zoom; `resetState()` (`app.js:3222-3237`) leaves `_maskSync`, `_statsRunner`, `_counts.runner`, queued `engineAnalysis` jobs
+     (`engineanalysis.js:181`), `editWindow` (up to 120 MiB + pinned `MaskTiles`, `tiledtools.js:21`), `tileCache`, `tileSchedulers`, `lastSec`
+     (`storage.js:53`), `lastImported` (`columns.js:591`) and `lmBgCache` (`figures.js:637`, unbounded Esri data URLs) alive across project
+     switches; `saveOnce` (`app.js:3285`) and `backupNow` (`app.js:3690`) check `S.sections.length` (active core only) instead of all cores,
+     leaving `_savedRecord` stale for `retainStore` or skipping live backup when the active core is empty; `TiledStatsRunner.rgba`
+     (`tiledit.js:308`) retains up to 48 MiB per tiled section indefinitely; `secDel` (`app.js:2683`) misses `markDirty()` and runner teardown;
+     `ensurePixels` (`app.js:150`) crashes on a missing-source tiled section (`levels === null`); `presetBest`/`presetAll` (`app.js:2564, 2614`)
+     do not guard tiled sections; `busy()` (`app.js:4570`) is not re-entrant; `statsWait` (`tiledtools.js:180-195`) leaks across section switches;
+     `readReopenCache` (`tiledproject.js:125-128`) misses objects absent from `cache.stats`. **Card: `M8.4.39`.**
+  4. **P1 — Python engine 65,536-request session ceiling & blocking store I/O (`src/sedcoretool/engine/server.py`):** `len(self.seen) >= 65_536`
+     (`server.py:149-151`) kills long tiled sessions (`ProtocolError`); heavy synchronous store ops (`mask.retain`, `mask.import`, `mask.export`,
+     `mask.copy`, `mask.put`, `mask.derived.put`/`.get`, `server.py:313-450`) block the single coordinator loop (stalling `tile.read`, progress
+     heartbeats and `job.cancel`); `masks.py:290, 654` lacks Windows `os.replace` retry and `winerror in (39, 112)` disk-full handling;
+     `server.py:360, 427` matches open stagings by `MaskStore` object identity (breaks after 64-store LRU eviction); `TileReader` (`tiles.py:34-35`)
+     is unbounded and not invalidated on worker eviction (`pyramid.py:84`); `uploadTable` (`tile-ipc.js:150-162`) leaks staged handles on
+     chunk/commit error; `source.py:93` misinterprets 4-band CMYK TIFFs as RGBA. **Card: `M8.4.40`.**
+  5. **P2 — Frontend Data-tab precision, virtualized table cap, engine-refresh/CSV races & SVG PNG memory:** `datatab.js:176, 266, 325` records
+     cell-edit `orig` from 6-decimal `fmt(v, 6)` instead of the stored float (corrupting Restore for small values like `1.23e-8`);
+     `datatab.js:222-224` still caps the virtualized table at `dataLimit = 400` and rebuilds `tableModel()` on every scroll frame;
+     `datatab.js:346, 365` breaks manual column deletion when the name contains `|`; `engineRefresh` (`app.js:1257`) calls `setMode(mode)`
+     mid-edit in Data/Figures/Multiproxy; `logCSVBtn` (`columns.js:555`) exports synchronously while engine analysis is pending; `recList`
+     delete (`columns.js:618`) can call `splice(-1, 1)`; `autoPick(..., 'typical')` (`figures.js:124`) crashes on null `o.feat`; PNG exports
+     (`figures.js:724, 965`, `datatab.js:108`, `multiproxy.js:1300`) use `encodeURIComponent` data URIs instead of Blob URLs; missing
+     `pointercancel` cleanup (`panels.js:44, 75`, `app.js:1662, 1812, 1820, 4521`). **Card: `Q10`.** Remaining 4,664-line `app.js` split tracked
+     as **`A4`** (post-M8.4.19).
+  - **Decisions waiting for the maintainer (proposed 21 Nov 2026):**
+    - **U (order before M8.4.19):** run **`M8.4.38`** and **`Q9`** (P0 security), then **`M8.4.39`** and **`M8.4.40`** (+ `M8.4.37`) before closing
+      the part C milestone gate (`M8.4.19`), and run **`Q10`** before the next public release (`V0.153`). *Recommended: approve.*
+    - **V (engine request-limit semantics in M8.4.40):** replace the hard 65,536-request session limit (`server.py:149`) with a bounded sliding
+      window (last 65,536 request IDs via `OrderedDict`) so sessions can run indefinitely while duplicate recent IDs are still rejected without
+      breaking string/UUID request IDs. *Recommended: approve.*
+
+- **Released version:** V0.152 (20 November 2026, `master` `8ee9776`, tag `V0.152`, GitHub Release published with 8 files; see below). Earlier: V0.151 (16 November 2026), integrated into `master` on the maintainer's instruction ("haz push de todo y luego publica en
   master"), which overrides the decision of 14 November 2026 that nothing goes to `master` until M8.4 is finished (part A is done; parts C and B are not). It is `master` commit `e59fff4` (pushed; no tag), whose tree is identical to commit `7aca549` of the work branch, on which `tests` and *Desktop builds* passed on Windows, macOS and Linux. It contains the
   visible-row Data table as the default (the release gate of every platform is still required before it is announced to users). V0.150 (14 November 2026) was integrated on the instruction "haz commit y push de todo a
   master con una nueva version 0.150". **No tag and no GitHub Release exist for V0.149, V0.150 or V0.151**: a tag publishes a Release and is the
@@ -2276,7 +2325,89 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 - **Model:** most capable, effort medium (a bounded change, but it touches what the user sees of the objects).
 - **Done when:** the synthetic section with its image opens within the budget, measured; development gate.
 
-##### M8.4.19 - Milestone gate of part C — state: after M8.4.18d and M8.4.36 (M8.4.37 before it if the maintainer decides so)
+##### M8.4.38 - Security hardening: close M8.4.34 store bypass and harden `trainer` IPC — state: Ready (third council audit, 21 Nov 2026; P0)
+
+- **Goal:** an injected renderer script cannot bypass M8.4.34's main-process confirmation for deleting or wiping another project's tile store,
+  cannot read/write another project's store metadata or copied sources, and cannot inject CLI flags or freeze the Electron main process via
+  `trainer:*` IPC.
+- **Read first:** `desktop/tile-ipc.js` (`reopen`, `maskBegin`, `deleteProjectStore`, `maskRetain`, `checkProject`, `opened`/`known`);
+  `desktop/main.js` (`setupTrainer`, `setupTiles`); `desktop/trainer.js` (`status`, `systemPython`, `hasNvidia`, `train`, `cancel`);
+  `tests/app/desktop-hardening.test.mjs`; `tests/app/tile-ipc.test.mjs`.
+- **Change:** `desktop/tile-ipc.js`, `desktop/main.js`, `desktop/trainer.js`, `tests/app/desktop-hardening.test.mjs`, `tests/app/tile-ipc.test.mjs`.
+- **Do not touch:** the wire protocol of `engine/server.py`, saved project format, compatibility identifiers, or training model outputs.
+- **Model:** most capable, effort high (security boundary, IPC validation, process lifecycle).
+- **Steps:**
+  1. In `desktop/tile-ipc.js`, record a project in `opened` only when the page genuinely opens or creates it (never blindly inside `reopen`
+     before checking `known`/existence, and never on arbitrary project IDs in `maskBegin` unless already opened or explicitly created via a
+     validated open/create flow); enforce `checkOpened` (or main-process confirmation) on `deleteProjectStore`, `maskRetain`, `maskImport`,
+     `maskExport`, `derivedPut`, `derivedGet`, `sourceCopyRead`, `sourceImportBegin`, `rememberSource`, `sourceInfo`, `locate` and `copySource`.
+  2. In `desktop/main.js`, enforce `event.senderFrame === event.sender.mainFrame` on every `trainer:*` handler (matching `engine:` and `tiles:`).
+  3. In `desktop/trainer.js`, validate every `train(opt)` option against strict allowlists/types/bounds (`encoder`, numeric `epochs`/`tile`/`overlap`,
+     non-flag safe `val`/`test`/`name` values, bounded `opt.zip` size written asynchronously), replace synchronous `spawnSync` in `status()`,
+     `systemPython()` and `hasNvidia()` with async `spawn` so the Electron main process event loop never stalls, and terminate the full child
+     process tree on `cancel()` (matching `desktop/engine.js`).
+- **Tests:** regression test in `tests/app/desktop-hardening.test.mjs` proving `reopen('victim', ...)` + `deleteProjectStore('victim')` /
+  `maskRetain('victim', [])` still requires main-process `confirm()` and fails when refused; tests for cross-project `source*`/`maskExport`/
+  `derivedGet` rejection; tests for `trainer` flag-injection rejection, oversized `zip` rejection, mainFrame check, and non-blocking `status()`;
+  `npm test`, `npm run typecheck`, `tests/e2e/desktop.mjs`, `tests/e2e/tiled-sections.mjs`.
+- **Done when:** all hardening regression tests pass on Windows and no `spawnSync` remains in `desktop/trainer.js`; development gate.
+
+##### M8.4.39 - Frontend lifecycle teardown, tiled-viewer stale closure, multi-core save/backup & memory leaks — state: Ready (third council audit, 21 Nov 2026; P1)
+
+- **Goal:** switching, closing or reopening a project cleanly tears down every background runner, queued engine job and large cache; reopened
+  tiled sections always repaint newly loaded tiles; multi-core saves and backups never skip sections when the active core is empty; memory stays
+  bounded across multi-section tiled editing.
+- **Read first:** `app/js/tiledview.js` (`tileSchedulers`); `app/js/app.js` (`resetState`, `saveOnce`, `backupNow`, `secDel`, `pxTouch`,
+  `ensurePixels`, `presetBest`, `presetAll`, `busy`); `app/js/tiledtools.js` (`editWindow`, `statsWait`); `app/js/tiledit.js`
+  (`TiledStatsRunner.rgba`); `app/js/tiledproject.js` (`readReopenCache`); `app/js/engineanalysis.js` (`releaseAll`); `app/js/storage.js`
+  (`lastSec`); `app/js/columns.js` (`lastImported`); `app/js/figures.js` (`lmBgCache`).
+- **Change:** the modules listed above (keep `app.js` at or below `APP_JS_CEILING`); new and extended Node + desktop e2e tests.
+- **Do not touch:** scientific calculations, saved project schema, tile-store disk format.
+- **Model:** most capable, effort high (project lifecycle, saving/`retainStore` safety, memory management).
+- **Steps:**
+  1. Fix `tiledview.js::tileSchedulers`: resolve the current section dynamically (`sec()?.tiled?.pyramid === tiled.pyramid`) instead of closing
+     over the first `tiled` object, update error state on the live section, and evict/clear schedulers on project reset.
+  2. In `resetState()` (and `secDel`): stop every section's `_maskSync`, `_statsRunner` and `_counts.runner`; cancel/clear queued `engineAnalysis`
+     jobs in `releaseAll()`; release `tiledtools.js` `editWindow` and reset `statsWait`; clear `tileCache` (closing ImageBitmaps), `tileSchedulers`,
+     `storage.js::lastSec` (for closed projects), `columns.js::lastImported`, and bound/clear `figures.js::lmBgCache`; call `markDirty()` in `secDel`.
+  3. Fix multi-core guards in `saveOnce` (`app.js:3285`) and `backupNow` (`app.js:3690`) to inspect all cores (`S.cores.some(c => c.sections.length)`
+     / `S.cores.flatMap(c => c.sections)`) instead of only `S.sections.length`.
+  4. Bound/clear `TiledStatsRunner.rgba` when idle or leaving a section; clear `_lc`/`_lb` in `pxTouch` eviction; guard `ensurePixels` against
+     `s.tiled.missing` (`levels === null`); guard `presetBest` and `presetAll` against tiled sections; make `busy()` use a nesting counter;
+     verify in `readReopenCache` that every object in `s.objects` needing stats is covered by `cache.stats`.
+- **Tests:** Node tests for `tileSchedulers` reopen repaint, `engineAnalysis.releaseAll()` aborting queued jobs, `readReopenCache` missing-object
+  rejection, multi-core `_savedRecord` update when active core has 0 sections, and `busy()` nesting; desktop e2e check reopening a tiled project
+  and verifying high-res tiles repaint without manual pan; `npm test`, `npm run typecheck`, `tests/e2e/tiled-sections.mjs`.
+- **Done when:** every bug above has a failing-before/passing-after test and `app.js` does not grow; development gate.
+
+##### M8.4.40 - Engine session-request limit, non-blocking store I/O and Windows/handle robustness — state: Ready (third council audit, 21 Nov 2026; P1; decision V)
+
+- **Goal:** long tiled editing sessions never crash at 65,536 engine requests; heavy mask-store operations never stall `tile.read`, progress
+  heartbeats or `job.cancel`; Python store writes survive transient Windows locks and recognise Windows disk-full errors; staged engine handles
+  and `TileReader` caches never leak; 4-band CMYK TIFFs are rejected instead of misrendered as RGBA.
+- **Read first:** `src/sedcoretool/engine/server.py` (`seen` limit, `mask.*` dispatch, `mask_stores` LRU vs `staging.store is store`);
+  `src/sedcoretool/store/masks.py` (`_write_durably`, `write_or_disk_error`); `src/sedcoretool/store/tiles.py` (`TileReader`);
+  `src/sedcoretool/store/pyramid.py` (eviction); `src/sedcoretool/store/source.py` (band/interpretation check); `desktop/tile-ipc.js` (`uploadTable`).
+- **Change:** the files listed above, `docs/roadmap-engine-contract.md` (document the sliding request-ID window), and tests in `tests/`.
+- **Do not touch:** mask-store on-disk format, pyramid format, scientific method outputs.
+- **Model:** most capable, effort high (engine protocol, concurrency, atomic disk I/O, image interpretation).
+- **Steps:**
+  1. Replace the hard `len(self.seen) >= 65_536` session kill (`server.py:149`) with a bounded `OrderedDict` sliding window (decision V) so
+     sessions run indefinitely while rejecting duplicate recent IDs.
+  2. Offload heavy synchronous mask-store I/O (`mask.retain`, `mask.import`, `mask.export`, `mask.copy`, `mask.put`, `mask.derived.put`/`.get`)
+     off the coordinator's request/progress loop (or run in a dedicated I/O worker thread with locking per store) so `tile.read`, progress
+     events and `job.cancel` remain responsive.
+  3. In `store/masks.py`, add Windows `EPERM`/`EBUSY` retry to `_write_durably` (`os.replace`) and check `getattr(err, 'winerror', None) in (39, 112)`
+     in `write_or_disk_error`; in `server.py`, match open stagings by canonical store path/project key instead of `staging.store is store`.
+  4. Bound `TileReader.descriptions`/`hashes` in `store/tiles.py` and invalidate evicted pyramids; in `desktop/tile-ipc.js::uploadTable`, release
+     the staged buffer token on `buffer.chunk` / `buffer.commit` error; in `store/source.py`, check `image.interpretation` to reject CMYK 4-band
+     TIFFs clearly (and decide/document 2-band gray+alpha handling).
+- **Tests:** Python unit/integration tests for >65,536 requests (or configurable window size) without error, concurrent `tile.read` during large
+  `mask.import`/`mask.retain`, `MaskStore` eviction + open staging protection, Windows retry & `winerror=112` mapping, CMYK TIFF rejection;
+  Node test for `uploadTable` cleanup on failed chunk; `pytest -q`, `npm test`, `ruff check`, `tests/e2e/tiled-sections.mjs`.
+- **Done when:** all tests pass on Windows and the engine runtime is rebuilt and verified; development gate.
+
+##### M8.4.19 - Milestone gate of part C — state: after M8.4.18d, M8.4.36 and (pending decision U) M8.4.37–M8.4.40 + Q9
 
 - **Model:** fast, effort low (running and recording the gate); the most capable with effort high for the decisions that follow it.
 - Windows, macOS and Linux on one commit (`tests` and *Desktop builds*, including the desktop end-to-end test with the engine experiment and the
@@ -2641,6 +2772,58 @@ Written from the council audit (status block). Each card names its model; the sc
       settings under "More options", the summaries of multiproxy's step headers copied to the other panels, a shortcut sheet opened with `?`,
       depths validated as typed with a message (today an invalid bottom reverts without explanation), buttons that a tiled section refuses
       disabled with the reason instead of refusing after the click.
+
+### Cards of the third council (21 November 2026)
+
+Runtime frontend + backend audit (status block). Part C / desktop-security / engine cards (`M8.4.38`–`M8.4.40`) sit above under part C;
+web/frontend security, UI correctness and architecture cards sit here.
+
+- [ ] **Q9 - Sanitize `innerHTML` injection surfaces across project, data, ML and multiproxy views (P0 security).**
+  - *Goal:* opening a hostile `.sedcoretool` project file or laboratory table cannot inject HTML or break out of attributes anywhere in the UI.
+  - *Read first:* `app/js/app.js` (lines 1437, 1441, 2279-2281, 2346, 2354, 2579, 3003, 3386, 3422, 3976, 4269, 4289, 4321, 4335, 4337);
+    `app/js/datatab.js` (lines 53, 55, 62, 130, 176, 195, 342, 346); `app/js/multiproxy.js` (lines 308, 363, 378, 382-383, 455, 1611);
+    `app/js/core.js` (`esc`).
+  - *Change:* escape every interpolated ID, unit, name, numeric/color field and tooltip across `app.js`, `datatab.js`, `multiproxy.js` (and audit
+    remaining `innerHTML` sites in `figures.js`, `columns.js`, `panels.js`); validate `thumb` URLs (`data:image/(jpeg|png|webp);base64,...` only)
+    in `mlExamplesHTML`/`mlOthersHTML` and on project import; keep `app.js` at or below `APP_JS_CEILING`.
+  - *Do not touch:* saved project schema, visual layout, DOM element IDs.
+  - *Model:* most capable, effort medium (security boundary across UI modules).
+  - *Tests:* Node & browser regression tests loading a crafted project JSON with `"><img src=x onerror=...>` payloads in project/core/section/
+    comment/layer/preset IDs, `units`, `L.name`, `y.color` and `library[].thumb`, asserting zero unexpected elements/attributes and clean rendering.
+  - *Done when:* all hostile-payload tests pass and a static check confirms no unescaped dynamic attribute interpolation remains; development gate.
+
+- [ ] **Q10 - Data-tab edit precision, virtualized table cap, engine-refresh/CSV races & SVG PNG Blob export.**
+  - *Goal:* fix verified runtime, UX and data-accuracy defects across the Data tab, Core log, Figures and pointer interactions.
+  - *Read first:* `app/js/datatab.js` (`108, 176, 222-224, 266, 325, 346, 365`); `app/js/columns.js` (`53, 555, 618`); `app/js/app.js`
+    (`1257, 1662, 1812, 1820, 4521`); `app/js/figures.js` (`124, 724, 965`); `app/js/multiproxy.js` (`1300`); `app/js/panels.js` (`44, 75`).
+  - *Change:*
+    1. `datatab.js`: capture `orig` from the raw numeric value in `c.proxies[col][i]` instead of the 6-decimal formatted `td.dataset.before`;
+       remove the `dataLimit = 400` cap when virtualized `dataViewportOn` is active and cache `tableModel()` across scroll frames; store
+       `data-core` and `data-col` separately so column names containing `|` delete cleanly.
+    2. `app.js` & `columns.js`: stop `engineRefresh` (`app.js:1257`) from calling `setMode(mode)` while editing in `data`/`fig`/`geo` (refresh
+       only the results/log/figure safely); await `analyzeSections(S.sections)` before exporting `logCSVBtn` (`columns.js:555`); guard
+       `recList` deletion (`columns.js:618`) against `findIndex === -1`.
+    3. `figures.js`, `datatab.js`, `multiproxy.js`: guard `autoPick(..., 'typical')` against null `o.feat`; replace `data:image/svg+xml` +
+       `encodeURIComponent(svg)` PNG export with Blob `ObjectURL` (revoked in `finally`).
+    4. `panels.js`, `app.js`: add `pointercancel` cleanup wherever `pointerup` clears drag state/listeners.
+  - *Do not touch:* scientific formulas, CSV format (Q4), virtualized-table default flag.
+  - *Model:* fast tier, effort medium (bounded fixes with focused unit and smoke tests).
+  - *Tests:* Node tests for small-value (`1.23e-8`) edit + restore, column name with `|`, `autoPick` with null `feat`, `recList` missing-id guard;
+    smoke/e2e test scrolling a 10,000-row virtualized table without clicking "Show more" and exporting a large PNG via Blob URL.
+  - *Done when:* all new tests plus `npm test`, `npm run typecheck` and `tests/e2e/smoke.mjs` pass; development gate.
+
+- [ ] **A4 - Modular decomposition of remaining `app.js` workflows (post-M8.4.19).**
+  - *Goal:* reduce `app.js` from 4,664 lines to wiring only by extracting the remaining cohesive controller workflows into dedicated modules, one
+    per commit, lowering `APP_JS_CEILING` in `tests/app/architecture.test.mjs` with each step.
+  - *Read first:* `docs/ARCHITECTURE.md §3`; `tests/app/architecture.test.mjs`; `tools/build_standalone.py` (`ORDER`); `app/js/app.js`.
+  - *Change:* extract (1) `mlpanel.js` (classifiers, evaluation, vision embeddings, trainer dialog), (2) `projectio.js` (library, save/backup/
+    package, comments, home, all-projects, multi-project), (3) `viewtools.js` (canvas rendering, pointer tools, crop, overlays), updating `ORDER`
+    in `tools/build_standalone.py`, `docs/ARCHITECTURE.md` and `docs/TECHNICAL_DOCUMENTATION.md §1.4`.
+  - *Do not touch:* scientific behaviour, saved project format, DOM IDs, test hooks on `window.ichantool`.
+  - *Model:* fast tier, effort medium (behaviour-preserving moves, verified one module per commit).
+  - *Tests:* `npm test` (including `architecture.test.mjs` with lowered ceiling), `npm run typecheck`, standalone build, `tests/e2e/smoke.mjs`
+    and `tests/e2e/desktop.mjs`.
+  - *Done when:* `app.js` is under 1,500 lines and only wires modules, with all suites green; development gate.
 
 ## Small maintenance cards
 
