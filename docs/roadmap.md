@@ -13,304 +13,30 @@ file and leave one line here.
 
 ## Status and handoff
 
-Updated 21 November 2026.
+Updated 21 November 2026. Rules for this block: [AGENTS.md §1 step 8](../AGENTS.md#1-every-session-in-this-order) (about 30 lines, rewritten,
+not appended). Earlier status records, check logs and audit texts: [roadmap-history.md § Status log](roadmap-history.md#status-log-until-21-november-2026).
 
-- **Third council audit of 21 November 2026 (runtime frontend + backend audit; design session, docs only, commit on `work/2026-11-13`):**
-  four expert perspectives (frontend state/lifecycle/memory, frontend UI/security/performance, Electron shell/IPC security, Python engine/tile store)
-  audited the live code across `app/js/`, `desktop/` and `src/sedcoretool/` (static code audit, no code changed and no test suite re-run).
-  All findings below are code-verified and not covered by earlier cards:
-  1. **P0 — Security bypass of M8.4.34 store protection (`desktop/tile-ipc.js:263, 411, 563`):** `reopen()` and `maskBegin()` add any `project`
-     to `opened` unconditionally without verifying `known` or the project's existence, allowing an injected script to call
-     `tiles.reopen(victim, ...)` followed by `tiles.deleteProjectStore(victim)` or `tiles.maskRetain(victim, [])` with zero main-process
-     confirmation; other project-scoped tile-IPC handlers (`maskImport`, `maskExport`, `derivedPut`/`Get`, `source*`, `locate`, `copySource`)
-     do not check `opened`. In addition, `trainer:*` IPC (`desktop/main.js:277`) omits `senderFrame === mainFrame`, `desktop/trainer.js:133-141`
-     passes CLI options without allowlist/type checks and writes `opt.zip` uncapped, `trainer.js:34-64` runs `spawnSync` up to 120 s (freezing the
-     Electron main process), and `cancel()` (`trainer.js:156`) does not kill the process tree. **Card: `M8.4.38`.**
-  2. **P0 — Frontend XSS / attribute-breakout surfaces in `innerHTML` (125 sites in `app/js/`):** unescaped imported/user fields in HTML strings:
-     `e.thumb` in `<img src="${e.thumb}">` (`app.js:4321, 4337`), imported IDs/units/settings (`app.js:1437, 1441, 2279-2281, 2346, 2354, 2579,
-     3003, 3386, 3422, 3976, 4269, 4289, 4335`), `datatab.js:53, 55, 62, 130, 176, 195, 342, 346`, and `multiproxy.js:308, 363, 378, 382-383,
-     455, 1611` (`L.name` unescaped in `cl.dragHere`). **Card: `Q9`.**
-  3. **P1 — Frontend lifecycle, tiled-viewer stale closure, multi-core save/backup bugs & memory leaks:** `tileSchedulers` (`tiledview.js:32-61`)
-     closes over the first `tiled` object (`sec()?.tiled === tiled`), so reopened sections never re-render loaded high-res tiles until manual
-     pan/zoom; `resetState()` (`app.js:3222-3237`) leaves `_maskSync`, `_statsRunner`, `_counts.runner`, queued `engineAnalysis` jobs
-     (`engineanalysis.js:181`), `editWindow` (up to 120 MiB + pinned `MaskTiles`, `tiledtools.js:21`), `tileCache`, `tileSchedulers`, `lastSec`
-     (`storage.js:53`), `lastImported` (`columns.js:591`) and `lmBgCache` (`figures.js:637`, unbounded Esri data URLs) alive across project
-     switches; `saveOnce` (`app.js:3285`) and `backupNow` (`app.js:3690`) check `S.sections.length` (active core only) instead of all cores,
-     leaving `_savedRecord` stale for `retainStore` or skipping live backup when the active core is empty; `TiledStatsRunner.rgba`
-     (`tiledit.js:308`) retains up to 48 MiB per tiled section indefinitely; `secDel` (`app.js:2683`) misses `markDirty()` and runner teardown;
-     `ensurePixels` (`app.js:150`) crashes on a missing-source tiled section (`levels === null`); `presetBest`/`presetAll` (`app.js:2564, 2614`)
-     do not guard tiled sections; `busy()` (`app.js:4570`) is not re-entrant; `statsWait` (`tiledtools.js:180-195`) leaks across section switches;
-     `readReopenCache` (`tiledproject.js:125-128`) misses objects absent from `cache.stats`. **Card: `M8.4.39`.**
-  4. **P1 — Python engine 65,536-request session ceiling & blocking store I/O (`src/sedcoretool/engine/server.py`):** `len(self.seen) >= 65_536`
-     (`server.py:149-151`) kills long tiled sessions (`ProtocolError`); heavy synchronous store ops (`mask.retain`, `mask.import`, `mask.export`,
-     `mask.copy`, `mask.put`, `mask.derived.put`/`.get`, `server.py:313-450`) block the single coordinator loop (stalling `tile.read`, progress
-     heartbeats and `job.cancel`); `masks.py:290, 654` lacks Windows `os.replace` retry and `winerror in (39, 112)` disk-full handling;
-     `server.py:360, 427` matches open stagings by `MaskStore` object identity (breaks after 64-store LRU eviction); `TileReader` (`tiles.py:34-35`)
-     is unbounded and not invalidated on worker eviction (`pyramid.py:84`); `uploadTable` (`tile-ipc.js:150-162`) leaks staged handles on
-     chunk/commit error; `source.py:93` misinterprets 4-band CMYK TIFFs as RGBA. **Card: `M8.4.40`.**
-  5. **P2 — Frontend Data-tab precision, virtualized table cap, engine-refresh/CSV races & SVG PNG memory:** `datatab.js:176, 266, 325` records
-     cell-edit `orig` from 6-decimal `fmt(v, 6)` instead of the stored float (corrupting Restore for small values like `1.23e-8`);
-     `datatab.js:222-224` still caps the virtualized table at `dataLimit = 400` and rebuilds `tableModel()` on every scroll frame;
-     `datatab.js:346, 365` breaks manual column deletion when the name contains `|`; `engineRefresh` (`app.js:1257`) calls `setMode(mode)`
-     mid-edit in Data/Figures/Multiproxy; `logCSVBtn` (`columns.js:555`) exports synchronously while engine analysis is pending; `recList`
-     delete (`columns.js:618`) can call `splice(-1, 1)`; `autoPick(..., 'typical')` (`figures.js:124`) crashes on null `o.feat`; PNG exports
-     (`figures.js:724, 965`, `datatab.js:108`, `multiproxy.js:1300`) use `encodeURIComponent` data URIs instead of Blob URLs; missing
-     `pointercancel` cleanup (`panels.js:44, 75`, `app.js:1662, 1812, 1820, 4521`). **Card: `Q10`.** Remaining 4,664-line `app.js` split tracked
-     as **`A4`** (post-M8.4.19).
-  - **Decisions U and V (approved by the maintainer on 21 Nov 2026, as recommended):**
-    - **U (order before M8.4.19):** run **`M8.4.38`** and **`Q9`** (P0 security), then **`M8.4.39`**, **`M8.4.40`** and **`M8.4.37`** before closing
-      the part C milestone gate (`M8.4.19`), and run **`Q10`** before the next public release (`V0.153`).
-    - **W (store clean-up and deletion in M8.4.38, approved 21 Nov 2026):** the right to remove stored masks follows what the program session
-      wrote; versions stored before the session stay until the project is deleted (details under the card).
-  - **Progress of 21 Nov 2026 (afternoon):** `tests` and *Desktop builds* passed on Windows, macOS and Linux on `0f3d25a`, which contains
-    M8.4.36 (`864cad1`): M8.4.36 is green on three systems. **M8.4.38 is done at the development gate** (Windows; checks under the card; the
-    GitHub run of its commit is pending). **Next card: `Q9`** (escape the `innerHTML` sites; P0).
-    - **V (engine request-limit semantics in M8.4.40):** replace the hard 65,536-request session limit (`server.py:149`) with a bounded sliding
-      window (last 65,536 request IDs via `OrderedDict`) so sessions can run indefinitely while duplicate recent IDs are still rejected without
-      breaking string/UUID request IDs.
-
-- **Released version:** V0.152 (20 November 2026, `master` `8ee9776`, tag `V0.152`, GitHub Release published with 8 files; see below). Earlier: V0.151 (16 November 2026), integrated into `master` on the maintainer's instruction ("haz push de todo y luego publica en
-  master"), which overrides the decision of 14 November 2026 that nothing goes to `master` until M8.4 is finished (part A is done; parts C and B are not). It is `master` commit `e59fff4` (pushed; no tag), whose tree is identical to commit `7aca549` of the work branch, on which `tests` and *Desktop builds* passed on Windows, macOS and Linux. It contains the
-  visible-row Data table as the default (the release gate of every platform is still required before it is announced to users). V0.150 (14 November 2026) was integrated on the instruction "haz commit y push de todo a
-  master con una nueva version 0.150". **No tag and no GitHub Release exist for V0.149, V0.150 or V0.151**: a tag publishes a Release and is the
-  owner's decision. The *Desktop builds* workflow is started by hand for the macOS and Linux builds (see the release checklist).
-- **Active work branch:** `work/2026-11-13` (pushed). `master` (V0.151, `e59fff4`) is contained in it since the merge of 16 November 2026 (commit `cdc401a`, no file changes),
-  so the two histories no longer diverge.
-- **Way of working (set on 16 November 2026 at the maintainer's request, rules in [AGENTS.md §5](../AGENTS.md#5-delivering-a-change)):** all work happens on the work branch, which is
-  pushed after every finished card (copy outside this computer, and the GitHub checks on three systems); `master` only receives versions, through
-  `python tools/integrate_version.py` ([DEVELOPMENT §8](DEVELOPMENT.md#8-versions-ci-and-releases)), which refuses to run if `master` holds anything that the work branch lacks;
-  every session starts by checking `git log HEAD..origin/master` and, if it lists something, merging `master` into the work branch.
-- **Open pull requests on GitHub (16 November 2026), both from Dependabot against `master`, neither merged:** #25 Electron 45.2.2 -> 45.3.2 (`desktop/package.json` and lock file) and
-  #24 `softprops/action-gh-release` 2 -> 3 (release workflow only). They wait for the maintainer (AGENTS §5.1); the natural moment is the preparation of V0.152. If one is merged on
-  GitHub by mistake nothing is lost: the next session merges `master` into the work branch.
-- **Checks:** see the last line of this block; it is rewritten at the end of every session.
-- **Full checks of 16 November 2026 on the V0.151 state (maintainer's Windows computer, run one after another):** `pytest -q` 724 passed / 9 skipped (Python 3.12); `npm test` 361 passed
-  (its first run inside the check script returned exit 1 with no output that could be read; four reruns, 361 passed each, so it is recorded as an unexplained, not reproduced incident);
-  `npm run typecheck` (no new diagnostics); `sync_version.py --check`; `ruff check src tests tools` (ruff under Python 3.14); runtime rebuilt; `tests/e2e/desktop.mjs`; `tests/e2e/smoke.mjs`.
-  The GitHub run on the version commit is recorded below once it has finished.
-- **Where we are:** M8.1 and M8.2 are done at the development gate (Windows). M8.3 is complete at the development gate: with
-  `SEDCORETOOL_ENGINE_EXPERIMENT=1` the desktop program calculates the interval table of every section in the Python engine and shows it,
-  with a pending state, stale-result rejection, cancellation and an error state, never falling back to JavaScript. Measurements of card
-  M8.3.8: [summary](validation/M8.3.8-engine-analysis-summary.md). **The engine path is 30-60 times slower than JavaScript and fails the
-  matched-timing gate of contract §7**; about 90 % of the time is moving the label image on every analysis (design review of 14 November 2026).
-- **Milestone gate of M8.2-M8.3 (card M8.3.9): passed on 14 November 2026**, commit `89512c1`: `tests` and *Desktop builds* succeeded on Windows,
-  macOS and Linux (the desktop end-to-end test with the engine experiment off and on, the package check and the packaged-runtime start). It was
-  the first time the engine work was built on macOS and Linux; it found three faults, all fixed (see the card). Still not covered, and on the
-  release checklist: launching the *packaged* program on macOS and Linux, Intel Macs, clean machines.
-- **Where M8.4 stands (14 November 2026):** cards M8.4.1-M8.4.5 are done and pushed. Measured on Windows (3 pairs, warm, flag off against
-  flag on), from the baseline before M8.4.1 to now: interval-size change on all sections 1,779 -> 229 ms (public) and 3,730 -> 259 ms (synthetic),
-  limit about 51 ms; edit, undo, redo 358 -> 147 ms and 569 -> 211 ms, limit 59-68 ms; unchanged re-analysis, memory peak and parity pass. **The
-  timing gate of contract §7 still fails for (a) and (b).** What remains in (b), measured through the interface on a 2.6-Mpixel section: about
-  35 ms are the interface's own redraw after the edit (it runs on the page's thread; with JavaScript it happens after the measured result, with
-  the engine it falls inside the chain of calls), 10 ms the snapshot and full hash in the page, about 50 ms the upload (the objects table and
-  both masks are derived and fully re-hashed by the engine), about 20 ms the engine. With the full-content hash that the maintainer's condition
-  of decision 1 requires and the page thread shared with drawing, this design cannot reach about 60 ms; the decision of 15 November 2026
-  (next item) moves the fix to part C.
-- **Decision of 15 November 2026 - direction for fluidity: option A.** The maintainer wants the program to stay very fluid with very heavy
-  images and with tables of tens of thousands of rows. Chosen: the engine owns a **tile store** on disk (a pixel pyramid and versioned mask
-  tiles); the page shows tiles and edits the loaded ones ([ARCHITECTURE §3.4, D10-D12](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84)).
-  What it changes:
-  1. **Order:** part A closes with M8.4.7 and M8.4.8 (V0.151 when the maintainer asks), then **part C** (tiles), then part B, then M8.5.
-     M8.4.6 is deferred.
-  2. **The timing question of 14 November is answered:** absolute interactive targets in [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates)
-     are the gate for interactive paths from part C on; the JavaScript-relative verdicts are still measured and reported. The numbers were
-     proposed by the design session and adopted with the choice; the maintainer may change them before M8.4.12 measures.
-  3. **Measure before committing (rule D11):** card M8.4.12 decides with one measurement whether the interval table of tiled sections is
-     computed by the engine (A) or stays in JavaScript (D).
-  4. **Doors kept open** for a later Rust core (option B) or a native interface (option C): the store format is documented and independent
-     of the browser and Electron, and no new scientific method is written in JavaScript (AGENTS.md §4).
-- **Review of M8.4.1-M8.4.5 (14 November 2026, second design session):** no scientific or safety fault found in the code; two defects fixed
-  (the change record cost about 8 ns for every pixel written, also with the engine off, and the engine's copies of the old project were not
-  released when a project was replaced); documents that still said "every analysis uploads every input" corrected; the guarantee about an
-  engine dying mid-transfer got its test; **M8.4 is not finished and M8.5 must not start**: M8.4.6-M8.4.8 (part A), M8.4.9-M8.4.11 (part B,
-  the cards were written in this review) and part C remain, plus the timing decision (answered on 15 November 2026, above). The browser test `smoke.mjs` could not be run locally in
-  the review (starting the local server was refused); the `e2e` job of GitHub runs it on every push.
-- **Rule D11 settled (16 November 2026, card M8.4.21):** after vectorising the interval kernel the outcome is still D (119.5 ms against 100); accepted for the
-  interactive interval table of tiled sections, which stays in JavaScript; the maintainer can overrule it.
-- **Progress of 16 November 2026:** M8.4.7, the M8.4.8 measurements, M8.4.12, M8.4.21, M8.4.13 (fixtures
-  in `C:\sedcore-large-fixtures`, outside the repository, and the Windows baseline) and M2.1.4 are done. The three-system gate of M8.4.8 passed on
-  `f4ec92a`, and `tests` and *Desktop builds* also succeeded on `01d6de7` (includes M8.4.21) on Windows, macOS and Linux (both pushed on the maintainer's request).
-  M2.1.4 and the promotion of the visible-row table to the default are in the branch (checks of that change on Windows: `tests/e2e/smoke.mjs` all passed, which includes both table tests; `node --test` 361 passed; typecheck passed; not run: the desktop end-to-end test, macOS, Linux). M2.1.5 (the `coreConvert` defect) is written and Ready. Session checks: `pytest` 724 passed / 9 skipped on M8.4.21; the other checks of DEVELOPMENT §3 were not repeated because only Python, tools and documents changed since `01d6de7`.
-- **Findings of M2.1.4 (Windows, [report](benchmarks/M2.1.4.md)) for the design session:** the native Data table fails the 33 ms target while scrolling (about 13 frames per second) and
-  the visible-rows rendering passes; both were measured at 10,400 rows (ten clicks of "Show more"), not at 100,000; a scatter of 50,000 points redraws in 156 ms (329 ms at
-  100,000); the **first opening of the multiproxy log takes 195 s at 100,000 rows** (7.7 s at 20,000) because `coreConvert` (`app/js/geo.js:103`) is rebuilt for every sample, a defect of
-  complexity that is independent of the tile store.
-- **Next version (decision of 16 November 2026):** V0.152 does **not** go to `master` until M8.4 is finished (parts A, C and B). The work branch keeps accumulating changes under `## Unreleased`.
-- **Next step: Q5** (long series: `extent()` without spreads, decimation on screen, the data record saved in parts; **model: most capable tier,
-  effort medium**), then M8.4.29 and the rest of order O; M8.4.30 is done (its size target replaced by the ceiling of decision R, approved 20 Nov 2026); decisions S, T and the four design choices of M8.4.34 were approved the same day; M8.4.33 is done; M8.4.32 is done
-  (green on three systems, commit `4a20dfd`); M8.4.29 and M8.4.34 are done at the development gate on 20 Nov 2026 (the GitHub run of their commits is pending); **GitHub on macOS and Linux (read on 20 Nov 2026; fixed by card M8.4.35, green on three systems on `fdf3d4c`): *Desktop builds* failed on `3b0f7dd` (P1), `00ca21b` (M8.4.29) and `12ff7cc` (M8.4.34), always in `tiled-sections.mjs` (`tests` passed on all three, and Windows and Linux passed): (i) twice a 30 s timeout waiting for the mask round to be on its way before the engine is killed (the wait polls with `requestAnimationFrame`, which a window macOS does not show may never run: diagnosis not confirmed); (ii) once `reopen()` found no tiled section after a reload (`grey: null`), the same symptom as the unexplained local failure of M8.4.34 (1 run in 4): the reason the load failed is not recorded by the test. Both block the milestone gate of part C (M8.4.19); a fix needs a card (proposed to the maintainer).** M8.4.18c is done at the development gate on 20 Nov 2026 (the masks of tiled sections and the project's copies of their sources in the folder backup and back; a day of the history can be opened; GitHub green on three systems on `cfd65e4`; M8.4.18d is done (packages carry tiled sections, ZIP64; GitHub green on three systems on `2f6331b`; a synthetic package of 4.97 GB restored exactly through the desktop program on 21 Nov 2026); opening that synthetic section failed: card M8.4.36 fixed it on 21 Nov 2026 (development gate; GitHub pending); card M8.4.37 (a memory bound for the objects' statistics) proposed; then M8.4.19, the milestone gate of part C; Q5 parts 1-2 are done (part 3 changes the saved format: approved on 20 Nov 2026 to wait for a save benchmark of long series, and done only if it shows a slow save; the thinning of core-column curves is decided with P2, approved the same day); P1 is done on 20 Nov 2026 (`figsize.js`, `pngmeta.js`, PNG at 300/600 dpi; `npm test` 507, typecheck and standalone build pass; the 600 dpi check added to `tests/e2e/figure-composition.mjs` (run by `smoke.mjs`) **has not been run**: the permission system refused to start the local server for it, so it runs in the next session or on the maintainer's computer); Q3 is done (units of records, sections and joined projects; development gate); Q2 is done (readers and import report; development gate), then the order O approved on 19 November 2026 (second
-  council audit, below). **V0.152** (decision J) was prepared on 20 Nov 2026 at the maintainer's request ("Publica la 0.152 y haz un release"):
-  full checks passed on the version commit (Windows: pytest 885 passed / 9 skipped, npm 478, typecheck, sync_version, ruff, standalone build,
-  runtime rebuilt, desktop.mjs off and on, tiled-sections.mjs). **Published on 20 Nov 2026:** `master` `8ee9776`, tag `V0.152`, GitHub Release
-  with 8 files (Desktop builds run 44644183590: Windows, macOS and Linux built, release job passed). `tools/release.sh` failed to find
-  `DELIVERY` (now an export); its steps were run by hand with Python 3.12 and the script is fixed on the work branch. Q4 is done (CSV with 15
-  significant digits; the core-column CSV with interval means, a gap limit, reversals marked; development gate), and the retries of card A2
-  were brought forward. Q1 is done (deleting an ichnotaxon reaches every core, asks first, can be restored; orphaned labels repaired on opening;
-  development gate). Full checks of Q4 and A2 (20 Nov 2026, Windows): `py -3.12 -m pytest -q` 885 passed / 9 skipped; `npm test` 478
-  passed; typecheck; `sync_version.py --check`; `ruff check`; standalone build; `desktop.mjs` with the engine off and on; `tiled-sections.mjs`
-  passed twice. M8.4.31 is done (a store clean-up keeps every version committed since the one the page names; saves run one at a time; development gate). M8.4.28 is done (an object operation right after reopening waits only for its own tiles: 387-397 ms instead of not finishing; development gate). M8.4.27 is done (the store folder is deleted and copied with its project; a missing stored version locks its section; development gate). M8.4.18b is done (a moved image is located by its SHA-256 and can be copied into the project; development gate). M8.4.18a is done (tiled sections are saved and reopen exactly; development gate). Its three findings have cards, in this order after M8.4.18b: M8.4.27 (the store folder follows its project: delete, copy under a new identifier, a missing stored version; Opus, high), M8.4.28 (object operations right after reopening; Opus, medium), M8.4.29 (reopening from a cache instead of every tile; Opus, high; decision G waits for the maintainer); then M8.4.18c, M8.4.18d, M8.4.19. Card M8.4.17 is done (decision F: the page counts tiled sections; development gate; see its *As built* and two findings to decide: no cancel button for a long recount, and the engine's `INVALID_BUFFER` on a whole section after the M8.4.16 edit script). The four cards added on 18 November 2026 to fix the warnings of M8.4.22 are done: M8.4.23, M8.4.24, M8.4.25 and M8.4.26 (development gate; `tests` and *Desktop builds* passed on each pushed commit). Card M8.4.16 is done (milestone gate passed on `4654ce0`: `tests` and *Desktop builds* on Windows, macOS and Linux).
-  [ARCHITECTURE §3.4](ARCHITECTURE.md#34-tile-store-for-large-images-planned-part-c-of-m84), cards M8.4.14-M8.4.19 detailed below; any model may implement them.
-  Also open: card H5 (the `e2e` job must pass ten consecutive pushes) and M8.4.20 (engine speed, Ready).
-- **Answered by the maintainer on 16 November 2026 (design of part C):** Q1 masks of tiled sections at full resolution: yes; Q2 pyramid cache budget: 50 GiB
-  ("lo que tú recomiendes"); Q3 JPEG or PNG above 1 GiB decoded: refused with a message that suggests TIFF. And: **add libraries when they make the program
-  faster and more stable** ("no tengas miedo en añadir librerías si eso acelera el programa y da estabilidad"); each one is still recorded with its capability,
-  the smallest alternative and its cost (AGENTS §3, item 9). First use: libvips for reading images (decision 4).
-- **Reminder for whoever talks to the maintainer:** the maintainer accepted the two acceptance levels on
-  13 November 2026 and asked to be **reminded to run the release-gate tests** (the release checklist below:
-  macOS and Linux, clean Windows machine, cold-cache first launch, saturated CPUs, package sizes, and the
-  numerical/timing/memory/recovery gates). Remind him when a milestone of M8 finishes and before any flag is
-  switched on by default or a version with the engine is announced.
-- **Audit of 19 November 2026 (design session, at the maintainer's request; only this file and AGENTS.md edited).** Findings and what follows:
-  1. **The rule "`app.js` only shrinks" was broken by part C.** `app.js` grew from 4,344 lines (13 Nov 2026) to 5,335 (worktree of M8.4.28):
-     +991 lines, about 40 functions of the tiled-section workflow (strokes, wand/lasso/scissors, object operations, statistics runner wiring,
-     mask sends and reads, reopening, store copy and delete), 151 lines longer than 200 characters. The pure modules (`tiledit.js`,
-     `tiledmasks.js`, `tiledcounts.js`, `tiledsync.js`, `tiledundo.js`) are sound and DOM-free; what is in `app.js` is controller code that no
-     card extracted. Cards M8.4.27 and M8.4.28 of this session added to it as well. Answer: card **M8.4.30** (below, before M8.4.29, which would
-     add a cache path to `loadTiledSection`) and an enforcement rule in AGENTS §4.
-  2. **Scientific code in JavaScript for tiled sections.** Two exceptions exist and are decided: the interval table (rule D11 = D) and the
-     per-tile object statistics (`tileStats` reuses today's `objectStats`, card M8.4.16). They conflict with the acceptance of M8.6 ("one
-     implementation per method"): decision **H** below.
-  3. **Two editing paths.** Every edit, analysis and save exists twice (whole sections in page memory, tiled sections in the store), and part B
-     (M8.4.9) would add a third way to hold small sections. Proposal for the design review of M8.4.19, decision **I** below.
-  4. **Unreleased user fixes.** The work branch holds 116 commits since V0.151 (16 Nov 2026); among them fixes users need without any flag:
-     H6 (blank window at full resolution), H7 (16-bit images above about 28 Mpixel crash), M2.1.5 (multiproxy opening). Decision **J** below.
-  5. **This file has grown to about 2,000 lines;** the status block keeps every check of every step since 16 November. Card **H8** (below).
-  6. **H5 can close:** the `web-app` job (which runs `tests/e2e/smoke.mjs`) passed on the last 27 pushes of the work branch; the one failed
-     run in the last 30 (`b845727`) is a macOS Python job cancelled for want of a runner. Marked done below.
-  7. **What is good and stays:** the layer rules hold outside `app.js` (no DOM in pure modules); contracts and file formats are documented
-     before the code; failures are visible (no silent fallback); saves are atomic; scientific checks use exact equality or tolerances stated
-     first; CI is green on Windows, macOS and Linux. The typecheck baseline still has 870 old diagnostics, almost all in `app.js` (M8.4.30
-     reduces them).
-  8. **Can we move to the next phases?** No. M8.5 needs the milestone gates of part C (M8.4.19) and part B (M8.4.11). Order recommended:
-     M8.4.28 (finishing) → **M8.4.30** → M8.4.29 (needs decision G) → M8.4.18c → M8.4.18d → M8.4.19 (with decision I) → M8.4.20 → part B as
-     decided by I → M8.5. Decisions G, H, I and J were approved the same day (below); J publishes V0.152 after M8.4.28.
-- **Decision R, approved by the maintainer on 20 Nov 2026 ("apruebo R"), as recommended (card M8.4.30):** the card's target of fewer than 4,344 lines for `app.js` cannot be
-  met by moving tiled-section code alone (it is out: 5,390 → 4,666). *Recommended:* accept 4,666 as the ceiling enforced by
-  `tests/app/architecture.test.mjs`, lowered by each later card that moves a workflow, rather than a separate move of unrelated code now.
-  The ceiling is 4,666 (`APP_JS_CEILING`); card M8.4.30's size target is closed by this decision.
-- **Second council audit of 19 November 2026** (the maintainer's prompt: four independent experts, a senior sedimentologist and
-  palaeoclimatologist, a scientific-software architect, a UX/UI specialist for complex technical software and a data-integrity and QA engineer,
-  read the repository without running anything, then critiqued the others anonymised and argued the trade-offs; the design session checked
-  the decisive claims in the code). **Confirmed in the code:** deleting an ichnotaxon (`classList` handler in `app.js`) acts only on the open
-  core's sections, with no confirmation and no undo, and leaves the traces of every other core with a class that no longer exists (P0); CSV
-  exports round to six decimals (`core.js::toCSV`, `toFixed(6)`: a mass susceptibility of 1e-8 is written as 0); the Excel reader reads only
-  the first sheet through `sheet_to_csv` without `rawNumbers` (`multiproxy.js`); missing-value codes (-999, -999.25, -9999) are read as values
-  (`log.js::num`); `Math.min(...array)` over whole series in about 30 places (a call-stack limit with long scanner records); changing a
-  section's unit relabels its depths without converting them. **Reported and not yet checked here:** joined projects keep the first core's
-  units without converting (`buildMultiProject`, `mergeImp`); the core-column CSV interpolates records across gaps of any length and drops
-  intervals outside the age model silently (`log.js`); splice overlaps differ between Python (`overlap`) and JavaScript (shared-definition rule);
-  rows dropped without a count in several readers; a corrupt `sources.json` replaced by an empty one; `tableview.js` listed as pure but using
-  the DOM; `presetAll`, `resAll`, rotation and deleting a data column without confirmation or undo; figures sized only in pixels, no PDF, no
-  embedded fonts, provenance without the multiproxy settings. **Debate (trade-offs agreed):** (1) rigour against fluency at import: one import
-  panel with a preview and counts that interrupts only for a real ambiguity (decimal separator, unknown units, missing-value codes, several
-  sheets) and otherwise leaves a data report with "Undo import"; (2) fidelity against speed in plots: decimate on screen (minimum and maximum
-  per pixel, which keeps peaks) and export at full resolution, saying so in the provenance; (3) confirmations against an expert's speed: undo
-  by domain and a recoverable deletion first, a dialog only for what cannot be undone or reaches other cores; defaults that change results
-  stay until the maintainer decides, and the breakdown of what a number contains is shown meanwhile.
-  - *Cards written or changed:* new Q1 (deleting an ichnotaxon, P0), Q2 (import panel and readers), Q3 (units), Q4 (exports keep the data),
-    Q5 (long series), Q6 (property tests and a corpus of real files), Q7 (splice overlaps), F1 (figures for publication), F2 (provenance of
-    every export), F3 (stratigraphic conventions, later), A1 (engine methods of core or project scope, before M8.5), U6 (detection over several
-    cores); changed: M8.4.30 (a JavaScript architecture test), S1 (the breakdown does not wait for decision K), S5, U1 (one long-task
-    component), U2 (the bulk actions it found), U3 (scope labels, collapsed steps, shortcut sheet), M8.5 (prerequisite A1, scikit-learn rule).
-  - *Order recommended (decision O):* the data-integrity cards affect every user of the current version, flags or not, so they go before the
-    rest of part C: **M8.4.31 and Q1 (P0)** → Q4 (with decision N) → Q2 → Q3 → M8.4.32 → M8.4.33 → M8.4.30 → Q5 → M8.4.29 → M8.4.34 →
-    M8.4.18c → M8.4.18d → M8.4.19; F1, F2, U1-U3, U6 after M8.4.30; A1 before M8.5; Q6 alongside Q2-Q4 (their tests); Q7 and F3 later.
-  - **Approved by the maintainer on 19 November 2026 ("apruebo J, K, L, M, N, O y P"), as recommended:** J (V0.152; the design session
-    proposes it after Q1 and Q4, so that those fixes reach users), K, L, M, N, O and P. The text of each proposal stays below for reference.
-  - **Decisions (approved, see above):** **M** (card Q2): values below a detection limit (`<0.01`, `bdl`) stay empty, become half the
-    limit or the limit (*recommended:* empty by default with a visible count, the other two per column); **N** (card Q4): CSV numbers written
-    with 15 significant digits instead of six decimals, a change of export format (*recommended*); **O**: the order above (*recommended*);
-    **P** (card Q4): the core-column CSV gets the gap limit of the cursor and an interval-mean mode (*recommended:* both, the mean as the
-    default for new exports, recorded in the provenance).
-- **Council audit of 19 November 2026** (at the maintainer's request: three independent reviewers, a software engineer, a sedimentologist
-  with data-science training and an interface designer, read the repository without running anything, then critiqued each other's reports
-  anonymised; the design session checked the disputed points in the code). It replaces the single-view "deep audit" written earlier the same
-  day. Agreed by all three: the arithmetic and the architecture on paper are sound; the risks are (1) **user data**: a store clean-up can delete
-  a version committed a moment earlier, saves can overlap, backups and packages leave tiled sections out without a word; (2) **evidence**:
-  nothing is validated on real cores and the tiled path is not tested on GitHub; (3) **defaults that bias results**: unreviewed candidates
-  count as bioturbation, detection sizes are in pixels so results depend on the resolution and on the storage path; (4) **feedback**: progress
-  and errors are invisible outside one mode and destructive actions are confirmed in four inconsistent ways. Checked by the design session:
-  the retain race (`retainStore` in `app.js` and `MaskStore.retain` delete every manifest not named, protecting only open staged versions),
-  the overlapping saves (`saveToDB`: a second waiter starts a save while the first one's is running), the silent omission in
-  `projectForExport` (no message), and the missing highlight of the start-screen and model-dialog tabs (`.htabs .btn` set `aria-selected`,
-  styled only through `aria-pressed`). Not confirmed: the general tab regression (`.tabs` tabs are styled). Measured the same day: the first
-  delete after reopening a 3 % `rgb8g` section had not finished after 18 min (M8.4.28, being fixed).
-  - *Cards written from it* (order below): M8.4.31 (store and saves keep every committed version), M8.4.32 (the tiled tests run on GitHub),
-    M8.4.33 (backups and packages say what they leave out), M8.4.34 (desktop hardening); in a new section *Council cards*: S1-S6 (science),
-    U1-U5 (interface), D2 (documents). Modified: M8.5 (acceptance of slices c and d), M6.5 in roadmap-future.md, M5.2 (dated protocol, S6).
-  - *Order recommended:* M8.4.28 → **M8.4.31** → **M8.4.32** → **M8.4.33** → M8.4.30 → M8.4.29 → **M8.4.34** → M8.4.18c → M8.4.18d → M8.4.19;
-    S6 (validation protocol) can start at once in parallel, since it is mostly the maintainer's data work; S1 and S2 need decisions K and L
-    and then go before M8.4.19, because the tiled path changes the resolution of analyses; U1-U3 after M8.4.30 (they touch the messages and
-    dialogs that card moves); U4, U5 and D2 at any time on the fast tier.
-  - **Decisions K and L (approved by the maintainer on 19 November 2026):** **K** (card S1): count only reviewed traces by default, with the unreviewed share shown next to
-    every result (*recommended*; it changes the default results of new projects, existing projects keep their stored setting); **L** (card S2):
-    detection sizes in millimetres (*recommended*; a project keeps its pixel values until the user converts it).
-- **Decisions of the audit of 19 November 2026: G, H, I and J approved by the maintainer the same day** ("apruebo G, H, I y J"), as recommended:
-  - **G** (card M8.4.29): the reopening cache in the engine's store. *Recommended: approve as proposed;* without it a reopened 10 % section needs
-    133 s before every object is current.
-  - **H** (M8.6 against D11 and the per-tile statistics): *recommended:* M8.6 accepts, for tiled sections only, the page's interval table and
-    per-tile object statistics as the one interactive implementation, with the Python method as the reference checked by parity tests in CI;
-    slice (b) of M8.5 moves the object features to Python for every other use. Otherwise M8.6 cannot pass as written.
-  - **I** (at the design review of M8.4.19): *recommended:* study whether every new section can use the tile store (a small image is a store of
-    few tiles), so that part B's M8.4.9 is replaced and the whole-section editing path is only kept to open old projects; decided with a
-    measurement of small-section editing through the tiled path against the targets of contract §7.
-  - **J** (version): *recommended:* publish V0.152 now from the work branch with every flag off, so that the H6, H7 and M2.1.5 fixes reach
-    users, instead of waiting for the end of M8.4 (decision of 16 November 2026). Needs the full checks and the GitHub checks on the version
-    commit, as always.
-- **Decisions waiting for the maintainer:** (1) the flags in the table below that need a promote/remove decision. **Decided on 16 November 2026: the visible-row table
-  (M2.1.3) is the default** (17 times faster at 100,000 rows; M2.1.4: scrolling passes the 33 ms target where the native table fails); it is in the branch, not in a published
-  version, and **the release gate (every platform) is still required before a version with it is published**;
-  (2) any change to the interactive targets of contract §7, before M8.4.12 measures. Decided on 15 November 2026: option A and what follows
-  from it (item above), which also answers the timing question of 14 November. Decided on 13 November 2026: acceptance levels (accepted),
-  scope of 1.0 (below), publication of V0.149. Decided on 14 November 2026: a milestone gate on macOS and Linux closes every milestone; the
-  five decisions of M8.4 (answers recorded there, among them **multi-gigabyte images are required for 1.0**).
-- **Checks of M8.4.22 (18 November 2026, maintainer's Windows computer):** `pytest -q` 861 passed / 9 skipped; `npm test` 432 passed; `npm run typecheck`; `ruff check src tests tools`; `sync_version.py --check`; standalone build; runtime rebuilt (`npm run prepare-runtime -- --offline`: needed after editing the engine's Python, or the engine stays `unavailable`); `tests/e2e/desktop.mjs` with the engine off and on; `tests/e2e/tiled-sections.mjs` passed twice. Its first run after the rebuild failed once in the M8.4.15 viewer probe ("drawn pixel = source pixel" at screen 230, 570: drawn 106, 79, 35 against 14, 14, 14); not reproduced in the two following runs, recorded as an incident. GitHub on `4654ce0` (M8.4.16 step 8): `tests` and *Desktop builds* passed on Windows, macOS and Linux, the milestone gate of card M8.4.16.
-- **Full checks of M8.4.16 closing (18 November 2026, maintainer's Windows computer):** `pytest -q` 848 passed / 9 skipped (Python 3.12, Anaconda); `npm test` 431 passed; `npm run typecheck`; `sync_version.py --check`; `ruff check src tests tools`; standalone build; `tests/e2e/desktop.mjs` with the engine off and on; `tests/e2e/tiled-sections.mjs` including the exact-equality block. Not run: `smoke.mjs`, the viewer measurement after step 6. GitHub: `d3ec007` `tests` passed; *Desktop builds* of `bdd1b14` and `d51a53e` were cancelled by the next push (not failures), so the milestone gate waits for a run that finishes on the closing commit.
-- **Checks of M8.4.16 step 7 (18 November 2026, maintainer's Windows computer):** `node tools/measure_mask_tables.mjs` run once (synthetic records, no image); no code of the program changed. GitHub on `bdd1b14` (step 6): `tests` passed; *Desktop builds* see the next line when finished.
-- **Checks of M8.4.16 step 6 (18 November 2026, maintainer's Windows computer):** `npm test` 431 passed (4 new in `tests/app/tiledops.test.mjs`);
-  `npm run typecheck`; standalone build; `tests/e2e/tiled-sections.mjs` (lasso, scissors, merge, class-change merge, delete with undo and redo,
-  the wand and the wait while statistics are computed, all with exact areas against the tiles); `tests/e2e/desktop.mjs` with the engine off and
-  on. Not run: pytest and ruff (no Python changed), `smoke.mjs`, the viewer measurement (the stroke path did not change). GitHub on `d407763`
-  (step 5): `tests` passed; *Desktop builds* failed on macOS while packaging (a download of a Python wheel for the bundled runtime timed out;
-  the desktop end-to-end tests on macOS had passed) and passed on all three systems when the failed job was run again.
-- **Checks of M8.4.16 step 5 (18 November 2026, maintainer's Windows computer):** `npm test` 427 passed (5 new in `tests/app/tiledundo.test.mjs`);
-  `npm run typecheck`; standalone build; `tests/e2e/tiled-sections.mjs` (the stroke undone while the engine is down and redone after the restart:
-  page and store equal to the state before the stroke, then to the stroke; objects and statistics restored); `tests/e2e/desktop.mjs` with the
-  engine off and on; `tools/measure_tiled_viewer.mjs` on `rgb8g`: every target met, strokes p95 22.7-31.1 ms against 33 (the 1 : 3 case over dense
-  masks has 1.9 ms of margin; [evidence](validation/M8.4.16-step5-viewer-rgb8g-windows.json)). Not run: pytest and ruff (no Python changed),
-  `smoke.mjs`. GitHub on `51a49e7` (step 4): `tests` and *Desktop builds* passed on Windows, macOS and Linux. The desktop end-to-end tests run
-  the program from `desktop/web`, a copy of `app/` made by `node desktop/scripts/prepare.js --with-examples`: refresh it before running them.
-- **Checks of M8.4.16 step 4 (18 November 2026, maintainer's Windows computer):** `npm test` 422 passed (6 new in `tests/app/tiledsync.test.mjs`, one
-  through the real engine and bridge in `tests/app/engine.test.mjs`); `npm run typecheck`; standalone build; `tests/e2e/tiled-sections.mjs` (engine
-  killed while a stroke's tiles are on their way: page unchanged, store complete after the automatic restart; run three times); `tests/e2e/desktop.mjs`
-  with the engine off and on; `tools/measure_tiled_viewer.mjs` on `rgb8g` with sending running: every target met, strokes p95 18.2-32.4 ms against
-  33 (the 1 : 3 case over dense masks has 0.6 ms of margin; [evidence](validation/M8.4.16-step4-viewer-rgb8g-windows.json)). Not run: pytest and
-  ruff (no Python changed), `smoke.mjs`. GitHub on `26cb1fc` (step 3): `tests` failed once on Windows in `engine.test.mjs` ("actual isolated
-  Python transfers multiple bounded chunks…", `ENGINE_UNAVAILABLE` at start-up) and passed when the job was run again; not reproduced, recorded
-  as an incident.
-- **Checks of M8.4.16 step 3 (18 November 2026, maintainer's Windows computer):** `npm test` 415 passed (5 new in `tests/app/tiledit.test.mjs`);
-  `npm run typecheck`; standalone build; `tests/e2e/tiled-sections.mjs` (strokes with the real mouse); `tests/e2e/desktop.mjs` with the engine off and
-  on; `tools/measure_tiled_viewer.mjs` on `rgb8g` (every target met; strokes p95 18.4-31.8 ms against 33, the closest at 1 screen pixel per 3
-  source pixels over dense masks; process tree 1,800 MiB; [evidence](validation/M8.4.16-step3-viewer-rgb8g-windows.json)) and on `rgb2g`
-  (15.8-26.2 ms, not kept). Not run: pytest and ruff (no Python changed), `smoke.mjs`. `tests/e2e/tiled-sections.mjs` is not run by GitHub.
-- **Checks of M8.4.16 step 2 (18 November 2026, maintainer's Windows computer):** `npm test` 410 passed (8 new in `tests/app/tiledmasks.test.mjs`);
-  `npm run typecheck`; standalone build; `tests/e2e/tiled-sections.mjs` (masks at full resolution and two coarser zooms); `tests/e2e/desktop.mjs`
-  (engine off); `tools/measure_tiled_viewer.mjs` on `rgb8g`: every target met, with masks 10.5 ms median / 12.9 ms p95 per frame, process tree
-  1,712 MiB ([evidence](validation/M8.4.16-step2-viewer-rgb8g-windows.json)). Not run: pytest and ruff (no Python changed since step 1), `smoke.mjs`.
-  Not measured: the mask layer at levels between full resolution and the working image (the pan measured stays at level 0).
-- **Checks of M8.4.16 step 1 (17 November 2026, maintainer's Windows computer):** `pytest -q` 848 passed / 9 skipped (Python 3.12), including the new
-  `tests/test_store_masks.py` and `tests/test_engine_masks.py`; `ruff check src tests tools`; bundled runtime rebuilt; `tests/e2e/tiled-sections.mjs` and
-  `tests/e2e/desktop.mjs` with the engine experiment on. Not repeated: `npm test`, typecheck, the standalone build and the other end-to-end tests (no
-  JavaScript changed). The GitHub run of the M8.4.15 closing state (`b2b4cdc`) passed on Windows, macOS and Linux.
-- **Last full checks: passed** on 17 November 2026 on the state of the M8.4.15 closing commit (branch `work/2026-11-13`, maintainer's Windows computer, one after another): `pytest -q` 811 passed / 9 skipped (Python 3.12); `npm test` 402 passed; `npm run typecheck` (no new diagnostics); `sync_version.py --check`; `ruff check src tests tools` (ruff under Python 3.14); standalone build; bundled runtime rebuilt; `tests/e2e/desktop.mjs` with the engine experiment off and on; `tests/e2e/tiled-sections.mjs`; `tests/e2e/large-16bit-desktop.mjs`. Not run locally: `tests/e2e/smoke.mjs` (needs the local server; the `e2e` job of GitHub runs it on every push). The GitHub run of that commit is recorded in the next session's first line.
-- **Previous checks:** passed** on 14 November 2026 on commit `381f2cf` (review of M8.4, branch `work/2026-11-13`, maintainer's Windows computer):
-  `pytest -q` 664 passed / 9 skipped (Python 3.12); `node --test tests/app/*.test.mjs` 343 passed; `npm run typecheck` (no new diagnostics);
-  `sync_version.py --check`; `ruff check src tests tools` (ruff 0.17.5 under Python 3.14, the only interpreter on this computer that has it);
-  standalone build; `tests/e2e/desktop.mjs` with the engine experiment on and off, bundled runtime rebuilt first. GitHub `tests` (including the
-  `e2e` job, which runs `smoke.mjs`) and *Desktop builds* succeeded on `381f2cf` on Windows, macOS and Linux. Not run locally: `tests/e2e/smoke.mjs`
-  (starting the local server was refused in that session). The commit of 15 November 2026 after it changes documents only (design of part C);
-  no code changed, so no checks were repeated. The scenario measurements of M8.4.1-M8.4.5 are separate evidence (baseline committed; later
-  runs summarised in each card).
+- **Branch:** `work/2026-11-13` (pushed); `master` (V0.152, `8ee9776`) is contained in it.
+- **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153; Q10 must be done before it.
+- **Last verified code commit:** `35c4aa5` (M8.4.38). Full checks on Windows: `pytest -q` 896 passed / 9 skipped; `npm test` 557;
+  typecheck; `sync_version.py --check`; ruff; `desktop.mjs` engine off and on; `tiled-sections.mjs`. GitHub `tests` and *Desktop builds*
+  passed on Windows, macOS and Linux. Later commits change documents only (AGENTS.md, this roadmap, CHANGELOG).
+- **Checks due:** none.
+- **In progress: `Q9`** (escape the `innerHTML` sites; P0 security; most capable tier, effort medium).
+- **Order after Q9 (decision U):** `M8.4.39` → `M8.4.40` (with decision V) → `M8.4.37` → **`M8.4.19`**, the milestone gate of part C.
+  Then part B as decided by I at the review of M8.4.19, then M8.5 (needs A1). `Q10` before V0.153; `A4` after M8.4.19.
+  Maintenance cards that any session may take when the maintainer asks: `H8` (shorten this file), `H9` (one command for the full checks).
+- **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) in its last cards; part B not started; M8.5 must not start.
+  The engine path fails the timing gate of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates)
+  for whole sections; the tile store (decision of 15 Nov 2026) is the answer for large images.
+- **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved
+  format of long series) only if a save benchmark shows a slow save. Every lettered decision up to W is approved (records in the cards and
+  in the status log).
+- **Open pull requests (Dependabot, against `master`, not merged):** #26 Electron 45.2.2 → 45.3.4, #24 `softprops/action-gh-release` 2 → 3.
+  They wait for the maintainer (AGENTS §5.1).
+- **Standing reminders:** remind the maintainer to run the release-gate tests (the [release checklist](#release-checklist)) when an M8
+  milestone finishes and before any flag is switched on by default or a version with the engine is announced. Libraries that make the
+  program faster or more stable may be added (16 Nov 2026), each with its capability, smallest alternative and cost (AGENTS §3.9).
 
 ## How work is accepted
 
@@ -2937,6 +2663,16 @@ Independent of M8; each can be done in under an hour when the maintainer asks.
       what a new session needs (branch, last verified commit, checks due, next card, open decisions); the per-step check records of M8.4.14-M8.4.28
       and the long *As built* texts of done cards move to `roadmap-history.md`, leaving one line each with a link. Done when no fact is lost
       (every moved paragraph is findable from its card line) and this file is under about 1,000 lines.
+- [ ] **H9 - One command for the full checks, with a short report** (21 Nov 2026, at the maintainer's request, to save tokens; fast tier,
+      effort medium). *Goal:* the full checks of [DEVELOPMENT §3](DEVELOPMENT.md#3-checks) run with one command, one after another, and print
+      one line per check (name, passed/failed/skipped, the count when the tool reports one, seconds) plus, for a failure, only its last lines;
+      the full output of each check goes to a log file. *Change:* new `tools/check_all.py` (standard library only; finds Python 3.12, ruff
+      and node as the commands in DEVELOPMENT §3 do; options to choose the end-to-end tests, e.g. `--desktop`, `--tiled`, `--smoke`, and to
+      name the log folder, default outside the repository or ignored by git); DEVELOPMENT §3 names it; the technical manual's source map
+      (§1.4). *Do not touch:* the checks themselves, their order, deadlines or tolerances (AGENTS §3.7); the GitHub workflows. *Tests:*
+      `tests/test_check_all.py` with fake check commands (pass, fail with long output, missing tool) asserting the summary lines, the exit
+      code (non-zero if any check failed) and that the log holds the full output. *Done when:* the tests and ruff pass, and one real run on
+      the maintainer's Windows computer gives the same results as running the commands by hand.
 - [ ] **H3 - Move raw benchmark reports out of the repository.** `docs/benchmarks/*.json` weighs about 10 MB.
       Needs the maintainer's decision on where the raw files go; the `.md` summaries stay.
 

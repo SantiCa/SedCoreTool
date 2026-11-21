@@ -20,12 +20,19 @@ repository (code, comments, documents, commit messages) is written in English.
 3. **Run pending checks first** if the status says "checks pending" (§5.4).
 4. **Find the task card** for what the maintainer asked (§6). No card and the request is not trivial: write the
    card first, or ask.
-5. **Read only what the card lists** under "Read first". You rarely need whole documents.
+5. **Read only what the card lists** under "Read first". You rarely need whole documents. Find a card in
+   `docs/roadmap.md` by searching for its identifier and read only that card; do not open the whole roadmap.
 6. **Make the change** following §3 and §4. Run focused checks as you go.
 7. **Document in the same commit** (§5.2), **commit on the branch** with explicitly named files and **push the
    branch** when a card or a verified checkpoint is finished (§5.1).
-8. **Update the roadmap status** (commit, checks run, next step, open questions).
+8. **Update the roadmap status** (commit, checks run, next step, open questions). Rewrite the block rather than
+   append to it, and keep it to about 30 lines: branch, last verified commit, checks due, the GitHub result of
+   the last pushed commits, next card, decisions waiting and standing reminders. Check logs, audit findings and
+   progress narratives go into the cards' *As built* or `docs/roadmap-history.md`, never into the status.
 9. **Report to the maintainer in Spanish** (§7).
+10. **One card per session.** After a card is committed, pushed and reported, the next card starts in a new
+    conversation, which picks up from the repository alone (§7). A long conversation carries all its earlier
+    context into every answer and costs far more than a fresh start.
 
 ## 2. The project and its documents
 
@@ -137,10 +144,12 @@ Session work happens on a branch; a version is created only when the maintainer 
    - **Dependency upgrades proposed by Dependabot** are pull requests against `master`. They stay open until the
      maintainer asks for one; its change is then made on the work branch (item 9 of §3 applies), checked like any
      other change, and reaches `master` with the next version.
-2. **Documents in the same commit as the change:**
-   - `CHANGELOG.md`, under `## Unreleased`: a short bullet under **"For users"** when what a user sees, does or
-     gets changes (say what changed for them, not how the work was organised), or under **"Internal"** for tools,
-     tests, refactors and documents.
+2. **Documents in the same commit as the change.** Each fact is written once, in the one place it belongs, and
+   linked from the others:
+   - `CHANGELOG.md`, under `## Unreleased`: a short bullet (one or two sentences) under **"For users"** when what
+     a user sees, does or gets changes (say what changed for them, not how the work was organised), or under
+     **"Internal"** for tools, tests, refactors and documents, naming the card. Functions, limits, test names and
+     the checks run go in the card's *As built*, not in the changelog.
    - `docs/TECHNICAL_DOCUMENTATION.md` when an algorithm, formula, default, file format or validation result
      changes. Formulas there must match the code exactly. It describes current behaviour: no history, no notes to
      reviewers.
@@ -221,6 +230,9 @@ Done when:    observable acceptance criteria.
     the model and reasoning effort of a Codex sub-agent). If the client cannot pin a sub-agent's model or effort, say
     so once and use the closest option it offers (a smaller model rather than a larger one with less effort). If it
     cannot start sub-agents at all, the session does the work itself; nothing else in these rules changes.
+  - **Delegate only when it pays.** A sub-agent needs a complete brief and its result needs a review. Delegate when
+    the brief and the review clearly cost less than doing the work (as a guide: ten or more similar edits, a long
+    read-only search, a long scripted run); a handful of edits the director already understands are done directly.
   - **Critical cards** (`most capable` in the `Model:` field: security, saving, formats, packaging, dependencies) stay
     with the director for design, decisions, the acceptance tests that define the card's criterion, and the review.
     Within them, only read-only exploration and mechanical edits that follow the director's exact list may be
@@ -260,7 +272,7 @@ Done when:    observable acceptance criteria.
   checks run and the next step. A new session must be able to continue from the repository alone, without any
   chat history.
 - When a card is done: mark it, link its changelog entry, move its long record to `docs/roadmap-history.md` and
-  leave one line in the roadmap.
+  leave one line in the roadmap. Then end the session (§1 step 10).
 - **Report to the maintainer in Spanish, briefly:** the result; how it was checked; branch and commit (or version
   number when one was created); how the change fits into SedCoreTool (which components it touches and how data or
   control passes between them); and what is genuinely pending, including checks not run and things not measured.
