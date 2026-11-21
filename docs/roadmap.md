@@ -25,7 +25,7 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **In progress: `Q9`** (escape the `innerHTML` sites; P0 security; most capable tier, effort medium).
 - **Order after Q9 (decision U):** `M8.4.39` → `M8.4.40` (with decision V) → `M8.4.37` → **`M8.4.19`**, the milestone gate of part C.
   Then part B as decided by I at the review of M8.4.19, then M8.5 (needs A1). `Q10` before V0.153; `A4` after M8.4.19.
-  `H8` (shorten this file) is done; next maintenance card asked for by the maintainer: `H9` (one command for the full checks).
+  `H8` (shorten this file) and `H9` (`python tools/check_all.py`, one command for the full checks) are done.
 - **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) in its last cards; part B not started; M8.5 must not start.
   The engine path fails the timing gate of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates)
   for whole sections; the tile store (decision of 15 Nov 2026) is the answer for large images.
@@ -808,16 +808,7 @@ Independent of M8; each can be done in under an hour when the maintainer asks.
 - [x] **H6 - A working resolution that does not fit in memory made the window go blank** (record: [history](roadmap-history.md#h6---a-working-resolution-that-does-not-fit-in-memory-made-the-window-go-blank)).
 - [x] **H7 - A 16-bit image above about 28 megapixels made the page die while it was decoded** (record: [history](roadmap-history.md#h7---a-16-bit-image-above-about-28-megapixels-made-the-page-die-while-it-was-decoded)).
 - [x] **H8 - Shorten the roadmap** (record: [history](roadmap-history.md#h8---shorten-the-roadmap)).
-- [ ] **H9 - One command for the full checks, with a short report** (21 Nov 2026, at the maintainer's request, to save tokens; fast tier,
-      effort medium). *Goal:* the full checks of [DEVELOPMENT §3](DEVELOPMENT.md#3-checks) run with one command, one after another, and print
-      one line per check (name, passed/failed/skipped, the count when the tool reports one, seconds) plus, for a failure, only its last lines;
-      the full output of each check goes to a log file. *Change:* new `tools/check_all.py` (standard library only; finds Python 3.12, ruff
-      and node as the commands in DEVELOPMENT §3 do; options to choose the end-to-end tests, e.g. `--desktop`, `--tiled`, `--smoke`, and to
-      name the log folder, default outside the repository or ignored by git); DEVELOPMENT §3 names it; the technical manual's source map
-      (§1.4). *Do not touch:* the checks themselves, their order, deadlines or tolerances (AGENTS §3.7); the GitHub workflows. *Tests:*
-      `tests/test_check_all.py` with fake check commands (pass, fail with long output, missing tool) asserting the summary lines, the exit
-      code (non-zero if any check failed) and that the log holds the full output. *Done when:* the tests and ruff pass, and one real run on
-      the maintainer's Windows computer gives the same results as running the commands by hand.
+- [x] **H9 - One command for the full checks, with a short report** (record: [history](roadmap-history.md#h9---one-command-for-the-full-checks-with-a-short-report)).
 - [ ] **H3 - Move raw benchmark reports out of the repository.** `docs/benchmarks/*.json` weighs about 10 MB.
       Needs the maintainer's decision on where the raw files go; the `.md` summaries stay.
 

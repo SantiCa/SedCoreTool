@@ -3321,3 +3321,25 @@ Updated 21 November 2026.
       what a new session needs (branch, last verified commit, checks due, next card, open decisions); the per-step check records of M8.4.14-M8.4.28
       and the long *As built* texts of done cards move to `roadmap-history.md`, leaving one line each with a link. Done when no fact is lost
       (every moved paragraph is findable from its card line) and this file is under about 1,000 lines.
+
+### H9 - One command for the full checks, with a short report
+
+- [x] **H9 - One command for the full checks, with a short report** (21 Nov 2026, at the maintainer's request, to save tokens; fast tier,
+      effort medium). *Goal:* the full checks of [DEVELOPMENT §3](DEVELOPMENT.md#3-checks) run with one command, one after another, and print
+      one line per check (name, passed/failed/skipped, the count when the tool reports one, seconds) plus, for a failure, only its last lines;
+      the full output of each check goes to a log file. *Change:* new `tools/check_all.py` (standard library only; finds Python 3.12, ruff
+      and node as the commands in DEVELOPMENT §3 do; options to choose the end-to-end tests, e.g. `--desktop`, `--tiled`, `--smoke`, and to
+      name the log folder, default outside the repository or ignored by git); DEVELOPMENT §3 names it; the technical manual's source map
+      (§1.4). *Do not touch:* the checks themselves, their order, deadlines or tolerances (AGENTS §3.7); the GitHub workflows. *Tests:*
+      `tests/test_check_all.py` with fake check commands (pass, fail with long output, missing tool) asserting the summary lines, the exit
+      code (non-zero if any check failed) and that the log holds the full output. *Done when:* the tests and ruff pass, and one real run on
+      the maintainer's Windows computer gives the same results as running the commands by hand.
+
+      *As built (21 Nov 2026):* `tools/check_all.py` (standard library; functions for finding tools, building the plan, running one check,
+      reading counts) and `tests/test_check_all.py` (10 tests with fake checks, injected plan). Runs `pytest -q`, `npm test`, `npm run
+      typecheck`, `sync_version.py --check` and `ruff check src tests tools` in the order of DEVELOPMENT §3, one at a time; one line per check
+      (PASSED / FAILED / SKIPPED when the tool is missing, count, seconds), the last 30 lines of a failure, one log file per check in `--log-dir`
+      (default: timestamped folder in the system temp directory); non-zero exit if a check failed or a tool is missing. Options: `--python`,
+      `--ruff`, `--log-dir`, `--only`, `--list`, `--desktop`, `--tiled`, `--smoke`, `--large16`, `--e2e`, `--prepare` (runs `node
+      desktop/scripts/prepare.js --with-examples` before the desktop end-to-end tests). Each end-to-end test runs once, as DEVELOPMENT §3
+      lists it (the engine-on run of `desktop.mjs` is not a separate step).

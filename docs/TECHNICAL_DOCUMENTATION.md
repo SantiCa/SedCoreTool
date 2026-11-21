@@ -239,6 +239,8 @@ client, page bridge, framing and bundled-runtime verification; §26.2–§26.3),
 §26.3), `trainer.js` and `model-store.js` (U-Net training and model generations; §9.3), `diagnostics.js` (§26.1)
 and `scripts/` (preparation, build and package checks).
 
+Tools (`tools/`): `check_all.py` runs the end-of-session checks of the development guide §3 one after another and prints one line per check; the full output of each goes to a log file, and the exit code is non-zero if a check failed or a tool is missing (tests: `tests/test_check_all.py`).
+
 ### 1.5 Names and compatibility
 
 The software started in 2019 as **IchAnTool** and was called **CorAnTool** in 2026 before taking its current name.
