@@ -200,29 +200,33 @@ Done when:    observable acceptance criteria.
     or a measurement that is already scripted.
   - A card without a `Model:` field defaults to the most capable tier with high effort for design work, and to the
     fast tier with medium effort for an implementing card that only measures or documents.
-- **Director mode and sub-agent delegation** (decided by the maintainer on 21 November 2026; applies to Antigravity/Gemini,
-  Claude Code and ChatGPT/Codex wherever the client supports spawning sub-agents). When the main session runs on the
-  **most capable tier**, it acts as **director** and **prefers delegating to smaller/faster sub-agents whenever the task
-  allows it, in order to save tokens and quota** on the most capable model. Without asking again to spawn a sub-agent,
-  delegate by default any authorised `fast`-tier card — and bounded mechanical, read-only exploration, documentation,
-  repetitive test or scripted-measurement sub-tasks within a larger card — to a sub-agent pinned to the model tier (and
-  effort level, where the client exposes it) that fits the task:
-  - **Antigravity / Gemini:** `invoke_subagent` with `Model` (`flash` for bounded implementation/tests/docs, `flash_lite`
-    for trivial or high-volume lookups, `pro` only when needed). No separate per-sub-agent effort parameter exists; note
-    that if the card asks for a different effort.
-  - **Claude Code:** sub-agent tool with `model` (`sonnet` for bounded implementation/tests/docs, `haiku` for fast
-    read-only search, trivial edits or repetitive lookups, `opus` only when needed), plus effort where supported by the
-    client.
-  - **ChatGPT / Codex:** sub-agent / multi-agent spawn with a smaller model and lower reasoning effort for bounded/fast
-    work, reserving the top model and high effort for design and critical tasks where supported.
-  - **Limits and fallback:** reserve the director directly for design, critical `most capable, effort high` cards,
-    briefing, diff review and decisions (if the session's effort or tier is lower than what a critical card asks for and
-    cannot be raised via a sub-agent, state the gap in one line and wait for the maintainer to switch or say "continue").
-    **One editor at a time** still holds strictly: never run two write-enabled sub-agents concurrently on the shared
-    checkout (read-only research sub-agents may run in parallel; only one writer runs at a time while the director waits).
-    A sub-agent never redesigns a card and obeys every §3 hard limit. The director owns briefing, reviewing the diff,
-    verifying tests/checks, committing and pushing on the work branch, updating the roadmap and changelog, and reporting
-    to the maintainer in Spanish.
+- **Director mode and sub-agent delegation** (decided by the maintainer on 21 November 2026). This rule is the same for
+  every assistant and client (Claude Code, ChatGPT/Codex, Gemini/Antigravity, Cursor, Copilot or any other) and is
+  written in terms of tiers, not products. When the main session runs on the **most capable tier** and its client can
+  start sub-agents, the session acts as **director** and **prefers delegating to smaller, faster sub-agents whenever the
+  task allows it, to save tokens and quota** on the most capable model. Without asking again, it delegates any authorised
+  `fast`-tier card, and the bounded sub-tasks of a larger card, to a sub-agent pinned to the smallest tier that fits:
+  - **Smallest tier** (for example Claude Haiku, Gemini Flash-Lite, the smallest GPT model): read-only search and
+    inventories, trivial edits, high-volume or repetitive lookups.
+  - **Fast tier** (see above): bounded implementation following an exact brief, mechanical edits across many sites,
+    documentation, repetitive tests, scripted measurements.
+  - **Most capable tier** as a sub-agent: only when a delegated sub-task needs it.
+  - **Setting the model and effort.** Use the client's own mechanism to choose the sub-agent's model and, where it
+    exists, its effort (for example the `model` of Claude Code's sub-agent tool, `Model` of Antigravity's
+    `invoke_subagent`, the model and reasoning effort of a Codex sub-agent). If the client cannot pin a model, say so
+    once and use the closest option it offers. If it cannot start sub-agents at all, the session does the work itself;
+    nothing else in these rules changes.
+  - **Critical cards** (`most capable` in the `Model:` field: security, saving, formats, packaging, dependencies) stay
+    with the director for design, decisions, the acceptance tests that define the card's criterion, and the review.
+    Within them, only read-only exploration and mechanical edits that follow the director's exact list may be
+    delegated, and the director reviews every changed line before committing.
+  - **Limits and fallback.** If the session's tier or effort is lower than what a critical card asks for and cannot be
+    raised through a sub-agent, state the gap in one line and wait for the maintainer to switch or say "continue".
+    **One editor at a time** holds strictly: never run two sub-agents that write on the shared checkout at the same
+    time (read-only sub-agents may run in parallel; one writer runs while the director waits). A sub-agent gets a
+    self-contained brief (it does not see the conversation), never redesigns a card, obeys every §3 hard limit and
+    does not commit or push. The director owns the brief, the diff review, the checks, committing and pushing on the
+    work branch, the roadmap and changelog, and the report to the maintainer in Spanish.
 - **One card at a time,** in roadmap order, and only the card the maintainer authorised. Finish or hand over
   before starting another. If a request combines independent workstreams, split it into cards and do the first.
 - **Interpret a broad request by intent:** choose the smallest concrete scope that satisfies it, state the
