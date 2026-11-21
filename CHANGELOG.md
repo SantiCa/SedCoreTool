@@ -35,6 +35,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.19: milestone gate of part C (tile store) met: GitHub checks on Windows, macOS and Linux and the interactive targets of the tiled viewer on Windows (`docs/validation/M8.4.19-*.json`). Details in the card's *As built*.
 - Card M8.4.37: memory budget of `TiledObjectStats` (`STATS_BUDGET_BYTES`, 256 MiB) measured with `tools/measure_tiled_stats_memory.mjs` (records in `docs/validation/M8.4.37-*.json`); new tests in `tests/app/tiledstatsbudget.test.mjs` and `tests/e2e/tiled-sections.mjs`. Details in the card's *As built*.
 - Card M8.4.40 (decision V): sliding window of request IDs in the engine, mask operations on their own thread, Windows rename retry and disk-full mapping, open staged versions matched by folder, bounded `TileReader` caches, `uploadTable` releases a failed buffer; new `tests/test_store_tiles.py` and tests in the engine and store suites. Details in the card's *As built*.
 - Card M8.4.39: the teardown of a closed project, the multi-core save and backup guards, and bounded caches of tiled editing; new tests in `tests/app/lifecycle.test.mjs` and checks in `tests/e2e/tiled-sections.mjs`. Details in the card's *As built*.
