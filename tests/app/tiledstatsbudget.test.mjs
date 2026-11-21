@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TILE } from '../../app/js/tiledsection.js';
 import { MaskTiles } from '../../app/js/tiledmasks.js';
-import { TiledObjectStats, TiledStatsRunner, STATS_BUDGET_BYTES, STATS_ENTRY_BYTES, STATS_OBJECT_BYTES, tileStats } from '../../app/js/tiledit.js';
+import { TiledObjectStats, TiledStatsRunner, STATS_BUDGET_BYTES, STATS_SPLIT_MARGIN, STATS_SPLIT_MAX_PARTS, estimateSectionStatsBytes, partsToFitStats, STATS_ENTRY_BYTES, STATS_OBJECT_BYTES, tileStats } from '../../app/js/tiledit.js';
 import { objectsTable } from '../../app/js/exportio.js';
 import { t } from '../../app/js/i18n.js';
 import { S } from '../../app/js/state.js';
@@ -110,7 +110,7 @@ test('card M8.4.37: when the statistics are dropped every object of the section 
   runner.stats.exceed();
   for (const o of s.objects.values()) assert.deepEqual([o.stats, o.feat, o.area, o.bbox, o.sbox], [null, null, 0, null, null], 'object ' + o.id);
   assert.equal(s.objects.size, 3, 'no object is deleted');
-  assert.deepEqual(toasts, [t('tiles.statsLimit')]);
+  assert.deepEqual(toasts, [t('tiles.statsLimit', { n: 2 })]);
   assert.deepEqual(changes, [['tiles']], 'the page redraws the section (tiles only: nothing to send)');
   // The objects table keeps the rows, with depths and measurements empty, and the operations that need a box say why they cannot run.
   const rows = objectsTable([...s.objects.values()].map((o) => ({ section: s.name, units: 'cm', o, status: 'manual', counted: true, depth: (r) => r, unavailable: true })));
@@ -118,7 +118,7 @@ test('card M8.4.37: when the statistics are dropped every object of the section 
   assert.deepEqual(rows[1].slice(6, 9).concat(rows[1].slice(10, 18)), Array(11).fill(null));
   const tools = createTiledTools(/** @type {any} */ ({ toast: (text) => toasts.push(text), sourceBox: () => null, maskLoader: () => ({ want: async () => {} }) }));
   assert.equal(tools.tiledPlan(/** @type {any} */ ({ ...s, frozen: null, _statsRunner: runner }), [null]), null);
-  assert.equal(toasts.at(-1), t('tiles.statsLimit'), 'not "try again in a moment": it would never succeed');
+  assert.equal(toasts.at(-1), t('tiles.statsLimit', { n: 2 }), 'not "try again in a moment": it would never succeed');
 });
 
 test('card M8.4.37: no reopening cache is written for a section whose statistics were dropped', async () => {
@@ -137,4 +137,50 @@ test('card M8.4.37: no reopening cache is written for a section whose statistics
   stats.exceed();
   await project.retainStore();
   assert.equal(puts.length, 1, 'none after the statistics were dropped');
+});
+
+test('card M8.4.41: the estimate of the whole section is the counted bytes per tile times the tiles that hold labels, never below what was counted', () => {
+  assert.equal(estimateSectionStatsBytes({ bytesCounted: 300, tilesCounted: 3, labelledTiles: 30 }), 3000, 'dense: ten times the tiles counted');
+  assert.equal(estimateSectionStatsBytes({ bytesCounted: 300, tilesCounted: 3, labelledTiles: 3 }), 300, 'sparse: all tiles already counted');
+  assert.equal(estimateSectionStatsBytes({ bytesCounted: 300, tilesCounted: 3, labelledTiles: 1 }), 300, 'never below what was counted');
+  assert.equal(estimateSectionStatsBytes({ bytesCounted: 500, tilesCounted: 1, labelledTiles: 10 }), 5000, 'a trip on the first tile');
+  assert.equal(estimateSectionStatsBytes({ bytesCounted: 500, tilesCounted: 0, labelledTiles: 10 }), 500, 'no tile counted: the bytes');
+});
+
+test('card M8.4.41: the parts to fit the statistics keep each within 80 % of the budget, 2 at least, and null beyond 8', () => {
+  const B = 1000, limit = B * STATS_SPLIT_MARGIN;       // 800
+  assert.equal(STATS_SPLIT_MAX_PARTS, 8);
+  assert.equal(partsToFitStats(1, B), 2, 'a tiny estimate still asks for 2');
+  assert.equal(partsToFitStats(limit - 1, B), 2);
+  assert.equal(partsToFitStats(limit * 2, B), 2, 'exactly 2 parts');
+  assert.equal(partsToFitStats(limit * 2 + 1, B), 3);
+  assert.equal(partsToFitStats(limit * 3, B), 3, 'exactly 3 parts');
+  assert.equal(partsToFitStats(limit * 8, B), 8, 'exactly 8 parts');
+  assert.equal(partsToFitStats(limit * 8 + 1, B), null, 'just over 8 parts: splitting would not be enough');
+  assert.equal(partsToFitStats(STATS_BUDGET_BYTES * 2), 3, 'default budget: 2 x budget needs 3 parts of at most 80 %');
+});
+
+test('card M8.4.41: the statistics record the estimate of the whole section at the trip, before they are cleared', () => {
+  let seen = null;
+  const stats = new TiledObjectStats({ budget: 3 * (128 + 2 * STATS_ENTRY_BYTES + 2 * STATS_OBJECT_BYTES) - 1, labelledTiles: () => 12, onExceeded: () => { seen = stats.estimateBytes; } });
+  assert.equal(stats.estimateBytes, null, 'unknown until the trip');
+  stats.replaceTile(0, denseTile(1, 2)); stats.replaceTile(1, denseTile(3, 2));
+  assert.equal(stats.exceeded, false);
+  stats.replaceTile(2, denseTile(5, 2));                // the third tile trips the budget
+  assert.ok(stats.exceeded);
+  const perTile = 128 + 2 * STATS_ENTRY_BYTES, counted = 3 * perTile + 6 * STATS_OBJECT_BYTES;
+  assert.equal(stats.estimateBytes, (counted / 3) * 12, 'bytes per counted tile x labelled tiles, measured before clearing');
+  assert.equal(seen, stats.estimateBytes, 'already set when the page is told');
+  assert.deepEqual([stats.bytes, stats.byTile.size], [0, 0]);
+  assert.equal(new TiledObjectStats().labelledTiles(), 0, 'default callback');
+});
+
+test('card M8.4.41: the tiles that hold labels are those loaded with labels plus those stored in the engine and not loaded', () => {
+  const tiles = new MaskTiles({ width: 4 * TILE, height: TILE }), labels = new Int32Array(TILE * TILE).fill(1);
+  assert.equal(tiles.labelledTileCount(), 0);
+  tiles.set(0, 0, labels, null); tiles.set(0, 1, new Int32Array(TILE * TILE), new Uint8Array(TILE * TILE).fill(1));   // labels / exclusion only
+  assert.equal(tiles.labelledTileCount(), 1, 'an exclusion-only tile holds no labels');
+  tiles.acknowledge([[0, 0], [0, 1]]);
+  tiles.stored.add(3);                                              // stored in the engine, not in the page
+  assert.equal(tiles.labelledTileCount(), 2, 'tile 0 loaded with labels, tile 3 stored and not loaded; the loaded exclusion-only tile is not counted');
 });

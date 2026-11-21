@@ -1245,6 +1245,30 @@ Updated 21 November 2026.
   no code changed, so no checks were repeated. The scenario measurements of M8.4.1-M8.4.5 are separate evidence (baseline committed; later
   runs summarised in each card).
 
+### M8.4.41 - The message of a section too dense for its object statistics suggests splitting it — state: Done (21 Nov 2026, development gate)
+
+- **Goal:** the message shown when the statistics trip (`tiles.statsLimit`) no longer says that reopening computes them again; it says that this
+  section is too dense for the object measurements, that delete, merge and cut are not available in it, and how many parts would fit (X1).
+- **Read first:** `TiledObjectStats` (`bytes`, `exceed`) and `TiledStatsRunner` in `tiledit.js`; `statsDropped` in `tiledstate.js`; the
+  *As built* of M8.4.37 in `roadmap-history.md`; `tiles.statsLimit` in `i18n.js`.
+- **Change:** `tiledit.js` (an estimate of the whole section's statistics at the trip: the bytes per tile counted so far times the section's
+  tiles that hold labels; a pure function, tested in Node); `tiledstate.js` (the message with the number of parts); `i18n.js` (Spanish and English).
+- **Do not touch:** the budget, what is dropped, the saved project.
+- **Model:** fast, effort medium (a bounded, pure estimate and a message).
+- **Tests:** Node tests of the estimate (dense, sparse, a trip on the first tile) and of the number of parts with the X1 rule; the e2e block of
+  M8.4.37 checks the new text.
+- **Done when:** the tests pass and the message no longer promises that reopening helps; development gate.
+- **As built (21 Nov 2026):** `tiledit.js`: `estimateSectionStatsBytes` (bytes counted / tiles counted × labelled tiles, never below what was
+  counted), `partsToFitStats` (`max(2, ceil(estimate / (0.8 × budget)))`, null beyond 8; `STATS_SPLIT_MARGIN`, `STATS_SPLIT_MAX_PARTS`),
+  `statsLimitMessage`; `TiledObjectStats` takes `labelledTiles` and records `estimateBytes` in `exceed()` before clearing. `tiledmasks.js`:
+  `MaskTiles.labelledTileCount()` (loaded entries with labels plus stored tiles not loaded; a stored tile holding only exclusion is counted, a
+  loaded one is not). `tiledstate.js`: `statsDropped(s, stats)` shows the new message. Outside the card's list: `tiledtools.js` (`tiledPlan`
+  showed the same key and would have shown a literal `{n}`). New texts `tiles.statsLimit` (with `{n}`) and `tiles.statsLimitTooDense`.
+  `app.js` 4,664 lines before and after. Implemented by a fast-tier sub-agent (medium effort), reviewed by the director.
+  Checks on Windows (`tools/check_all.py --prepare --desktop --tiled`): `pytest -q` 924 passed / 9 skipped; `npm test` 586; typecheck;
+  `sync_version --check`; ruff; `desktop.mjs` engine off and on; `tiled-sections.mjs`. The new Node tests were not run against the old code
+  (they import the new exports).
+
 ## Records moved from the roadmap on 21 November 2026 (card H8)
 
 ### M8.3.1 - Move the section analysis out of `app.js`

@@ -2,7 +2,7 @@
 // Editing tiled sections (card M8.4.30 step 3; moved out of app.js without changing behaviour): brush, erase and exclusion strokes on edit
 // windows, undo and redo of tiled edits, and the wand, lasso, scissors and object operations, with the wait for objects' statistics of card
 // M8.4.28. app.js passes what these need from the page (its editing primitives, the drag in progress, the view) in one context object.
-import { EditWindow, WINDOW_TILES, affectedTiles, pinRanges, planWindows, tilesUnder, toWindowRect, windowRange, windowRgba } from './tiledit.js';
+import { EditWindow, WINDOW_TILES, affectedTiles, pinRanges, planWindows, statsLimitMessage, tilesUnder, toWindowRect, windowRange, windowRgba } from './tiledit.js';
 import { TILE } from './tiledsection.js';
 import { TileChanges, trimTileHistory } from './tiledundo.js';
 import { hasId, renameId, topAt, minOf, maxOf } from './core.js';
@@ -150,7 +150,7 @@ export function createTiledTools(ctx) {
   function tiledPlan(s, rects, { boxes = true, tooLarge = 'tiles.boxTooLarge' } = {}) {
     if (s.frozen) { toast(t('tiles.frozen.' + s.frozen)); return null; }   // card M8.4.18a: a section without its pixels is not edited
     const runner = s._statsRunner, waiting = (r) => { const under = tilesUnder(s.maskTiles, r); return runner.pendingIn(under) || runner.failedIn(under); };
-    if (boxes && (rects.some((r) => !r) || (runner && rects.some(waiting)))) { void runner?.retry(); toast(t(runner?.stats.exceeded ? 'tiles.statsLimit' : 'tiles.busy')); return null; }   // card M8.4.37: boxes dropped
+    if (boxes && (rects.some((r) => !r) || (runner && rects.some(waiting)))) { void runner?.retry(); if (runner?.stats.exceeded) { const { key, vars } = statsLimitMessage(runner.stats); toast(t(key, vars)); } else toast(t('tiles.busy')); return null; }   // card M8.4.37: boxes dropped
     const plan = planWindows(s.maskTiles, rects);
     if (plan.tooLarge) { toast(t(tooLarge, { n: WINDOW_TILES })); return null; }
     if (plan.missing.length) { void maskLoader(s).want(plan.missing).catch(() => {}); toast(t('tiles.loadingMasks')); return null; }

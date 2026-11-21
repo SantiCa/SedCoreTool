@@ -18,18 +18,19 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.152, `8ee9776`) is contained in it.
 - **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153; Q10 must be done before it.
-- **Last verified code commit:** M8.4.37 (this commit; see `git log`). Full checks on Windows: `npm test` 582; typecheck; `pytest -q` 924
+- **Last verified code commit:** M8.4.41 (this commit; see `git log`). Full checks on Windows: `npm test` 586; typecheck; `pytest -q` 924
   passed / 9 skipped; ruff; `sync_version --check`; `tiled-sections.mjs`; `desktop.mjs` engine off and on.
-- **GitHub:** `f896132` (code of M8.4.37): `tests` and *Desktop builds* passed on Windows, macOS and Linux (milestone gate of part C, M8.4.19).
-  The intermittent Linux hang of `tiled-sections.mjs` seen once on `1464f6e` did not recur; keep watching it.
-- **Checks due:** the GitHub result of the M8.4.19 documentation commit (no code changed).
+- **GitHub:** `f896132` (code of M8.4.37): all green on three systems (milestone gate of part C). `89d080b` (documents only, same code):
+  `tests` green; *Desktop builds* green on Windows and Linux, **failed twice on macOS** (run and rerun) in `tiled-sections.mjs`: "reopened, no
+  redraw by hand: drawn pixel = source pixel" (screen `[0,0,0]`, source `[255,255,255]`, tile state cached and idle). Not caused by a code
+  change; not diagnosed. **Open question for the maintainer:** a card to diagnose it (the check comes from M8.4.39).
+- **Checks due:** the GitHub result of the M8.4.41 commit (does the macOS failure recur?).
 - **Found by the run, not in it:** **Q11** (hostile ML settings stop the classifier; from Q9), **Q12** (an evicted placeholder section cannot
   rebuild its grey image; from M8.4.39).
-- **Authorised run of 21 Nov 2026 ("sigue con el resto") finished:** `Q9`, `M8.4.39`, `M8.4.40`, `M8.4.37` done. **`M8.4.19` done (21 Nov 2026):**
-  milestone gate of part C met; the synthetic section with its image was not measured in the program. **Next:** the maintainer's decisions on
-  rule 6 and on the tiled flag, then M8.4.41-M8.4.43, then part B as decided by I, then M8.5 (needs A1). `Q10` before V0.153; `A4` now open.
-- **Splitting a section too dense for its object statistics:** cards M8.4.41-M8.4.43 after M8.4.19 (asked by the maintainer after
-  M8.4.37); decisions X1-X4 approved on 21 Nov 2026 as recommended.
+- **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
+  the release gate. Decisions X1-X4 (splitting a too-dense section) approved as recommended.
+- **Next:** **M8.4.42** (a row window of a tiled section; most capable, effort high: saved-format change), then M8.4.43, then part B as decided
+  by I, then M8.5 (needs A1). `Q10` before V0.153; `A4` open.
 - **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) done, milestone gate met (M8.4.19); part B not started; M8.5 must not start.
   The engine path fails the timing gate of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates)
   for whole sections; the tile store (decision of 15 Nov 2026) is the answer for large images.
@@ -65,7 +66,7 @@ Every experimental switch, with the decision it is waiting for ([policy: ARCHITE
 | Engine experiment | M8 | environment variable `SEDCORETOOL_ENGINE_EXPERIMENT=1` | off | Removed at M8.6 after the release gate |
 | NumPy multi-row counting in the Python API | M3.1.5 / M3.1.6 / M8.3.3 | environment variable `SEDCORETOOL_EXPERIMENTAL_COUNTS=1` | no effect: the multi-row kernel is the only implementation since M8.3.3 | Maintainer: remove the variable and its tests/benchmark in a cleanup |
 | Navigation preview rollback | M2.2.4 | session control in the Sections panel | preview on | Maintainer: remove the rollback control, or keep it until more memory evidence exists |
-| Tiled sections | M8.4.15 | environment variable `SEDCORETOOL_TILED_SECTIONS=1`, with the engine experiment | off | The milestone gate of part C (M8.4.19), then the release gate |
+| Tiled sections | M8.4.15 | environment variable `SEDCORETOOL_TILED_SECTIONS=1`, with the engine experiment | off | The release gate (milestone gate of part C met; kept off until then, decided by the maintainer on 21 Nov 2026) |
 | Visible-row table rendering | M2.1.3 | session-only checkbox in the Data table (turns it off for the session) | **on** (since 16 Nov 2026) | Release gate before publishing; then the maintainer decides whether to remove the checkbox and the native path |
 | Desktop operating diagnostics | M1.2.3 | opt-in control in the desktop program | off | Removed after the hang diagnosis of M1.2.2 is accepted |
 
@@ -381,7 +382,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 
 - [x] **M8.4.40 - Engine session-request limit, non-blocking store I/O and Windows/handle robustness** (done 21 Nov 2026, development gate; record: [history](roadmap-history.md#m8440---engine-session-request-limit-non-blocking-store-io-and-windowshandle-robustness)).
 
-##### M8.4.19 - Milestone gate of part C — state: Done (milestone gate met, 21 Nov 2026); decisions on rule 6 and the flag wait for the maintainer
+##### M8.4.19 - Milestone gate of part C — state: Done (milestone gate met, 21 Nov 2026); decisions taken 21 Nov 2026: rule 6 keeps both paths; the tiled flag stays off until the release gate
 
 - **As built (21 Nov 2026):** GitHub on `f896132` (code of M8.4.37): `tests` and *Desktop builds* passed on Windows, macOS and Linux, including
   `desktop.mjs` with the engine experiment off and on, `tiled-sections.mjs` and `large-16bit-desktop.mjs`. Windows (Ryzen 7 7700X, 31 GiB,
@@ -419,19 +420,7 @@ Decisions **X1-X4** below were **approved by the maintainer on 21 Nov 2026, as r
   is saved with format version 7, so an older SedCoreTool opens it read-only (as for any newer project) instead of showing each part as the
   whole image. Every other project keeps format 6.
 
-##### M8.4.41 - The message of a section too dense for its object statistics suggests splitting it — state: Ready after M8.4.19 (21 Nov 2026)
-
-- **Goal:** the message shown when the statistics trip (`tiles.statsLimit`) no longer says that reopening computes them again; it says that this
-  section is too dense for the object measurements, that delete, merge and cut are not available in it, and how many parts would fit (X1).
-- **Read first:** `TiledObjectStats` (`bytes`, `exceed`) and `TiledStatsRunner` in `tiledit.js`; `statsDropped` in `tiledstate.js`; the
-  *As built* of M8.4.37 in `roadmap-history.md`; `tiles.statsLimit` in `i18n.js`.
-- **Change:** `tiledit.js` (an estimate of the whole section's statistics at the trip: the bytes per tile counted so far times the section's
-  tiles that hold labels; a pure function, tested in Node); `tiledstate.js` (the message with the number of parts); `i18n.js` (Spanish and English).
-- **Do not touch:** the budget, what is dropped, the saved project.
-- **Model:** fast, effort medium (a bounded, pure estimate and a message).
-- **Tests:** Node tests of the estimate (dense, sparse, a trip on the first tile) and of the number of parts with the X1 rule; the e2e block of
-  M8.4.37 checks the new text.
-- **Done when:** the tests pass and the message no longer promises that reopening helps; development gate.
+- [x] **M8.4.41 - The message of a section too dense for its object statistics suggests splitting it** (done 21 Nov 2026, development gate; record: [history](roadmap-history.md#m8441---the-message-of-a-section-too-dense-for-its-object-statistics-suggests-splitting-it)).
 
 ##### M8.4.42 - A tiled section can show a row window of its image — state: Ready after M8.4.41 (X2, X4 approved 21 Nov 2026)
 

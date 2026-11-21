@@ -263,16 +263,55 @@ export const STATS_BUDGET_BYTES = 256 * 2 ** 20;
 export const STATS_ENTRY_BYTES = 160;
 export const STATS_OBJECT_BYTES = 96;
 const STATS_TILE_BYTES = 128;
+/** Card M8.4.41: each part of a section split to fit the statistics aims at this share of the budget. */
+export const STATS_SPLIT_MARGIN = 0.8;
+/** Card M8.4.41: beyond this many parts, splitting the section would not be enough. */
+export const STATS_SPLIT_MAX_PARTS = 8;
+
+/**
+ * Card M8.4.41: the statistics of the whole section, estimated from the tiles counted when the budget tripped: (bytes per counted tile) x (tiles of the
+ * section that hold labels). Never below what was counted.
+ * @param {{bytesCounted: number, tilesCounted: number, labelledTiles: number}} counted bytes (estimate of `TiledObjectStats.bytes`) and numbers of tiles
+ * @returns {number} bytes
+ */
+export function estimateSectionStatsBytes({ bytesCounted, tilesCounted, labelledTiles }) {
+  if (!(tilesCounted > 0)) return bytesCounted;
+  return Math.max(bytesCounted, (bytesCounted / tilesCounted) * labelledTiles);
+}
+
+/**
+ * Card M8.4.41: into how many parts the section must be split so that each part's statistics stay within `STATS_SPLIT_MARGIN` of the budget (at least 2),
+ * or null when that needs more than `STATS_SPLIT_MAX_PARTS` (splitting would not be enough). @param {number} estimateBytes @param {number} [budget] bytes
+ * @returns {number | null}
+ */
+export function partsToFitStats(estimateBytes, budget = STATS_BUDGET_BYTES) {
+  const parts = Math.max(2, Math.ceil(estimateBytes / (budget * STATS_SPLIT_MARGIN)));
+  return parts > STATS_SPLIT_MAX_PARTS ? null : parts;
+}
+
+/**
+ * Card M8.4.41: the key and variables of the message for dropped statistics: how many parts would fit, or "too dense" when no split would.
+ * @param {{estimateBytes?: number | null}} stats @returns {{key: string, vars?: {n: number}}}
+ */
+export function statsLimitMessage(stats) {
+  const parts = partsToFitStats(stats.estimateBytes ?? 0);
+  return parts === null ? { key: 'tiles.statsLimitTooDense' } : { key: 'tiles.statsLimit', vars: { n: parts } };
+}
 
 /** Per-tile statistics of every object of a tiled section and their totals. Tile indices are `row * cols + col`. */
 export class TiledObjectStats {
-  /** @param {{budget?: number, onExceeded?: () => void}} [options] `onExceeded` is called once, when the statistics are dropped */
-  constructor({ budget = STATS_BUDGET_BYTES, onExceeded = () => {} } = {}) {
+  /**
+   * @param {{budget?: number, onExceeded?: () => void, labelledTiles?: () => number}} [options] `onExceeded` is called once, when the statistics are
+   * dropped; `labelledTiles` gives the number of tiles of the section that hold labels (card M8.4.41, for the estimate of the whole section)
+   */
+  constructor({ budget = STATS_BUDGET_BYTES, onExceeded = () => {}, labelledTiles = () => 0 } = {}) {
     /** @type {Map<number, Map<number, TraceStats>>} */
     this.byTile = new Map();
     /** @type {Map<number, Set<number>>} */
     this.tilesOf = new Map();
-    this.budget = budget; this.onExceeded = onExceeded;
+    this.budget = budget; this.onExceeded = onExceeded; this.labelledTiles = labelledTiles;
+    /** Card M8.4.41: bytes the statistics of the whole section would take, estimated when they were dropped; null until then. @type {number | null} */
+    this.estimateBytes = null;
     /** The estimate of the tiles' maps and their entries; `bytes` adds the objects' sets of tiles. */
     this.tileBytes = 0;
     /** Card M8.4.37: the statistics went beyond the budget; they were dropped and none is kept until the section is opened again. */
@@ -308,6 +347,7 @@ export class TiledObjectStats {
    */
   exceed() {
     this.exceeded = true;
+    this.estimateBytes = estimateSectionStatsBytes({ bytesCounted: this.bytes, tilesCounted: this.byTile.size, labelledTiles: this.labelledTiles() });
     this.byTile.clear(); this.tilesOf.clear(); this.tileBytes = 0;
     this.onExceeded();
   }

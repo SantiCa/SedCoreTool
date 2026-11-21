@@ -4,7 +4,7 @@
 // the sends of its masks to the engine's store (MaskSync). app.js passes what these need from the page in one context object.
 import { MaskLoader, MaskSync, buildMaskTables, classesText } from './tiledsync.js';
 import { TiledCountsRunner, TiledRowCounts } from './tiledcounts.js';
-import { TiledObjectStats, TiledStatsRunner, tilesUnder } from './tiledit.js';
+import { TiledObjectStats, TiledStatsRunner, statsLimitMessage, tilesUnder } from './tiledit.js';
 import { binRowsOfSection, binsFromRowCounts } from './sectionanalysis.js';
 import { features } from './imageproc.js';
 import { pxPerCm } from './sectiondepth.js';
@@ -35,7 +35,7 @@ export function createTiledState(ctx) {
 
   function tiledStatsRunner(s) {
     if (s._statsRunner) return s._statsRunner;
-    const stats = new TiledObjectStats({ onExceeded: () => statsDropped(s) }), fetchRgba = (positions) => level0Rgba(s, positions);
+    const stats = new TiledObjectStats({ onExceeded: () => statsDropped(s, stats), labelledTiles: () => s.maskTiles.labelledTileCount() }), fetchRgba = (positions) => level0Rgba(s, positions);
     const onUpdate = (ids) => {
       const ppu = pxPerCm(s) * s.ds;                       // source pixels per centimetre
       for (const id of ids) {
@@ -58,11 +58,13 @@ export function createTiledState(ctx) {
    * Card M8.4.37: the statistics of the section's objects went beyond their budget and were dropped (`TiledObjectStats.exceed`). Every object loses
    * its statistics, features and boxes, which are no longer known (they would be stale after the next edit): the object panel and the objects table
    * say they are not available, the classifier does not use them, a save writes the objects without them (as objects saved before their statistics
-   * were computed), and operations that need an object's box refuse. They are computed again when the section is opened again.
+   * were computed), and operations that need an object's box refuse. Opening the section again computes them again and they trip again: the message (card M8.4.41) says into how many
+   * parts the section would have to be split to fit, or that even a split would not.
    */
-  function statsDropped(s) {
+  function statsDropped(s, stats) {
     for (const o of s.objects.values()) { o.stats = null; o.feat = null; o.area = 0; o.bbox = null; o.sbox = null; }
-    toast(t('tiles.statsLimit'), 12000);
+    const { key, vars } = statsLimitMessage(stats);
+    toast(t(key, vars), 12000);
     if (S.sections.includes(s)) afterChange(s, ctx.TILES_ONLY);
   }
 

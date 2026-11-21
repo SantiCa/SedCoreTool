@@ -1214,9 +1214,10 @@ try {
     window.ichantool.deleteObjects([id]);
     const kept = s.objects.has(id), withStats = [...s.objects.values()].filter((o) => o.stats || o.feat || o.bbox).length;
     await window.ichantool.saveNow();
-    return { id, panel: panel.includes(t('obj.statsNA')), kept, withStats, limit: t('tiles.statsLimit'), busy: t('tiles.busy') };
+    return { id, panel: panel.includes(t('obj.statsNA')), kept, withStats, limit: t('tiles.statsLimit', { n: 2 }), reopen: t('tiles.statsLimit', { n: 2 }).toLowerCase().includes('opened again') || t('tiles.statsLimit', { n: 2 }).toLowerCase().includes('abrirla'), busy: t('tiles.busy') };
   });
   assert.ok(dropped37.id && dropped37.panel && dropped37.kept && dropped37.withStats === 0, 'measurements not available, the deletion refused: ' + JSON.stringify(dropped37));
+  assert.ok(!dropped37.reopen, 'the text no longer promises that reopening helps');
   assert.ok(toasts.slice(toastsBeforeBudget).includes(dropped37.limit) && !toasts.slice(toastsBeforeBudget).includes(dropped37.busy), 'the reason is given, not "try again"');
   assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false }, 'reopened after the statistics were dropped');
   const afterBudget = await dump(await on.page.evaluate(() => window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId)));

@@ -193,7 +193,8 @@ are proposals with a default that the maintainer confirms or changes before the 
 
 1. **Which sections are tiled.** A section is tiled when its source has more pixels than the working-resolution limit
    (`maxMP`, 8 megapixels by default: the point where today's path starts discarding detail, M8.4.13), the engine is available and the
-   flag of M8.4.15 is on. Every other section keeps today's path (rule 6).
+   flag of M8.4.15 is on. Every other section keeps today's path (rule 6; both paths kept, decided by the maintainer on 21 November 2026
+   after the milestone gate of part C).
 2. **Masks of a tiled section are at full resolution** (confirmed by the maintainer, 16 November 2026): labels and exclusion on level 0 of the pyramid, so the interval
    table counts the source pixels. The resolution selector of today's path (`RES_FACTORS`) does not apply to tiled sections.
 3. **Two folders, chosen by the main process.** The pyramid is a cache keyed by the SHA-256 of the source file

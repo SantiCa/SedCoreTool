@@ -3237,7 +3237,11 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   Node's V8, without pointer compression, takes about 1.8 times as much: [record](validation/M8.4.37-tiled-stats-memory-node.json)). The budget is above
   the statistics the largest reopening cache can hold (at most about 234 MiB by the estimate), so a section whose statistics can be cached is never cut.
   Beyond it they are all dropped and none is kept until the section is opened again (which computes them again: with the same masks they go beyond
-  the budget again), as the row histograms below: the runner stops, no object is reported
+  the budget again), as the row histograms below. At the trip the statistics of the whole section are estimated (card M8.4.41,
+  `estimateSectionStatsBytes`): the bytes counted so far divided by the tiles counted, times the section's tiles that hold labels
+  (`MaskTiles.labelledTileCount`), never below what was counted; the message gives the number of parts that would each stay within 80% of the
+  budget (`partsToFitStats`: `max(2, ceil(estimate / (0.8 × budget)))`, `STATS_SPLIT_MARGIN`), or, beyond 8 parts (`STATS_SPLIT_MAX_PARTS`),
+  says that splitting would not be enough and suggests reviewing the detection. When they are dropped: the runner stops, no object is reported
   (none is removed), every object of the section loses `stats`, `feat`, `area`, `bbox` and `sbox` (the panel and the objects table say the measurements
   are not available, the classifier has no descriptors for them, a save writes the objects without `st`), operations that need an object's box refuse
   with that reason, no reopening cache is written, and the page says so once. The synthetic section of M8.4.18d (about 64,300 of 65,535 objects in every
