@@ -3550,3 +3550,39 @@ Updated 21 November 2026.
     save and reopen, statistics computed again on reopening; no separate failing-before run). `app.js` 4,664 → 4,664 lines.
   - Checks (Windows, final state): `npm test` 582; typecheck (no new diagnostics, 4 baseline entries resolved); `pytest -q` 924 passed / 9
     skipped; ruff; `sync_version --check`; `tiled-sections.mjs`; `desktop.mjs` engine off and on. Not run: macOS and Linux (GitHub on push).
+
+### M8.4.43 - Split a tiled section into parts
+
+- **Goal:** from the message of M8.4.41 (and from the section's menu), the user splits a tiled section into the parts X1 gives, at mask-tile
+  boundaries near equal heights; each part keeps its objects (same ids, classes, ichnotaxa), its depths at its rows and its share of the
+  region of interest and marks; the parts' interval tables together equal the original's.
+- **Model:** most capable, effort high (editing that could lose user work, the store, the saved format).
+- **Done when:** the tests pass and the synthetic section of M8.4.18d splits into parts that each stay under the budget, or the message of
+  M8.4.41 says that it cannot (X1); development gate.
+- *As built (21 Nov 2026; development gate, Windows):*
+  - **Engine and IPC (`src/sedcoretool/store/masks.py`, `src/sedcoretool/engine/server.py`, `desktop/engine.js`, `desktop/tile-ipc.js`,
+    `desktop/preload.js`, contract §8.7):** added `MaskStore.slice_rows` and `mask.slice` (300 s deadline, session-commit tracked, M8.4.38
+    ownership tracked). Verifies every tile blob in `[row0, row1)` and every source table before writing (`INVALID_BUFFER` on damage); reuses
+    tile blobs directly by SHA-256 without re-encoding (shifted by `-row0`), reuses `classes`, filters the four object columns to objects present
+    in `[row0, row1)` (reusing blobs when all stay, or all `null` when none), keeps original indices of used overlap stacks (empty spans for
+    unused lower indices, or `[0, 0]` / `null` when none), writes the new manifest last (`LIMIT_EXCEEDED`/`disk` on full disk leaves source
+    intact), and returns kept `object_ids` and sorted used `stack_indices` as `u32le` binary frames with transport SHA-256 verification.
+  - **Pure module and UI controller (`app/js/tiledsplit.js`, `app/js/tiledsplitui.js`, `app/index.html`, `app/js/i18n.js`, `app/js/tiledstate.js`,
+    `app/js/app.js`, `tools/build_standalone.py`, `docs/ARCHITECTURE.md`, `docs/TECHNICAL_DOCUMENTATION.md`):** `tiledsplit.js` aligns cuts to
+    `max(512, 2^level)` (`maxSplitParts`, `splitRowBounds`), computes X1 suggestions (`splitSuggestion`), continuous depths, clipped ROI,
+    partitioned marks and manual ranges (`planSplitParts`), decodes `mask.slice` payloads and builds format-7 part records (`buildPartRecord`).
+    `tiledsplitui.js` manages the actionable M8.4.41 banner (`#secStatsWarning` / `#secStatsSplit`, hidden when X1 refuses > 8 parts), the
+    section-panel button (`#secSplit`), the confirmation dialog listing every part and its depths (X3a), and failure-safe replacement
+    (`settle -> mask.slice -> loadTiledSection -> atomic swap`; original section and stored version stay intact on any failure or before save).
+    `app.js` 4,652 → 4,647 lines (`APP_JS_CEILING` lowered to 4,647).
+  - **M8.4.18d synthetic section (Done when, X1):** the synthetic section (7,168 tiles × ~64,333 objects/tile, ~69.5 GiB estimated) exceeds
+    8 parts (`splitSuggestion.suggested === null`), so the M8.4.41 banner shows `tiles.statsLimitTooDense` without offering a split; an
+    over-budget section within 8 parts splits into the X1 parts that each compute their full object statistics under budget.
+  - **Tests:** `tests/test_store_masks.py` (+2: blob reuse, object/stack filtering, empty slice, mask reassembly, damaged tile/exclude/table
+    refusal, bad bounds, disk full); `tests/test_engine_masks.py` (+1: `mask.slice` end-to-end, binary frames, retain, damaged blob);
+    `tests/app/tile-ipc.test.mjs` (+1: validation and forwarding); `tests/app/tiledsplit.test.mjs` (5: alignment, exact masks/objects/depths/marks/ROI/interval tables, unaligned payload decode, over-budget split fit & M8.4.18d refusal, half-way engine/disk failure safety);
+    `tests/e2e/tiled-sections.mjs` (M8.4.43 block: M8.4.41 banner, half-way disk-full refusal, UI split via dialog, exact union masks, object
+    pixels/classes, summed interval tables, continuous depths, marks, format-7 save, reopen, and folder backup).
+  - **Checks (Windows, final state):** `npm test` 602 pass / 0 fail; `npm run typecheck` passed; `pytest -q` 927 passed / 9 skipped; `ruff`
+    passed; `sync_version --check` passed; `desktop.mjs` engine off and on passed; `tiled-sections.mjs` passed. Not run: macOS and Linux
+    (GitHub on push).

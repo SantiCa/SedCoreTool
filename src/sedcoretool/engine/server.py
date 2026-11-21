@@ -64,7 +64,7 @@ RUNNER_IDLE_SECONDS = 30         # an idle method worker holds memory (NumPy, th
 PROGRESS_EVENT_SECONDS = 0.1     # at most ten progress events per second (§3)
 PYRAMID_NAME = re.compile(r'[^/\\:\x00-\x1f]{1,255}')   # a file name for display: no folder separators or control characters
 MAX_PATH = 4096
-MASK_OPERATIONS = ('mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.forget', 'mask.derived.put', 'mask.derived.get',
+MASK_OPERATIONS = ('mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.slice', 'mask.forget', 'mask.derived.put', 'mask.derived.get',
                    'mask.export', 'mask.import')
 MAX_STAGINGS = 16                # staged mask versions per session (contract §8.7)
 REQUEST_WINDOW = 65_536          # decision V (card M8.4.40): the most recent request IDs remembered to refuse a duplicate; older ones are forgotten
@@ -492,6 +492,15 @@ class Coordinator:
                 raise RequestError('INVALID_REQUEST', 'to')
             source, target = self.mask_store(payload['from']), self.mask_store(payload['to'])
             return self.masks.write_or_disk_error(target.copy_from, source, payload['manifest'], payload['start'])
+        if operation == 'mask.slice':                                           # card M8.4.43: new version from tile rows [row0, row1), reusing blobs
+            require_fields(payload, ('project', 'manifest', 'section', 'row0', 'row1'))
+            store = self.mask_store(payload['project'])
+            result, joined = self.masks.write_or_disk_error(store.slice_rows, payload['manifest'], payload['section'], payload['row0'], payload['row1'])
+            chain = self.session_commits.setdefault(store.folder, {}).setdefault(payload['section'], [])
+            if result['manifest'] in chain:
+                chain.remove(result['manifest'])
+            chain.append(result['manifest'])
+            return self.framed(result, joined)
         if operation == 'mask.derived.put':                                     # card M8.4.29: a cache the page derived from a stored version
             require_fields(payload, ('project', 'manifest', 'kind', 'handle'))
             value = self.committed_buffer(buffers, payload['handle'])

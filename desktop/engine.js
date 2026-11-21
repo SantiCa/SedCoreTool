@@ -10,7 +10,7 @@ const { controlFrame, frame, ControlReader } = require('./engine-protocol');
 const ADVERTISED_METHODS = new Set(['buffer.digest/1', 'section.intervals/1']);
 // The tile-store operations (contract §8) are main-process only: engine-ipc.js never forwards them, and `pyramid.build` carries a path.
 const OPERATIONS = new Set(['hello', 'buffer.begin', 'buffer.derive', 'buffer.chunk', 'buffer.commit', 'buffer.release', 'buffer.read', 'buffer.digest', 'section.analyze', 'job.cancel', 'shutdown',
-  'pyramid.build', 'pyramid.info', 'tile.read', 'mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.forget', 'mask.derived.put', 'mask.derived.get', 'mask.export', 'mask.import']);
+  'pyramid.build', 'pyramid.info', 'tile.read', 'mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.slice', 'mask.forget', 'mask.derived.put', 'mask.derived.get', 'mask.export', 'mask.import']);
 // Requests followed by one binary frame (a descriptor/binary pair of contract §3); at most two of them wait for an answer at a time.
 const WITH_BINARY = new Set(['buffer.chunk', 'mask.put']);
 // A pyramid build has no fixed length: the engine stops a build whose progress stalls for 60 s. The client fails the session only
@@ -26,8 +26,9 @@ const ANALYSIS_TIMEOUT_MS = 10 * 60 * 1000;
 // engine is stopped, which could be in the middle of a commit on a slow disk. Chosen with a wide margin over the times seen (a retain, commit or copy
 // of a 10 % `rgb8g` section took well under 2 s on an SSD); not derived from a worst-case measurement.
 const STORE_DEADLINES_MS = Object.freeze({ 'mask.begin': 30000, 'mask.put': 60000, 'mask.commit': 120000, 'mask.discard': 30000, 'mask.read': 60000,
-  'mask.retain': 300000, 'mask.info': 30000, 'mask.copy': 120000, 'mask.forget': 60000, 'mask.derived.put': 120000, 'mask.derived.get': 120000,
+  'mask.retain': 300000, 'mask.info': 30000, 'mask.copy': 120000, 'mask.slice': 300000, 'mask.forget': 60000, 'mask.derived.put': 120000, 'mask.derived.get': 120000,
   'mask.export': 120000, 'mask.import': 120000 });
+const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 
 const MAX_AUTOMATIC_RESTARTS = 1;
 // Card M8.4.26 (decided by the maintainer, 18 Nov 2026): the handshake has its own deadline. Starting Python took up to 4.7 s on a
@@ -215,6 +216,26 @@ class EngineClient {
           || frames.some((size) => !Number.isSafeInteger(size) || size < 1 || size > 1048576) || frames.reduce((sum, size) => sum + size, 0) !== read.byte_length) throw unavailable();
       this.partial = { pending, id: value.id, result: read, parts: [], remaining: frames.length };
       return { binaryFrames: frames };
+    }
+    if (value.status === 'ok' && pending.op === 'mask.slice') {
+      // Card M8.4.43: kept object IDs and used stack indices follow as u32le binary frames of at most 1 MiB (empty when neither is present).
+      const read = value.result, frames = read?.frames, total = (read?.object_count + read?.stack_count) * 4;
+      if (!read || Object.keys(read).sort().join() !== 'frames,height,manifest,object_count,sha256,stack_count,tile_count,width'
+          || !/^[0-9a-f]{64}$/.test(read.manifest) || !/^[0-9a-f]{64}$/.test(read.sha256)
+          || !Number.isSafeInteger(read.width) || read.width < 1 || !Number.isSafeInteger(read.height) || read.height < 1
+          || !Number.isSafeInteger(read.tile_count) || read.tile_count < 0
+          || !Number.isSafeInteger(read.object_count) || read.object_count < 0 || read.object_count > 1048576
+          || !Number.isSafeInteger(read.stack_count) || read.stack_count < 0 || read.stack_count > 4194304
+          || !Array.isArray(frames) || frames.length > 32 || frames.some((size) => !Number.isSafeInteger(size) || size < 1 || size > 1048576)
+          || frames.reduce((sum, size) => sum + size, 0) !== total) throw unavailable();
+      if (frames.length) {
+        this.partial = { pending, id: value.id, result: read, parts: [], remaining: frames.length };
+        return { binaryFrames: frames };
+      }
+      if (read.sha256 !== EMPTY_SHA256) throw unavailable();
+      clearTimeout(pending.timer); this.pending.delete(value.id);
+      pending.resolve({ ...read, bytes: Buffer.alloc(0) });
+      return undefined;
     }
     clearTimeout(pending.timer); this.pending.delete(value.id);
     if (value.status === 'ok') pending.resolve(value.result);

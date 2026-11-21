@@ -836,3 +836,42 @@ def test_an_open_staged_version_keeps_its_blobs_after_its_store_left_the_open_st
     assert pending[1] in stored_names(value)[1], 'the open staged version kept its tile'
     manifest = value.ok('mask.commit', {'staged': staged, 'tables': value.tables()})[0]['manifest']
     assert b''.join(value.ok('mask.read', {'project': 'p1', 'manifest': manifest, 'layer': 'labels', 'positions': [[0, 0]]})[1]) == pending[0]
+
+
+def test_mask_slice_through_the_engine_reuses_blobs_and_returns_present_objects(engine, tmp_path):
+    """Card M8.4.43: mask.slice writes a new version for tile rows [row0, row1), returns kept object IDs and stack indices in binary frames,
+    reuses tile blobs, and refuses damaged blobs and bad arguments."""
+    value = engine()
+    staged = begin(value)['staged']                                         # W=600, H=1100 -> 3 tile rows, 2 cols
+    t0 = labels_tile(10, rows=512, cols=512)
+    t2 = labels_tile(20, rows=76, cols=512)                                 # row 2: 1100 - 1024 = 76 rows inside
+    put(value, staged, *t0, row=0, col=0)
+    put(value, staged, *t2, row=2, col=0)
+    tables = {'object_ids': value.buffer(np.array([10, 20, 30], dtype='<u4').tobytes(), 'u32le'),
+              'object_class': value.buffer(np.array([0, 0, -1], dtype='<i4').tobytes(), 'i32le'),
+              'object_predicted': value.buffer(np.array([-1, -1, -1], dtype='<i4').tobytes(), 'i32le'),
+              'object_confidence': value.buffer(np.array([0.0, 0.5, 0.0], dtype='<f8').tobytes(), 'f64le'),
+              'classes': value.buffer(json.dumps([{'id': 'a', 'name': 'Burrow', 'counts': True}]).encode(), 'utf8json'),
+              'stack_offsets': value.buffer(np.array([0, 0], dtype='<u4').tobytes(), 'u32le')}
+    src = value.ok('mask.commit', {'staged': staged, 'tables': tables})[0]['manifest']
+
+    res0, bin0 = value.ok('mask.slice', {'project': 'p1', 'manifest': src, 'section': 'p_top', 'row0': 0, 'row1': 2})
+    res1, bin1 = value.ok('mask.slice', {'project': 'p1', 'manifest': src, 'section': 'p_bot', 'row0': 2, 'row1': 3})
+    raw0, raw1 = b''.join(bin0), b''.join(bin1)
+    assert res0['height'] == 1024 and res0['object_count'] == 1 and res0['stack_count'] == 0 and res0['sha256'] == hashlib.sha256(raw0).hexdigest()
+    assert res1['height'] == 76 and res1['object_count'] == 1 and res1['stack_count'] == 0 and res1['sha256'] == hashlib.sha256(raw1).hexdigest()
+    assert np.frombuffer(raw0, dtype='<u4').tolist() == [10]
+    assert np.frombuffer(raw1, dtype='<u4').tolist() == [20]
+    assert b''.join(value.ok('mask.read', {'project': 'p1', 'manifest': res0['manifest'], 'layer': 'labels', 'positions': [[0, 0]]})[1]) == t0[0]
+    assert b''.join(value.ok('mask.read', {'project': 'p1', 'manifest': res1['manifest'], 'layer': 'labels', 'positions': [[0, 0]]})[1]) == t2[0]
+    assert value.error('mask.slice', {'project': 'p1', 'manifest': src, 'section': 'p_bad', 'row0': 2, 'row1': 2}) == ('INVALID_REQUEST', 'rows')
+
+    # Session commit tracking keeps the newly sliced manifest when retain runs before the page names it.
+    value.ok('mask.retain', {'project': 'p1', 'keep': [src]})
+    assert res0['manifest'] in stored_names(value)[0] and res1['manifest'] in stored_names(value)[0]
+
+    # Damaged blob is refused cleanly.
+    blob_path = tmp_path / 'projects' / 'p1' / 'tiles' / 'blobs' / t2[1][:2] / t2[1]
+    blob_path.write_bytes(b'damaged')
+    value.ok('mask.forget', {'project': 'p1'})
+    assert value.error('mask.slice', {'project': 'p1', 'manifest': src, 'section': 'p_fail', 'row0': 2, 'row1': 3}) == ('INVALID_BUFFER', 'tile')

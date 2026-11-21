@@ -16,10 +16,10 @@ import { S, sec } from './state.js';
 /**
  * @param {{TILES: any, readonly TILES_ONLY: readonly string[], toast: (text: string, ms?: number) => void, afterChange: (s: any, tables?: any) => void,
  *   analysisProject: () => any, analyze: (s: any) => void, effClassArray: (s: any) => any, renderResults: () => void, requestRender: () => void,
- *   sourceBox: (o: any) => any, sourceRoi: (s: any) => any}} ctx
+ *   sourceBox: (o: any) => any, sourceRoi: (s: any) => any, onStatsExceeded?: (s: any) => void}} ctx
  */
 export function createTiledState(ctx) {
-  const { toast, afterChange, analysisProject, analyze, effClassArray, renderResults, requestRender, sourceBox, sourceRoi } = ctx;
+  const { toast, afterChange, analysisProject, analyze, effClassArray, renderResults, requestRender, sourceBox, sourceRoi, onStatsExceeded = () => {} } = ctx;
   /** Object statistics of a tiled section, per tile and from the level-0 pixels (card M8.4.16 step 3); bounding boxes also in working pixels. */
   /** RGBA level-0 pixel tiles of a tiled section, read through the engine in batches of 16. `positions` are in the section's grid; card M8.4.42:
    *  with a window they are read shifted to its rows, and rows below the window come back as a source ending there pads them (zero). */
@@ -70,6 +70,7 @@ export function createTiledState(ctx) {
     for (const o of s.objects.values()) { o.stats = null; o.feat = null; o.area = 0; o.bbox = null; o.sbox = null; }
     const { key, vars } = statsLimitMessage(stats);
     toast(t(key, vars), 12000);
+    onStatsExceeded(s);
     if (S.sections.includes(s)) afterChange(s, ctx.TILES_ONLY);
   }
 

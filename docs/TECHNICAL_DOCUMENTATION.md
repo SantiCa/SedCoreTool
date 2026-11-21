@@ -168,6 +168,8 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `tiledtools.js` | Editing tiled sections (card M8.4.30 step 3): strokes on edit windows, undo and redo of tiled edits, wand, lasso, scissors and object operations, the wait for objects' statistics; context object from `app.js` | No (controller) |
 | `tiledstate.js` | One tiled section's state behind the page (card M8.4.30 step 2): per-tile object statistics, row counts and interval table, reads of level-0 pixels and dropped mask tiles, mask sends to the engine's store; context object from `app.js` | No (controller) |
 | `tiledrecord.js` | The saved record of a tiled section and its row window (card M8.4.42): the record written and validated (`serTiledSection`, `validTiledRecord`), the project's format version (6, or 7 with a window) and whether a newer one opens read-only, and the window's translation of level-0 tile rows, of the last tile and of the working image's band | Yes |
+| `tiledsplit.js` | Splitting a tiled section into parts along mask-tile boundaries (card M8.4.43): alignment to `max(512, 2^level)` (`maxSplitParts`, `splitRowBounds`), X1 suggestion (`splitSuggestion`), continuous depths, clipped analysis area, marks and manual ranges (`planSplitParts`), `mask.slice` payload decoding and format-7 part record building (`buildPartRecord`) | Yes |
+| `tiledsplitui.js` | Interface for splitting a tiled section (card M8.4.43): actionable statistics-budget banner (`#secStatsWarning`), section-panel button (`#secSplit`), confirmation dialog naming every part and its depths (X3a), and failure-safe replacement (`settle -> mask.slice -> loadTiledSection -> swap`) | No (controller) |
 | `tiledproject.js` | The project side of tiled sections (card M8.4.30 step 1): reopening a saved tiled section, the lock of a missing stored version, the store folder that follows its project, the store's part of a save; it receives what it needs from `app.js` in one context object | No (controller) |
 | `taxa.js` | The ichnotaxa of a project (card Q1): use of a class across cores, deleting it from every core and restoring it, repairing labels of classes that no longer exist | Yes |
 | `singleflight.js` | One run at a time with at most one more run for the requests made meanwhile, if the revision changed (card M8.4.31): project saves; `nestedIndicator`, one busy sign for overlapping operations (card M8.4.39) | Yes |
@@ -3271,7 +3273,15 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   pixel reads (statistics, wand) ask for tile row `row + y0 / 512`, and rows of the last tile below the window read as zero, as the padding of a
   source that ends there. The working image is rows `y0 / 2^level` to that plus `ceil((y1 - y0) / 2^level)` of its level; its last row averages
   source rows below `y1` when `y1` is not a multiple of `2^level` and is not the image's last row (display only). The viewer chooses and places the
-  pyramid's tiles shifted by `y0` source pixels and clips them to the section's analysis area. Nothing in the interface creates a window yet.
+  pyramid's tiles shifted by `y0` source pixels and clips them to the section's analysis area.
+  *Splitting a tiled section* (`tiledsplit.js`, `tiledsplitui.js`, `store/masks.py::slice_rows`, `mask.slice`; card M8.4.43, decisions X1–X4): from
+  the statistics-budget banner (`#secStatsWarning`, offering the X1 count when 2–8 parts fit) or from the section panel (`#secSplit`), the user
+  splits a tiled section into parts at mask-tile boundaries aligned to `max(512, 2^level)` near equal heights. A confirmation dialog names every
+  part and its depth range before replacing the original (X3a). Each part is created by `mask.slice` (verifying and reusing the tile blobs by
+  SHA-256 without re-encoding, keeping `classes`, filtering the four object columns to objects present in that tile-row range, and keeping the
+  original indices of used overlap stacks), opened with its row window over the same pyramid, its continuous depths, clipped analysis area, marks
+  and manual ranges. A failure while settling, slicing or loading leaves the original section and its saved version intact; the original's stored
+  version stays in the store until the parts are saved (and in folder backup history).
   *Saving:* each tiled section's sync must first be settled (every tile and table acknowledged by the store); the record is built at that moment, so
   masks, objects and stacks are one state. A section that does not settle within 15 s keeps its last saved record, the rest of the project is saved,
   the save state stays "unsaved" and the page says so once ("The latest edits of a large section have not reached the engine's store yet…"); the next

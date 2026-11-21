@@ -145,6 +145,14 @@ def _column(name: str, data: bytes) -> array:
     return values
 
 
+def _to_le_bytes(values: array) -> bytes:
+    if sys.byteorder == 'big':
+        copy = array(values.typecode, values)
+        copy.byteswap()
+        return copy.tobytes()
+    return values.tobytes()
+
+
 def check_objects(columns: dict, classes: bytes) -> None:
     """Check the object columns against each other and the classes table (contract §8.7); ``MaskError`` with the column's name otherwise.
     ``columns`` maps every name of ``OBJECT_COLUMNS`` to bytes, or every one to None (no objects)."""
@@ -595,6 +603,127 @@ class MaskStore:
         entry = tiles.get((row, col))
         sha256 = entry[layer] if entry else None
         return None if sha256 is None else self.read_blob(sha256, LAYER_BYTES[layer], 'tile')
+
+    def slice_rows(self, sha256: str, section: str, row0: int, row1: int) -> tuple[dict, bytes]:
+        """Write a new stored version from tile rows ``[row0, row1)`` of a stored version (card M8.4.43).
+
+        Every tile blob in the range is verified and reused directly by its SHA-256 (no re-encoding or rewriting), with its tile row shifted by
+        ``-row0``. The ``classes`` blob is reused; the four object columns keep only the objects present in those tiles (in their original order,
+        reusing the blobs when all objects remain); overlap stacks keep their original indices for the stacks present in those tiles (empty slots
+        for unused indices below the highest used stack, or ``[0, 0]`` with ``stack_members: None`` when none is used). The new manifest is
+        written last; the source manifest and its blobs are never touched. Returns ``(result, binary_payload)`` where ``binary_payload`` holds
+        the kept ``object_ids`` followed by the sorted used stack indices, both little-endian ``u32``."""
+        if not valid_section(section):
+            raise MaskError('INVALID_REQUEST', 'section')
+        manifest, tiles = self.read_manifest(sha256)
+        rows, _ = grid(manifest['width'], manifest['height'])
+        if type(row0) is not int or type(row1) is not int or not (0 <= row0 < row1 <= rows):
+            raise MaskError('INVALID_REQUEST', 'rows')
+        width = manifest['width']
+        height = min(manifest['height'], row1 * TILE) - row0 * TILE
+        grid(width, height)
+        tables = manifest['tables']
+        classes_bytes = self.read_blob(tables['classes']['sha256'], tables['classes']['byte_length'], 'tables.classes')
+        offsets_bytes = self.read_blob(tables['stack_offsets']['sha256'], tables['stack_offsets']['byte_length'], 'tables.stack_offsets')
+        members_bytes = (self.read_blob(tables['stack_members']['sha256'], tables['stack_members']['byte_length'], 'tables.stack_members')
+                         if tables['stack_members'] is not None else None)
+        offsets = _column('stack_offsets', offsets_bytes)
+        members = _column('stack_members', members_bytes) if members_bytes is not None else array('I')
+        if len(offsets) < 2 or offsets[0] != 0 or offsets[1] != 0 or any(offsets[i] > offsets[i + 1] for i in range(len(offsets) - 1)):
+            raise MaskError('INVALID_BUFFER', 'tables.stack_offsets')
+        if offsets[-1] != len(members):
+            raise MaskError('INVALID_BUFFER', 'tables.stack_members')
+        col_bytes = {name: (self.read_blob(tables[name]['sha256'], tables[name]['byte_length'], f'tables.{name}')
+                            if tables[name] is not None else None) for name in OBJECT_COLUMNS}
+        check_objects(col_bytes, classes_bytes)
+
+        sliced_tiles: dict[tuple[int, int], dict] = {}
+        present_ids: set[int] = set()
+        used_stacks: set[int] = set()
+        stack_limit = len(offsets) - 1
+        for (row, col), entry in sorted(tiles.items()):
+            if not (row0 <= row < row1):
+                continue
+            if entry['exclude']:
+                self.read_blob(entry['exclude'], LAYER_BYTES['exclude'], 'tile')
+            if entry['labels']:
+                labels_bytes = self.read_blob(entry['labels'], LAYER_BYTES['labels'], 'tile')
+                for value in set(_column('object_class', labels_bytes)):       # i32le labels
+                    if value > 0:
+                        present_ids.add(value)
+                    elif value < 0:
+                        index = -value
+                        if not 1 <= index < stack_limit:
+                            raise MaskError('INVALID_BUFFER', 'tile')
+                        used_stacks.add(index)
+            sliced_tiles[(row - row0, col)] = dict(entry)
+        for index in used_stacks:
+            present_ids.update(members[offsets[index]:offsets[index + 1]])
+
+        new_tables: dict = {'classes': tables['classes']}
+        if col_bytes['object_ids'] is not None:
+            src_ids = _column('object_ids', col_bytes['object_ids'])
+            kept = [i for i, oid in enumerate(src_ids) if oid in present_ids]
+            if len(kept) == len(src_ids):
+                for name in OBJECT_COLUMNS:
+                    new_tables[name] = tables[name]
+                out_ids = src_ids
+            elif not kept:
+                for name in OBJECT_COLUMNS:
+                    new_tables[name] = None
+                out_ids = array('I')
+            else:
+                out_ids = array('I', (src_ids[i] for i in kept))
+                for name in OBJECT_COLUMNS:
+                    if name == 'object_ids':
+                        col = out_ids
+                    else:
+                        src_col = _column(name, col_bytes[name])
+                        col = array(src_col.typecode, (src_col[i] for i in kept))
+                    data = _to_le_bytes(col)
+                    digest = hashlib.sha256(data).hexdigest()
+                    write_or_disk_error(self.write_blob, data, digest, f'tables.{name}')
+                    new_tables[name] = {'sha256': digest, 'byte_length': len(data)}
+        else:
+            for name in OBJECT_COLUMNS:
+                new_tables[name] = None
+            out_ids = array('I')
+
+        sorted_stacks = sorted(used_stacks)
+        if sorted_stacks and len(sorted_stacks) == len(offsets) - 2:
+            new_tables['stack_offsets'] = tables['stack_offsets']
+            new_tables['stack_members'] = tables['stack_members']
+        elif not sorted_stacks and tables['stack_members'] is None and len(offsets) == 2:
+            new_tables['stack_offsets'] = tables['stack_offsets']
+            new_tables['stack_members'] = None
+        else:
+            max_stack = sorted_stacks[-1] if sorted_stacks else 0
+            new_offsets = array('I', [0])
+            new_members = array('I')
+            for index in range(max_stack + 1):
+                if index in used_stacks:
+                    new_members.extend(members[offsets[index]:offsets[index + 1]])
+                new_offsets.append(len(new_members))
+            off_bytes = _to_le_bytes(new_offsets)
+            off_sha = hashlib.sha256(off_bytes).hexdigest()
+            write_or_disk_error(self.write_blob, off_bytes, off_sha, 'tables.stack_offsets')
+            new_tables['stack_offsets'] = {'sha256': off_sha, 'byte_length': len(off_bytes)}
+            if new_members:
+                mem_bytes = _to_le_bytes(new_members)
+                mem_sha = hashlib.sha256(mem_bytes).hexdigest()
+                write_or_disk_error(self.write_blob, mem_bytes, mem_sha, 'tables.stack_members')
+                new_tables['stack_members'] = {'sha256': mem_sha, 'byte_length': len(mem_bytes)}
+            else:
+                new_tables['stack_members'] = None
+
+        new_manifest = {'format': FORMAT, 'version': VERSION, 'section': section, 'width': width, 'height': height, 'tile': TILE,
+                        'tiles': {f'{row}.{col}': entry for (row, col), entry in sorted(sliced_tiles.items())},
+                        'tables': {name: new_tables[name] for name in TABLES}}
+        new_name = write_or_disk_error(self.write_manifest, new_manifest)
+        joined = _to_le_bytes(out_ids) + _to_le_bytes(array('I', sorted_stacks))
+        return ({'manifest': new_name, 'width': width, 'height': height, 'tile_count': len(sliced_tiles),
+                 'object_count': len(out_ids), 'stack_count': len(sorted_stacks),
+                 'sha256': hashlib.sha256(joined).hexdigest()}, joined)
 
 
 class Staging:

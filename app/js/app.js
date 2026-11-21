@@ -33,6 +33,7 @@ import { nestedIndicator, singleFlight } from './singleflight.js';
 import { joinCoreTables } from './coremerge.js';
 import { createTiledProject } from './tiledproject.js';
 import { FORMAT_VERSION_WINDOW, opensReadOnly, projectFormatVersion, serTiledSection } from './tiledrecord.js';
+import { createTiledSplitController } from './tiledsplitui.js';
 import { createTiledState } from './tiledstate.js';
 import { createTiledTools } from './tiledtools.js';
 import { createTiledView } from './tiledview.js';
@@ -386,10 +387,7 @@ function pickCore(n) {
     dlg.showModal();
   });
 }
-/* ───────────── M8.4.15: tiled sections (behind SEDCORETOOL_TILED_SECTIONS=1 and the engine experiment) ─────────────
-   An image larger than the maximum size when adding images gets a pixel pyramid in the engine's tile store. The section keeps a small working
-   image from one level of it (so the rest of the program works as on a reduced section) and the viewer draws full-resolution tiles over it.
-   Not saved yet and not editable yet (cards M8.4.16 and M8.4.18): the interface says so. */
+/* M8.4.15+: tiled sections (behind SEDCORETOOL_TILED_SECTIONS=1 and the engine experiment). */
 const TILES = /** @type {any} */ (window).corantoolDesktop?.tiles?.enabled === true ? /** @type {any} */ (window).corantoolDesktop.tiles : null;
 
 /* Tools that a tiled section does not have yet (ARCHITECTURE §3.4 decision 8). Each refusal shows the one message `tiles.unavailable`.
@@ -413,12 +411,6 @@ function putMaskTile(s, row, col, labels, exclude) {
   requestRender();
 }
 
-/* Strokes on a tiled section (card M8.4.16 step 3). Brush, erase, exclude and include run today's code (paintAt, addPx, setLabel, setEx) on an
-   edit window (decision A: the visible level-0 mask tiles plus a margin of the brush radius, as flat arrays), seen through `windowSection`;
-   what each pointer move wrote is copied back into the tiles and into the working image's reduced masks. The window refuses beyond
-   WINDOW_TILES tiles with "zoom in to edit" (decision B). Object statistics are recomputed per tile afterwards from the level-0 pixels
-   (`tiledStatsRunner`). Tiled strokes keep no pixel log: their undo step keeps a copy of each tile before its first write (step 5,
-   `tiledundo.js`). */
 const sourceBox = (o) => (o?.sbox ? { x0: o.sbox[0], y0: o.sbox[1], x1: o.sbox[2] + 1, y1: o.sbox[3] + 1 } : null);
 /** The analysis area of a tiled section in source pixels (half-open). */
 const sourceRoi = (s) => ({ x0: s.roi.x0 * s.ds, y0: s.roi.y0 * s.ds, x1: Math.min(s.roi.x1 * s.ds, s.maskTiles.width), y1: Math.min(s.roi.y1 * s.ds, s.maskTiles.height) });
@@ -427,7 +419,7 @@ const sourceRoi = (s) => ({ x0: s.roi.x0 * s.ds, y0: s.roi.y0 * s.ds, x1: Math.m
 const { level0Rgba, tiledStatsRunner, tiledCounts, queueTileCounts, analyzeTiled, recoverEngine, hexDigest, storeProject, bridgeResult, maskLoader,
   maskSync } = createTiledState({
   TILES, get TILES_ONLY() { return TILES_ONLY; }, toast, afterChange, analysisProject: () => analysisProject(), analyze, effClassArray, renderResults, requestRender,
-  sourceBox, sourceRoi,
+  sourceBox, sourceRoi, onStatsExceeded: (s) => { if (s === sec()) tiledSplit.render(s); },
 });
 /** Card M8.4.39: the busy sign stays while any busy operation runs (they overlap: a log redraw during a load, a wait for statistics). */
 const busyShown = nestedIndicator(() => { $('busy').hidden = false; }, () => { $('busy').hidden = true; });
@@ -2371,10 +2363,10 @@ function renderSectionForm() {
     && s.bottom > s.top && Object.hasOwn(UNIT_TO_CM, s.units));
   $('secSel').innerHTML = S.sections.map((x, k) => `<option value="${esc(k)}" ${k === S.cur ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
   for (const id of ['secName', 'secTop', 'secBottom', 'secUnits', 'secDel', 'roiBtn', 'roiReset', 'rotL', 'rotR', 'detectBtn', 'clearCand', 'secRes', 'resAll']) $(id).disabled = !s;
-  if (!s) { void tiledSource.render(null); return; }
+  if (!s) { void tiledSource.render(null); tiledSplit.render(null); return; }
   // kept byte for byte (D2), or locked until its image is located (card M8.4.18a-b): its saved record is what a save writes
   if (s.frozen) for (const id of ['secName', 'secTop', 'secBottom', 'secUnits', 'roiBtn', 'roiReset', 'rotL', 'rotR', 'detectBtn', 'clearCand', 'secRes', 'resAll']) /** @type {HTMLInputElement} */ ($(id)).disabled = true;
-  void tiledSource.render(s);
+  void tiledSource.render(s); tiledSplit.render(s);
   if (s.tiled && TILED_BLOCKED_TOOLS.has(S.tool)) setTool('pan');   // a tool chosen on another section does not follow into a tiled one
   $('secName').value = s.name; $('secTop').value = s.top; $('secBottom').value = s.bottom; $('secUnits').value = s.units;
   const ppu = pxPerCm(s);
@@ -3128,6 +3120,11 @@ const { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTile
   TILES, get settleDeadlineMs() { return settleDeadlineMs; }, toast, storeProject, maskSync, maskLoader, newSection, sectionFields, greyRgba, sourceRoi,
   tileBuildDialog, tiledCounts, tiledStatsRunner, tiledWorkingImage, serTiledSection, hexDigest,
 });
+/** Card M8.4.43: splitting a tiled section into parts lives in tiledsplitui.js (pure geometry in tiledsplit.js). */
+const tiledSplit = createTiledSplitController({
+  TILES, get settleDeadlineMs() { return settleDeadlineMs; }, readOnlyProject: () => readOnlyProject, storeProject, maskSync, loadTiledSection,
+  stopTiledWork, discardEditHistory, resetTiledTools, tileBuildDialog, analyze, selectSection, scheduleLearn, scheduleLog, markDirty, toast, esc: (text) => esc(text),
+});
 
 /** D2 of card M8.4.18: without the engine a tiled section is a grey placeholder, never edited, and its record is saved back unchanged. */
 function placeholderSection(q) {
@@ -3137,8 +3134,6 @@ function placeholderSection(q) {
   s.placeholder = q; s.frozen = 'engine';
   return s;
 }
-
-
 
 /* V0.36: version 5 = trace overlaps (stacks, V0.20), cell edits (V0.35). A newer file opens read-only. Card M8.4.18a: version 6 = a project with tiled
    sections, written only when it has one, so every other project stays version 5 byte for byte. Card M8.4.42: version 7 (FORMAT_VERSION_WINDOW,
@@ -4648,5 +4643,5 @@ window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, read
   tiledCountsIdle: () => S.sections.every((q) => !q._counts || (!q._counts.runner.running && q._counts.counts.ready)),
   tiledCountsStats: () => { const q = sec()?._counts; return q ? { tiles: q.counts.hists.size, bytes: q.counts.bytes } : null; }, tiledMasksLoad: (index) => { const q = S.sections[index], m = q.maskTiles; return maskLoader(q).want([...m.stored].map((i) => [Math.floor(i / m.cols), i % m.cols])); },   // card M8.4.29 tests: a reopened section's stored tiles into the page
   tiledStatsIdle: () => S.sections.every((q) => !q._statsRunner || q._statsRunner.idle),
-  masksSettled: () => S.sections.every((q) => !q.maskTiles || !q._maskSync || q._maskSync.settled), mergeObjects, deleteObjects, selectSection, forceTiledSections: (on) => { forceTiled = !!on; },
+  masksSettled: () => S.sections.every((q) => !q.maskTiles || !q._maskSync || q._maskSync.settled), splitTiledSection: (s, count, opts) => tiledSplit.splitSection(s ?? sec(), count, opts), mergeObjects, deleteObjects, selectSection, forceTiledSections: (on) => { forceTiled = !!on; },
   saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };

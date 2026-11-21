@@ -404,3 +404,27 @@ test('card Q13: a discard refused with BUSY is tried again; one refused otherwis
   assert.deepEqual(await other.call(1, 'maskDiscard', second), { ok: {} }, 'the record was kept, so the page may try again');
   assert.deepEqual(failing.discarded, [second, second]);
 });
+
+test('card M8.4.43: maskSlice validates arguments, forwards to the engine and records the written manifest', async (t) => {
+  const calls = [];
+  const manifest = 'a'.repeat(64), sliced = 'b'.repeat(64);
+  const payload = Buffer.from(new Uint32Array([7, 9, 1]).buffer);
+  const engine = {
+    async request(op, arg) {
+      calls.push([op, arg]);
+      if (op === 'mask.slice') return { manifest: sliced, width: 600, height: 1024, tile_count: 2, object_count: 2, stack_count: 1, bytes: payload };
+      return {};
+    },
+  };
+  const ipc = createTileIpc({ engine, projectsRoot: temporary(t) });
+  const bad = await ipc.call(1, 'maskSlice', 'p1', 'not-a-hash', 'part1', 0, 2);
+  assert.deepEqual(bad, { error: { code: 'INVALID_REQUEST', field: 'manifest' } });
+  assert.deepEqual(await ipc.call(1, 'maskSlice', 'p1', manifest, 'bad/sec', 0, 2), { error: { code: 'INVALID_REQUEST', field: 'section' } });
+  assert.deepEqual(await ipc.call(1, 'maskSlice', 'p1', manifest, 'part1', 2, 2), { error: { code: 'INVALID_REQUEST', field: 'rows' } });
+  assert.deepEqual(await ipc.call(1, 'maskSlice', 'p1', manifest, 'part1', -1, 2), { error: { code: 'INVALID_REQUEST', field: 'rows' } });
+  assert.equal(calls.length, 0, 'invalid arguments never reach the engine');
+
+  const ok = await ipc.call(1, 'maskSlice', 'p1', manifest, 'part1', 0, 2);
+  assert.deepEqual(ok, { ok: { manifest: sliced, width: 600, height: 1024, tileCount: 2, objectCount: 2, stackCount: 1, bytes: payload } });
+  assert.deepEqual(calls, [['mask.slice', { project: 'p1', manifest, section: 'part1', row0: 0, row1: 2 }]]);
+});

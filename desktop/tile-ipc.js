@@ -714,6 +714,20 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
       const result = await engine.request('mask.read', { project, manifest, layer, positions });
       return { tiles: result.tiles.map(({ row, col, byte_length }) => ({ row, col, byte_length })), bytes: result.bytes };
     },
+    /** Card M8.4.43: a new stored version from tile rows [row0, row1) of a stored version, reusing its tile blobs; returns the new manifest and kept object/stack IDs. */
+    async maskSlice(owner, project, manifest, section, row0, row1) {
+      checkAccess(project);
+      if (typeof manifest !== 'string' || !SHA256.test(manifest)) reject('INVALID_REQUEST', 'manifest');
+      if (typeof section !== 'string' || !SECTION.test(section)) reject('INVALID_REQUEST', 'section');
+      if (!isPosition(row0) || !isPosition(row1) || !(row0 < row1)) reject('INVALID_REQUEST', 'rows');
+      const result = await engine.request('mask.slice', { project, manifest, section, row0, row1 });
+      if (typeof result?.manifest !== 'string' || !SHA256.test(result.manifest) || !result.bytes
+          || result.bytes.length !== (result.object_count + result.stack_count) * 4) reject('INTERNAL', 'slice');
+      opened.add(project);
+      recordWritten(project, result.manifest);
+      return { manifest: result.manifest, width: result.width, height: result.height, tileCount: result.tile_count,
+        objectCount: result.object_count, stackCount: result.stack_count, bytes: result.bytes };
+    },
   };
 
   return {

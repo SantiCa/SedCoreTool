@@ -18,18 +18,18 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.152, `8ee9776`) is contained in it.
 - **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153; Q10 must be done before it.
-- **Last verified code commit:** Q13 + M8.4.42 (this commit; see `git log`). Full checks on Windows: `npm test` 596; typecheck; `pytest -q`
-  924 passed / 9 skipped; ruff; `sync_version --check`; `tiled-sections.mjs`; `desktop.mjs` engine off and on.
-- **GitHub:** `f896132` (code of M8.4.37): all green on three systems (milestone gate of part C). Since `89d080b`, *Desktop builds* fails on
-  **macOS only** (3 commits, `cb3e240` included) in `tiled-sections.mjs`: "reopened, no redraw by hand: drawn pixel = source pixel" (screen
-  `[0,0,0]`, source `[255,255,255]`, tile state cached and idle); `tests` green. Not diagnosed. **Open question for the maintainer:** a card to
-  diagnose it (the check comes from M8.4.39).
+- **Last verified code commit:** M8.4.43 (this commit; see `git log`). Full checks on Windows: `npm test` 602 pass / 0 fail; typecheck;
+  `pytest -q` 927 passed / 9 skipped; ruff; `sync_version --check`; `tiled-sections.mjs`; `desktop.mjs` engine off and on.
+- **GitHub:** `f896132` (code of M8.4.37): all green on three systems (milestone gate of part C). On `4676908` (Q13 + M8.4.42): `tests`
+  green; *Desktop builds* green on Windows, failed in `tiled-sections.mjs` on macOS (same failure since `89d080b`: "reopened, no redraw by
+  hand: drawn pixel = source pixel") and on Linux (run `44951549785`, not diagnosed). **Open question for the maintainer:** a card to
+  diagnose the macOS/Linux `tiled-sections.mjs` failures.
 - **Checks due:** the GitHub result of this commit.
 - **Found by the run, not in it:** **Q11** (hostile ML settings stop the classifier; from Q9), **Q12** (an evicted placeholder section cannot
-  rebuild its grey image; from M8.4.39). **Q13** done (21 Nov 2026, maintainer's choice: before finishing M8.4.42).
+  rebuild its grey image; from M8.4.39). **Q13** done (21 Nov 2026).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
-  the release gate. Decisions X1-X4 (splitting a too-dense section) approved as recommended.
-- **Next:** **M8.4.43** (split a tiled section into parts; most capable, effort high, to a fresh sub-agent), then part B as decided
+  the release gate. Decisions X1-X4 (splitting a too-dense section) approved as recommended and delivered (M8.4.41–M8.4.43 done).
+- **Next:** part B starting with **M8.4.9** (section pixels resident in the engine; review/implement with most capable, effort high) as decided
   by I, then M8.5 (needs A1). `Q10` before V0.153; `A4` open.
 - **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) done, milestone gate met (M8.4.19); part B not started; M8.5 must not start.
   The engine path fails the timing gate of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates)
@@ -453,24 +453,7 @@ Decisions **X1-X4** below were **approved by the maintainer on 21 Nov 2026, as r
   (byte-equal record); a format-7 project opens read-only in a build that knows only format 6 (simulated).
 - **Done when:** the tests pass; development gate. Nothing in the interface creates a window yet.
 
-##### M8.4.43 - Split a tiled section into parts — state: Ready after M8.4.42 (X1-X4 approved 21 Nov 2026)
-
-- **Goal:** from the message of M8.4.41 (and from the section's menu), the user splits a tiled section into the parts X1 gives, at mask-tile
-  boundaries near equal heights; each part keeps its objects (same ids, classes, ichnotaxa), its depths at its rows and its share of the
-  region of interest and marks; the parts' interval tables together equal the original's.
-- **Read first:** M8.4.42; `copy_from` and `mask.copy` (`store/masks.py`, `engine/server.py`); `MaskStore` manifests and tables; `secDel`,
-  `newSection`, `depthAtRow`; contract §8.7.
-- **Change:** a store operation that writes a new version from a range of tile rows of a stored version, reusing its blobs (content-addressed,
-  no re-encoding) and keeping the tables of the objects present in that range (`store/masks.py`, `engine/server.py`, contract §8.7, Python
-  tests); the page action, its confirmation and the replacement (X3) in a controller module (not `app.js`); i18n texts.
-- **Do not touch:** the mask-store and pyramid formats; the original's stored version until the parts are saved.
-- **Model:** most capable, effort high (editing that could lose user work, the store, the saved format).
-- **Tests:** split then compare: the union of the parts' masks equals the original's, each object keeps its pixels and class, the interval
-  tables summed over the parts equal the original's (exact), depths continuous at the boundary; a split stopped half-way (engine stopped,
-  disk full) leaves the original section and its saved version intact; save, reopen and folder backup of the parts; Python tests of the
-  range copy (blobs reused, damaged blob refused).
-- **Done when:** the tests pass and the synthetic section of M8.4.18d splits into parts that each stay under the budget, or the message of
-  M8.4.41 says that it cannot (X1); development gate.
+- [x] **M8.4.43 - Split a tiled section into parts** (done 21 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased); record: [history](roadmap-history.md#m8443---split-a-tiled-section-into-parts)).
 
 #### M8.4.20 - Engine speed: what is left of the "velocidad del motor" list — state: Ready after M8.4.8 (placed here at the maintainer's request, 15 November 2026)
 

@@ -1296,6 +1296,175 @@ try {
     console.log('Window block, sends:', JSON.stringify(await on.page.evaluate(() => window.ichantool.S.sections.filter((q) => q._maskSync).map((q) => ({ id: q.id, failures: q._maskSync.failures, lastError: q._maskSync.lastError ?? null })))));
     fs.rmSync(cutPng, { force: true });
     console.log(`Row window ${rows.y0}-${rows.y1} of the stored image against a source of only those rows: identical working image, ${cut.runs.length} label runs, ${cut.objects.length} objects with statistics, ${cutTable.bins.length} bins; saved as format 7`);
+
+    // Card M8.4.43: split a tiled section into parts from the M8.4.41 banner, compare masks/objects/interval tables/depths, verify a half-way
+    // failure leaves the original intact, then save, reopen and folder-backup the parts.
+    {
+      const splitSetup = await on.page.evaluate(async (id) => {
+        const { S } = window.ichantool, idx = S.sections.findIndex((q) => q.id === id), s = S.sections[idx];
+        window.ichantool.selectSection(idx);
+        s.top = 100; s.bottom = 110; s.units = 'cm';
+        s.roi = { x0: 0, y0: 0, x1: s.w, y1: s.h };
+        s.marks = [{ id: 'ms1', x: 50, y: 100, cls: S.classes[0].id }, { id: 'ms2', x: 80, y: 4000, cls: S.classes[1]?.id || S.classes[0].id }];
+        s.manual = [{ from: 100, to: 110, BI: 3, ii: 4 }];
+        // Ensure a tile in the top half AND a tile in the bottom half hold labels so both parts carry masks and objects.
+        const firstId = [...s.objects.keys()][0], secondId = [...s.objects.keys()][1] ?? firstId;
+        const lTop = new Int32Array(512 * 512); for (let y = 20; y < 80; y++) lTop.fill(firstId, y * 512 + 20, y * 512 + 120);
+        const lCross = new Int32Array(512 * 512); for (let y = 480; y < 512; y++) lCross.fill(secondId, y * 512 + 40, y * 512 + 100);
+        const lCross2 = new Int32Array(512 * 512); for (let y = 0; y < 40; y++) lCross2.fill(secondId, y * 512 + 40, y * 512 + 100);
+        window.ichantool.putMaskTile(0, 0, lTop, null);
+        window.ichantool.putMaskTile(4, 0, lCross, null);
+        window.ichantool.putMaskTile(5, 0, lCross2, null);
+        s._maskSync?.request([]);
+        window.ichantool.analyze(s);
+        for (let k = 0; k < 600 && !(window.ichantool.masksSettled() && window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle()); k++) await new Promise((r) => setTimeout(r, 50));
+        await window.ichantool.saveNow();
+        for (let k = 0; k < 600 && !window.ichantool.masksSettled(); k++) await new Promise((r) => setTimeout(r, 50));
+        await window.ichantool.saveNow();
+        // Collect full-resolution pixel digest per row, object pixel counts, and interval-table pixel totals.
+        await window.ichantool.tiledMasksLoad(idx);
+        const W = s.maskTiles.width, H = s.maskTiles.height;
+        const labels = new Int32Array(W * H), exclude = new Uint8Array(W * H), objPx = {};
+        for (let y = 0; y < H; y++) {
+          const tr = Math.floor(y / 512), ty = y - tr * 512;
+          for (let x = 0; x < W; x++) {
+            const tc = Math.floor(x / 512), tx = x - tc * 512, e = s.maskTiles.get(tr, tc);
+            const lv = e?.labels ? e.labels[ty * 512 + tx] : 0, ev = e?.exclude ? e.exclude[ty * 512 + tx] : 0;
+            labels[y * W + x] = lv; exclude[y * W + x] = ev;
+            if (lv > 0) objPx[lv] = (objPx[lv] || 0) + 1;
+            else if (lv < 0) for (const oid of s.stacks[-lv]) objPx[oid] = (objPx[oid] || 0) + 1;
+          }
+        }
+        const hex = async (bytes) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
+        let validSum = 0, bioSum = 0; const clsSum = S.classes.map(() => 0);
+        for (const b of s.bins) {
+          validSum += b.valid;
+          if (b.pct !== null) { bioSum += Math.round((b.pct / 100) * b.valid); b.classPct.forEach((p, k) => { clsSum[k] += Math.round((p / 100) * b.valid); }); }
+        }
+        const classesById = Object.fromEntries([...s.objects.values()].map((o) => [o.id, o.cls]));
+        return { idx, name: s.name, manifest: s._savedRecord.tiled.manifest, top: s.top, bottom: s.bottom, W, H,
+          labelsHash: await hex(new Uint8Array(labels.buffer)), excludeHash: await hex(exclude),
+          objPx, classesById, validSum, bioSum, clsSum, sectionsCount: S.sections.length };
+      }, cutId);
+
+      // (a) Trigger the M8.4.41 budget trip and verify the actionable banner appears.
+      const banner = await on.page.evaluate((idx) => {
+        const s = window.ichantool.S.sections[idx];
+        s._statsRunner.stats.exceed();
+        return {
+          warnHidden: document.getElementById('secStatsWarning').hidden,
+          btnHidden: document.getElementById('secStatsSplit').hidden,
+          btnText: document.getElementById('secStatsSplit').textContent,
+        };
+      }, splitSetup.idx);
+      assert.equal(banner.warnHidden, false, 'M8.4.41 banner is visible');
+      assert.equal(banner.btnHidden, false, 'split button is visible in the banner');
+
+      // (b) Split stopped half-way (simulated disk full on part 2): original section and its stored manifest stay intact.
+      const origManifestFile = path.join(await storeFolder(), 'tiles', 'manifests', `${splitSetup.manifest}.json`);
+      assert.ok(fs.existsSync(origManifestFile), 'original manifest is on disk');
+      const halfWay = await on.page.evaluate(async (idx) => {
+        const s = window.ichantool.S.sections[idx], origSlice = window.corantoolDesktop.tiles.maskSlice;
+        let n = 0;
+        const slice = (...args) => (++n === 2 ? Promise.resolve({ error: { code: 'LIMIT_EXCEEDED', field: 'disk' } }) : origSlice(...args));
+        const out = await window.ichantool.splitTiledSection(s, 2, { confirm: false, slice });
+        return { out: out === null ? null : out.length, stillPresent: window.ichantool.S.sections[idx] === s, count: window.ichantool.S.sections.length, manifest: s._savedRecord.tiled.manifest };
+      }, splitSetup.idx);
+      assert.deepEqual(halfWay, { out: null, stillPresent: true, count: splitSetup.sectionsCount, manifest: splitSetup.manifest }, 'half-way failure leaves original section intact');
+      assert.ok(fs.existsSync(origManifestFile), 'original manifest file stays on disk');
+
+      // (c) Real split from the M8.4.41 banner button + confirmation dialog (X3a).
+      await on.page.click('#secStatsSplit');
+      await on.page.waitForSelector('#splitOk', { timeout: 10000 });
+      const dialogItems = await on.page.evaluate(() => [...document.querySelectorAll('#splitList li')].map((li) => li.textContent));
+      assert.equal(dialogItems.length, 2, 'confirmation names both parts and their depths: ' + JSON.stringify(dialogItems));
+      assert.ok(dialogItems[0].includes('100') && dialogItems[1].includes('110'), 'depths shown in confirmation: ' + JSON.stringify(dialogItems));
+      await on.page.click('#splitOk');
+      await on.page.waitForFunction(([n, idx]) => window.ichantool.S.sections.length === n + 1 && !!window.ichantool.S.sections[idx]?.tiled?.window && !document.querySelector('dialog[open]'),
+        { timeout: 120000, polling: 100 }, [splitSetup.sectionsCount, splitSetup.idx]);
+      await on.page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle(), { polling: 100, timeout: 120000 });
+      assert.ok(fs.existsSync(origManifestFile), 'original manifest stays on disk until the parts are saved');
+
+      const verifyParts = async (label) => {
+        const res = await on.page.evaluate(async ([idx, W, H]) => {
+          const { S } = window.ichantool, parts = [S.sections[idx], S.sections[idx + 1]];
+          for (let k = 0; k < parts.length; k++) await window.ichantool.tiledMasksLoad(idx + k);
+          const labels = new Int32Array(W * H), exclude = new Uint8Array(W * H), objPx = {}, classesById = {};
+          let validSum = 0, bioSum = 0; const clsSum = S.classes.map(() => 0);
+          for (const p of parts) {
+            const py0 = p.tiled.window.y0, pH = p.maskTiles.height;
+            for (const o of p.objects.values()) classesById[o.id] = o.cls;
+            for (let y = 0; y < pH; y++) {
+              const tr = Math.floor(y / 512), ty = y - tr * 512;
+              for (let x = 0; x < W; x++) {
+                const tc = Math.floor(x / 512), tx = x - tc * 512, e = p.maskTiles.get(tr, tc);
+                const lv = e?.labels ? e.labels[ty * 512 + tx] : 0, ev = e?.exclude ? e.exclude[ty * 512 + tx] : 0;
+                labels[(py0 + y) * W + x] = lv; exclude[(py0 + y) * W + x] = ev;
+                if (lv > 0) objPx[lv] = (objPx[lv] || 0) + 1;
+                else if (lv < 0) for (const oid of p.stacks[-lv]) objPx[oid] = (objPx[oid] || 0) + 1;
+              }
+            }
+            for (const b of p.bins) {
+              validSum += b.valid;
+              if (b.pct !== null) { bioSum += Math.round((b.pct / 100) * b.valid); b.classPct.forEach((v, k) => { clsSum[k] += Math.round((v / 100) * b.valid); }); }
+            }
+          }
+          const hex = async (bytes) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
+          return {
+            ids: parts.map((p) => p.id), windows: parts.map((p) => p.tiled.window), frozen: parts.map((p) => p.frozen ?? null),
+            depths: parts.map((p) => [p.top, p.bottom]), marks: parts.map((p) => p.marks.map((m) => [m.id, m.y])),
+            allHaveStats: parts.every((p) => [...p.objects.values()].every((o) => !!o.stats)),
+            labelsHash: await hex(new Uint8Array(labels.buffer)), excludeHash: await hex(exclude),
+            objPx, classesById, validSum, bioSum, clsSum,
+          };
+        }, [splitSetup.idx, splitSetup.W, splitSetup.H]);
+        assert.deepEqual(res.frozen, [null, null], `${label}: both parts unlocked`);
+        assert.equal(res.allHaveStats, true, `${label}: every object in both parts has statistics`);
+        assert.deepEqual(res.windows, [{ y0: 0, y1: 2560 }, { y0: 2560, y1: 5000 }], `${label}: mask-tile aligned windows`);
+        assert.equal(res.depths[0][0], splitSetup.top, `${label}: top depth matches`);
+        assert.equal(res.depths[0][1], res.depths[1][0], `${label}: depths continuous at boundary`);
+        assert.equal(res.depths[1][1], splitSetup.bottom, `${label}: bottom depth matches`);
+        assert.deepEqual(res.marks, [[['ms1', 100]], [['ms2', 4000 - 2560]]], `${label}: marks partitioned and shifted`);
+        assert.equal(res.labelsHash, splitSetup.labelsHash, `${label}: union of labels equals original`);
+        assert.equal(res.excludeHash, splitSetup.excludeHash, `${label}: union of exclusion equals original`);
+        assert.deepEqual(res.objPx, splitSetup.objPx, `${label}: every object keeps its pixels`);
+        for (const [id, cls] of Object.entries(res.classesById)) assert.equal(cls, splitSetup.classesById[id], `${label}: object ${id} keeps its class`);
+        assert.equal(res.validSum, splitSetup.validSum, `${label}: summed valid pixels equal original`);
+        assert.equal(res.bioSum, splitSetup.bioSum, `${label}: summed bioturbated pixels equal original`);
+        assert.deepEqual(res.clsSum, splitSetup.clsSum, `${label}: summed class pixels equal original`);
+        return res;
+      };
+
+      const afterSplit = await verifyParts('after split');
+      // (d) Save (format 7) and reopen: identical parts.
+      const savedVer = await on.page.evaluate(async () => {
+        for (let k = 0; k < 600 && !window.ichantool.masksSettled(); k++) await new Promise((r) => setTimeout(r, 50));
+        await window.ichantool.saveNow();
+        for (let k = 0; k < 600 && !window.ichantool.masksSettled(); k++) await new Promise((r) => setTimeout(r, 50));
+        await window.ichantool.saveNow();
+        return window.ichantool.serialize().version;
+      });
+      assert.equal(savedVer, 7, 'split parts saved as format 7');
+      await on.page.evaluate(async () => {
+        const { getProject } = await import(new URL('js/storage.js', location.href).href);
+        await window.ichantool.loadProject(await getProject(window.ichantool.S.id));
+      });
+      await on.page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle(), { polling: 100, timeout: 120000 });
+      await verifyParts('reopened');
+      // (e) Folder backup carries both split parts and their manifests.
+      const splitBackup = await backupFiles(on.page, 'backup-m8443');
+      const splitBkName = Object.keys(splitBackup).find((name) => name.endsWith('/project.json')).split('/')[0];
+      const splitBkProj = JSON.parse(Buffer.from(splitBackup[splitBkName + '/project.json'].b64, 'base64').toString('utf8'));
+      const splitBkSections = splitBkProj.cores.flatMap((c) => c.sections).filter((q) => afterSplit.ids.includes(q.id));
+      assert.equal(splitBkProj.version, 7, 'folder backup writes format 7');
+      assert.equal(splitBkSections.length, 2, 'folder backup keeps both split parts');
+      for (const q of splitBkSections) {
+        assert.ok(q.tiled?.window && splitBackup[`${splitBkName}/manifests/${q.tiled.manifest}.json`], 'backup holds manifest and window of ' + q.id);
+      }
+      await on.page.waitForFunction(() => window.ichantool.S.cores.flatMap((c) => c.sections).every((q) => !q._maskSync || (q._maskSync.settled && !q._maskSync.running)),
+        { polling: 100, timeout: 120000 });
+      console.log('Split tiled section (M8.4.43): half-way failure kept original intact; UI split produced 2 parts with identical masks, object pixels/classes, summed interval tables and continuous depths; saved (format 7), reopened and folder-backed up');
+    }
   }
   // (3) Deleting a project from the library deletes its folder, and only that one.
   const originalFolder = manifestFile.slice(0, manifestFile.indexOf(path.sep + 'tiles' + path.sep));
