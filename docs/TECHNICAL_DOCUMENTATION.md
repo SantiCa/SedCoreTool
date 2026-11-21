@@ -3236,7 +3236,8 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   the measured heap was within 1% of it for tiles of tens of thousands of objects and 7-18% from it for tiles of 200-2,000 ([record](validation/M8.4.37-tiled-stats-memory-electron.json);
   Node's V8, without pointer compression, takes about 1.8 times as much: [record](validation/M8.4.37-tiled-stats-memory-node.json)). The budget is above
   the statistics the largest reopening cache can hold (at most about 234 MiB by the estimate), so a section whose statistics can be cached is never cut.
-  Beyond it they are all dropped and none is kept until the section is opened again, as the row histograms below: the runner stops, no object is reported
+  Beyond it they are all dropped and none is kept until the section is opened again (which computes them again: with the same masks they go beyond
+  the budget again), as the row histograms below: the runner stops, no object is reported
   (none is removed), every object of the section loses `stats`, `feat`, `area`, `bbox` and `sbox` (the panel and the objects table say the measurements
   are not available, the classifier has no descriptors for them, a save writes the objects without `st`), operations that need an object's box refuse
   with that reason, no reopening cache is written, and the page says so once. The synthetic section of M8.4.18d (about 64,300 of 65,535 objects in every

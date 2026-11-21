@@ -29,8 +29,8 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Authorised run of 21 Nov 2026 ("sigue con el resto") finished:** `Q9`, `M8.4.39`, `M8.4.40`, `M8.4.37` done. **Next: `M8.4.19`**, the
   milestone gate of part C (needs the maintainer's go-ahead; it also measures the synthetic section with its image, which M8.4.37 extrapolated).
   Then part B as decided by I at the review of M8.4.19, then M8.5 (needs A1). `Q10` before V0.153; `A4` after M8.4.19.
-- **Decision for the maintainer (from M8.4.37):** after its statistics budget trips, a section refuses delete, merge and cut until reopened;
-  keep this, or a later card keeps a grow-only box so those operations still work (recommended: keep; real cores stay far below the budget).
+- **Decisions waiting (21 Nov 2026):** X1-X4 for splitting a section too dense for its object statistics (cards M8.4.41-M8.4.43,
+  asked by the maintainer after M8.4.37; recommendations above the cards).
 - **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) in its last cards; part B not started; M8.5 must not start.
   The engine path fails the timing gate of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates)
   for whole sections; the tile store (decision of 15 Nov 2026) is the answer for large images.
@@ -391,6 +391,73 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
   promoting the flag (release gate).
 
 - **Result of the measurements (15 November 2026):** [summary](validation/M8.4.8-final-summary.md). Matched timing still fails for (a) and (b) (public 226 and 166 ms against limits of 51 and 60; synthetic 305 and 271 against 51 and 68); (c), the memory peak and parity pass; the interactive targets are met for (a) on the public example and not for (b); input during a stroke is 15.6 ms p95 with the engine on and off; the desktop end-to-end test survives a coordinator killed during an undo. The three-system milestone gate is the push of the work branch (item 3 above needs the CI runners).
+
+**Splitting a section too dense for its object statistics (requested by the maintainer on 21 Nov 2026, after M8.4.37).** When the statistics
+of a tiled section go beyond `STATS_BUDGET_BYTES`, reopening does not help: they trip again at every opening, and delete, merge and cut stay
+refused. The program should suggest splitting the section and then do it. Three cards, in this order, after M8.4.19 (not part of its gate).
+Decisions **X1-X4** (below) are waiting for the maintainer; M8.4.42 and M8.4.43 do not start before them.
+
+- **X1 (number of parts):** (a) always two, as first asked; (b) **recommended:** the number of parts the estimate says each needs to fit with a
+  margin (at least 2), offered only up to 8 parts; beyond 8 the message says that splitting would not be enough (masks this dense usually come
+  from a detection that marked noise) and suggests reviewing the detection. Two halves fix only a section up to about twice the budget.
+- **X2 (how the parts see the image):** (a) **recommended:** each part is a row window over the same stored image (a new optional field of the
+  tiled record, no copy of the image); (b) the image is cut into new image files, one per part (no format change, but the image is stored again:
+  gigabytes for the sections this concerns).
+- **X3 (the original section):** (a) **recommended:** replaced by the parts after a confirmation that names the parts and their depths; the
+  original's stored masks stay in the store until the project's next clean-up, and in the folder backup's history; (b) kept next to the parts
+  (its statistics keep tripping).
+- **X4 (saved format, with X2a):** **recommended:** the window is written only for sections that have one, and a project that has such a section
+  is saved with format version 7, so an older SedCoreTool opens it read-only (as for any newer project) instead of showing each part as the
+  whole image. Every other project keeps format 6.
+
+##### M8.4.41 - The message of a section too dense for its object statistics suggests splitting it — state: Ready after M8.4.19 (21 Nov 2026)
+
+- **Goal:** the message shown when the statistics trip (`tiles.statsLimit`) no longer says that reopening computes them again; it says that this
+  section is too dense for the object measurements, that delete, merge and cut are not available in it, and how many parts would fit (X1).
+- **Read first:** `TiledObjectStats` (`bytes`, `exceed`) and `TiledStatsRunner` in `tiledit.js`; `statsDropped` in `tiledstate.js`; the
+  *As built* of M8.4.37 in `roadmap-history.md`; `tiles.statsLimit` in `i18n.js`.
+- **Change:** `tiledit.js` (an estimate of the whole section's statistics at the trip: the bytes per tile counted so far times the section's
+  tiles that hold labels; a pure function, tested in Node); `tiledstate.js` (the message with the number of parts); `i18n.js` (Spanish and English).
+- **Do not touch:** the budget, what is dropped, the saved project.
+- **Model:** fast, effort medium (a bounded, pure estimate and a message).
+- **Tests:** Node tests of the estimate (dense, sparse, a trip on the first tile) and of the number of parts with the X1 rule; the e2e block of
+  M8.4.37 checks the new text.
+- **Done when:** the tests pass and the message no longer promises that reopening helps; development gate.
+
+##### M8.4.42 - A tiled section can show a row window of its image — state: Blocked on X2 and X4 (21 Nov 2026)
+
+- **Goal:** a tiled section can cover only source rows `y0`-`y1` of its stored image (`tiled.window`, X2a): the viewer, the mask tiles, the
+  counts, the statistics, the source reads and the depths all work in the window's coordinates; a section without a window is unchanged.
+- **Read first:** `serTiledSection` and `sectionRecord` (`app.js`), `loadTiledSection` (`tiledproject.js`), `createTiledView` (`tiledview.js`:
+  tile placement and reads), `level0Rgba` and `sourceRoi`, `FORMAT_VERSION_TILED` and `readOnlyProject`; ARCHITECTURE §3.4; the saved-format
+  section of `docs/TECHNICAL_DOCUMENTATION.md`.
+- **Change:** those files and the technical documentation (format 7 and the window field, X4). The window starts on a multiple of 512 source rows
+  (a mask-tile boundary); coarser pyramid levels are drawn with the window's offset in source pixels.
+- **Do not touch:** the pyramid and mask-store formats, sections without a window, the interval table's formulas.
+- **Model:** most capable, effort high (a saved-format change and every coordinate path of tiled sections).
+- **Tests:** a section with a window over rows `[y0, y1)` and a section made from a source holding only those rows give identical masks, objects,
+  statistics and interval table (exact equality, Node and `tests/e2e/tiled-sections.mjs`); a format-6 project opens and saves unchanged
+  (byte-equal record); a format-7 project opens read-only in a build that knows only format 6 (simulated).
+- **Done when:** the tests pass; development gate. Nothing in the interface creates a window yet.
+
+##### M8.4.43 - Split a tiled section into parts — state: Blocked on X1-X4 and M8.4.42 (21 Nov 2026)
+
+- **Goal:** from the message of M8.4.41 (and from the section's menu), the user splits a tiled section into the parts X1 gives, at mask-tile
+  boundaries near equal heights; each part keeps its objects (same ids, classes, ichnotaxa), its depths at its rows and its share of the
+  region of interest and marks; the parts' interval tables together equal the original's.
+- **Read first:** M8.4.42; `copy_from` and `mask.copy` (`store/masks.py`, `engine/server.py`); `MaskStore` manifests and tables; `secDel`,
+  `newSection`, `depthAtRow`; contract §8.7.
+- **Change:** a store operation that writes a new version from a range of tile rows of a stored version, reusing its blobs (content-addressed,
+  no re-encoding) and keeping the tables of the objects present in that range (`store/masks.py`, `engine/server.py`, contract §8.7, Python
+  tests); the page action, its confirmation and the replacement (X3) in a controller module (not `app.js`); i18n texts.
+- **Do not touch:** the mask-store and pyramid formats; the original's stored version until the parts are saved.
+- **Model:** most capable, effort high (editing that could lose user work, the store, the saved format).
+- **Tests:** split then compare: the union of the parts' masks equals the original's, each object keeps its pixels and class, the interval
+  tables summed over the parts equal the original's (exact), depths continuous at the boundary; a split stopped half-way (engine stopped,
+  disk full) leaves the original section and its saved version intact; save, reopen and folder backup of the parts; Python tests of the
+  range copy (blobs reused, damaged blob refused).
+- **Done when:** the tests pass and the synthetic section of M8.4.18d splits into parts that each stay under the budget, or the message of
+  M8.4.41 says that it cannot (X1); development gate.
 
 #### M8.4.20 - Engine speed: what is left of the "velocidad del motor" list — state: Ready after M8.4.8 (placed here at the maintainer's request, 15 November 2026)
 
