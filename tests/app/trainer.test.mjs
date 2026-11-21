@@ -24,6 +24,9 @@ test('the managed trainer resolves current bundled Python code before its instal
   }
 });
 
+/** The smallest valid ZIP: the end record of an empty archive (card M8.4.38: the trainer checks the signature). */
+const EMPTY_ZIP = Uint8Array.from([0x50, 0x4b, 0x05, 0x06, ...new Array(18).fill(0)]);
+
 function trainerFixture(t, name = 'core') {
   const root = mkdtempSync(path.join(tmpdir(), 'sedcoretool-model-save-'));
   t.after(() => {
@@ -35,7 +38,7 @@ function trainerFixture(t, name = 'core') {
     fixture.events.push([event, data]); fixture.onEvent?.(event, data);
   } });
   fixture.trainer = trainer;
-  fixture.options = { name, zip: new Uint8Array([1, 2, 3]), epochs: 4, pretrained: false };
+  fixture.options = { name, zip: EMPTY_ZIP, epochs: 4, pretrained: false };
   fixture.dataset = { split: { train: { cores: ['train'] }, val: { cores: ['validation'] }, test: { cores: ['test'] } } };
   const legacy = path.join(root, 'models', safe(name)), legacyRun = path.join(root, 'runs', safe(name));
   fs.mkdirSync(path.join(legacyRun, 'data'), { recursive: true });

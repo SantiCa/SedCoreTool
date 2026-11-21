@@ -454,7 +454,7 @@ test('mask tiles through the real client and the page bridge: a version written,
   t.after(() => fs.rm(projectsDirectory, { recursive: true, force: true }));
   const client = await clientFixture(t, { projectsDirectory });
   const { createTileIpc } = require('../../desktop/tile-ipc.js');
-  const bridge = createTileIpc({ engine: { request: (op, payload, binary, options) => client.request(op, payload, binary, options) } });
+  const bridge = createTileIpc({ engine: { request: (op, payload, binary, options) => client.request(op, payload, binary, options) }, projectsRoot: projectsDirectory });   // stores this session creates (card M8.4.38)
   const page = 7, other = 8;
   const begun = await bridge.call(page, 'maskBegin', 'p1', 's1', 1300, 1100, null);
   assert.deepEqual([begun.ok.rows, begun.ok.cols], [3, 3]);
@@ -497,7 +497,7 @@ test('card M8.4.18c: a stored version exported through the real client and the p
   t.after(() => fs.rm(projectsDirectory, { recursive: true, force: true }));
   const client = await clientFixture(t, { projectsDirectory });
   const { createTileIpc } = require('../../desktop/tile-ipc.js');
-  const bridge = createTileIpc({ engine: { request: (op, payload, binary, options) => client.request(op, payload, binary, options) } });
+  const bridge = createTileIpc({ engine: { request: (op, payload, binary, options) => client.request(op, payload, binary, options) }, projectsRoot: projectsDirectory });   // stores this session creates (card M8.4.38)
   const page = 7, begun = await bridge.call(page, 'maskBegin', 'p1', 's1', 1300, 1100, null);
   const labels = new Int32Array(512 * 512); labels[5] = 42;
   const labelBytes = new Uint8Array(labels.buffer);

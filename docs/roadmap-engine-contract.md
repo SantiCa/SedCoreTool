@@ -553,7 +553,9 @@ Identifiers are checked against the rules above (`INVALID_REQUEST` with the fiel
 exist. A staged version lives only in the coordinator's memory: if the engine stops before `mask.commit` answers, no manifest was written
 and the base, and every earlier manifest, stays readable; the client sends its unacknowledged tiles again to a new staged version (card
 M8.4.16 step 4). The project record names each section's current manifest (card M8.4.18a); between saves a stroke adds the tiles it
-changed (compressed) and one manifest, and after a save `mask.retain` removes what no saved or current version names. The tables are not read
+changed (compressed) and one manifest, and after a save `mask.retain` removes what no saved or current version names. The main process
+(card M8.4.38) adds to `keep` every version of a store it did not create in this program session that the session did not write, so the
+versions stored before the session stay until the project is deleted (`desktop/tile-ipc.js`; technical manual §28). The tables are not read
 back: a reopened section takes its objects and stacks from the project record.
 
 **The folder follows its project (card M8.4.27).** When a project is deleted from the library, the page asks the main process to delete

@@ -59,7 +59,12 @@ Updated 21 November 2026.
      as **`A4`** (post-M8.4.19).
   - **Decisions U and V (approved by the maintainer on 21 Nov 2026, as recommended):**
     - **U (order before M8.4.19):** run **`M8.4.38`** and **`Q9`** (P0 security), then **`M8.4.39`**, **`M8.4.40`** and **`M8.4.37`** before closing
-      the part C milestone gate (`M8.4.19`), and run **`Q10`** before the next public release (`V0.153`). Next card: **`M8.4.38`**.
+      the part C milestone gate (`M8.4.19`), and run **`Q10`** before the next public release (`V0.153`).
+    - **W (store clean-up and deletion in M8.4.38, approved 21 Nov 2026):** the right to remove stored masks follows what the program session
+      wrote; versions stored before the session stay until the project is deleted (details under the card).
+  - **Progress of 21 Nov 2026 (afternoon):** `tests` and *Desktop builds* passed on Windows, macOS and Linux on `0f3d25a`, which contains
+    M8.4.36 (`864cad1`): M8.4.36 is green on three systems. **M8.4.38 is done at the development gate** (Windows; checks under the card; the
+    GitHub run of its commit is pending). **Next card: `Q9`** (escape the `innerHTML` sites; P0).
     - **V (engine request-limit semantics in M8.4.40):** replace the hard 65,536-request session limit (`server.py:149`) with a bounded sliding
       window (last 65,536 request IDs via `OrderedDict`) so sessions can run indefinitely while duplicate recent IDs are still rejected without
       breaking string/UUID request IDs.
@@ -2325,7 +2330,36 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 - **Model:** most capable, effort medium (a bounded change, but it touches what the user sees of the objects).
 - **Done when:** the synthetic section with its image opens within the budget, measured; development gate.
 
-##### M8.4.38 - Security hardening: close M8.4.34 store bypass and harden `trainer` IPC — state: Ready (third council audit, 21 Nov 2026; P0)
+##### M8.4.38 - Security hardening: close M8.4.34 store bypass and harden `trainer` IPC — state: Done at the development gate (21 Nov 2026, Windows; third council audit, P0)
+
+- **Decision W (approved by the maintainer on 21 Nov 2026, "Versiones viejas protegidas").** Step 1 as written could not be met without a
+  visible change: the main process cannot tell the page from a script in it (both use the same calls), and the page cleans up the store after
+  every save, so asking for confirmation on `maskRetain` of every reopened project would show a window at the first save of each one. Chosen:
+  the right to remove follows what this program session wrote. A store whose folder did not exist when the session first named it (`created`)
+  is cleaned up and deleted as before; in any other store a clean-up removes only versions the session wrote (earlier ones stay until the
+  project is deleted) and a deletion always needs the main-process window. Cost: each editing session of a project saved earlier leaves on
+  disk the tiles that changed from the version it opened. Options not chosen: asking once per project and session before removing earlier
+  versions; leaving the bypass for the reopened project.
+- **As built.** `tile-ipc.js`: `created`, `seen` (at most 65,536 identifiers), `written`; `contact` and `checkAccess` (opened, announced or
+  created) on every project-scoped operation; `reopen` still opens any project (the last project opens at start before the library is
+  announced) and so gives access but never the right to remove; `maskRetain` of a store not created adds every manifest on disk that the session
+  did not write to `keep` (more than 1,024: `LIMIT_EXCEEDED`, nothing removed); `deleteProjectStore` asks unless `created`; `copyProjectStore`
+  writes only into a `created` folder; staged versions remember their project. `main.js`: `fromTopAppFrame` for `engine:`, `tiles:` and
+  `trainer:`. `trainer.js`: `trainingOptions` (fixed keys; the page's epoch field allows any whole number, so the bound is 1-10,000, not the
+  field's 500), the ZIP written with `fs.promises.writeFile`, `capture` instead of `spawnSync`, `terminateTree` (taskkill `/T /F` first on
+  Windows, process group elsewhere). No change to the engine, the saved format or `app/`; `app.js` stays at 4,664 lines.
+- **What it does not cover (stated in SECURITY.md).** A script can still read the stores of projects it reopens or announces, add versions to
+  them and replace their reopening caches (checked when read), and start a training with valid options. The access check on non-removing
+  operations is defence in depth: a script can call `reopen` first.
+- **Checks (Windows, 21 Nov 2026, one after another).** `npm test` 557 passed; `npm run typecheck` passed; `tests/e2e/desktop.mjs` engine off
+  and on passed; `tests/e2e/tiled-sections.mjs` passed (one run; it deletes a project created in its own session, without a window);
+  `pytest -q` 896 passed / 9 skipped (Python 3.12); `sync_version.py --check`; `ruff check src tests tools` (Python 3.14). Not run:
+  `smoke.mjs` (the interface did not change), macOS and Linux (GitHub). Not tested by an end-to-end run: the main-process window shown when
+  deleting a project saved in an earlier session (the unit tests cover the rule; the window itself is the one of M8.4.34).
+  The new tests: `reopen` + `deleteProjectStore` asks and keeps the folder when refused; `reopen` + `maskRetain(victim, [])` names every earlier
+  version to keep and removes only the session's; every project-scoped operation on a stranger is refused before the engine; the frame check;
+  25 refused training requests (flags in core names, encoder, epochs, ZIP); no `spawnSync` in `trainer.js` and timers run during a slow
+  command; cancelling ends a grandchild process.
 
 - **Goal:** an injected renderer script cannot bypass M8.4.34's main-process confirmation for deleting or wiping another project's tile store,
   cannot read/write another project's store metadata or copied sources, and cannot inject CLI flags or freeze the Electron main process via

@@ -206,8 +206,8 @@ test('card M8.4.18a: retain and info are checked before they reach the engine', 
     if (op === 'mask.info') { const p = Promise.resolve({ section: 's1', width: 600, height: 300, tiles: 1, positions: [0, 1, 3], next: null }); p.requestId = randomUUID(); return p; }
     return request(op, payload, binary, options);
   };
-  const ipc = createTileIpc({ engine }), m = 'd'.repeat(64);
-  await ipc.call(1, 'maskBegin', 'p1', 's1', 600, 300, null);                  // the page works on this project (card M8.4.34)
+  const ipc = createTileIpc({ engine, projectsRoot: temporary(t) }), m = 'd'.repeat(64);
+  await ipc.call(1, 'maskBegin', 'p1', 's1', 600, 300, null);                  // a store this session creates (cards M8.4.34, M8.4.38)
   assert.deepEqual(await ipc.call(1, 'maskRetain', 'p1', [m]), { ok: { removed: { manifests: 2, blobs: 5 } } });
   assert.deepEqual(engine.calls.at(-1), { op: 'mask.retain', payload: { project: 'p1', keep: [m] } });
   for (const keep of ['all', [m, 'x'], Array(1025).fill(m)]) assert.deepEqual(await ipc.call(1, 'maskRetain', 'p1', keep), { error: { code: 'INVALID_REQUEST', field: 'keep' } });
@@ -229,6 +229,7 @@ test('card M8.4.29: derived files are checked before they reach the engine and s
     return request(op, payload, binary, options);
   };
   const ipc = createTileIpc({ engine }), body = Buffer.alloc(2_500_000, 7);
+  await ipc.call(1, 'announceProjects', ['p1']);                                 // a project of the library (card M8.4.38)
   assert.deepEqual(await ipc.call(1, 'derivedPut', 'p1', m, 'reopen', body), { ok: { byte_length: 2_500_000 } });
   const sent = calls.filter((c) => c.op === 'buffer.chunk');
   assert.deepEqual(sent.map((c) => c.size), [1048576, 1048576, 402848]);
@@ -263,6 +264,7 @@ test('card M8.4.18c step 3: a project\'s copy of a source is read in pieces, and
   fs.writeFileSync(path.join(root, 'p1', 'sources', copy), image);
   fs.writeFileSync(path.join(root, 'p1', 'sources.json'), JSON.stringify({ format: 'sedcoretool.sources', version: 1, sources: { [pyramid]: { size: image.length, name: 'core.png', copy } } }));
   const ipc = createTileIpc({ engine: fakeEngine(pyramid), projectsRoot: root });
+  await ipc.call(1, 'announceProjects', ['p1']);                                 // a project of the library, read for a backup (card M8.4.38)
   // Read in pieces of 8 MiB, each with its SHA-256; a project without a copy says so.
   const pieces = [];
   for (let offset = 0; offset < image.length;) {

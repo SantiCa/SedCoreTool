@@ -26,13 +26,19 @@ that page (the code builds a few hundred fragments of HTML), these limits apply 
 - **Navigation and links.** Navigation (also by redirect, and in the program's own extra windows) to an address outside the app origin is
   refused. Links that open outside the program go to the system only if they are `https:`, `http:` or `mailto:`; `file:`, `javascript:`, `data:`,
   other custom schemes and another `app:` host open nothing.
-- **Project stores on disk.** A page may delete a project's stored masks only for a project it opened in this session; for one it only announced
-  from its library listing, the main process asks the user in its own window first; any other identifier is refused. Copying a store needs an
-  opened or announced source and never overwrites another project's folder; cleaning up (`mask.retain`) is limited to opened projects. A script
-  could still call the operations on projects it announces itself, which is why the window and its default (Cancel) exist: the protection against
-  a script that can also announce is the user's answer, not the code.
+- **Project stores on disk.** The main process cannot tell the page from a script in it, so the right to remove stored data follows what this
+  program session wrote, not what the page says it works on. A store whose folder did not exist when the session first named it is this session's:
+  it may be cleaned up and deleted without a question. Any other store (a project saved earlier, also one the page reopened) is deleted only if the
+  page opened or announced it and the user agrees in a window of the main process (default: Cancel); a clean-up (`mask.retain`) there removes only
+  versions this session wrote and keeps every earlier one. An identifier the page neither opened, announced nor created is refused by every store
+  operation. A copy goes only into a folder this session created. The protection against a script that can also open or announce a project is
+  the user's answer and the rule on earlier versions, not the code's knowledge of what the user opened.
+- **Training.** Only the top frame of an app page may call the training channels. A training request is checked against fixed options, types
+  and bounds (core names never start with `-`, the encoder is one of a short list, the training ZIP has a ZIP signature and at most 2 GiB)
+  before anything is written; the trainer never runs a command synchronously in the main process, and cancelling it ends every process it started.
 - **Not covered.** A script in the page can still read and change what the page itself can (its projects in the browser database, its open
-  images) and use the program's engine operations on the projects it opened.
+  images), read the stores of projects it opens or announces, add versions to them and replace their reopening caches (which are checked when
+  read), and start a training with valid options.
 
 ## Desktop scientific runtime
 

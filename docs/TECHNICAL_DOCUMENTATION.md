@@ -3405,19 +3405,40 @@ still apply. `sectiondepth.js` follows `core.js`, `sectionanalysis.js` follows `
 
 ## 28. Repository engineering and security
 
-**Desktop hardening (card M8.4.34).** `desktop/main.js` exports the pure checks that the tests use: `safeExternalUrl` (only `https:`, `http:` and
+**Desktop hardening (cards M8.4.34 and M8.4.38).** `desktop/main.js` exports the pure checks that the tests use: `safeExternalUrl` (only `https:`, `http:` and
 `mailto:`, without credentials in a web address and at most 8,192 characters, are given to `shell.openExternal`), `isAppNavigation` (an address is
-an app page if `resolveAppPath` resolves it inside the web folder) and `DESKTOP_SCRIPT_POLICY`. `will-navigate`, `will-redirect` and
+an app page if `resolveAppPath` resolves it inside the web folder), `fromTopAppFrame` (the sender frame is an app page and is its window's main
+frame; every `engine:`, `tiles:` and `trainer:` handler refuses any other caller) and `DESKTOP_SCRIPT_POLICY`. `will-navigate`, `will-redirect` and
 `will-frame-navigate` of every window (the extra windows opened with `window.open` included) are cancelled unless the address is an app page, and
 `setWindowOpenHandler` opens an app page in a window, a web or mail address in the system and nothing else. Every `.html` file served over `app:`
 carries `Content-Security-Policy: script-src 'self' 'wasm-unsafe-eval'` as a header, which adds to (never replaces) the `<meta>` policy of the page.
-`desktop/tile-ipc.js` keeps two sets for the session: `opened` (projects for which the page began a stored version or reopened a section) and `known`
-(identifiers the page announced with `announceProjects` from the library listing, `announceStoreProjects` in `tiledproject.js`, at most 8,192).
-`deleteProjectStore` of a project that is not `opened` is refused (`INVALID_REQUEST`, `project`) unless it is `known`, and then it needs the answer
-of `confirm`, a message box of the main process (default button: cancel; `{deleted: false, declined: true}` when declined); `copyProjectStore`
-needs `from` opened or known and refuses a `to` whose folder exists and is not opened (`INVALID_REQUEST`, `from` / `to`); `maskRetain` needs an
-opened project. `EngineClient` gives each mask-store operation its own deadline (`STORE_DEADLINES_MS` in `desktop/engine.js`; the table is in
-contract §8.7) instead of the 5 s of an ordinary request, after which the engine is stopped.
+`desktop/tile-ipc.js` keeps these sets for the program session (all pages): `opened` (projects for which the page began a stored version or
+reopened a section), `known` (identifiers the page announced with `announceProjects` from the library listing, `announceStoreProjects` in
+`tiledproject.js`, at most 8,192), `created` (projects whose folder `<projects>/<project>` did not exist the first time the session named them,
+recorded in `seen`, at most 65,536 identifiers, then `LIMIT_EXCEEDED`; a project whose folder a confirmed deletion removed joins it) and `written`
+(per project, the manifests this session committed with `maskCommit`, imported with `maskImport` or copied with `copyProjectStore`; after each
+clean-up only those still on disk stay). Every operation that names a project (`maskBegin`, `maskRetain`, `maskInfo`, `maskRead`, `derivedPut`,
+`derivedGet`, `maskExport`, `maskImport`, `rememberSource`, `sourceCopyRead`, `sourceImportBegin`, `sourceInfo`, `locate`, `copySource`) refuses
+one that is neither opened, known nor created (`INVALID_REQUEST`, `project`) before anything reaches the engine; `reopen` is how the page opens a
+saved project (also before its library listing is announced) and adds it to `opened`. `deleteProjectStore` of a project that is not `created` is
+refused unless it is opened or known, and then it needs the answer of `confirm`, a message box of the main process (default button: cancel;
+`{deleted: false, declined: true}` when declined). `maskRetain` of a project that is not `created` adds to the versions to keep every manifest in
+`<projects>/<project>/tiles/manifests/` that is not in `written`, so it removes only versions this session wrote (more than 1,024 to keep:
+`LIMIT_EXCEEDED`, `keep`, nothing removed); in a `created` project it keeps exactly what the page names. `copyProjectStore` needs `from` opened,
+known or created and `to` created (`INVALID_REQUEST`, `from` / `to`). `EngineClient` gives each mask-store operation its own deadline
+(`STORE_DEADLINES_MS` in `desktop/engine.js`; the table is in contract §8.7) instead of the 5 s of an ordinary request, after which the engine is
+stopped.
+
+**Training requests (card M8.4.38).** `trainingOptions` in `desktop/trainer.js` checks a request before anything is written: only the keys `zip`,
+`name`, `val`, `test`, `epochs`, `pretrained`, `tile`, `overlap`, `encoder` and `resume`; `name` a string of at most 1,024 characters (then made
+safe by `safe`); `epochs` an integer from 1 to 10,000 (default 60); `tile` an integer from 64 to 4,096 (default 512); `overlap` an integer from 0
+to 1,024 and below `tile` (default 64); `encoder` one of `resnet18`, `resnet34`, `resnet50` (default `resnet34`); `pretrained` and `resume`
+booleans; `val` and `test` at most 1,024 core names of 1-200 characters, without control characters and never starting with `-`; for a new run
+`zip` the bytes of a ZIP (starting with a local file header or the end record of an empty archive, 22 bytes to 2 GiB; the limit is chosen, not
+measured). A refusal is `INVALID_OPTION` naming the field. The ZIP is written with `fs.promises.writeFile`. `status`, `systemPython` and
+`hasNvidia` run their commands through `capture` (an asynchronous `spawn` with a deadline: 15 s for the searches, 120 s for `unet device`; output
+kept up to 1 M characters). `cancel` ends the running command and everything it started: on Windows `taskkill /pid <pid> /T /F` and then the
+command itself if it is still there; elsewhere the command leads its own process group (`detached`), which gets `SIGKILL`.
 
 **Performance baseline.** The [M0.1 benchmark](benchmarks/M0.1.md) measures browser project opening, IndexedDB
 autosave and interval analysis, and verifies the shared interval results against the public Python API.
