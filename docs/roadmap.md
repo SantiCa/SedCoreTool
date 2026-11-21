@@ -20,18 +20,17 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153; Q10 must be done before it.
 - **Last verified code commit:** M8.4.37 (this commit; see `git log`). Full checks on Windows: `npm test` 582; typecheck; `pytest -q` 924
   passed / 9 skipped; ruff; `sync_version --check`; `tiled-sections.mjs`; `desktop.mjs` engine off and on.
-- **GitHub:** `952b36b` (M8.4.40, contains M8.4.39): `tests` and *Desktop builds* passed on Windows, macOS and Linux. On `1464f6e` the Linux job
-  had hung once in `tiled-sections.mjs` after the folder-backup step (`Runtime.callFunctionOn timed out`); the same code passed on Linux
-  afterwards: an intermittent failure to watch at M8.4.19. The run of the M8.4.37 commit is to be read at the start of the next session.
-- **Checks due:** the GitHub result of the M8.4.37 commit.
+- **GitHub:** `f896132` (code of M8.4.37): `tests` and *Desktop builds* passed on Windows, macOS and Linux (milestone gate of part C, M8.4.19).
+  The intermittent Linux hang of `tiled-sections.mjs` seen once on `1464f6e` did not recur; keep watching it.
+- **Checks due:** the GitHub result of the M8.4.19 documentation commit (no code changed).
 - **Found by the run, not in it:** **Q11** (hostile ML settings stop the classifier; from Q9), **Q12** (an evicted placeholder section cannot
   rebuild its grey image; from M8.4.39).
-- **Authorised run of 21 Nov 2026 ("sigue con el resto") finished:** `Q9`, `M8.4.39`, `M8.4.40`, `M8.4.37` done. **Next: `M8.4.19`**, the
-  milestone gate of part C (needs the maintainer's go-ahead; it also measures the synthetic section with its image, which M8.4.37 extrapolated).
-  Then part B as decided by I at the review of M8.4.19, then M8.5 (needs A1). `Q10` before V0.153; `A4` after M8.4.19.
+- **Authorised run of 21 Nov 2026 ("sigue con el resto") finished:** `Q9`, `M8.4.39`, `M8.4.40`, `M8.4.37` done. **`M8.4.19` done (21 Nov 2026):**
+  milestone gate of part C met; the synthetic section with its image was not measured in the program. **Next:** the maintainer's decisions on
+  rule 6 and on the tiled flag, then M8.4.41-M8.4.43, then part B as decided by I, then M8.5 (needs A1). `Q10` before V0.153; `A4` now open.
 - **Splitting a section too dense for its object statistics:** cards M8.4.41-M8.4.43 after M8.4.19 (asked by the maintainer after
   M8.4.37); decisions X1-X4 approved on 21 Nov 2026 as recommended.
-- **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) in its last cards; part B not started; M8.5 must not start.
+- **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) done, milestone gate met (M8.4.19); part B not started; M8.5 must not start.
   The engine path fails the timing gate of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates)
   for whole sections; the tile store (decision of 15 Nov 2026) is the answer for large images.
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved
@@ -382,7 +381,17 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 
 - [x] **M8.4.40 - Engine session-request limit, non-blocking store I/O and Windows/handle robustness** (done 21 Nov 2026, development gate; record: [history](roadmap-history.md#m8440---engine-session-request-limit-non-blocking-store-io-and-windowshandle-robustness)).
 
-##### M8.4.19 - Milestone gate of part C — state: after M8.4.18d, M8.4.36, M8.4.38, Q9, M8.4.39, M8.4.40 and M8.4.37 (decision U, approved 21 Nov 2026)
+##### M8.4.19 - Milestone gate of part C — state: Done (milestone gate met, 21 Nov 2026); decisions on rule 6 and the flag wait for the maintainer
+
+- **As built (21 Nov 2026):** GitHub on `f896132` (code of M8.4.37): `tests` and *Desktop builds* passed on Windows, macOS and Linux, including
+  `desktop.mjs` with the engine experiment off and on, `tiled-sections.mjs` and `large-16bit-desktop.mjs`. Windows (Ryzen 7 7700X, 31 GiB,
+  warm disk cache, headless, one run): `tools/measure_tiled_viewer.mjs` on `rgb8g` ([json](validation/M8.4.19-viewer-rgb8g-windows.json)) meets
+  every target: first useful view 956 ms (≤ 2 s), cached pan/zoom 4.7 / 6.7 ms median / p95, with masks 10.8 / 13.1, strokes p95 28.0, 20.1 and
+  31.4 ms (≤ 33), refusal beyond the edit budget, jumps never blank and complete at 176 ms p95 (≤ 250), process-tree peak 1,851 MiB (≤ 2,048).
+  `--small` ([json](validation/M8.4.19-small-windows.json), public 620 x 16,726 example): tiled against today's path, first view 1,394 / 496 ms,
+  frame cost 5.6 / 6.7 ms median and 7.5 / 10.0 p95, peak 753 / 813 MiB. **Not measured:** a 16 GiB computer, an Intel Mac, clean machines,
+  macOS and Linux timing, a real display, repeated runs, the synthetic section with its image in the program (only extrapolated by M8.4.37).
+  The intermittent Linux hang of `tiled-sections.mjs` did not recur on this run. List S2 said "Before M8.4.19"; decision U's order was followed.
 
 - **Model:** fast, effort low (running and recording the gate); the most capable with effort high for the decisions that follow it.
 - Windows, macOS and Linux on one commit (`tests` and *Desktop builds*, including the desktop end-to-end test with the engine experiment and the
