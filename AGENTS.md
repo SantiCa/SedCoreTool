@@ -202,21 +202,27 @@ Done when:    observable acceptance criteria.
     fast tier with medium effort for an implementing card that only measures or documents.
 - **Director mode and sub-agent delegation** (decided by the maintainer on 21 November 2026; applies to Antigravity/Gemini,
   Claude Code and ChatGPT/Codex wherever the client supports spawning sub-agents). When the main session runs on the
-  **most capable tier**, it acts as **director** and may delegate an **authorised** card (or a bounded sub-task of it)
-  to a sub-agent pinned to the model tier — and effort level, where the client exposes it — requested by the card's
-  `Model:` field, without asking again to spawn that sub-agent:
-  - **Antigravity / Gemini:** `invoke_subagent` with `Model` (`pro`, `flash`, `flash_lite`). No separate per-sub-agent
-    effort parameter exists; note that if the card asks for a different effort.
-  - **Claude Code:** sub-agent tool with `model` (`opus`, `sonnet`, `haiku`), plus effort where supported by the client.
-  - **ChatGPT / Codex:** sub-agent / multi-agent spawn with the requested model and reasoning effort where supported.
-  - **Limits and fallback:** the director handles `most capable, effort high` design or critical cards directly when its
-    own session already matches (if the session's effort or tier is lower than what the card asks for and cannot be
-    raised via a sub-agent, state the gap in one line and wait for the maintainer to switch or say "continue").
+  **most capable tier**, it acts as **director** and **prefers delegating to smaller/faster sub-agents whenever the task
+  allows it, in order to save tokens and quota** on the most capable model. Without asking again to spawn a sub-agent,
+  delegate by default any authorised `fast`-tier card — and bounded mechanical, read-only exploration, documentation,
+  repetitive test or scripted-measurement sub-tasks within a larger card — to a sub-agent pinned to the model tier (and
+  effort level, where the client exposes it) that fits the task:
+  - **Antigravity / Gemini:** `invoke_subagent` with `Model` (`flash` for bounded implementation/tests/docs, `flash_lite`
+    for trivial or high-volume lookups, `pro` only when needed). No separate per-sub-agent effort parameter exists; note
+    that if the card asks for a different effort.
+  - **Claude Code:** sub-agent tool with `model` (`sonnet` for bounded implementation/tests/docs, `haiku` for fast
+    read-only search, trivial edits or repetitive lookups, `opus` only when needed), plus effort where supported by the
+    client.
+  - **ChatGPT / Codex:** sub-agent / multi-agent spawn with a smaller model and lower reasoning effort for bounded/fast
+    work, reserving the top model and high effort for design and critical tasks where supported.
+  - **Limits and fallback:** reserve the director directly for design, critical `most capable, effort high` cards,
+    briefing, diff review and decisions (if the session's effort or tier is lower than what a critical card asks for and
+    cannot be raised via a sub-agent, state the gap in one line and wait for the maintainer to switch or say "continue").
     **One editor at a time** still holds strictly: never run two write-enabled sub-agents concurrently on the shared
-    checkout (read-only research sub-agents may run; only one writer runs at a time while the director waits). A
-    sub-agent never redesigns a card and obeys every §3 hard limit. The director owns briefing, reviewing the diff,
-    verifying tests/checks, committing and pushing on the work branch, updating the roadmap and changelog, and
-    reporting to the maintainer in Spanish.
+    checkout (read-only research sub-agents may run in parallel; only one writer runs at a time while the director waits).
+    A sub-agent never redesigns a card and obeys every §3 hard limit. The director owns briefing, reviewing the diff,
+    verifying tests/checks, committing and pushing on the work branch, updating the roadmap and changelog, and reporting
+    to the maintainer in Spanish.
 - **One card at a time,** in roadmap order, and only the card the maintainer authorised. Finish or hand over
   before starting another. If a request combines independent workstreams, split it into cards and do the first.
 - **Interpret a broad request by intent:** choose the smallest concrete scope that satisfies it, state the
