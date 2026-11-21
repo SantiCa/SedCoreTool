@@ -195,7 +195,10 @@ Done when:    observable acceptance criteria.
   by the maintainer. An implementing session, with any model, does not redesign: if the card is wrong, incomplete or
   blocked, stop, write the problem under the card ("Blocked: …") and in the status, and report it. A design session
   that writes cards collects **every decision those cards will need** and asks them together, with a recommendation
-  each, so the maintainer answers once instead of in the middle of each card.
+  each, so the maintainer answers once instead of in the middle of each card. **Broad audits** (several reviewers
+  reading the whole code, as in the council audits of November 2026) are among the most expensive work and always add
+  cards: they are held at the milestone gate that closes a milestone (for example M8.4.19), not between its cards,
+  unless the maintainer asks for one.
 - **Which model** (decided by the maintainer on 16 November 2026; the same rule for every assistant: Claude,
   ChatGPT/Codex, Gemini or another). Before starting a card, tell the maintainer in one line which tier and which
   effort the card's `Model:` field asks for and why; if the session runs on another tier or effort, say so and wait
@@ -242,6 +245,11 @@ Done when:    observable acceptance criteria.
     itself goes either to the director, delegating only read-only exploration and mechanical edits that follow an
     exact list, or whole to a fresh sub-agent of the **most capable tier at the card's effort**, which meets the card's
     `Model:` field; the director's brief then states the policy and the acceptance tests the sub-agent must write.
+  - **Review in proportion to the risk** (decided by the maintainer on 21 November 2026). On a critical card the
+    director reviews every changed line. On a `fast`-tier card the director checks which files changed, that each new
+    test failed before the fix and passes after, the check results, and samples the diff; a fresh sub-agent of the
+    fast tier may first review the diff against the card and list only what looks wrong, so the director reads those
+    parts closely. A finding in a sampled review sends the whole diff to a line-by-line review.
   - **One fresh sub-agent per card in a run.** In an authorised run (below), the director gives each card to a new
     sub-agent of the card's tier and effort, with a self-contained brief made from the card and the decisions that
     apply. The sub-agent starts without the conversation's history, as a new session would, and the director's own
