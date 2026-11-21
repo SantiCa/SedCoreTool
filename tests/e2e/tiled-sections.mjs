@@ -1201,6 +1201,28 @@ try {
   const reopenedDump = await dump(await on.page.evaluate(() => window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId)));
   assert.deepEqual([reopenedDump.runs, reopenedDump.exRuns], [raceDump.runs, raceDump.exRuns], 'the reopened masks are the last saved ones');
   console.log(`Edits and saves overlapping for 20 s (${race.edits} edits, ${race.requests} saves requested): the store holds the saved versions and the reopened masks are the last saved ones`);
+  // Card M8.4.37: statistics dropped beyond their budget (forced here: this section is far below it). The object panel says the measurements are not
+  // available, a deletion refuses with that reason instead of "try again", a save keeps the masks, and the next opening computes the statistics again.
+  const toastsBeforeBudget = toasts.length;
+  const dropped37 = await on.page.evaluate(async () => {
+    const { S, t } = window.ichantool, index = S.sections.findIndex((q) => q.id === window.__tiledId), s = S.sections[index];
+    window.ichantool.selectSection(index);
+    const id = [...s.objects.values()].find((o) => o.stats)?.id;
+    S.selected = id; S.multi.clear();
+    s._statsRunner.stats.exceed();
+    const panel = document.getElementById('objInfo')?.textContent ?? '';
+    window.ichantool.deleteObjects([id]);
+    const kept = s.objects.has(id), withStats = [...s.objects.values()].filter((o) => o.stats || o.feat || o.bbox).length;
+    await window.ichantool.saveNow();
+    return { id, panel: panel.includes(t('obj.statsNA')), kept, withStats, limit: t('tiles.statsLimit'), busy: t('tiles.busy') };
+  });
+  assert.ok(dropped37.id && dropped37.panel && dropped37.kept && dropped37.withStats === 0, 'measurements not available, the deletion refused: ' + JSON.stringify(dropped37));
+  assert.ok(toasts.slice(toastsBeforeBudget).includes(dropped37.limit) && !toasts.slice(toastsBeforeBudget).includes(dropped37.busy), 'the reason is given, not "try again"');
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false }, 'reopened after the statistics were dropped');
+  const afterBudget = await dump(await on.page.evaluate(() => window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId)));
+  assert.deepEqual([afterBudget.runs, afterBudget.exRuns], [raceDump.runs, raceDump.exRuns], 'the masks are those saved before');
+  assert.ok(await on.page.evaluate((id) => !!window.ichantool.S.sections.find((q) => q.id === window.__tiledId).objects.get(id)?.stats, dropped37.id), 'the statistics are computed again at the next opening');
+  console.log('Statistics dropped beyond their budget: "not available" shown, deletion refused with the reason, masks saved unchanged, statistics computed again on reopening');
   // (3) Deleting a project from the library deletes its folder, and only that one.
   const originalFolder = manifestFile.slice(0, manifestFile.indexOf(path.sep + 'tiles' + path.sep));
   await on.page.evaluate(async (id) => {

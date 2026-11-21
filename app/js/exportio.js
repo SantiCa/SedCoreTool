@@ -27,13 +27,14 @@ export function bioturbationTable(sections, { counted = [], range = false, ageUn
 
 /**
  * Object table: one row per trace with a bounding box. Each item: {section, units, o (object), cls, status, pred,
- * counted, depth(row) → depth}; o.feat holds the descriptors.
+ * counted, depth(row) → depth, unavailable}; o.feat holds the descriptors. Card M8.4.37: `unavailable` (the statistics of a tiled section were
+ * dropped beyond their budget) keeps the row of an object without a box, with its depths and descriptors empty (not available).
  */
 export function objectsTable(items) {
   const rows = [['section', 'object_id', 'class', 'status', 'suggested_class', 'confidence', 'depth_top', 'depth_bottom', 'depth_center', 'units', 'area_cm2', 'length_cm', 'width_cm', 'elongation', 'verticality', 'compactness', 'mean_luminance', 'contrast', 'counted']];
   for (const it of items) {
-    const o = it.o; if (!o.bbox) continue; const f = o.feat || {};
-    rows.push([it.section, o.id, it.cls ?? '', it.status, it.pred ?? '', o.cls ? 1 : o.conf ?? null, it.depth(o.bbox[1]), it.depth(o.bbox[3] + 1), f.cy != null ? it.depth(f.cy + 0.5) : null, it.units,
+    const o = it.o; if (!o.bbox && !it.unavailable) continue; const f = o.feat || {};
+    rows.push([it.section, o.id, it.cls ?? '', it.status, it.pred ?? '', o.cls ? 1 : o.conf ?? null, o.bbox ? it.depth(o.bbox[1]) : null, o.bbox ? it.depth(o.bbox[3] + 1) : null, f.cy != null ? it.depth(f.cy + 0.5) : null, it.units,
       f.areaCm2 ?? null, f.majorCm ?? null, f.minorCm ?? null, f.elong ?? null, f.vert ?? null, f.compact ?? null, f.meanL ?? null, f.contrast ?? null, it.counted ? 1 : 0]);
   }
   return rows;

@@ -150,7 +150,7 @@ export function createTiledTools(ctx) {
   function tiledPlan(s, rects, { boxes = true, tooLarge = 'tiles.boxTooLarge' } = {}) {
     if (s.frozen) { toast(t('tiles.frozen.' + s.frozen)); return null; }   // card M8.4.18a: a section without its pixels is not edited
     const runner = s._statsRunner, waiting = (r) => { const under = tilesUnder(s.maskTiles, r); return runner.pendingIn(under) || runner.failedIn(under); };
-    if (boxes && (rects.some((r) => !r) || (runner && rects.some(waiting)))) { void runner?.retry(); toast(t('tiles.busy')); return null; }
+    if (boxes && (rects.some((r) => !r) || (runner && rects.some(waiting)))) { void runner?.retry(); toast(t(runner?.stats.exceeded ? 'tiles.statsLimit' : 'tiles.busy')); return null; }   // card M8.4.37: boxes dropped
     const plan = planWindows(s.maskTiles, rects);
     if (plan.tooLarge) { toast(t(tooLarge, { n: WINDOW_TILES })); return null; }
     if (plan.missing.length) { void maskLoader(s).want(plan.missing).catch(() => {}); toast(t('tiles.loadingMasks')); return null; }

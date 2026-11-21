@@ -18,19 +18,19 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.152, `8ee9776`) is contained in it.
 - **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153; Q10 must be done before it.
-- **Last verified code commit:** M8.4.40 (this commit; see `git log`). Full checks on Windows: `pytest -q` 924 passed / 9 skipped; `npm test` 577;
-  typecheck; ruff; `sync_version --check`; engine runtime rebuilt; `tiled-sections.mjs` and `desktop.mjs` (engine on) passed. M8.4.39
-  (`1464f6e`): `npm test` 576, `desktop.mjs` off and on, `tiled-sections.mjs`, `large-16bit-desktop.mjs` passed on Windows.
-- **GitHub:** `b991fd9` (Q9) green on three systems. `1464f6e` (M8.4.39): `tests` green; *Desktop builds* green on Windows and macOS, **Linux
-  failed**: `tiled-sections.mjs` hung after the folder-backup step (`Runtime.callFunctionOn timed out`); a re-run of that job was started to
-  tell a flaky runner from a bug. Read its result and the run of the M8.4.40 commit before the next card.
-- **Checks due:** the Linux result above.
+- **Last verified code commit:** M8.4.37 (this commit; see `git log`). Full checks on Windows: `npm test` 582; typecheck; `pytest -q` 924
+  passed / 9 skipped; ruff; `sync_version --check`; `tiled-sections.mjs`; `desktop.mjs` engine off and on.
+- **GitHub:** `952b36b` (M8.4.40, contains M8.4.39): `tests` and *Desktop builds* passed on Windows, macOS and Linux. On `1464f6e` the Linux job
+  had hung once in `tiled-sections.mjs` after the folder-backup step (`Runtime.callFunctionOn timed out`); the same code passed on Linux
+  afterwards: an intermittent failure to watch at M8.4.19. The run of the M8.4.37 commit is to be read at the start of the next session.
+- **Checks due:** the GitHub result of the M8.4.37 commit.
 - **Found by the run, not in it:** **Q11** (hostile ML settings stop the classifier; from Q9), **Q12** (an evicted placeholder section cannot
   rebuild its grey image; from M8.4.39).
-- **Authorised run (maintainer, 21 Nov 2026, "sigue con el resto"; AGENTS §6 *Authorised runs*):** `Q9`, `M8.4.39`, `M8.4.40` (done) →
-  **`M8.4.37`** (next). Each card goes to a fresh sub-agent of its tier and effort; one commit, push and short report per card; stop only for
-  *Stop and ask*. Then **`M8.4.19`**, the milestone gate of part C (not part of the run). Then part B as decided by I at the review of
-  M8.4.19, then M8.5 (needs A1). `Q10` before V0.153; `A4` after M8.4.19.
+- **Authorised run of 21 Nov 2026 ("sigue con el resto") finished:** `Q9`, `M8.4.39`, `M8.4.40`, `M8.4.37` done. **Next: `M8.4.19`**, the
+  milestone gate of part C (needs the maintainer's go-ahead; it also measures the synthetic section with its image, which M8.4.37 extrapolated).
+  Then part B as decided by I at the review of M8.4.19, then M8.5 (needs A1). `Q10` before V0.153; `A4` after M8.4.19.
+- **Decision for the maintainer (from M8.4.37):** after its statistics budget trips, a section refuses delete, merge and cut until reopened;
+  keep this, or a later card keeps a grow-only box so those operations still work (recommended: keep; real cores stay far below the budget).
 - **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) in its last cards; part B not started; M8.5 must not start.
   The engine path fails the timing gate of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates)
   for whole sections; the tile store (decision of 15 Nov 2026) is the answer for large images.
@@ -374,16 +374,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 
 - [x] **M8.4.36 - Opening a tiled section whose tiles are all masked** (done 21 Nov 2026; record: [history](roadmap-history.md#m8436---opening-a-tiled-section-whose-tiles-are-all-masked)).
 
-##### M8.4.37 - A memory bound for the statistics of the objects of tiled sections — state: Ready (proposed 21 Nov 2026)
-
-- **Goal:** the per-tile statistics of the objects of a tiled section (`TiledObjectStats`, card M8.4.16 step 3) stay within a stated budget; beyond
-  it they are dropped and the page says that the objects' statistics are not available, as for the row counts (card M8.4.36).
-- **Read first:** `TiledObjectStats` and `TiledStatsRunner` (`tiledit.js`); card M8.4.36; the reopening cache (`tiledcache.js`, `statsCover`).
-- **Steps:** (1) measure the statistics of the synthetic section of M8.4.18d with a source image (a generated TIFF of 32,768 x 57,344 pixels, or
-  a smaller grid); (2) a budget with the same behaviour as `COUNT_HISTOGRAM_BYTES`; (3) the objects table and the features say "not available"
-  instead of stale numbers.
-- **Model:** most capable, effort medium (a bounded change, but it touches what the user sees of the objects).
-- **Done when:** the synthetic section with its image opens within the budget, measured; development gate.
+- [x] **M8.4.37 - A memory bound for the statistics of the objects of tiled sections** (done 21 Nov 2026, development gate; record: [history](roadmap-history.md#m8437---a-memory-bound-for-the-statistics-of-the-objects-of-tiled-sections)).
 
 - [x] **M8.4.38 - Security hardening: close M8.4.34 store bypass and harden `trainer` IPC** (done 21 Nov 2026; record: [history](roadmap-history.md#m8438---security-hardening-close-m8434-store-bypass-and-harden-trainer-ipc)).
 

@@ -250,18 +250,45 @@ export function tileStats(source, row, col) {
   return out;
 }
 
+/**
+ * Card M8.4.37: memory the per-tile statistics of one section may hold (the estimate `TiledObjectStats.bytes`); beyond it they are all dropped and
+ * none is kept until the section is opened again, as the row histograms (`COUNT_HISTOGRAM_BYTES`, card M8.4.36). It is above the memory of the
+ * statistics the largest reopening cache can hold (`CACHE_MAX_BYTES`, 140 bytes per object and tile there: at most about 234 MiB by this estimate),
+ * so a section whose statistics can be cached is never cut.
+ */
+export const STATS_BUDGET_BYTES = 256 * 2 ** 20;
+// The estimate, measured in Electron's V8 (pointer compression, as in the page; `tools/measure_tiled_stats_memory.mjs`): one object's statistics in one
+// tile (its `TraceStats` and its entries in the tile's map and in the object's set of tiles) and one object's set of tiles; a tile's map besides.
+// Node's V8 without pointer compression takes about 1.8 times as much.
+export const STATS_ENTRY_BYTES = 160;
+export const STATS_OBJECT_BYTES = 96;
+const STATS_TILE_BYTES = 128;
+
 /** Per-tile statistics of every object of a tiled section and their totals. Tile indices are `row * cols + col`. */
 export class TiledObjectStats {
-  constructor() {
+  /** @param {{budget?: number, onExceeded?: () => void}} [options] `onExceeded` is called once, when the statistics are dropped */
+  constructor({ budget = STATS_BUDGET_BYTES, onExceeded = () => {} } = {}) {
     /** @type {Map<number, Map<number, TraceStats>>} */
     this.byTile = new Map();
     /** @type {Map<number, Set<number>>} */
     this.tilesOf = new Map();
+    this.budget = budget; this.onExceeded = onExceeded;
+    /** The estimate of the tiles' maps and their entries; `bytes` adds the objects' sets of tiles. */
+    this.tileBytes = 0;
+    /** Card M8.4.37: the statistics went beyond the budget; they were dropped and none is kept until the section is opened again. */
+    this.exceeded = false;
   }
-  /** Replace the contributions of one tile; returns the ids whose totals changed. @param {number} tile @param {Map<number, TraceStats>} stats */
+  /** Estimated memory of what is kept. */
+  get bytes() { return this.tileBytes + this.tilesOf.size * STATS_OBJECT_BYTES; }
+  /**
+   * Replace the contributions of one tile; returns the ids whose totals changed. Beyond the budget everything is dropped and no id is returned (a
+   * total is no longer known: it must not be taken for an object without pixels). @param {number} tile @param {Map<number, TraceStats>} stats
+   */
   replaceTile(tile, stats) {
     const changed = new Set();
-    for (const id of this.byTile.get(tile)?.keys() || []) { changed.add(id); this.tilesOf.get(id)?.delete(tile); }
+    if (this.exceeded) return changed;
+    const old = this.byTile.get(tile);
+    for (const id of old?.keys() || []) { changed.add(id); this.tilesOf.get(id)?.delete(tile); }
     if (stats.size) this.byTile.set(tile, stats); else this.byTile.delete(tile);
     for (const id of stats.keys()) {
       changed.add(id);
@@ -270,7 +297,19 @@ export class TiledObjectStats {
       set.add(tile);
     }
     for (const id of changed) if (!this.tilesOf.get(id)?.size) this.tilesOf.delete(id);
+    const tileBytes = (/** @type {Map<number, TraceStats> | undefined} */ m) => (m?.size ? STATS_TILE_BYTES + m.size * STATS_ENTRY_BYTES : 0);
+    this.tileBytes += tileBytes(stats) - tileBytes(old);
+    if (this.bytes > this.budget) { this.exceed(); return new Set(); }
     return changed;
+  }
+  /**
+   * Card M8.4.37: beyond the budget the statistics are all dropped (masks with tens of thousands of objects in every tile, as the synthetic section of
+   * M8.4.18d, would keep about 70 GiB for its 7,168 tiles), and none is kept until the section is opened again.
+   */
+  exceed() {
+    this.exceeded = true;
+    this.byTile.clear(); this.tilesOf.clear(); this.tileBytes = 0;
+    this.onExceeded();
   }
   /** An object's statistics over the whole section, or null when it has no pixel. @param {number} id */
   total(id) {
@@ -328,8 +367,9 @@ export class TiledStatsRunner {
     this.releaseWhenIdle = false;
   }
   /**
-   * Card M8.4.39: the section is closed or deleted. The queue is dropped, the pixel cache emptied, waiting callers released, and nothing is reported
-   * any more (a report would change a section that is no longer in the project). The statistics already computed stay in `stats`.
+   * Card M8.4.39: the section is closed or deleted (card M8.4.37: or its statistics went beyond their budget). The queue is dropped, the pixel
+   * cache emptied, waiting callers released, and nothing is reported any more (a report would change a section that is no longer in the project,
+   * or whose statistics are no longer known). The statistics already computed stay in `stats`.
    */
   stop() {
     this.stopped = true;
@@ -345,6 +385,7 @@ export class TiledStatsRunner {
   }
   /** @param {[number, number][]} positions @param {Iterable<number>} [ids] */
   queue(positions, ids = []) {
+    if (this.stats.exceeded && !this.stopped) this.stop();              // card M8.4.37: dropped while a reopening cache was restored
     if (this.stopped) return Promise.resolve();
     const indices = positions.map(([row, col]) => this.tiles.index(row, col));
     for (const tile of indices) this.pending.add(tile);
@@ -417,6 +458,7 @@ export class TiledStatsRunner {
         const changed = this.stats.replaceTile(tile, tileStats({ width: this.tiles.width, height: this.tiles.height, stacks: this.stacks(),
           labelsAt: (r, c) => this.tiles.get(r, c)?.labels || null, rgbaAt: (r, c) => this.rgba.get(r * cols + c) || null }, row, col));
         for (const id of changed) this.ids.add(id);
+        if (this.stats.exceeded) this.stop();                          // card M8.4.37: nothing more is computed until the section is opened again
       } catch (error) { if (!this.stopped) { this.failed.add(tile); this.onError(error); } }
       this.computing = -1;
       const done = this.waiters.filter((w) => !this.pendingIn(w.positions));

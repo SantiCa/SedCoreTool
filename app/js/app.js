@@ -2267,7 +2267,7 @@ function renderObject() {
   renderObjectList(s);
   if (s && S.multi.size > 1) { renderMulti(s, box); return; }
   if (!o) { box.innerHTML = `<p class="note">${t('obj.none')}</p>`; return; }
-  const st = status(o), ppu = pxPerCm(s), f = o.feat || {}, [, y0, , y1] = o.bbox || [];   // no box yet: a tiled object whose statistics are on their way
+  const st = status(o), ppu = pxPerCm(s), f = /** @type {Partial<ReturnType<typeof features>>} */ (o.feat || {}), [, y0, , y1] = o.bbox || [], na = !o.stats && s._statsRunner?.stats.exceeded ? t('obj.statsNA') : '';   // no box yet: a tiled object whose statistics are on their way (or dropped, card M8.4.37)
   const opts = [`<option value="">${t('obj.unassigned')}</option>`].concat(S.classes.map((c) => `<option value="${esc(c.id)}" ${c.id === o.cls ? 'selected' : ''}>${keyOf(c) ? esc(keyOf(c)) + ' · ' : ''}${esc(c.name)}</option>`)).join('');
   const sugg = o.pred ? `<span class="swatch" style="background:${validHexColor(clsById(o.pred)?.color, '#777777')}"></span>${esc(clsById(o.pred)?.name || '')} · ${Math.round(o.conf * 100)}%` : 'novel' in o && o.novel ? t('obj.novel') : '—';
   const u = esc(s.units), toU = (cm) => cm / UNIT_TO_CM[u];   // card Q9: u is shown as markup below
@@ -2277,10 +2277,10 @@ function renderObject() {
       <dt>${t('obj.status')}</dt><dd><span class="pill ${esc(st)}">${t('obj.' + st)}</span></dd>
       ${o.cls ? '' : `<dt>${t('obj.suggest')}</dt><dd>${sugg}</dd>`}
       ${o.cls || !xOf(o) ? '' : `<dt>${t('obj.probs')}</dt><dd>${probTable(o)}</dd>`}
-      <dt>${t('obj.depth')}</dt><dd>${o.bbox ? `${fmt(depthAtRow(s, y0), 3)}–${fmt(depthAtRow(s, y1 + 1), 3)} ${u}` : '—'}</dd>
-      <dt>${t('obj.size')}</dt><dd>${fmt(toU(f.majorCm), 3)} × ${fmt(toU(f.minorCm), 3)} ${u}</dd>
-      <dt>${t('obj.area')}</dt><dd>${fmt(o.area / (ppu * ppu) / UNIT_TO_CM[u] ** 2, 4)} ${u}² · ${esc(o.area)} px</dd>
-      <dt>${t('obj.shape')}</dt><dd>${t('obj.elong')} ${fmt(f.elong, 1)} · ${t('obj.vert')} ${fmt(f.vert, 2)}</dd>
+      <dt>${t('obj.depth')}</dt><dd>${o.bbox ? `${fmt(depthAtRow(s, y0), 3)}–${fmt(depthAtRow(s, y1 + 1), 3)} ${u}` : na || '—'}</dd>
+      <dt>${t('obj.size')}</dt><dd>${na || `${fmt(toU(f.majorCm), 3)} × ${fmt(toU(f.minorCm), 3)} ${u}`}</dd>
+      <dt>${t('obj.area')}</dt><dd>${na || `${fmt(o.area / (ppu * ppu) / UNIT_TO_CM[u] ** 2, 4)} ${u}² · ${esc(o.area)} px`}</dd>
+      <dt>${t('obj.shape')}</dt><dd>${na || `${t('obj.elong')} ${fmt(f.elong, 1)} · ${t('obj.vert')} ${fmt(f.vert, 2)}`}</dd>
     </dl>
     <div class="row">${o.pred && !o.cls ? `<button class="btn small primary" id="objAccept">${t('obj.accept')}</button>` : ''}<button class="btn small" id="objDel">${t('obj.delete')}</button></div>
     <p class="note">${t('obj.multiHint')}</p>`;
@@ -2780,7 +2780,7 @@ $('expObjects').addEventListener('click', () => {
   const items = [];
   for (const s of S.sections) {
     const eff = effClassArray(s);
-    for (const o of s.objects.values()) items.push({ section: s.name, units: s.units, o, cls: clsById(o.cls)?.name, status: status(o), pred: clsById(o.pred)?.name, counted: eff[o.id] >= 0, depth: (row) => depthAtRow(s, row) });
+    for (const o of s.objects.values()) items.push({ section: s.name, units: s.units, o, cls: clsById(o.cls)?.name, status: status(o), pred: clsById(o.pred)?.name, counted: eff[o.id] >= 0, depth: (row) => depthAtRow(s, row), unavailable: !!s._statsRunner?.stats.exceeded });
   }
   saveFile(`${safe(S.name)}_objects.csv`, withProv(toCSV(objectsTable(items))), 'text/csv');   // V0.44: exportio.js
 });

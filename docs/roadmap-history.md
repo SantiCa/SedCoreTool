@@ -3492,3 +3492,37 @@ Updated 21 November 2026.
   - Notes: `winerror` 5 is retried, so a permanent permission error is reported 1.55 s later; an ID older than the window would run again
     (clients use a new UUID per request); CMYK uses the generic `source` refusal (no dedicated interface text); the per-operation deadlines
     of `engine.js` still count the time a mask request waits behind another, as before.
+
+### M8.4.37 - A memory bound for the statistics of the objects of tiled sections
+
+- **Goal:** the per-tile statistics of the objects of a tiled section (`TiledObjectStats`, card M8.4.16 step 3) stay within a stated budget; beyond
+  it they are dropped and the page says that the objects' statistics are not available, as for the row counts (card M8.4.36).
+- **Read first:** `TiledObjectStats` and `TiledStatsRunner` (`tiledit.js`); card M8.4.36; the reopening cache (`tiledcache.js`, `statsCover`).
+- **Steps:** (1) measure the statistics of the synthetic section of M8.4.18d with a source image (a generated TIFF of 32,768 x 57,344 pixels, or
+  a smaller grid); (2) a budget with the same behaviour as `COUNT_HISTOGRAM_BYTES`; (3) the objects table and the features say "not available"
+  instead of stale numbers.
+- **Model:** most capable, effort medium (a bounded change, but it touches what the user sees of the objects).
+- **Done when:** the synthetic section with its image opens within the budget, measured; development gate.
+- *As built (21 Nov 2026; written by a most-capable sub-agent at medium effort, every changed line reviewed by the director; development gate, Windows):*
+  - Measurement (`tools/measure_tiled_stats_memory.mjs`, Electron 45.2.2's V8 via `ELECTRON_RUN_AS_NODE`, pointer compression as in the page;
+    Windows 11, Ryzen 7 7700X, 31 GiB; records `docs/validation/M8.4.37-tiled-stats-memory-electron.json` and `-node.json`): dense 6 x 6 grid of
+    512-pixel tiles with random labels over 65,535 objects (as `make_large_mask_version.py`), 2,315,991 (object, tile) entries: 162 B per entry
+    in Electron (291 B in Node); sparse grids 238-313 B. Estimate used: 160 B per entry + 96 B per object + 128 B per tile. The synthetic section
+    of M8.4.18d (7,168 tiles x 64,333 entries) would need about 69.5 GiB: **extrapolated, the full section with its image was not opened**.
+  - Budget `STATS_BUDGET_BYTES` = 256 MiB: above the statistics the largest reopening cache can hold (`CACHE_MAX_BYTES` 128 MiB, about
+    958k entries, about 234 MiB), so a section whose statistics can be cached is never cut. Bounded run on the dense 6 x 6 grid (Electron):
+    tripped at tile 26, peak estimate 263.6 MB, live heap peak 262.3 MB, about 96 KB kept afterwards, the page told once.
+  - `tiledit.js`: `TiledObjectStats({budget, onExceeded})`, `bytes`, `exceed()`; `replaceTile` trips beyond the budget, drops everything and
+    returns no id (no object is taken for one without pixels); `TiledStatsRunner` stops once tripped (also during a cache restore).
+    `tiledstate.js` `statsDropped`: objects lose `stats`, `feat`, `bbox`, `sbox` (area 0), toast `tiles.statsLimit`. `app.js` `renderObject`
+    shows `obj.statsNA`; objects export keeps the rows with empty cells (`exportio.js`); `tiledtools.js` `tiledPlan` gives the reason.
+    `tiledproject.js` writes no reopening cache after a trip. Under budget nothing changes (existing equality tests pass). Saved schema unchanged.
+  - Known consequences (reported to the maintainer): after a trip, delete, merge, cut and same-ichnotaxon grouping are refused in that section
+    until it is reopened (boxes are dropped so that a delete cannot leave orphan pixels), and a section as dense as the synthetic one trips at
+    every opening; the saved `st` of its objects are not written at the next save (recomputed at the next opening); vision embeddings and
+    thumbnails are kept. Real core images (thousands of objects over a few tiles each) stay about two orders of magnitude below the budget.
+  - Tests: `tests/app/tiledstatsbudget.test.mjs` (5; tests 1, 3, 4, 5 failed with the fix reverted, test 2 is a unit test of the estimate);
+    `tests/e2e/tiled-sections.mjs` forces the trip on the kept copy ("not available" shown, delete refused with the reason, masks unchanged after
+    save and reopen, statistics computed again on reopening; no separate failing-before run). `app.js` 4,664 → 4,664 lines.
+  - Checks (Windows, final state): `npm test` 582; typecheck (no new diagnostics, 4 baseline entries resolved); `pytest -q` 924 passed / 9
+    skipped; ruff; `sync_version --check`; `tiled-sections.mjs`; `desktop.mjs` engine off and on. Not run: macOS and Linux (GitHub on push).

@@ -151,7 +151,8 @@ export function createTiledProject(ctx) {
       q._reopenWriting = true;
       try {
         const snapshot = q._counts.counts.snapshot();
-        if (!snapshot || !statsCover(snapshot.hists, q._statsRunner.stats.byTile)) continue;   // objects saved without statistics: rebuilt at the next opening, which computes them
+        // Objects saved without statistics, or statistics dropped beyond their budget (card M8.4.37): rebuilt at the next opening, which computes them
+        if (!snapshot || q._statsRunner.stats.exceeded || !statsCover(snapshot.hists, q._statsRunner.stats.byTile)) continue;
         const bytes = await encodeReopenCache({ manifest, source: rec.source.sha256, ds: q.ds, width: rec.width, height: rec.height, working: q,
           columns: snapshot.columns, hists: snapshot.hists, stats: q._statsRunner.stats.byTile }, hexDigest);
         if (!holds()) continue;                                       // edited while the cache was being made: the next save writes it

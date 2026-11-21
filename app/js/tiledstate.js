@@ -35,7 +35,7 @@ export function createTiledState(ctx) {
 
   function tiledStatsRunner(s) {
     if (s._statsRunner) return s._statsRunner;
-    const stats = new TiledObjectStats(), fetchRgba = (positions) => level0Rgba(s, positions);
+    const stats = new TiledObjectStats({ onExceeded: () => statsDropped(s) }), fetchRgba = (positions) => level0Rgba(s, positions);
     const onUpdate = (ids) => {
       const ppu = pxPerCm(s) * s.ds;                       // source pixels per centimetre
       for (const id of ids) {
@@ -53,6 +53,17 @@ export function createTiledState(ctx) {
     s._statsRunner = new TiledStatsRunner({ tiles: s.maskTiles, stats, stacks: () => s.stacks, fetchRgba, onUpdate, tilesOf,
       loadMasks: (positions) => maskLoader(s).want(positions), onError: (error) => toast(error.message || String(error), 9000) });
     return s._statsRunner;
+  }
+  /**
+   * Card M8.4.37: the statistics of the section's objects went beyond their budget and were dropped (`TiledObjectStats.exceed`). Every object loses
+   * its statistics, features and boxes, which are no longer known (they would be stale after the next edit): the object panel and the objects table
+   * say they are not available, the classifier does not use them, a save writes the objects without them (as objects saved before their statistics
+   * were computed), and operations that need an object's box refuse. They are computed again when the section is opened again.
+   */
+  function statsDropped(s) {
+    for (const o of s.objects.values()) { o.stats = null; o.feat = null; o.area = 0; o.bbox = null; o.sbox = null; }
+    toast(t('tiles.statsLimit'), 12000);
+    if (S.sections.includes(s)) afterChange(s, ctx.TILES_ONLY);
   }
 
   /* The interval table of a tiled section (card M8.4.17, decision F of ARCHITECTURE §3.4): the page counts each tile it holds into a row histogram
