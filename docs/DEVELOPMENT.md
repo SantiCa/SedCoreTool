@@ -20,7 +20,7 @@ PATH; call them by full path:
 | Tool | Location |
 |---|---|
 | Python 3.12 with pytest, NumPy, pandas | `C:\Users\Santiago\anaconda3\python.exe` |
-| Node 22 and npm | `C:\Program Files\nodejs` â€” in PowerShell: `$env:Path += ';C:\Program Files\nodejs'`, then use `npm.cmd` |
+| Node 22 and npm | `C:\Program Files\nodejs` — in PowerShell: `$env:Path += ';C:\Program Files\nodejs'`, then use `npm.cmd` |
 | Ruff | `.venv\review-tools\bin\ruff.exe` (`.venv/` holds caches and tools; it is not a virtual environment) |
 
 In Git Bash, plain `python` may be a different interpreter without pytest. Use the full path above.
@@ -52,13 +52,13 @@ npm test
 npm run typecheck
 <python> tools/sync_version.py --check
 <ruff> check src tests tools
-node tests/e2e/desktop.mjs                          # when desktop/, saving or the interface changed (see Â§6)
-node tests/e2e/smoke.mjs                            # when the interface changed; needs the server of Â§2 and Chrome
+node tests/e2e/desktop.mjs                          # when desktop/, saving or the interface changed (see §6)
+node tests/e2e/smoke.mjs                            # when the interface changed; needs the server of §2 and Chrome
 node tests/e2e/large-16bit-desktop.mjs              # when image decoding or the memory of sections changed (card H7)
 # The Python tile-store tests skip when pyvips is missing; SEDCORETOOL_REQUIRE_PYVIPS=1 (set by the tests workflow, card M8.4.32) makes that a failure.
 ```
 
-`python tools/check_all.py` runs this end-of-session list for you, one check after another, and prints one line per check (result, count, seconds) and only the last lines of a failure; the full output of each check goes to a log file (`--log-dir`, default a timestamped folder in the system temp directory). It finds Python 3.12, ruff and Node as described in Â§1 (`--python`, `--ruff` override them) and runs the end-to-end tests only when asked: `--desktop` (engine experiment off, then on), `--tiled`, `--smoke`, `--large16` or `--e2e` for all (`--prepare` first refreshes `desktop/web`; `--smoke` needs the server of Â§2). `--only name,name` runs a subset and `--list` prints the plan. The list above remains the reference for what the checks are.
+`python tools/check_all.py` runs this end-of-session list for you, one check after another, and prints one line per check (result, count, seconds) and only the last lines of a failure; the full output of each check goes to a log file (`--log-dir`, default a timestamped folder in the system temp directory). It finds Python 3.12, ruff and Node as described in §1 (`--python`, `--ruff` override them) and runs the end-to-end tests only when asked: `--desktop` (engine experiment off, then on), `--tiled`, `--smoke`, `--large16` or `--e2e` for all (`--prepare` first refreshes `desktop/web`; `--smoke` needs the server of §2). `--only name,name` runs a subset and `--list` prints the plan. The list above remains the reference for what the checks are.
 
 The end-to-end tests that start the desktop program (`desktop.mjs`, `large-16bit-desktop.mjs`, `tiled-sections.mjs`, `working-memory-desktop.mjs`) first check, in under a second (`tests/e2e/preflight.mjs`), that `desktop/web` and `desktop/python` hold the current `app/` and `src/` and that the engine runtime's recorded sources match `src/`; if not, they stop and print the command that fixes it (`node desktop/scripts/prepare.js --with-examples`, `npm run prepare-runtime -- --offline` in `desktop/`).
 The end-to-end tests need `npm i --no-save puppeteer-core@23` at the repository root. Record the result and the
@@ -110,7 +110,7 @@ $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'      # unsigned build
 Push-Location desktop; npm.cmd run dist; Pop-Location     # about 5 minutes
 ```
 
-Output in `desktop/dist/`: `SedCoreTool-V0.<n>-windows-setup.exe` (installer), `â€¦-windows-portable.zip` (program
+Output in `desktop/dist/`: `SedCoreTool-V0.<n>-windows-setup.exe` (installer), `…-windows-portable.zip` (program
 folder; extract with "Extract all") and `win-unpacked/`. `node desktop/scripts/check-package.js` checks the
 packaged resources. macOS and Linux packages are built by the *Desktop builds* GitHub workflow.
 
@@ -120,7 +120,7 @@ packaged resources. macOS and Linux packages are built by the *Desktop builds* G
 |---|---|
 | `tests/e2e/desktop.mjs` waits 90 s and fails after clicking `openTest` | `npm run dist` rebuilt `desktop/web` **without** sample data. Run `node desktop/scripts/prepare.js --with-examples` (what `npm start` does), then repeat the test |
 | Engine state `unavailable` right after editing Python or changing the version | The runtime manifest no longer matches. Run `npm run prepare-runtime -- --offline` in `desktop/` (the desktop tests now say this before starting) |
-| `No module named pytest` | The shell picked another Python. Use the full path in Â§1 |
+| `No module named pytest` | The shell picked another Python. Use the full path in §1 |
 | `npm` is blocked by the PowerShell execution policy | Use `npm.cmd` |
 | Engine tests time out when several suites run at once | CPU contention, measured in M8.2.3. Run suites one after another |
 | `ENGINE_UNAVAILABLE` at the start of an engine test | Read the evidence in the message (card M8.4.26): `reason`, `failedMs` against `deadlineMs`, `exit` and the last `stderr` lines. "no handshake within the start deadline" with an idle `stderr` means Python started too slowly: the handshake has its own deadline of 20 s (`START_TIMEOUT_MS` in `desktop/engine.js`; under full CPU load starts took up to 4.7 s). `SEDCORETOOL_ENGINE_START_LOG=<file>` records every start; the *engine start repetitions* workflow runs the file 20 times on GitHub's Windows runner |
@@ -138,11 +138,11 @@ the roadmap. State in the report what was **not** measured.
 | `tools/measure_engine_lifecycle.mjs` | Runtime verification, engine ready, orderly stop, forced kill, leftovers; optional CPU load (`--load N`) |
 | `tools/measure_engine_cancellation.mjs` | Buffer upload speed, cancellation latency (running and queued jobs), engine memory |
 | `tools/measure_packaged_startup.mjs <exe>` | Packaged program: time to window and to engine ready, close, leftover processes, process-tree memory and idle CPU. `--keep-profile` reuses one user-data folder (verification record present after the first launch); `--wait-ms` shortens the failure timeout |
-| `tools/measure_engine_analysis.mjs` | The gates of contract Â§7 for an engine method run from the desktop program: parity, matched timing, stages per section, responsiveness, cancellation, process-tree memory (through `tools/process_tree_sampler.py`, needs `psutil`), ten open/analyse/close cycles, worker and coordinator kills. `--only scenarios` runs the three warm scenarios (interval change, edit/undo/redo, unchanged) flag off against flag on in alternating fresh processes and writes a pass/fail verdict per scenario and for the memory peak (rules in `tools/engine_gates.mjs`, tested by `tests/app/engine-gates.test.mjs`); `--synthetic <package>` adds the eight-section project of `tools/benchmark.py::make_synthetic` |
+| `tools/measure_engine_analysis.mjs` | The gates of contract §7 for an engine method run from the desktop program: parity, matched timing, stages per section, responsiveness, cancellation, process-tree memory (through `tools/process_tree_sampler.py`, needs `psutil`), ten open/analyse/close cycles, worker and coordinator kills. `--only scenarios` runs the three warm scenarios (interval change, edit/undo/redo, unchanged) flag off against flag on in alternating fresh processes and writes a pass/fail verdict per scenario and for the memory peak (rules in `tools/engine_gates.mjs`, tested by `tests/app/engine-gates.test.mjs`); `--synthetic <package>` adds the eight-section project of `tools/benchmark.py::make_synthetic` |
 | `tools/measure_interval_table.py` | In-process time to turn remembered row counts into the interval table for a section of any height (default 349,526 rows); card M8.4.12 |
 | `tools/make_large_fixtures.py FOLDER [--only ...] [--verify]` | Writes deterministic 2-8 GiB TIFF/BigTIFF images and a JPEG to a folder outside the repository (20-30 GiB for the set); `--verify` reads 20 sampled regions of each TIFF with the program's own reader (`tools/verify_large_fixtures.mjs`) and compares them with the generator's pixel function; card M8.4.13 |
 | `node tools/check_large_package.mjs [--cols 64] [--rows 112] [--profile FOLDER] [--out FILE]` | A package above 4 GiB through the desktop program: writes a synthetic tiled version (`tools/make_large_mask_version.py`, 7,168 tiles, about 5 GB) into a fresh profile, packages it from the page (ZIP64), imports it into an emptied store, compares the files and opens the project; about 15 min and 15 GB of disk; card M8.4.18d |
-| `<python> tools/integrate_version.py --summary TEXT [--push]` | Integrates the work branch into `master` as one version commit after checking that nothing would be lost (see Â§8); never creates a tag |
+| `<python> tools/integrate_version.py --summary TEXT [--push]` | Integrates the work branch into `master` as one version commit after checking that nothing would be lost (see §8); never creates a tag |
 | `<python> tools/measure_tile_store.py FIXTURES --pyramids FOLDER --out FILE --phase compression\|full\|cancel [--compressor none\|zlib] [--only ...]` | Builds pixel pyramids of the M8.4.13 fixtures through the engine's coordinator (in-process) and its method worker: build time, memory, progress, cancellation, tile reads and exactness against the generator; `--pyramids` must be outside the repository; card M8.4.14 |
 | `node tools/measure_tile_delivery.mjs FILE.tif --out FILE` | Windows. Runs the desktop program with tiled sections on, builds the pyramid of FILE from the page and times tile reads through the engine and through the main process's own reader; card M8.4.15 step 1 |
 | `node tools/measure_large_tables.mjs --chrome PATH --out FILE [--rows 20000,100000] [--reps 3] [--parts table,figures] [--merge] [--profile-first-open]` | Opens the real application from a local static server in headless Chrome and measures the Data table (native and visible-rows rendering), the depth plot, the cross-plot and the multiproxy log on the deterministic M2.1 fixture; needs `puppeteer-core`; card M2.1.4 |
@@ -151,9 +151,9 @@ the roadmap. State in the report what was **not** measured.
 
 ## 8. Versions, CI and releases
 
-- A version is created only when the maintainer asks: [AGENTS.md Â§5](../AGENTS.md#5-delivering-a-change).
+- A version is created only when the maintainer asks: [AGENTS.md §5](../AGENTS.md#5-delivering-a-change).
   `python tools/sync_version.py` copies the number from `DELIVERY` in `app/js/app.js` to the other files; rebuild
-  the runtime afterwards (Â§4).
+  the runtime afterwards (§4).
 - **Integrating a version into `master`** is one command, run on the work branch after the version commit passed
   the full checks, was pushed, and `tests` and *Desktop builds* succeeded on it:
 
@@ -176,9 +176,9 @@ the roadmap. State in the report what was **not** measured.
   builds Windows, macOS and Linux packages on every push of a `work/**` branch (build and test only), on a version
   tag, or on a manual run. A manual run with `draft_release=false` produces artifacts without a release. Never push
   a tag only to get a build: tags publish.
-- **Milestone gate** ([AGENTS.md Â§6](../AGENTS.md#6-working-on-a-task)): push the work branch; *Desktop builds* starts
-  by itself (a newer push cancels the older run of the same branch; it can also be started by hand from Actions â†’
-  Desktop builds â†’ Run workflow, `draft_release` off). It prepares the bundled runtime, runs `tests/e2e/desktop.mjs`
+- **Milestone gate** ([AGENTS.md §6](../AGENTS.md#6-working-on-a-task)): push the work branch; *Desktop builds* starts
+  by itself (a newer push cancels the older run of the same branch; it can also be started by hand from Actions →
+  Desktop builds → Run workflow, `draft_release` off). It prepares the bundled runtime, runs `tests/e2e/desktop.mjs`
   with the engine experiment off and on, `tests/e2e/large-16bit-desktop.mjs` and `tests/e2e/tiled-sections.mjs` (card M8.4.32: tiled sections,
   their saving, reopening and store folder; the engine's process is found with PowerShell on Windows and `ps` elsewhere), packages and checks the
   package on Windows, macOS (Apple Silicon runner)
