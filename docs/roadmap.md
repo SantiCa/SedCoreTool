@@ -20,12 +20,13 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153; Q10 must be done before it.
 - **Last verified code commit:** `35c4aa5` (M8.4.38). Full checks on Windows: `pytest -q` 896 passed / 9 skipped; `npm test` 557;
   typecheck; `sync_version.py --check`; ruff; `desktop.mjs` engine off and on; `tiled-sections.mjs`. GitHub `tests` and *Desktop builds*
-  passed on Windows, macOS and Linux. Later commits change documents only (AGENTS.md, this roadmap, CHANGELOG).
+  passed on Windows, macOS and Linux. Since then: documents, and H9 (`bfbc6b4`, `tools/check_all.py`, a tool only; its run on
+  Windows: `pytest` 906 passed / 9 skipped, `npm test` 557, typecheck, `sync_version`, ruff, all passed; no end-to-end test needed).
 - **Checks due:** none.
-- **In progress: `Q9`** (escape the `innerHTML` sites; P0 security; most capable tier, effort medium).
-- **Order after Q9 (decision U):** `M8.4.39` → `M8.4.40` (with decision V) → `M8.4.37` → **`M8.4.19`**, the milestone gate of part C.
-  Then part B as decided by I at the review of M8.4.19, then M8.5 (needs A1). `Q10` before V0.153; `A4` after M8.4.19.
-  `H8` (shorten this file) and `H9` (`python tools/check_all.py`, one command for the full checks) are done.
+- **Authorised run (maintainer, 21 Nov 2026, "sigue con el resto"; AGENTS §6 *Authorised runs*):** `Q9` (in progress; escape the
+  `innerHTML` sites; P0 security) → `M8.4.39` → `M8.4.40` (with decision V) → `M8.4.37`. Each card goes to a fresh sub-agent of its tier
+  and effort; one commit, push and short report per card; stop only for *Stop and ask*. Then **`M8.4.19`**, the milestone gate of part C
+  (not part of the run). Then part B as decided by I at the review of M8.4.19, then M8.5 (needs A1). `Q10` before V0.153; `A4` after M8.4.19.
 - **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) in its last cards; part B not started; M8.5 must not start.
   The engine path fails the timing gate of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates)
   for whole sections; the tile store (decision of 15 Nov 2026) is the answer for large images.

@@ -32,7 +32,8 @@ repository (code, comments, documents, commit messages) is written in English.
 9. **Report to the maintainer in Spanish** (§7).
 10. **One card per session.** After a card is committed, pushed and reported, the next card starts in a new
     conversation, which picks up from the repository alone (§7). A long conversation carries all its earlier
-    context into every answer and costs far more than a fresh start.
+    context into every answer and costs far more than a fresh start. In an authorised run of several cards (§6), a
+    director session may stay open and give each card to a fresh sub-agent instead.
 
 ## 2. The project and its documents
 
@@ -179,7 +180,8 @@ Session work happens on a branch; a version is created only when the maintainer 
 ```
 #### <ID> - <title>            state: Ready | In progress | Blocked | Done
 Goal:         one or two sentences: what will be true afterwards.
-Read first:   the few files and document sections needed. Nothing else is required reading.
+Read first:   the few files, functions and document sections needed, by name (line numbers go stale as soon as
+              another card edits the file). Nothing else is required reading.
 Change:       files to create or modify.
 Do not touch: files and behaviours that must stay as they are.
 Model:        most capable | fast, effort low | medium | high (one reason). See "Which model" below.
@@ -191,7 +193,9 @@ Done when:    observable acceptance criteria.
 - **Two roles.** *Designing* (deciding structure, contracts, acceptance criteria; writing or changing cards) and
   *implementing* (carrying out one card exactly). A design session is run with the most capable model available or
   by the maintainer. An implementing session, with any model, does not redesign: if the card is wrong, incomplete or
-  blocked, stop, write the problem under the card ("Blocked: …") and in the status, and report it.
+  blocked, stop, write the problem under the card ("Blocked: …") and in the status, and report it. A design session
+  that writes cards collects **every decision those cards will need** and asks them together, with a recommendation
+  each, so the maintainer answers once instead of in the middle of each card.
 - **Which model** (decided by the maintainer on 16 November 2026; the same rule for every assistant: Claude,
   ChatGPT/Codex, Gemini or another). Before starting a card, tell the maintainer in one line which tier and which
   effort the card's `Model:` field asks for and why; if the session runs on another tier or effort, say so and wait
@@ -233,10 +237,17 @@ Done when:    observable acceptance criteria.
   - **Delegate only when it pays.** A sub-agent needs a complete brief and its result needs a review. Delegate when
     the brief and the review clearly cost less than doing the work (as a guide: ten or more similar edits, a long
     read-only search, a long scripted run); a handful of edits the director already understands are done directly.
-  - **Critical cards** (`most capable` in the `Model:` field: security, saving, formats, packaging, dependencies) stay
-    with the director for design, decisions, the acceptance tests that define the card's criterion, and the review.
-    Within them, only read-only exploration and mechanical edits that follow the director's exact list may be
-    delegated, and the director reviews every changed line before committing.
+  - **Critical cards** (`most capable` in the `Model:` field: security, saving, formats, packaging, dependencies): the
+    decisions and the review stay with the director, who reviews every changed line before committing. The work
+    itself goes either to the director, delegating only read-only exploration and mechanical edits that follow an
+    exact list, or whole to a fresh sub-agent of the **most capable tier at the card's effort**, which meets the card's
+    `Model:` field; the director's brief then states the policy and the acceptance tests the sub-agent must write.
+  - **One fresh sub-agent per card in a run.** In an authorised run (below), the director gives each card to a new
+    sub-agent of the card's tier and effort, with a self-contained brief made from the card and the decisions that
+    apply. The sub-agent starts without the conversation's history, as a new session would, and the director's own
+    context grows only by the briefs, reports and diffs. This is how a run respects "one card per session" (§1 step 10).
+  - **Prepare the next card while one is being written.** While a sub-agent writes card N, the director reads what
+    card N+1 needs and writes its brief, without editing the checkout; card N+1 starts as soon as card N is committed.
   - **Limits and fallback.** If the session's tier or effort is lower than what a critical card asks for and cannot be
     raised through a sub-agent, state the gap in one line and wait for the maintainer to switch or say "continue".
     **One editor at a time** holds strictly: never run two sub-agents that write on the shared checkout at the same
@@ -246,6 +257,11 @@ Done when:    observable acceptance criteria.
     work branch, the roadmap and changelog, and the report to the maintainer in Spanish.
 - **One card at a time,** in roadmap order, and only the card the maintainer authorised. Finish or hand over
   before starting another. If a request combines independent workstreams, split it into cards and do the first.
+- **Authorised runs** (decided by the maintainer on 21 November 2026). The maintainer may authorise several cards at
+  once ("do order U: M8.4.39, M8.4.40, M8.4.37"). The session then does them one after another, each committed,
+  pushed and reported in the short form of §7, without asking between cards. It stops only for *Stop and ask* below,
+  a §3 hard limit, or a decision the maintainer has not taken. The run (its cards, and which are done) is written in
+  the roadmap status, so another session can continue it.
 - **Interpret a broad request by intent:** choose the smallest concrete scope that satisfies it, state the
   assumption, continue. Ask only when the goal or a consequential choice cannot be inferred.
 - **Stop and ask when:** an acceptance criterion cannot be met; a hard limit (§3) is in the way; the change would
@@ -265,6 +281,11 @@ Done when:    observable acceptance criteria.
 - **One editor at a time** on the shared checkout, even for different files. All assistants work in this same
   local folder, so handoffs are commits on the work branch (pushed, §5.1) plus the roadmap status; `master` is
   not touched unless asked.
+  - **Exception: two cards in parallel, only with the maintainer's explicit permission for that pair.** The two cards
+    must touch disjoint files (for example an interface card and an engine card). Each runs in its own `git worktree`
+    on its own branch made from the work branch; the sub-agents do not edit `CHANGELOG.md` or the roadmap. The director
+    merges each branch into the work branch with a normal merge, writes the documents, and runs the full checks one
+    after another on the merged state (the engine tests have timing deadlines). Then the worktrees and branches are removed.
 
 ## 7. Handoff and reporting
 
@@ -273,8 +294,9 @@ Done when:    observable acceptance criteria.
   chat history.
 - When a card is done: mark it, link its changelog entry, move its long record to `docs/roadmap-history.md` and
   leave one line in the roadmap. Then end the session (§1 step 10).
-- **Report to the maintainer in Spanish, briefly:** the result; how it was checked; branch and commit (or version
-  number when one was created); how the change fits into SedCoreTool (which components it touches and how data or
-  control passes between them); and what is genuinely pending, including checks not run and things not measured.
+- **Report to the maintainer in Spanish, briefly, in a fixed form of about 8 lines:** the result; how it was checked
+  (which checks, on which platform); branch and commit (or version number when one was created); which components it
+  touches; what is genuinely pending, including checks not run and things not measured; the next card and the tier
+  and effort it asks for. More detail only when the maintainer asks for it.
 - **Be exact about evidence.** Say what was tested, on which platform, and what was not. A configured CI job is not
   a job that ran. A planned part is never described as available.
