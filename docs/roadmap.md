@@ -25,17 +25,18 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
   *Desktop builds* failed in `tiled-sections.mjs` on Windows, macOS and Linux (run `44957994403`). The *As built* of M8.4.43 said it passed
   on Windows; it does not.
 - **Checks due:** the GitHub result of this commit (expected: `tiled-sections.mjs` still failing until Q14).
-- **Found, not done:** **Q14** (the failure above; most capable, effort high), **Q11** (hostile ML settings stop the classifier), **Q12**
+- **Found, not done:** **Q14** (the failure above; most capable, effort high), **Q15** (the macOS/Linux-only failures of
+  `tiled-sections.mjs`; most capable, effort medium), **Q11** (hostile ML settings stop the classifier), **Q12**
   (an evicted placeholder section cannot rebuild its grey image).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 (splitting a too-dense section) approved as recommended and delivered (M8.4.41–M8.4.43).
-- **Next:** **Q14** is recommended before M8.4.10 (a red end-to-end test hides new failures); then **M8.4.10** (record tables resident in the
+- **Next (order decided by the maintainer, 22 Nov 2026):** **Q14**, then **Q15**, then **M8.4.10** (record tables resident in the
   engine; most capable, effort medium), **M8.4.11** (gate of part B; fast, effort low), then M8.5 (needs A1). `Q10` before V0.153; `A4` open.
 - **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) done, milestone gate met (M8.4.19); part B: M8.4.9 done
   (22 Nov 2026); M8.5 must not start. The engine path fails the timing gate of
   [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates) for whole sections; the tile store is the
   answer for large images.
-- **Decisions waiting for the maintainer:** whether Q14 goes before M8.4.10; promote or remove the flags marked so in the [flag table](#flags);
+- **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags);
   `Q5` part 3 (saved format of long series) only if a save benchmark shows a slow save. Every lettered decision up to X is approved. M8.4.9 kept
   the 512 MiB session budget by measurement (a third outcome beside the card's two): recorded in contract §3.
 - **Open pull requests (Dependabot, against `master`, not merged):** #26 Electron 45.2.2 → 45.3.4, #24 `softprops/action-gh-release` 2 → 3.
@@ -738,6 +739,15 @@ web/frontend security, UI correctness and architecture cards sit here.
   (`89d080b` onwards) failed on macOS and Linux in another step ("reopened, no redraw by hand"). *Change:* diagnose and fix the cause (the
   window block logs `BUSY` as `lastError` on two sections); never widen the wait. *Done when:* `tiled-sections.mjs` passes on Windows locally
   and on the three systems on GitHub on one commit.
+
+- [ ] **Q15 - `tiled-sections.mjs` failures that occur only on macOS and Linux** (asked by the maintainer, 22 Nov 2026; after Q14; most
+  capable, effort medium: diagnosis across systems, through GitHub logs). From `89d080b` to `4676908` *Desktop builds* passed on Windows and
+  failed in `tiled-sections.mjs` on macOS at "reopened, no redraw by hand: drawn pixel = source pixel" and on Linux (run `44951549785`, not
+  diagnosed). *Read first:* the failing logs (`gh run view <id> --log-failed`), the reopened-viewer step of `tests/e2e/tiled-sections.mjs`,
+  `.github/workflows/` (the *Desktop builds* job). *Change:* find the cause from the logs; fix the program if it draws wrongly there, or the
+  test if it depends on Windows-only timing or colour handling, stating which and why (never widen a tolerance or a wait, AGENTS §3.7).
+  *Done when:* after Q14, *Desktop builds* is green on Windows, macOS and Linux on one commit, or each remaining failure is recorded with its
+  message and a decision of the maintainer.
 
 - [ ] **Q10 - Data-tab edit precision, virtualized table cap, engine-refresh/CSV races & SVG PNG Blob export.**
   - *Goal:* fix verified runtime, UX and data-accuracy defects across the Data tab, Core log, Figures and pointer interactions.
