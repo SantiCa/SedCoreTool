@@ -88,9 +88,11 @@ class Source:
         try:
             image = loader(str(self.path), access='sequential' if self.sequential else 'random', fail_on='error')
             width, height, bands, sample = image.width, image.height, image.bands, image.format
+            interpretation = image.interpretation
         except pyvips.Error:
             raise MethodError('UNSUPPORTED_INPUT', 'source') from None
-        if sample not in SAMPLE_TYPES or bands not in (1, 3, 4):
+        # 1 band is grey, 3 RGB, 4 RGBA; grey with alpha (2 bands) is refused. CMYK also has 4 bands, which would be shown as RGBA (card M8.4.40).
+        if sample not in SAMPLE_TYPES or bands not in (1, 3, 4) or interpretation == 'cmyk':
             raise MethodError('UNSUPPORTED_INPUT', 'source')
         self.info = SourceInfo(kind, width, height, bands, SAMPLE_TYPES[sample][0])
         if not (0 < width <= MAX_WIDTH and 0 < height <= MAX_HEIGHT) or self.info.band_bytes > MAX_BAND_BYTES:

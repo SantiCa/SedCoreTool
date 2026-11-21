@@ -18,17 +18,19 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.152, `8ee9776`) is contained in it.
 - **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153; Q10 must be done before it.
-- **Last verified code commit:** M8.4.39 (this commit; see `git log`). Full checks on Windows: `npm test` 576; typecheck; `desktop.mjs`
-  engine off and on; `tiled-sections.mjs`; `large-16bit-desktop.mjs`; `pytest -q` 907 passed / 9 skipped, ruff, `sync_version --check`.
-  `smoke.mjs` not run locally. GitHub `tests` (with the `e2e` smoke job) and *Desktop builds* passed on Windows, macOS and Linux on `b991fd9`
-  (contains Q9); the run of the M8.4.39 commit is to be read at the start of the next card.
-- **Checks due:** none locally; read the GitHub result of the M8.4.39 commit.
+- **Last verified code commit:** M8.4.40 (this commit; see `git log`). Full checks on Windows: `pytest -q` 924 passed / 9 skipped; `npm test` 577;
+  typecheck; ruff; `sync_version --check`; engine runtime rebuilt; `tiled-sections.mjs` and `desktop.mjs` (engine on) passed. M8.4.39
+  (`1464f6e`): `npm test` 576, `desktop.mjs` off and on, `tiled-sections.mjs`, `large-16bit-desktop.mjs` passed on Windows.
+- **GitHub:** `b991fd9` (Q9) green on three systems. `1464f6e` (M8.4.39): `tests` green; *Desktop builds* green on Windows and macOS, **Linux
+  failed**: `tiled-sections.mjs` hung after the folder-backup step (`Runtime.callFunctionOn timed out`); a re-run of that job was started to
+  tell a flaky runner from a bug. Read its result and the run of the M8.4.40 commit before the next card.
+- **Checks due:** the Linux result above.
 - **Found by the run, not in it:** **Q11** (hostile ML settings stop the classifier; from Q9), **Q12** (an evicted placeholder section cannot
   rebuild its grey image; from M8.4.39).
-- **Authorised run (maintainer, 21 Nov 2026, "sigue con el resto"; AGENTS §6 *Authorised runs*):** `Q9` (done) → `M8.4.39` (done) →
-  **`M8.4.40`** (next, with decision V) → `M8.4.37`. Each card goes to a fresh sub-agent of its tier and effort; one commit, push and short
-  report per card; stop only for *Stop and ask*. Then **`M8.4.19`**, the milestone gate of part C (not part of the run). Then part B as decided
-  by I at the review of M8.4.19, then M8.5 (needs A1). `Q10` before V0.153; `A4` after M8.4.19.
+- **Authorised run (maintainer, 21 Nov 2026, "sigue con el resto"; AGENTS §6 *Authorised runs*):** `Q9`, `M8.4.39`, `M8.4.40` (done) →
+  **`M8.4.37`** (next). Each card goes to a fresh sub-agent of its tier and effort; one commit, push and short report per card; stop only for
+  *Stop and ask*. Then **`M8.4.19`**, the milestone gate of part C (not part of the run). Then part B as decided by I at the review of
+  M8.4.19, then M8.5 (needs A1). `Q10` before V0.153; `A4` after M8.4.19.
 - **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) in its last cards; part B not started; M8.5 must not start.
   The engine path fails the timing gate of [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates)
   for whole sections; the tile store (decision of 15 Nov 2026) is the answer for large images.
@@ -387,32 +389,7 @@ every non-empty tile counted once, which means reading them back. **Decisions D1
 
 - [x] **M8.4.39 - Frontend lifecycle teardown, tiled-viewer stale closure, multi-core save/backup & memory leaks** (done 21 Nov 2026, development gate; record: [history](roadmap-history.md#m8439---frontend-lifecycle-teardown-tiled-viewer-stale-closure-multi-core-savebackup--memory-leaks)).
 
-##### M8.4.40 - Engine session-request limit, non-blocking store I/O and Windows/handle robustness — state: Ready (third council audit, 21 Nov 2026; P1; decision V)
-
-- **Goal:** long tiled editing sessions never crash at 65,536 engine requests; heavy mask-store operations never stall `tile.read`, progress
-  heartbeats or `job.cancel`; Python store writes survive transient Windows locks and recognise Windows disk-full errors; staged engine handles
-  and `TileReader` caches never leak; 4-band CMYK TIFFs are rejected instead of misrendered as RGBA.
-- **Read first:** `src/sedcoretool/engine/server.py` (`seen` limit, `mask.*` dispatch, `mask_stores` LRU vs `staging.store is store`);
-  `src/sedcoretool/store/masks.py` (`_write_durably`, `write_or_disk_error`); `src/sedcoretool/store/tiles.py` (`TileReader`);
-  `src/sedcoretool/store/pyramid.py` (eviction); `src/sedcoretool/store/source.py` (band/interpretation check); `desktop/tile-ipc.js` (`uploadTable`).
-- **Change:** the files listed above, `docs/roadmap-engine-contract.md` (document the sliding request-ID window), and tests in `tests/`.
-- **Do not touch:** mask-store on-disk format, pyramid format, scientific method outputs.
-- **Model:** most capable, effort high (engine protocol, concurrency, atomic disk I/O, image interpretation).
-- **Steps:**
-  1. Replace the hard `len(self.seen) >= 65_536` session kill (`server.py:149`) with a bounded `OrderedDict` sliding window (decision V) so
-     sessions run indefinitely while rejecting duplicate recent IDs.
-  2. Offload heavy synchronous mask-store I/O (`mask.retain`, `mask.import`, `mask.export`, `mask.copy`, `mask.put`, `mask.derived.put`/`.get`)
-     off the coordinator's request/progress loop (or run in a dedicated I/O worker thread with locking per store) so `tile.read`, progress
-     events and `job.cancel` remain responsive.
-  3. In `store/masks.py`, add Windows `EPERM`/`EBUSY` retry to `_write_durably` (`os.replace`) and check `getattr(err, 'winerror', None) in (39, 112)`
-     in `write_or_disk_error`; in `server.py`, match open stagings by canonical store path/project key instead of `staging.store is store`.
-  4. Bound `TileReader.descriptions`/`hashes` in `store/tiles.py` and invalidate evicted pyramids; in `desktop/tile-ipc.js::uploadTable`, release
-     the staged buffer token on `buffer.chunk` / `buffer.commit` error; in `store/source.py`, check `image.interpretation` to reject CMYK 4-band
-     TIFFs clearly (and decide/document 2-band gray+alpha handling).
-- **Tests:** Python unit/integration tests for >65,536 requests (or configurable window size) without error, concurrent `tile.read` during large
-  `mask.import`/`mask.retain`, `MaskStore` eviction + open staging protection, Windows retry & `winerror=112` mapping, CMYK TIFF rejection;
-  Node test for `uploadTable` cleanup on failed chunk; `pytest -q`, `npm test`, `ruff check`, `tests/e2e/tiled-sections.mjs`.
-- **Done when:** all tests pass on Windows and the engine runtime is rebuilt and verified; development gate.
+- [x] **M8.4.40 - Engine session-request limit, non-blocking store I/O and Windows/handle robustness** (done 21 Nov 2026, development gate; record: [history](roadmap-history.md#m8440---engine-session-request-limit-non-blocking-store-io-and-windowshandle-robustness)).
 
 ##### M8.4.19 - Milestone gate of part C — state: after M8.4.18d, M8.4.36, M8.4.38, Q9, M8.4.39, M8.4.40 and M8.4.37 (decision U, approved 21 Nov 2026)
 

@@ -177,18 +177,23 @@ function createTileIpc({ engine, pyramidRoot = null, projectsRoot = null, delive
     try { names = fs.readdirSync(path.join(projectsRoot, project, 'tiles', 'manifests')); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
     return names.filter((name) => /^[0-9a-f]{64}\.json$/.test(name)).map((name) => name.slice(0, 64));
   };
-  /** One table as a committed engine buffer; returns its handle. The caller releases it. */
+  /** One table as a committed engine buffer; returns its handle. The caller releases it; a buffer that failed to arrive is released here (card M8.4.40). */
   async function uploadTable(name, data) {
     const spec = TABLES[name], bytes = bytesOf(data);
     if (!bytes || bytes.length < spec.item || bytes.length % spec.item) reject('INVALID_REQUEST', `tables.${name}`);
     if (bytes.length > spec.limit) reject('LIMIT_EXCEEDED', `tables.${name}`);
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     const { handle } = await engine.request('buffer.begin', { dtype: spec.dtype, shape: [bytes.length / spec.item], byte_length: bytes.length, sha256 });
-    for (let offset = 0; offset < bytes.length; offset += MAX_CHUNK) {
-      const part = bytes.subarray(offset, offset + MAX_CHUNK);
-      await engine.request('buffer.chunk', { handle, offset, byte_length: part.length }, Buffer.from(part));
+    try {
+      for (let offset = 0; offset < bytes.length; offset += MAX_CHUNK) {
+        const part = bytes.subarray(offset, offset + MAX_CHUNK);
+        await engine.request('buffer.chunk', { handle, offset, byte_length: part.length }, Buffer.from(part));
+      }
+      await engine.request('buffer.commit', { handle });
+    } catch (error) {
+      engine.request('buffer.release', { handles: [handle] }).catch(() => {});
+      throw error;
     }
-    await engine.request('buffer.commit', { handle });
     return handle;
   }
 

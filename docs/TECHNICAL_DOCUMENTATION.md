@@ -2970,7 +2970,9 @@ of window loading, reports failure through status and waits for shutdown before 
 Frames use the M8.1 `SCE1` 12-byte header, strict UTF-8 JSON controls <=64 KiB, binary chunks <=1 MiB and
 duplicate-key/depth/finite-number checks. At most 32 requests and two binary chunks are outstanding in main;
 descriptor/binary pairs cannot interleave. Partial/malformed frames, unknown sessions, process exit or request
-timeout invalidate the session. Each fresh start assigns a new UUID; previous handles cannot be reused.
+timeout invalidate the session. Each fresh start assigns a new UUID; previous handles cannot be reused. The coordinator refuses a
+request ID it has seen among the last 65,536 of the session (`INVALID_REQUEST`) and forgets older ones, so a session has no request limit
+(card M8.4.40).
 Two methods are advertised. `buffer.digest/1` (`buffer.digest {handle}`) recomputes a committed buffer's SHA-256 in an
 isolated subprocess and returns `{sha256,byte_length}`; it tests transport and worker ownership. `section.intervals/1`
 (`section.analyze`, inputs and results in the [engine contract](roadmap-engine-contract.md) §3–§5) calculates the interval
@@ -3164,7 +3166,8 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   new one fits and the disk keeps 1 GiB free; otherwise the build fails with `LIMIT_EXCEEDED` (`disk`).
 - **Reading sources** (`store/source.py`): the format is recognised by the file's first bytes and opened only with libvips' TIFF, JPEG or PNG
   loader; limits are checked on the header (width ≤ 262,144, height ≤ 16,777,216, one 512-row band ≤ 256 MiB, JPEG or PNG ≤ 1 GiB decoded).
-  Samples are copied as stored (8 or 16 bits; 1, 3 or 4 channels).
+  Samples are copied as stored (8 or 16 bits; 1, 3 or 4 channels). Grey with alpha (2 bands) and CMYK (4 bands whose libvips interpretation
+  is `cmyk`, TIFF or JPEG) are refused with `UNSUPPORTED_INPUT` (`source`); a 4-band image is otherwise read as RGBA.
 - **Identity of a source** (`store/identity.py`): a pyramid is named by the SHA-256 of the whole source file. After hashing a file whole the
   engine records its absolute path, size, modification time (ns), the SHA-256 of its first, middle and last MiB and the full SHA-256 in
   `<root>/identities.json` (at most 1,024 entries, 1 MiB); when the same file is added again in the same state its pyramid is found from the
@@ -3179,7 +3182,9 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   second (8 GiB in 81 s), memory below 320 MiB, disk about 1.33 times the decoded image, cancellation answered in 7-15 ms
   ([summary](validation/M8.4.14-summary.md)).
 - **Serving tiles** (`store/tiles.py`, in the coordinator): every tile is checked against the SHA-256 listed in `<level>/.tiles.sha256` before
-  it is sent; verified tiles are kept in a 256 MiB least-recently-used cache. Up to 16 tiles per request, sent in binary frames of at most 1 MiB.
+  it is sent; verified tiles are kept in a 256 MiB least-recently-used cache. The descriptions of the last 64 pyramids used and their levels'
+  hash lists (64 MiB) are kept least recently used first out; a pyramid whose description is dropped keeps no hash list or tile in memory
+  (card M8.4.40). Up to 16 tiles per request, sent in binary frames of at most 1 MiB.
 - **Mask tiles** (`store/masks.py`, in the coordinator; card M8.4.16, not used by the interface yet): the labels (`i32`) and exclusion (`u8`) of a
   tiled section at full resolution, in 512 x 512 tiles on the grid of level 0, plus its objects, classes and overlap-stack tables, stored in
   `<user data>/projects/<project>/tiles/` (the main process passes `<user data>/projects` with `--projects-dir`; nothing there is deleted by a
@@ -3191,6 +3196,11 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   exists only in the coordinator's memory, so a stopped engine leaves every earlier version readable. Blobs and manifests are written to a
   temporary file, flushed to the disk and renamed; a blob or manifest is used only when its bytes match its name (a blob also must decompress
   to exactly its length), and a damaged blob is written again by the next `mask.put` of the same content. Verified blobs are cached (64 MiB).
+  On Windows a rename refused because another program holds the file for a moment (Windows errors 5, 32 and 33) is tried again after 50, 100,
+  200, 400 and 800 ms before the error is reported; a full disk (`ENOSPC`, `EDQUOT`, or Windows errors 39 and 112) is `LIMIT_EXCEEDED`
+  (`disk`). The mask operations run on one thread of the coordinator, one at a time in the order they arrived (at most 16 waiting behind the running one), so
+  `tile.read`, build progress and `job.cancel` are answered while one runs; an open staged version protects its blobs from `mask.retain` and
+  its project from `mask.forget` by the store's folder (card M8.4.40).
   Unused blobs and manifests are not deleted yet (card M8.4.18).
 - **Tiled sections in the interface** (behind the same flag): an image added through the interface whose header says it has more pixels than the
   maximum size when adding images gets a pyramid (a dialog shows the progress and can cancel) and becomes a section whose working image is the
@@ -3386,7 +3396,7 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   registers a file the user chose (the page gets an opaque token, never the path), builds its pyramid with progress events, cancels, and reads the
   verified tiles of pyramids the page built, through the engine. `desktop/tile-reader.js` reads the store in the main process; it serves only the
   measurement option `SEDCORETOOL_TILE_DELIVERY=direct`.
-- **Tests:** `tests/test_store_source.py`, `tests/test_store_pyramid.py`, `tests/test_engine_store.py` (Python), the tile-store tests of
+- **Tests:** `tests/test_store_source.py`, `tests/test_store_pyramid.py`, `tests/test_store_tiles.py`, `tests/test_engine_store.py` (Python), the tile-store tests of
   `tests/app/engine.test.mjs` (the desktop client and the real engine), `tests/app/tile-ipc.test.mjs` (the bridge and the reader) and
   `tests/app/source-copy.test.mjs` (locating a moved source, the verified copy into the project), `tests/app/project-store.test.mjs` (the
   project's folder deleted and copied with it).

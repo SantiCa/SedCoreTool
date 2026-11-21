@@ -18,6 +18,7 @@ import math
 import os
 import re
 import sys
+import time
 import zlib
 from array import array
 from collections import OrderedDict
@@ -63,6 +64,12 @@ WINDOWS_DEVICES = {'con', 'prn', 'aux', 'nul', *(f'com{i}' for i in range(10)), 
 ZEROS = bytes(LAYER_BYTES['labels'])
 MAX_BLOB_BYTES = max(*LAYER_BYTES.values(), *TABLE_LIMITS.values())   # the largest uncompressed blob: a stack table of 16 MiB
 ZERO_LAYER = {layer: bytes(length) for layer, length in LAYER_BYTES.items()}
+# Card M8.4.40: Windows error numbers. A rename over a file another program holds for a moment fails with ERROR_ACCESS_DENIED (5),
+# ERROR_SHARING_VIOLATION (32) or ERROR_LOCK_VIOLATION (33) (Node reports them as EPERM and EBUSY); it is tried again 5 times, after 50, 100,
+# 200, 400 and 800 ms (1.55 s in all). A full disk is ERROR_HANDLE_DISK_FULL (39) or ERROR_DISK_FULL (112), whatever errno Python derives.
+WINDOWS_TRANSIENT_LOCKS = (5, 32, 33)
+REPLACE_RETRY_SECONDS = (0.05, 0.1, 0.2, 0.4, 0.8)
+WINDOWS_DISK_FULL = (39, 112)
 
 
 class MaskError(Exception):
@@ -278,6 +285,24 @@ def inflate_blob(raw: bytes, sha256: str, length: int | None, field: str) -> byt
     return data
 
 
+def _is_transient_lock(error: OSError) -> bool:
+    """A Windows sharing violation: another program (an antivirus or the search indexer) holds the file for a moment."""
+    return getattr(error, 'winerror', None) in WINDOWS_TRANSIENT_LOCKS
+
+
+def _replace_retrying(source: Path, target: Path) -> None:
+    """``os.replace``, tried again after each delay of ``REPLACE_RETRY_SECONDS`` while it fails with a transient Windows lock (card M8.4.40);
+    any other error, or the last one, is raised."""
+    for delay in (*REPLACE_RETRY_SECONDS, None):
+        try:
+            os.replace(source, target)
+            return
+        except OSError as error:
+            if delay is None or not _is_transient_lock(error):
+                raise
+        time.sleep(delay)
+
+
 def _write_durably(path: Path, data: bytes) -> None:
     """Temporary file in the same folder, flushed to the disk, then renamed over ``path``: a reader sees the old file or the whole new one."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -287,7 +312,7 @@ def _write_durably(path: Path, data: bytes) -> None:
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        _replace_retrying(temporary, path)
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
@@ -651,6 +676,6 @@ def write_or_disk_error(write, *arguments):
     try:
         return write(*arguments)
     except OSError as error:
-        if error.errno in (errno.ENOSPC, getattr(errno, 'EDQUOT', errno.ENOSPC)):
+        if error.errno in (errno.ENOSPC, getattr(errno, 'EDQUOT', errno.ENOSPC)) or getattr(error, 'winerror', None) in WINDOWS_DISK_FULL:
             raise MaskError('LIMIT_EXCEEDED', 'disk') from None
         raise

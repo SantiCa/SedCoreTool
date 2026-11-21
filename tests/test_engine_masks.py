@@ -6,6 +6,7 @@ import io
 import json
 import subprocess
 import sys
+import threading
 import zlib
 from pathlib import Path
 from uuid import uuid4
@@ -16,6 +17,7 @@ import pytest
 from sedcoretool.engine.protocol import BINARY_FRAME, MAX_CHUNK, read_frame, strict_json, write_binary, write_json
 from sedcoretool.engine.server import Coordinator
 from sedcoretool.store import masks
+from test_store_tiles import hand_made_pyramid
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVER = ROOT / 'src' / 'sedcoretool' / 'engine' / 'server.py'
@@ -36,11 +38,12 @@ def frames(output):
 class Engine:
     """One coordinator in this process, driven like the main process drives it."""
 
-    def __init__(self, tmp_path, projects=True):
+    def __init__(self, tmp_path, projects=True, pyramids=False):
         (tmp_path / 'scratch').mkdir(exist_ok=True)
         self.output = io.BytesIO()
         self.coordinator = Coordinator(self.output, version='test', runtime_id='0' * 64, scratch_directory=str(tmp_path / 'scratch'),
-                                       projects_directory=str(tmp_path / 'projects') if projects else None)
+                                       projects_directory=str(tmp_path / 'projects') if projects else None,
+                                       pyramid_directory=str(tmp_path / 'pyramids') if pyramids else None, pyramid_budget=2**30)
         self.session = str(uuid4())
         self.call('hello', {'protocol': 1})
 
@@ -49,6 +52,7 @@ class Engine:
         item = request(self.session, operation, payload)
         before = len(frames(self.output))
         self.coordinator.receive(item, data)
+        self.coordinator.answer_masks(wait=True)           # card M8.4.40: mask requests are answered from the MaskIO thread
         found = frames(self.output)[before:]
         assert found[0][0] == 'json' and found[0][1]['id'] == item['id']
         return found[0][1], [value for kind, value in found[1:] if kind == 'binary']
@@ -87,8 +91,8 @@ class Engine:
 def engine(tmp_path):
     made = []
 
-    def make(projects=True):
-        made.append(Engine(tmp_path, projects))
+    def make(projects=True, pyramids=False):
+        made.append(Engine(tmp_path, projects, pyramids))
         return made[-1]
     yield make
     for value in made:
@@ -711,3 +715,124 @@ def test_export_refuses_a_damaged_blob(engine):
     path.write_bytes(path.read_bytes()[:-3])
     value.coordinator.mask_cache.items.clear()
     assert value.error('mask.export', {'project': 'p1', 'manifest': manifest, 'blobs': [tile]}) == ('INVALID_BUFFER', 'tile')
+
+
+# ---- Card M8.4.40: mask requests run on their own thread, in order; an open staged version is protected by its folder ----
+
+def slow_disk(monkeypatch, name='retain'):
+    """Make ``MaskStore.<name>`` wait until the test lets it go, as on a slow disk: ``(started, release)`` events."""
+    started, release = threading.Event(), threading.Event()
+    original = getattr(masks.MaskStore, name)
+
+    def slow(self, *args):
+        started.set()
+        assert release.wait(5), 'the test did not let the mask request finish'
+        return original(self, *args)
+    monkeypatch.setattr(masks.MaskStore, name, slow)
+    return started, release
+
+
+def answered(value):
+    return [item['id'] for kind, item in frames(value.output) if kind == 'json']
+
+
+def test_tile_reads_and_cancellations_are_answered_while_a_mask_request_runs(engine, monkeypatch):
+    value = engine(pyramids=True)
+    pyramid, tile = hand_made_pyramid(Path(value.coordinator.pyramid_root), 7)
+    version = committed_version(value)
+    started, release = slow_disk(monkeypatch)
+    retain = request(value.session, 'mask.retain', {'project': 'p1', 'keep': [version]})
+    value.coordinator.receive(retain)                                      # returns at once: the store works on the MaskIO thread
+    assert started.wait(5)
+    read = request(value.session, 'tile.read', {'pyramid': pyramid, 'level': 0, 'positions': [[0, 0]]})
+    cancel = request(value.session, 'job.cancel', {'request_id': str(uuid4())})
+    value.coordinator.receive(read)
+    value.coordinator.receive(cancel)
+    value.coordinator.poll()
+    assert answered(value)[-2:] == [read['id'], cancel['id']] and retain['id'] not in answered(value)
+    found = frames(value.output)
+    at = next(k for k, (kind, item) in enumerate(found) if kind == 'json' and item['id'] == read['id'])
+    assert found[at][1]['status'] == 'ok' and found[at + 1] == ('binary', tile)
+    release.set()
+    value.coordinator.answer_masks(wait=True)
+    response = frames(value.output)[-1][1]
+    assert response['id'] == retain['id'] and response['status'] == 'ok', response
+
+
+def test_mask_requests_run_in_the_order_they_arrived(engine):
+    value = engine()
+    staged = begin(value)['staged']
+    tiles = [labels_tile(k + 1) for k in range(3)]
+    tables = value.tables()
+    sent = []
+    for col, (data, sha) in enumerate(tiles):                             # sent one after another, without waiting for an answer
+        sent.append(request(value.session, 'mask.put', {'staged': staged, 'layer': 'labels', 'row': col // 2, 'col': col % 2, 'sha256': sha}))
+        value.coordinator.receive(sent[-1], data)
+    sent.append(request(value.session, 'mask.commit', {'staged': staged, 'tables': tables}))
+    value.coordinator.receive(sent[-1])
+    value.coordinator.answer_masks(wait=True)
+    responses = {item['id']: item for kind, item in frames(value.output) if kind == 'json'}
+    assert [responses[item['id']]['status'] for item in sent] == ['ok'] * 4
+    manifest = responses[sent[-1]['id']]['result']['manifest']
+    read = value.ok('mask.read', {'project': 'p1', 'manifest': manifest, 'layer': 'labels', 'positions': [[0, 0], [0, 1], [1, 0]]})[1]
+    assert b''.join(read) == b''.join(data for data, _ in tiles)
+
+
+def test_a_buffer_released_after_a_mask_request_arrived_is_still_read_by_it(engine, monkeypatch):
+    value = engine()
+    manifest = committed_version(value)
+    _, blobs = backup_of(value, manifest)
+    files = sorted(blobs.items())
+    handle = upload(value, b''.join(data for _, data in files))
+    started, release = slow_disk(monkeypatch)
+    value.coordinator.receive(request(value.session, 'mask.retain', {'project': 'p9', 'keep': []}))
+    assert started.wait(5)
+    item = request(value.session, 'mask.import', {'project': 'p2', 'kind': 'blobs', 'handle': handle,
+                                                  'files': [{'name': name, 'byte_length': len(data)} for name, data in files]})
+    value.coordinator.receive(item)
+    value.coordinator.receive(request(value.session, 'buffer.release', {'handles': [handle]}))    # answered at once
+    assert frames(value.output)[-1][1]['result'] == {'released': [handle]}
+    release.set()
+    value.coordinator.answer_masks(wait=True)
+    response = next(found for kind, found in frames(value.output) if kind == 'json' and found['id'] == item['id'])
+    assert response['result'] == {'accepted': [True] * len(files)}
+    assert handle not in value.coordinator.store.buffers, 'unpinned and removed once answered'
+
+
+def test_shutdown_answers_the_mask_requests_received_before_it(engine, monkeypatch):
+    value = engine()
+    started, release = slow_disk(monkeypatch)
+    retain = request(value.session, 'mask.retain', {'project': 'p1', 'keep': []})
+    value.coordinator.receive(retain)
+    assert started.wait(5)
+    threading.Timer(0.2, release.set).start()
+    shutdown = request(value.session, 'shutdown', {})
+    value.coordinator.receive(shutdown)
+    assert answered(value)[-2:] == [retain['id'], shutdown['id']]
+
+
+def test_an_unexpected_error_on_the_mask_thread_still_ends_the_session(engine, monkeypatch):
+    value = engine()
+    manifest = committed_version(value)
+
+    def broken(*_arguments):
+        raise RuntimeError('a bug')
+    monkeypatch.setattr(masks.MaskStore, 'info', broken)
+    with pytest.raises(RuntimeError):
+        value.call('mask.info', {'project': 'p1', 'manifest': manifest, 'start': 0})
+
+
+def test_an_open_staged_version_keeps_its_blobs_after_its_store_left_the_open_stores(engine):
+    """At most 64 stores stay open; a staged version still holds its own. Retain and forget recognise it by folder, not by object."""
+    value = engine()
+    staged = begin(value)['staged']
+    pending = labels_tile(42)
+    put(value, staged, *pending)
+    for k in range(64):                                                    # 64 other projects push the store of p1 out
+        value.ok('mask.retain', {'project': f'q{k}', 'keep': []})
+    assert 'p1' not in value.coordinator.mask_stores
+    assert value.error('mask.forget', {'project': 'p1'}) == ('BUSY', None)
+    value.ok('mask.retain', {'project': 'p1', 'keep': []})
+    assert pending[1] in stored_names(value)[1], 'the open staged version kept its tile'
+    manifest = value.ok('mask.commit', {'staged': staged, 'tables': value.tables()})[0]['manifest']
+    assert b''.join(value.ok('mask.read', {'project': 'p1', 'manifest': manifest, 'layer': 'labels', 'positions': [[0, 0]]})[1]) == pending[0]

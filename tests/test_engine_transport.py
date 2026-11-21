@@ -564,3 +564,40 @@ def test_a_derived_buffer_works_through_the_coordinator_and_analyses_like_a_buff
         assert refused["status"] == "error" and refused["error"]["code"] == "INVALID_BUFFER"
     finally:
         coordinator.close()
+
+
+def test_a_session_answers_more_than_65536_requests(tmp_path):
+    """Decision V (card M8.4.40): the coordinator remembers a sliding window of request IDs instead of ending the session at 65,536."""
+    coordinator = Coordinator(io.BytesIO(), version='test', runtime_id='0' * 64, scratch_directory=str(tmp_path))
+    session = str(uuid4())
+    try:
+        coordinator.receive(request(session, 'hello', {'protocol': 1}))
+        for _ in range(65_600):
+            coordinator.output = io.BytesIO()               # keep memory flat: only the last answer is read
+            item = request(session, 'buffer.release', {'handles': []})
+            coordinator.receive(item)
+        assert responses(coordinator)[item['id']]['status'] == 'ok'
+        assert len(coordinator.seen) == 65_536
+    finally:
+        coordinator.close()
+
+
+def test_the_request_window_refuses_recent_duplicates_and_forgets_the_oldest(tmp_path):
+    coordinator = Coordinator(io.BytesIO(), version='test', runtime_id='0' * 64, scratch_directory=str(tmp_path))
+    coordinator.request_window = 4
+    session = str(uuid4())
+    try:
+        coordinator.receive(request(session, 'hello', {'protocol': 1}))
+        items = [request(session, 'buffer.release', {'handles': []}) for _ in range(5)]
+        for item in items:
+            coordinator.receive(item)
+        for item in items[2:]:                               # still in the window: refused without being run again
+            coordinator.output = io.BytesIO()
+            coordinator.receive(item)
+            assert responses(coordinator)[item['id']]['error']['code'] == 'INVALID_REQUEST'
+        coordinator.output = io.BytesIO()
+        coordinator.receive(items[0])                        # the oldest identifiers left the window
+        assert responses(coordinator)[items[0]['id']]['status'] == 'ok'
+        assert list(coordinator.seen) == [items[2]['id'], items[3]['id'], items[4]['id'], items[0]['id']]
+    finally:
+        coordinator.close()

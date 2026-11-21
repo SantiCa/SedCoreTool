@@ -370,3 +370,62 @@ def test_a_full_disk_is_a_limit(tmp_path, monkeypatch):
     with pytest.raises(masks.MaskError) as error:
         staging.put('labels', 0, 0, sha, data)
     assert (error.value.code, error.value.field) == ('LIMIT_EXCEEDED', 'disk') and staging.tiles == {}
+
+
+class WinError(OSError):
+    """An OSError as Python raises it on Windows, with its Windows error number (``winerror``) on every platform."""
+
+    def __init__(self, winerror, code):
+        super().__init__(code, os.strerror(code))
+        self.windows_code = winerror
+
+    @property
+    def winerror(self):
+        return self.windows_code
+
+
+def test_a_rename_held_for_a_moment_by_another_program_is_tried_again(tmp_path, monkeypatch):
+    """Card M8.4.40: on Windows an antivirus or the indexer can hold a file just written; the rename is tried again a few times."""
+    monkeypatch.setattr(masks, 'REPLACE_RETRY_SECONDS', (0, 0, 0, 0, 0))
+    target = store(tmp_path)
+    real_replace, calls = os.replace, []
+
+    def held_twice(source, destination):
+        calls.append(destination)
+        if len(calls) <= 2:
+            raise WinError(32 if len(calls) == 1 else 5, 13)      # ERROR_SHARING_VIOLATION, then ERROR_ACCESS_DENIED
+        return real_replace(source, destination)
+    monkeypatch.setattr(masks.os, 'replace', held_twice)
+    data, sha = tile_with('labels', lambda t: t.__setitem__((0, 0), 5))
+    target.write_blob(data, sha, 'tile')
+    assert len(calls) == 3
+    assert masks.MaskStore(target.folder).read_blob(sha, len(data), 'tile') == data
+    assert not list(target.folder.rglob('*.tmp'))
+
+
+def test_a_rename_is_tried_again_only_for_a_transient_lock_and_then_fails_cleanly(tmp_path, monkeypatch):
+    monkeypatch.setattr(masks, 'REPLACE_RETRY_SECONDS', (0, 0, 0, 0, 0))
+    target = store(tmp_path)
+    data, sha = tile_with('labels', lambda t: t.__setitem__((0, 0), 5))
+    for error, attempts in ((WinError(32, 13), 6), (WinError(3, 2), 1), (OSError(5, 'Input/output error'), 1)):
+        calls = []
+
+        def failing(source, destination, error=error, calls=calls):
+            calls.append(destination)
+            raise error
+        monkeypatch.setattr(masks.os, 'replace', failing)
+        with pytest.raises(OSError) as raised:
+            target.write_blob(data, sha, 'tile')
+        assert raised.value is error and len(calls) == attempts       # the last error, after 5 more tries only for a sharing violation
+        assert not list(target.folder.rglob('*.tmp')), 'the temporary file is removed'
+
+
+@pytest.mark.parametrize('winerror', [39, 112])
+def test_a_full_windows_disk_is_a_limit_whatever_errno_python_derives(winerror):
+    def full(*_arguments):
+        raise WinError(winerror, 22)                              # EINVAL: what errno says is not used
+    with pytest.raises(masks.MaskError) as error:
+        masks.write_or_disk_error(full)
+    assert (error.value.code, error.value.field) == ('LIMIT_EXCEEDED', 'disk')
+    with pytest.raises(OSError):
+        masks.write_or_disk_error(lambda: (_ for _ in ()).throw(WinError(5, 13)))

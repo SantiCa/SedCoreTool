@@ -96,8 +96,11 @@ The JSON envelope is `{v:1, kind, session, id, op, payload}`. `session` and `id`
 `kind` is `request`, `response` or `event`. A response echoes the operation and request ID and has exactly
 one of `status:"ok"` plus `result`, `status:"error"` plus `error`, or `status:"cancelled"`, in place of
 `payload`. An event retains `payload` and the initiating request ID. Each accepted request gets exactly one
-terminal response; duplicate IDs are rejected without re-executing work. The initiating main process supplies
-the new session UUID in `hello`; no other operation is accepted before successful negotiation.
+terminal response; duplicate IDs are rejected without re-executing work. The engine remembers the IDs of the last 65,536 requests of the
+session (a sliding window, oldest forgotten first; decision V, card M8.4.40): a session has no request limit, and an ID repeated within that
+window gets `INVALID_REQUEST` (an ID older than the window would be run again; clients use a new UUID per request). Responses are matched
+to requests by ID, not by order: mask operations (§8.7) are answered when they finish, possibly after later requests of other kinds.
+The initiating main process supplies the new session UUID in `hello`; no other operation is accepted before successful negotiation.
 All buffer handles and project/section tokens are also session-local UUIDs. SHA-256 values use 64 lowercase
 hexadecimal characters. Requests and metadata records have closed, operation-specific fields; reject unknown
 fields rather than silently ignore an unsupported setting. Protocol fixtures in M8.2 must encode these rules.
@@ -376,7 +379,8 @@ applied: samples are copied as stored (as `app/js/tiff.js` does today).
 
 The engine opens a source with libvips (ARCHITECTURE §3.4 decision 4) and accepts only these loaders: TIFF (classic and BigTIFF, first page or
 image only), JPEG and PNG; anything else is `UNSUPPORTED_INPUT` with `details.field = "source"`. Accepted samples: 8-bit or 16-bit unsigned, 1, 3
-or 4 bands (a grey image with alpha, 2 bands, is refused as today). Limits checked from the header before any pixel is read: width at most
+or 4 bands (a grey image with alpha, 2 bands, is refused as today; 4 bands must be RGBA: a CMYK image, TIFF or JPEG, is refused with
+`details.field = "source"`, card M8.4.40). Limits checked from the header before any pixel is read: width at most
 262,144 and height at most 16,777,216 pixels; one band of 512 rows at most 256 MiB (`width x 512 x channels x bytes`); a JPEG or PNG at most
 1 GiB decoded (`width x height x channels x bytes`; maintainer, 16 November 2026), refused otherwise with `UNSUPPORTED_INPUT`, `details.field =
 "source.size"` and a message that suggests TIFF. TIFF sources are read by region (random access); JPEG and PNG sequentially, in bands.
@@ -414,7 +418,8 @@ libvips' own caches are limited (`cache_set_max_mem` 64 MiB, `cache_set_max_file
 | `tile.read` | `{pyramid, level, positions: [[row, col], ...]}`, 1 to 16 positions inside the level's grid | `{tiles: [{row, col, byte_length, sha256}, ...], frames: [n1, n2, ...]}` in request order, immediately followed by the uncompressed tile bytes of all tiles, concatenated in that order and cut into binary frames of at most 1,048,576 bytes whose lengths `frames` announces (the client accepts exactly those frames, then checks each tile's SHA-256). Each tile is read, decompressed if needed and checked against `.tiles.sha256` before anything is sent; if any tile fails, the response is an error (`INVALID_BUFFER`, `details.field = "tile"`) and no binary frame follows. |
 
 `tile.read` and `pyramid.info` run in the coordinator (standard library only: file reads, `zlib`, `hashlib`); verified tiles are kept in a
-least-recently-used cache of at most 256 MiB. Tile bytes are never charged to the session's buffer budget of §3 (they are not buffers).
+least-recently-used cache of at most 256 MiB; the descriptions of the last 64 pyramids used and their levels' SHA-256 lists (at most 64 MiB)
+are kept the same way, and a pyramid whose description leaves keeps nothing in memory (card M8.4.40). Tile bytes are never charged to the session's buffer budget of §3 (they are not buffers).
 Error codes are those of §3. A coordinator started without `--pyramid-dir` answers the three operations with `UNSUPPORTED_METHOD`.
 
 The page reaches these operations only through `desktop/tile-ipc.js` (card M8.4.15, behind `SEDCORETOOL_TILED_SECTIONS=1`): a file the user chose becomes an
@@ -508,7 +513,13 @@ step 7), the columns take 20 bytes per object.
 decompresses (with a bound of its expected length plus one byte) to exactly its expected length and to bytes with its name's hash. Anything
 else is `INVALID_BUFFER` with `details.field = "manifest"` or `"tile"` / `"table"`, and nothing is sent.
 
-**Operations** (in the coordinator, standard library only; they never run in the method worker):
+**Operations** (in the coordinator, standard library only; they never run in the method worker). They run on one
+thread of their own (card M8.4.40), one at a time and in the order they arrived, so a long one (an import, a clean-up, a copy) does not delay `tile.read`,
+the progress events of a build or `job.cancel`; each is answered when it finishes. The buffers a mask request names are taken as they are
+when it arrives: a `buffer.release` sent after it does not affect it. At most 16 mask requests wait behind the running one; while 16 wait the engine
+reads no further request. `shutdown` answers the mask requests received before it first. A blob, manifest or derived file whose rename is
+refused by a Windows sharing violation (another program holding the file for a moment) is tried again 5 times within 1.55 s; a full disk is
+`LIMIT_EXCEEDED` (`disk`) also when Windows reports it as error 39 or 112.
 
 | Operation | Request payload | Successful result |
 |---|---|---|
@@ -524,7 +535,7 @@ else is `INVALID_BUFFER` with `details.field = "manifest"` or `"tile"` / `"table
 | `mask.copy` | `{from, to, manifest, start}`: two different projects (card M8.4.27) | `{next, tiles}`: copies a manifest of `from` into `to` in pages of 32 tiles from position `start` of its tile list (the tables with `start` 0): every blob is read and verified from `from` and written to `to` unless a valid one is there. The manifest is written last, only when every blob it names is in `to`; a page skipped is `INVALID_REQUEST` (`start`), a damaged blob `INVALID_BUFFER`. `next` is the start of the next page, or `null` when the manifest has been written. |
 | `mask.export` | `{project, manifest, blobs}` (card M8.4.18c): `blobs` `null` for the manifest's own file, or 1 to 32 (`EXPORT_PAGE`) blob names that the stored manifest uses (else `INVALID_REQUEST`, `blobs`) | `{files: [{name, byte_length, sha256}, ...], frames: [n1, ...]}` in request order, followed by the files' bytes in binary frames of at most 1,048,576 bytes, as for `mask.read`. A file is sent exactly as stored: the manifest's canonical JSON (whose SHA-256 is its name), or a blob's zlib stream (`sha256` is then that of the stream, `name` that of the bytes it decompresses to). Every one is checked first (the manifest as by any reader, each blob decompressed to its expected length and hash); a damaged one is `INVALID_BUFFER` with its field and nothing is sent. |
 | `mask.import` | `{project, kind, handle, files}` (card M8.4.18c): `handle` a committed 1-D `u8` buffer holding the files one after the other; `files` `[{name, byte_length}]` (the lengths add up to the buffer's), 1 to 32 for `kind: "blobs"`, exactly one for `kind: "manifest"` | `blobs`: `{accepted: [boolean, ...]}` in order. A blob is accepted, and written as any blob, only if its bytes are one whole zlib stream that decompresses (bounded by the largest blob, 16 MiB, plus one byte) to bytes whose SHA-256 is its name; a refused one is not written and does not stop the others. `manifest`: `{manifest}` after the file passes every check of a stored manifest (its name is its SHA-256) and every blob it names is in the store (else `INVALID_REQUEST`, `blobs`, and nothing is written). A restore therefore sends the blobs first and the manifest last; a restore stopped half-way leaves only blobs that no manifest names. |
-| `mask.forget` | `{project}` (card M8.4.27) | `{}`: the coordinator drops the project's store and its cached blobs from memory, before the main process deletes the folder; `BUSY` while a staged version of the project is open. |
+| `mask.forget` | `{project}` (card M8.4.27) | `{}`: the coordinator drops the project's store and its cached blobs from memory, before the main process deletes the folder; `BUSY` while a staged version of the project is open (a staged version belongs to the project whose folder it writes to, card M8.4.40). |
 
 **Deadlines of the store operations (card M8.4.34).** The client of the main process (`desktop/engine.js`, `STORE_DEADLINES_MS`) gives each
 operation of this section its own deadline instead of the 5 s of an ordinary request, after which it stops the engine: `mask.begin`, `mask.discard`,

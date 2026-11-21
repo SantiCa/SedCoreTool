@@ -3432,3 +3432,63 @@ Updated 21 November 2026.
     (before the director's one-line fix, which touches only `app.js`). `smoke.mjs` not run locally (the GitHub `e2e` job runs it).
   - Found, not fixed (outside the card): card **Q12** (a section kept as a placeholder after a failed engine opening cannot rebuild its working
     image after eviction); the `lastSec` entries of other projects, read by the backup loop, are kept.
+
+### M8.4.40 - Engine session-request limit, non-blocking store I/O and Windows/handle robustness
+
+- **Goal:** long tiled editing sessions never crash at 65,536 engine requests; heavy mask-store operations never stall `tile.read`, progress
+  heartbeats or `job.cancel`; Python store writes survive transient Windows locks and recognise Windows disk-full errors; staged engine handles
+  and `TileReader` caches never leak; 4-band CMYK TIFFs are rejected instead of misrendered as RGBA.
+- **Read first:** `src/sedcoretool/engine/server.py` (`seen` limit, `mask.*` dispatch, `mask_stores` LRU vs `staging.store is store`);
+  `src/sedcoretool/store/masks.py` (`_write_durably`, `write_or_disk_error`); `src/sedcoretool/store/tiles.py` (`TileReader`);
+  `src/sedcoretool/store/pyramid.py` (eviction); `src/sedcoretool/store/source.py` (band/interpretation check); `desktop/tile-ipc.js` (`uploadTable`).
+- **Change:** the files listed above, `docs/roadmap-engine-contract.md` (document the sliding request-ID window), and tests in `tests/`.
+- **Do not touch:** mask-store on-disk format, pyramid format, scientific method outputs.
+- **Model:** most capable, effort high (engine protocol, concurrency, atomic disk I/O, image interpretation).
+- **Steps:**
+  1. Replace the hard `len(self.seen) >= 65_536` session kill (`server.py:149`) with a bounded `OrderedDict` sliding window (decision V) so
+     sessions run indefinitely while rejecting duplicate recent IDs.
+  2. Offload heavy synchronous mask-store I/O (`mask.retain`, `mask.import`, `mask.export`, `mask.copy`, `mask.put`, `mask.derived.put`/`.get`)
+     off the coordinator's request/progress loop (or run in a dedicated I/O worker thread with locking per store) so `tile.read`, progress
+     events and `job.cancel` remain responsive.
+  3. In `store/masks.py`, add Windows `EPERM`/`EBUSY` retry to `_write_durably` (`os.replace`) and check `getattr(err, 'winerror', None) in (39, 112)`
+     in `write_or_disk_error`; in `server.py`, match open stagings by canonical store path/project key instead of `staging.store is store`.
+  4. Bound `TileReader.descriptions`/`hashes` in `store/tiles.py` and invalidate evicted pyramids; in `desktop/tile-ipc.js::uploadTable`, release
+     the staged buffer token on `buffer.chunk` / `buffer.commit` error; in `store/source.py`, check `image.interpretation` to reject CMYK 4-band
+     TIFFs clearly (and decide/document 2-band gray+alpha handling).
+- **Tests:** Python unit/integration tests for >65,536 requests (or configurable window size) without error, concurrent `tile.read` during large
+  `mask.import`/`mask.retain`, `MaskStore` eviction + open staging protection, Windows retry & `winerror=112` mapping, CMYK TIFF rejection;
+  Node test for `uploadTable` cleanup on failed chunk; `pytest -q`, `npm test`, `ruff check`, `tests/e2e/tiled-sections.mjs`.
+- **Done when:** all tests pass on Windows and the engine runtime is rebuilt and verified; development gate.
+- *As built (21 Nov 2026; written by a most-capable sub-agent at high effort, every changed line reviewed by the director; development gate, Windows):*
+  - Step 1: `Coordinator.seen` is an `OrderedDict` of the last `REQUEST_WINDOW = 65_536` IDs (attribute `request_window` for tests); a repeated
+    ID inside the window is `INVALID_REQUEST`; `ProtocolError('session request limit')` removed.
+  - Step 2: the 13 `MASK_OPERATIONS` run on one `MaskIO` thread (`server.py`), FIFO, one at a time, so no two mask operations interleave and
+    their order is the arrival order. Only that thread touches mask state (`stagings`, `mask_stores`, `session_commits`, the blob cache); only
+    the coordinator's thread writes to the transport (`answer_masks`, called by `poll` and with `wait=True` by `shutdown`). The committed buffers
+    a request names are resolved and pinned at arrival (`mask_buffers`) and unpinned when it is answered. Errors are answered as before
+    (`MaskError` → its code, `OSError` → `INTERNAL`, others end the session). At most `MAX_PENDING_MASK_REQUESTS = 16` wait; while full the
+    coordinator answers finished work and reads nothing new. `close()` joins the thread before the buffer store goes. Mask responses can arrive
+    after later requests of other kinds; `desktop/engine.js` matches by ID (contract §3). No deadlock: the thread waits only on its input queue
+    and on the disk, and `done` is unbounded. Messages and result formats are unchanged.
+  - Step 3: `masks._replace_retrying` (used by `_write_durably`) retries `os.replace` on `winerror` 5, 32, 33 after 50, 100, 200, 400 and
+    800 ms and raises the last error; other errors are raised at once. `write_or_disk_error` maps `winerror` 39 and 112 to `LIMIT_EXCEEDED`
+    (`disk`). `mask.retain` and `mask.forget` match open stagings by `store.folder`: before, once 64 other projects pushed a store out of
+    `mask_stores`, a retain could delete the blobs of an open staged version and `mask.forget` accepted a project with an open staging.
+  - Step 4: `TileReader.descriptions` is an LRU of 64 (a description that leaves calls `forget`), `hashes` an LRU of 64 MiB (a larger list is
+    used for that read only). Eviction of cached pyramids in `pyramid.py` was already safe (`make_room` keeps `pyramids_used`); unchanged.
+    `uploadTable` releases the handle when `buffer.chunk` or `buffer.commit` fails. `Source` refuses `interpretation == 'cmyk'` (TIFF, JPEG) with
+    `UNSUPPORTED_INPUT` / `source`; 2-band grey+alpha stays refused (already documented).
+  - Tests (each failed with its fix reverted, passes with it): `test_engine_transport.py` (window: >65,536 requests; recent duplicate refused,
+    oldest forgotten), `test_engine_masks.py` (staging protected by folder after its store left `mask_stores`; `tile.read` and `job.cancel`
+    answered while a mask request runs; a buffer released after a mask request arrived is still read; `shutdown` answers earlier mask requests;
+    order and error regression guards), `test_store_masks.py` (rename retried for a transient lock, not for other errors; `winerror` 39 and 112),
+    new `test_store_tiles.py` (bounded descriptions and hash lists; altered tile still refused), `test_store_source.py` (CMYK TIFF and JPEG),
+    `tests/app/tile-ipc.test.mjs` (failed chunk or commit releases the buffer). The engine-masks harness now waits for mask answers
+    (`answer_masks(wait=True)`); no check was relaxed.
+  - Checks (Windows): `pytest -q` 924 passed / 9 skipped; `npm test` 577; typecheck (no new diagnostics); ruff; `sync_version --check`;
+    runtime rebuilt (`prepare-runtime --offline`, native check true) and `prepare.js --with-examples`; `tiled-sections.mjs` and `desktop.mjs`
+    with the engine on passed. After a comment-only change in `server.py` and two document sentences: ruff and the five affected test files
+    (150 passed, 1 skipped), runtime rebuilt, preflight passed.
+  - Notes: `winerror` 5 is retried, so a permanent permission error is reported 1.55 s later; an ID older than the window would run again
+    (clients use a new UUID per request); CMYK uses the generic `source` refusal (no dedicated interface text); the per-operation deadlines
+    of `engine.js` still count the time a mask request waits behind another, as before.

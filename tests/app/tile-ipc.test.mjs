@@ -319,3 +319,28 @@ test('card M8.4.18c step 3: a project\'s copy of a source is read in pieces, and
   }
   void b;
 });
+
+test('card M8.4.40: a table buffer whose chunk or commit fails is released, with the tables sent before it', async (t) => {
+  for (const failing of ['buffer.chunk', 'buffer.commit']) {
+    const engine = fakeEngine('a'.repeat(64)), request = engine.request.bind(engine), released = [];
+    const answer = (value) => { const p = Promise.resolve(value); p.requestId = randomUUID(); return p; };
+    let next = 0;
+    engine.request = (op, payload, binary, options) => {
+      if (op === 'mask.begin') return answer({ staged: randomUUID(), rows: 1, cols: 2 });
+      if (op === 'buffer.begin') return answer({ handle: `h${++next}` });
+      if (op === failing && payload.handle === 'h2') {
+        const p = Promise.reject(Object.assign(new Error('INTERNAL'), { code: 'INTERNAL' })); p.requestId = randomUUID(); return p;
+      }
+      if (op === 'buffer.release') released.push(...payload.handles);
+      if (op.startsWith('buffer.')) return answer({});
+      return request(op, payload, binary, options);
+    };
+    const ipc = createTileIpc({ engine, projectsRoot: temporary(t) });
+    const { staged } = (await ipc.call(1, 'maskBegin', 'p1', 's1', 600, 300, null)).ok;
+    const tables = { object_ids: new Uint32Array([1]), object_class: new Int32Array([0]) };
+    assert.deepEqual(await ipc.call(1, 'maskCommit', staged, tables), { error: { code: 'INTERNAL' } }, failing);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(released.sort(), ['h1', 'h2'], `${failing}: every staged buffer is released`);
+    assert.ok(!engine.calls.some((c) => c.op === 'mask.commit'), 'the commit is not sent');
+  }
+});

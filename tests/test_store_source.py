@@ -144,6 +144,18 @@ def test_unsupported_or_hostile_files_are_refused(tmp_path, make):
     assert refused.value.code in ("UNSUPPORTED_INPUT", "LIMIT_EXCEEDED")
 
 
+@pytest.mark.parametrize("fmt", ["TIFF", "JPEG"])
+def test_a_cmyk_image_is_refused_rather_than_read_as_rgba(tmp_path, fmt):
+    """Card M8.4.40: CMYK has four bands like RGBA; its samples are ink amounts, so showing them as RGBA would be wrong."""
+    path = tmp_path / "cmyk.bin"
+    Image.new("CMYK", (40, 30), (10, 20, 30, 40)).save(path, format=fmt)
+    with pytest.raises(MethodError) as refused:
+        src.Source(path)
+    assert (refused.value.code, refused.value.field) == ("UNSUPPORTED_INPUT", "source")
+    rgba = tmp_path / "rgba.tif"
+    Image.new("RGBA", (40, 30), (10, 20, 30, 40)).save(rgba)
+    assert src.Source(rgba).info.channels == 4                                 # four bands that are RGBA stay accepted
+
 def test_a_truncated_tiff_fails_when_the_missing_band_is_read(tmp_path):
     whole = tmp_path / "whole.tif"
     Image.fromarray(pattern(1300, 70, 3, 8)).save(whole)

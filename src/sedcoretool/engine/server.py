@@ -10,7 +10,7 @@ import shutil
 import sys
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from pathlib import Path
 from uuid import uuid4
 
@@ -67,6 +67,8 @@ MAX_PATH = 4096
 MASK_OPERATIONS = ('mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.forget', 'mask.derived.put', 'mask.derived.get',
                    'mask.export', 'mask.import')
 MAX_STAGINGS = 16                # staged mask versions per session (contract §8.7)
+REQUEST_WINDOW = 65_536          # decision V (card M8.4.40): the most recent request IDs remembered to refuse a duplicate; older ones are forgotten
+MAX_PENDING_MASK_REQUESTS = 16   # mask requests waiting behind the running one (card M8.4.40); while this many wait, no request is read
 
 
 def load_store():
@@ -82,6 +84,45 @@ def load_store():
     return store_format, store_tiles, store_masks
 
 
+class MaskIO:
+    """One thread that runs the mask requests (contract §8.7) one at a time, in the order they arrived (card M8.4.40).
+
+    Mask requests read, verify, compress and write files and can take seconds; on this thread they no longer hold up ``tile.read``, the
+    progress events of a build or ``job.cancel``, which the coordinator's thread keeps serving. Only this thread touches the mask store's
+    state (staged versions, open stores, the session's commits, the blob cache). It never writes to the transport and never waits for the
+    coordinator: ``run`` returns ``(result, binary frames)`` or raises, and the outcome goes to ``done`` for the coordinator to answer."""
+
+    def __init__(self, run):
+        self.run = run
+        self.requests = queue.Queue(maxsize=MAX_PENDING_MASK_REQUESTS)
+        self.done = queue.Queue()                 # never full: at most MAX_PENDING_MASK_REQUESTS + 1 outcomes wait in it
+        self.pending = 0                          # given and not answered yet; changed only by the coordinator's thread
+        self.thread = threading.Thread(target=self.loop, name='mask-io', daemon=True)
+        self.thread.start()
+
+    def loop(self):
+        while (item := self.requests.get()) is not None:
+            request, data, buffers = item
+            try:
+                outcome = ('ok', self.run(request, data, buffers))
+            except BaseException as error:        # answered, or raised again, by the coordinator's thread as before card M8.4.40
+                outcome = ('raised', error)
+            self.done.put((request, buffers, outcome))
+
+    def offer(self, item, timeout) -> bool:
+        try:
+            self.requests.put(item, timeout=timeout)
+        except queue.Full:
+            return False
+        self.pending += 1
+        return True
+
+    def stop(self):
+        """Finish every request already given (their answers are dropped: the session is over), then end the thread."""
+        self.requests.put(None)
+        self.thread.join()
+
+
 class Coordinator:
     def __init__(self, output, *, version, runtime_id, worker_script=None, method_script=None, scratch_directory=None,
                  pyramid_directory=None, pyramid_budget=None, projects_directory=None):
@@ -92,7 +133,8 @@ class Coordinator:
         self.method_script = method_script
         self.attachment = None
         self.session = None
-        self.seen = set()
+        self.seen = OrderedDict()                 # request ID -> None, oldest first (decision V)
+        self.request_window = REQUEST_WINDOW
         self.store = BufferStore(scratch_directory=scratch_directory)
         self.jobs = deque()
         self.active = None
@@ -114,6 +156,7 @@ class Coordinator:
         # Mask store (contract §8.7): only when the main process named the projects folder. Staged versions live in memory only.
         self.projects_root = Path(projects_directory) if projects_directory else None
         self.masks = self.mask_cache = None
+        self.mask_io = None                       # started with the first mask request
         self.mask_stores = {}
         self.stagings = {}
         # Card M8.4.31: per store folder and section, the manifests committed by this process in order. `mask.retain` keeps those after the
@@ -146,9 +189,10 @@ class Coordinator:
         if request['id'] in self.seen:
             self.response(request, 'error', error=RequestError('INVALID_REQUEST'))
             return
-        if len(self.seen) >= 65_536:
-            raise ProtocolError('session request limit')
-        self.seen.add(request['id'])
+        # Decision V (card M8.4.40): a sliding window of the last REQUEST_WINDOW identifiers, so a session runs for as long as it is used.
+        self.seen[request['id']] = None
+        if len(self.seen) > self.request_window:
+            self.seen.popitem(last=False)
         try:
             result = self.dispatch(request, data)
             if result is not None:
@@ -211,7 +255,10 @@ class Coordinator:
         if operation in ('pyramid.build', 'pyramid.info', 'tile.read'):
             return self.store_operation(request)
         if operation in MASK_OPERATIONS:
-            return self.mask_operation(request, data)
+            if self.projects_root is None:
+                raise RequestError('UNSUPPORTED_METHOD')
+            self.submit_mask(request, data)
+            return None
         if operation == 'job.cancel':
             require_fields(payload, ('request_id',))
             if not is_uuid(payload['request_id']):
@@ -229,6 +276,7 @@ class Coordinator:
             return {'state': 'already_terminal'}
         if operation == 'shutdown':
             require_fields(payload, ())
+            self.answer_masks(wait=True)                 # the mask requests received before it are answered before it
             self.closing = True
             self.cancel_all()
             return {}
@@ -310,15 +358,89 @@ class Coordinator:
                 self.session_commits[store.folder][section] = chain[positions[-1]:]
         return recent
 
-    def mask_operation(self, request, data):
-        if self.projects_root is None:
-            raise RequestError('UNSUPPORTED_METHOD')
+    # Card M8.4.40: mask requests run on the MaskIO thread, in arrival order. The coordinator's thread admits them (submit_mask), pins the
+    # buffers they name, and answers them when they are done (answer_masks); everything between runs on the MaskIO thread (mask_operation).
+
+    def submit_mask(self, request, data):
+        """Give a mask request to the MaskIO thread. While MAX_PENDING_MASK_REQUESTS wait, finished ones are answered and jobs kept going,
+        and no other request is read: the transport slows down instead of memory growing."""
+        if self.mask_io is None:
+            self.mask_io = MaskIO(self.mask_operation)
+        item = (request, data, self.mask_buffers(request))
+        while not self.mask_io.offer(item, timeout=0.002):
+            self.poll()
+
+    def mask_buffers(self, request) -> dict:
+        """The committed buffers a mask request names, as they are when it arrives, each pinned until the request is answered: a
+        ``buffer.release`` sent after it can no longer remove a file the MaskIO thread is about to read."""
+        payload, named = request['payload'], []
+        if isinstance(payload, dict):
+            if request['op'] == 'mask.commit' and isinstance(payload.get('tables'), dict):
+                named = list(payload['tables'].values())
+            elif request['op'] in ('mask.derived.put', 'mask.import'):
+                named = [payload.get('handle')]
+        buffers = {}
+        for handle in named:
+            if isinstance(handle, str) and handle not in buffers:
+                try:
+                    value = self.store.get(handle, committed=True)
+                except RequestError:
+                    continue                                    # refused, as before, when the request reaches it (`committed_buffer`)
+                value.pins += 1
+                buffers[handle] = value
+        return buffers
+
+    @staticmethod
+    def committed_buffer(buffers, handle):
+        """MaskIO thread: a buffer `mask_buffers` resolved; the same refusal as ``BufferStore.get`` otherwise."""
+        value = buffers.get(handle) if isinstance(handle, str) else None
+        if value is None:
+            raise RequestError('INVALID_BUFFER', 'handle')
+        return value
+
+    def answer_masks(self, *, wait=False):
+        """Answer the mask requests the MaskIO thread has finished; with ``wait``, until every one given to it is answered. An error it raised
+        is answered as `receive` answers one (a ProtocolError or an unexpected error ends the session, as before card M8.4.40)."""
+        worker = self.mask_io
+        while worker is not None and worker.pending:
+            try:
+                request, buffers, (kind, value) = worker.done.get(block=wait)
+            except queue.Empty:
+                return
+            worker.pending -= 1
+            for handle in buffers:
+                self.store.unpin(handle)
+            if kind == 'ok':
+                result, parts = value
+                self.response(request, result=result)
+                for part in parts:                                  # the response announced these frames
+                    write_binary(self.output, part)
+            elif isinstance(value, RequestError):
+                self.response(request, 'error', error=value)
+            elif isinstance(value, OSError):
+                self.response(request, 'error', error=RequestError('INTERNAL'))
+            else:
+                raise value
+
+    @property
+    def mask_pending(self) -> bool:
+        return self.mask_io is not None and self.mask_io.pending > 0
+
+    def mask_operation(self, request, data, buffers):
+        """MaskIO thread: ``(result, binary frames)`` of one mask request."""
         try:
-            return self.mask_request(request['op'], request['payload'], data)
+            value = self.mask_request(request['op'], request['payload'], data, buffers)
         except self.masks.MaskError as error:
             raise RequestError(error.code, error.field) from None
+        return value if isinstance(value, tuple) else (value, [])
 
-    def mask_request(self, operation, payload, data):
+    @staticmethod
+    def framed(result, joined):
+        """``(result with its frame sizes, frames)``: bytes sent after a response in binary frames of at most MAX_CHUNK."""
+        parts = [joined[start:start + MAX_CHUNK] for start in range(0, len(joined), MAX_CHUNK)]
+        return {**result, 'frames': [len(part) for part in parts]}, parts
+
+    def mask_request(self, operation, payload, data, buffers):
         if operation == 'mask.begin':
             require_fields(payload, ('project', 'section', 'width', 'height', 'base'))
             if len(self.stagings) >= MAX_STAGINGS:
@@ -338,7 +460,7 @@ class Coordinator:
             require_fields(payload, ('staged', 'tables'))
             staging = self.staging(payload['staged'])
             try:
-                manifest = staging.commit(self.mask_tables(payload['tables']))
+                manifest = staging.commit(self.mask_tables(payload['tables'], buffers))
             finally:
                 del self.stagings[payload['staged']]          # closed also when the commit fails (contract §8.7)
             chain = self.session_commits.setdefault(staging.store.folder, {}).setdefault(staging.section, [])
@@ -357,7 +479,7 @@ class Coordinator:
             store = self.mask_store(payload['project'])
             protected = set()
             for staging in self.stagings.values():                              # an open staged version keeps every blob it holds
-                if staging.store is store:
+                if staging.store.folder == store.folder:                        # by folder: its MaskStore may have left `mask_stores` since
                     protected |= {name for entry in staging.tiles.values() for name in (entry['labels'], entry['exclude']) if name}
                     protected |= {table['sha256'] for table in (staging.tables or {}).values() if table}
             return {'removed': self.masks.write_or_disk_error(store.retain, payload['keep'], protected, self.recent_commits(store, payload['keep']))}
@@ -372,7 +494,7 @@ class Coordinator:
             return self.masks.write_or_disk_error(target.copy_from, source, payload['manifest'], payload['start'])
         if operation == 'mask.derived.put':                                     # card M8.4.29: a cache the page derived from a stored version
             require_fields(payload, ('project', 'manifest', 'kind', 'handle'))
-            value = self.store.get(payload['handle'], committed=True)
+            value = self.committed_buffer(buffers, payload['handle'])
             if value.dtype != 'u8' or len(value.shape) != 1:
                 raise RequestError('INVALID_BUFFER', 'derived')
             if value.length > self.masks.MAX_DERIVED_BYTES:
@@ -387,17 +509,14 @@ class Coordinator:
             data = self.mask_store(payload['project']).get_derived(payload['manifest'], payload['kind'])
             if data is None:
                 return {'found': False}
-            self.attachments = [data[start:start + MAX_CHUNK] for start in range(0, len(data), MAX_CHUNK)]
-            return {'found': True, 'byte_length': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'frames': [len(part) for part in self.attachments]}
+            return self.framed({'found': True, 'byte_length': len(data), 'sha256': hashlib.sha256(data).hexdigest()}, data)
         if operation == 'mask.export':                                          # card M8.4.18c: files of a stored version, for a backup folder
             require_fields(payload, ('project', 'manifest', 'blobs'))
             store = self.mask_store(payload['project'])
             names = [payload['manifest']] if payload['blobs'] is None else payload['blobs']
             files = [store.export_manifest(payload['manifest'])] if payload['blobs'] is None else store.export_blobs(payload['manifest'], payload['blobs'])
-            joined = b''.join(files)
-            self.attachments = [joined[start:start + MAX_CHUNK] for start in range(0, len(joined), MAX_CHUNK)]
-            return {'files': [{'name': name, 'byte_length': len(data), 'sha256': hashlib.sha256(data).hexdigest()} for name, data in zip(names, files)],
-                    'frames': [len(part) for part in self.attachments]}
+            return self.framed({'files': [{'name': name, 'byte_length': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+                                          for name, data in zip(names, files)]}, b''.join(files))
         if operation == 'mask.import':                                          # card M8.4.18c: files of a backup folder, verified, into the store
             require_fields(payload, ('project', 'kind', 'handle', 'files'))
             kind, files = payload['kind'], payload['files']
@@ -408,7 +527,7 @@ class Coordinator:
                                and self.masks.HEX64.fullmatch(item['name']) and type(item['byte_length']) is int and item['byte_length'] > 0
                                for item in files)):
                 raise RequestError('INVALID_REQUEST', 'files')
-            value = self.store.get(payload['handle'], committed=True)
+            value = self.committed_buffer(buffers, payload['handle'])
             if value.dtype != 'u8' or len(value.shape) != 1 or value.length != sum(item['byte_length'] for item in files):
                 raise RequestError('INVALID_BUFFER', 'files')
             data = value.path.read_bytes()
@@ -424,7 +543,7 @@ class Coordinator:
         if operation == 'mask.forget':                                          # card M8.4.27: the project's folder is about to be deleted
             require_fields(payload, ('project',))
             store = self.mask_store(payload['project'])
-            if any(staging.store is store for staging in self.stagings.values()):
+            if any(staging.store.folder == store.folder for staging in self.stagings.values()):
                 raise RequestError('BUSY')
             store.forget()
             self.mask_stores.pop(payload['project'], None)
@@ -443,13 +562,11 @@ class Coordinator:
                     or not 0 <= position[0] < rows or not 0 <= position[1] < cols):
                 raise RequestError('INVALID_REQUEST', 'positions')
         tiles = [store.read_tile(payload['manifest'], layer, row, col) for row, col in positions]
-        joined = b''.join(tile for tile in tiles if tile is not None)
-        self.attachments = [joined[start:start + MAX_CHUNK] for start in range(0, len(joined), MAX_CHUNK)]
-        return {'tiles': [{'row': row, 'col': col, 'sha256': None if tile is None else hashlib.sha256(tile).hexdigest(),
-                           'byte_length': 0 if tile is None else len(tile)} for (row, col), tile in zip(positions, tiles)],
-                'frames': [len(part) for part in self.attachments]}
+        return self.framed({'tiles': [{'row': row, 'col': col, 'sha256': None if tile is None else hashlib.sha256(tile).hexdigest(),
+                                       'byte_length': 0 if tile is None else len(tile)} for (row, col), tile in zip(positions, tiles)]},
+                           b''.join(tile for tile in tiles if tile is not None))
 
-    def mask_tables(self, tables):
+    def mask_tables(self, tables, buffers):
         """The bytes of the committed buffers named in ``mask.commit`` (None for a nullable table: no objects, no overlap), checked against
         their dtypes and limits (contract §8.7)."""
         if not isinstance(tables, dict) or not set(tables) <= set(self.masks.TABLES):
@@ -459,7 +576,7 @@ class Coordinator:
             if handle is None and name in self.masks.NULLABLE_TABLES:
                 out[name] = None
                 continue
-            value = self.store.get(handle, committed=True)
+            value = self.committed_buffer(buffers, handle)
             if value.dtype != self.masks.TABLE_DTYPES[name] or len(value.shape) != 1:
                 raise RequestError('INVALID_BUFFER', f'tables.{name}')
             if value.length > self.masks.TABLE_LIMITS[name]:
@@ -656,6 +773,7 @@ class Coordinator:
         self.response(request, status, result, error)
 
     def poll(self):
+        self.answer_masks()
         active = self.active
         if active is None:
             self.start_next()
@@ -752,6 +870,9 @@ class Coordinator:
 
     def close(self):
         try:
+            worker, self.mask_io = self.mask_io, None
+            if worker is not None:
+                worker.stop()                        # before the buffer store goes: it may be reading a pinned buffer
             self.cancel_all(notify=False)
         finally:
             try:
@@ -793,8 +914,8 @@ def serve(input_stream, output_stream, *, version, runtime_id, scratch_directory
     try:
         while not coordinator.closing:
             try:
-                # While a job runs, look again after 2 ms so that its answer is not left waiting (it was up to 20 ms per job).
-                item = inbox.get(timeout=0.002 if coordinator.active else 0.02)
+                # While a job or a mask request runs, look again after 2 ms so that its answer is not left waiting (it was up to 20 ms per job).
+                item = inbox.get(timeout=0.002 if coordinator.active or coordinator.mask_pending else 0.02)
                 if item is None:
                     break
                 if isinstance(item, Exception):
