@@ -167,6 +167,14 @@ runs per mode): public 912 MiB engine off, 1,095 MiB engine on with pixels resid
 (limit 2,042: passes; highest single run with the engine on 1,987 MiB). Not measured: macOS, Linux, a clean machine, 16-bit sections in
 these projects (both are 8-bit; 16-bit transfer is covered by tests, not by this measurement).
 
+Record tables (card M8.4.10, client side): a client may keep record tables (§4, "Tables") between requests, bounded separately: at most
+16 MiB as the engine charges them (values and validity once, the `utf8json` description 64 times) and 16 tables, least recently used first;
+a table that does not fit is never kept (`LIMIT_EXCEEDED`, field `table`). With the inputs (256 MiB), the pixels (192 MiB) and the reserve
+(16 MiB) this takes 480 MiB of the 512 MiB session budget and leaves 32 MiB for the 64-fold charge of the analyses' metadata tables (at
+most 9.5 MiB measured in card M8.4.9) and for results; the budget is not raised. The 3 buffers of 16 tables and the 11 of 16 sections are 224
+live buffers, within the 256 handles. When the engine reports its budget full while a table is sent, the client drops the other tables and
+the resident pixels and tries once more.
+
 Initial limits: 256 MiB per buffer; 512 MiB per engine session for all staged/committed buffers, queued-job
 snapshots, results and admitted scratch arrays together; 1 GiB private scratch-disk cap. Admission uses checked
 size estimates including conversion and overlapping class layers; reject before allocation when the estimate
@@ -241,6 +249,17 @@ binning algorithm in the bridge. Avoid a full classes × height × width overlap
 An initial experiment may advertise a narrower capability (e.g. <=255 classes, empty age model); unsupported
 snapshots fail visibly under the flag. General promotion requires the full supported application domain, or
 an explicitly approved compatibility decision; truncation and silent omissions are never accepted.
+
+**Tables (card M8.4.10).** A method that takes a record table (depth/age records, data tables, multiproxy series) receives it as three
+inputs: `<name>` (`utf8json` `{version:1, rows, columns:[{name, unit}]}`, columns in order), `<name>_values` (`f64le[columns, rows]`,
+column *i* in row *i*) and `<name>_valid` (`u8[columns, rows]`: 1 present, 0 missing; a missing slot holds 0, never NaN). Valid values are
+finite. Limits: 1-256 columns, 1-1,048,576 rows (an empty table cannot be transferred: a method declares it optional instead), at most 8 MiB
+for values and validity together, a description of at most 32 KiB, column names non-empty, unique and at most 256 UTF-8 bytes, units at most
+64. Column names and units are literal metadata, never identifiers to execute; a method names the columns it accepts. The client builds
+the buffers with `tablesnapshot.js::buildTableSnapshot` and a method decodes them with `methods/validation.py::table`, which refuses every
+violation naming the input (`<name>`, `<name>.version`, `<name>.rows`, `<name>.columns`, `<name>.columns.name`, `<name>.columns.unit`,
+`<name>_values`, `<name>_valid`). The *table identity* is the SHA-256 of `table/1|<rows>|<JSON of [name, unit, SHA-256 of the column's
+values, SHA-256 of its validity] per column>`.
 
 ## 5. Result contract and provenance
 

@@ -96,7 +96,7 @@ matching tier and the Python API the **last**; the kernel takes `precedence="fir
 
 | Kind | Rule | Examples |
 |---|---|---|
-| Pure modules | No `document`, `window` or DOM types; state arrives as arguments. Tested with Node in `tests/app/` | `core.js`, `sectiondepth.js`, `sectionanalysis.js`, `maskchanges.js`, `tiledsection.js`, `tiledrecord.js`, `tiledsplit.js`, `tilecache.js`, `tiledmasks.js`, `tiledit.js`, `tiledcounts.js`, `tiledcache.js`, `tiledbackup.js`, `tiledsync.js`, `tiledundo.js`, `singleflight.js`, `taxa.js`, `coremerge.js`, `residentstore.js`, `sectionpixels.js`, `engineclient.js`, `engineanalysis.js`, `edit.js`, `imageproc.js`, `learn.js`, `log.js`, `geo.js`, `interp.js`, `locmap.js`, `plot.js`, `sheet.js`, `exportio.js`, `zip.js`, `figsize.js`, `pngmeta.js`, `unet.js`, `unetmodel.js`, `navpreview.js`, `figview.js` |
+| Pure modules | No `document`, `window` or DOM types; state arrives as arguments. Tested with Node in `tests/app/` | `core.js`, `sectiondepth.js`, `sectionanalysis.js`, `maskchanges.js`, `tiledsection.js`, `tiledrecord.js`, `tiledsplit.js`, `tilecache.js`, `tiledmasks.js`, `tiledit.js`, `tiledcounts.js`, `tiledcache.js`, `tiledbackup.js`, `tiledsync.js`, `tiledundo.js`, `singleflight.js`, `taxa.js`, `coremerge.js`, `residentstore.js`, `sectionpixels.js`, `tablesnapshot.js`, `engineclient.js`, `engineanalysis.js`, `edit.js`, `imageproc.js`, `learn.js`, `log.js`, `geo.js`, `interp.js`, `locmap.js`, `plot.js`, `sheet.js`, `exportio.js`, `zip.js`, `figsize.js`, `pngmeta.js`, `unet.js`, `unetmodel.js`, `navpreview.js`, `figview.js` |
 | State | The shared project state `S` and small helpers | `state.js` |
 | Controllers and views | Read and change `S`, call pure modules, build DOM/SVG, wire events | `app.js`, `columns.js`, `datatab.js`, `figures.js`, `multiproxy.js`, `panels.js`, `diagnostics.js`, `folderversion.js`, `tiledproject.js`, `tiledsplitui.js`, `tiledstate.js`, `tiledtools.js`, `tiledview.js`, `tableview.js` |
 | Storage | IndexedDB project library | `storage.js` |
@@ -123,8 +123,9 @@ Pure modules for M8.3:
   existing `s.bins` array (`resultToBins`), so that tables, columns, figures and exports do not change.
 - `engineclient.js` — uploads typed arrays in chunks of at most 1 MiB, starts and cancels jobs and downloads
   results through an injected bridge object. In the desktop program the bridge is `window.corantoolDesktop.engine`;
-  in Node tests it is a fake. What the engine keeps between requests is recorded in two `residentstore.js` registries with
-  their own bounds: the inputs of analyses (M8.4.2) and the working pixels of sections (M8.4.9, described by `sectionpixels.js`).
+  in Node tests it is a fake. What the engine keeps between requests is recorded in three `residentstore.js` registries with
+  their own bounds: the inputs of analyses (M8.4.2), the working pixels of sections (M8.4.9, described by `sectionpixels.js`) and
+  record tables (M8.4.10, built by `tablesnapshot.js`).
 - `engineanalysis.js` — per-section state with the engine on: pending, ready or error. It keys each request on
   `analysisRevision`, empties `s.bins` while a result is awaited, queues one analysis at a time, cancels a request that
   an edit made obsolete and publishes a result only if the revision is still current. It never computes bins and never

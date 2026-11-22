@@ -11,6 +11,7 @@
     "app/js/maskchanges.js",
     "app/js/residentstore.js",
     "app/js/sectionpixels.js",
+    "app/js/tablesnapshot.js",
     "app/js/engineclient.js",
     "app/js/engineanalysis.js",
     "app/js/unetmodel.js",

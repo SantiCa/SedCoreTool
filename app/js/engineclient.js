@@ -1,10 +1,11 @@
 // @ts-check
 // Renderer side of the engine bridge (window.corantoolDesktop.engine, see desktop/engine-ipc.js): uploads the inputs of
 // one section analysis in bounded chunks, requests it, downloads the result columns and always releases every token.
-// It also keeps the working pixels of sections in the engine (card M8.4.9). Pure: the bridge is passed in, so Node can test it
+// It also keeps the working pixels of sections (card M8.4.9) and record tables (card M8.4.10) in the engine. Pure: the bridge is passed in, so Node can test it
 // with a fake. No DOM.
 import { createResidentStore } from './residentstore.js';
 import { describePixels, PIXEL_INPUTS } from './sectionpixels.js';
+import { TABLE_METADATA_CHARGE } from './tablesnapshot.js';
 
 const CHUNK_BYTES = 1048576;
 const OUTPUT_TYPES = /** @type {const} */ ({ u8: Uint8Array, u16le: Uint16Array, i32le: Int32Array, u32le: Uint32Array, u64le: BigUint64Array, f64le: Float64Array });
@@ -39,15 +40,22 @@ const TABLE_INPUTS = /** @type {const} */ (['objects', 'classes', 'settings', 'a
 export const RESIDENT_BYTES = 256 * 1048576, RESIDENT_SECTIONS = 16;
 /** Working pixels of sections that the engine keeps (card M8.4.9): their own byte bound, at most RESIDENT_SECTIONS sections. Contract §3. */
 export const RESIDENT_PIXEL_BYTES = 192 * 1048576;
+/** Record tables that the engine keeps (card M8.4.10): their bytes as the engine charges them (a `utf8json` description 64 times) and
+ * their number. With the inputs (256 MiB), the pixels (192 MiB) and the engine's reserve (16 MiB) they take 480 of the 512 MiB session
+ * budget, and the 3 buffers of 16 tables keep a page within the engine's 256 handles. Contract §3. */
+export const RESIDENT_TABLE_BYTES = 16 * 1048576, RESIDENT_TABLES = 16;
+/** The buffers of one table (tablesnapshot.js), replaced together when its identity changes. */
+const TABLE_BUFFERS = /** @type {const} */ (['meta', 'values', 'valid']);
 
 /** @typedef {import('./residentstore.js').ResidentInput} ResidentInput @typedef {import('./residentstore.js').ResidentEntry} ResidentEntry */
 
 /**
  * @param {{status: () => Promise<any>, beginBuffer: Function, appendBuffer: Function, commitBuffer: Function,
  *   analyzeSection: Function, cancel: Function, readBuffer: Function, release: Function, deriveBuffer?: Function, restart?: Function}} bridge
- * @param {{readyTimeoutMs?: number, residentBytes?: number, residentSections?: number, pixelBytes?: number}} [options]
+ * @param {{readyTimeoutMs?: number, residentBytes?: number, residentSections?: number, pixelBytes?: number, tableBytes?: number, tables?: number}} [options]
  */
-export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentBytes = RESIDENT_BYTES, residentSections = RESIDENT_SECTIONS, pixelBytes = RESIDENT_PIXEL_BYTES } = {}) {
+export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentBytes = RESIDENT_BYTES, residentSections = RESIDENT_SECTIONS, pixelBytes = RESIDENT_PIXEL_BYTES,
+  tableBytes = RESIDENT_TABLE_BYTES, tables: tableCount = RESIDENT_TABLES } = {}) {
   if (!LITTLE_ENDIAN) throw new Error('The engine transport requires a little-endian computer');
 
   /** @param {string[]} tokens */
@@ -62,6 +70,13 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
   const pixels = createResidentStore({ maxBytes: pixelBytes, maxOwners: residentSections, release });
   /** Uploads of pixels still running, by owner, so that two requests for the same pixels share one upload. @type {WeakMap<object, {identity: string, promise: Promise<any>}>} */
   const pixelUploads = new WeakMap();
+  // Record tables (card M8.4.10), valid for one tablesnapshot.js identity. The registry's owner is one slot per (owner, key): an owner
+  // may hold several tables, and a slot lives exactly as long as its owner.
+  const tables = createResidentStore({ maxBytes: tableBytes, maxOwners: tableCount, release });
+  /** @type {WeakMap<object, Map<string, object>>} */
+  const tableSlots = new WeakMap();
+  /** Uploads of tables still running, by slot. @type {WeakMap<object, {identity: string, promise: Promise<any>}>} */
+  const tableUploads = new WeakMap();
   /** How masks reached the engine so far (whole, or as the changed rows of what it held), and how often its budget was full (card M8.4.9). */
   const stats = { fullMaskUploads: 0, derivations: 0, budgetFull: 0 };
 
@@ -173,10 +188,14 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
     const entry = resident.get(owner), area = section.w * section.h;
     return !!entry && entry.inputs.labels?.bytes === 4 * area && entry.inputs.exclude?.bytes === area;
   }
-  /** Releases everything the engine holds for `owner`: its analysis inputs and its pixels. */
-  function forget(/** @type {object} */ owner) { resident.forget(owner); pixels.forget(owner); }
+  /** Releases everything the engine holds for `owner`: its analysis inputs, its pixels and its tables. */
+  function forget(/** @type {object} */ owner) {
+    resident.forget(owner); pixels.forget(owner);
+    for (const slot of tableSlots.get(owner)?.values() ?? []) tables.forget(slot);
+    tableSlots.delete(owner);
+  }
   /** Releases everything the engine holds for this page (a project is being replaced). */
-  function releaseAll() { resident.releaseAll(); pixels.releaseAll(); }
+  function releaseAll() { resident.releaseAll(); pixels.releaseAll(); tables.releaseAll(); }
 
   /**
    * The analysis succeeded: the freshly uploaded buffers replace the ones they supersede and stay in the engine, unless the section is
@@ -254,6 +273,86 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
       for (const token of superseded) transient.add(token);
       for (const input of Object.values(fresh)) transient.delete(input.token);
       return tokensOf(described.identity, /** @type {ResidentEntry} */ (pixels.get(owner)));
+    } finally {
+      void releaseTokens([...transient]);
+    }
+  }
+
+  /** The registry slot of the table `key` of `owner`, made on first use when `create` is true. */
+  function tableSlot(/** @type {object} */ owner, /** @type {string} */ key, create = false) {
+    let slots = tableSlots.get(owner);
+    if (!slots && create) tableSlots.set(owner, (slots = new Map()));
+    let slot = slots?.get(key);
+    if (!slot && create && slots) slots.set(key, (slot = {}));
+    return slot;
+  }
+  /** True when the engine holds the table `key` of `owner` for `identity` (tablesnapshot.js::buildTableSnapshot). */
+  function hasTable(/** @type {object} */ owner, /** @type {string} */ key, /** @type {string} */ identity) {
+    const slot = tableSlot(owner, key), entry = slot && tables.get(slot);
+    return !!entry && entry.key === identity && TABLE_BUFFERS.every((name) => !!entry.inputs[name]);
+  }
+
+  /**
+   * Makes a record table resident in the engine as the table `key` of `owner` (card M8.4.10) and returns the tokens of its three buffers:
+   * `meta` (`utf8json`), `values` (`f64le[columns, rows]`) and `valid` (`u8[columns, rows]`), which a method receives under the input
+   * names of `tablesnapshot.js::tableInputNames`. `snapshot` comes from `buildTableSnapshot`. Nothing is uploaded when the engine already
+   * holds this table with the same identity; otherwise the new buffers replace the old ones of that key. A table whose charge is larger
+   * than the table budget is never kept (`LIMIT_EXCEEDED`, field `table`, before anything is sent). The tokens stay valid until other
+   * tables push this one out of the budget, `forget(owner)`, `releaseAll` or a restart; request the method that uses them right away.
+   * @param {object} owner @param {string} key @param {import('./tablesnapshot.js').TableSnapshot} snapshot @param {{signal?: AbortSignal}} [options]
+   * @returns {Promise<{identity: string, meta: string, values: string, valid: string}>}
+   */
+  async function ensureTable(owner, key, snapshot, { signal } = {}) {
+    if (!owner || typeof owner !== 'object' || typeof key !== 'string' || !key) throw new EngineError('INVALID_REQUEST', 'table');
+    const { identity, buffers, chargedBytes } = snapshot ?? {};
+    const sound = typeof identity === 'string' && /^[0-9a-f]{64}$/.test(identity) && Number.isSafeInteger(chargedBytes) && chargedBytes > 0
+      && buffers?.meta?.dtype === 'utf8json' && buffers?.values?.dtype === 'f64le' && buffers?.valid?.dtype === 'u8'
+      && buffers.meta.data instanceof Uint8Array && buffers.values.data instanceof Float64Array && buffers.valid.data instanceof Uint8Array;
+    if (!sound) throw new EngineError('INVALID_REQUEST', 'table');
+    const slot = /** @type {object} */ (tableSlot(owner, key, true));
+    for (;;) {
+      const running = tableUploads.get(slot);
+      if (!running) break;
+      if (running.identity === identity) return running.promise;
+      await running.promise.catch(() => {});
+    }
+    tables.pruneGone();
+    const entry = tables.get(slot);
+    if (entry && entry.key === identity && TABLE_BUFFERS.every((name) => !!entry.inputs[name])) {
+      tables.touch(entry);
+      return tableTokens(identity, entry);
+    }
+    if (chargedBytes > tableBytes) { tables.forget(slot); throw new EngineError('LIMIT_EXCEEDED', 'table'); }
+    const promise = uploadTable(slot, entry, snapshot, signal);
+    tableUploads.set(slot, { identity, promise });
+    try { return await promise; } finally { if (tableUploads.get(slot)?.promise === promise) tableUploads.delete(slot); }
+  }
+  /** @param {string} identity @param {ResidentEntry} entry */
+  const tableTokens = (identity, entry) => ({ identity, meta: entry.inputs.meta.token, values: entry.inputs.values.token, valid: entry.inputs.valid.token });
+
+  /**
+   * @param {object} slot @param {ResidentEntry | undefined} entry @param {import('./tablesnapshot.js').TableSnapshot} snapshot
+   * @param {AbortSignal | undefined} signal
+   */
+  async function uploadTable(slot, entry, snapshot, signal) {
+    await ready();
+    const transient = /** @type {Set<string>} */ (new Set());
+    try {
+      tables.makeRoom(entry, snapshot.chargedBytes);
+      // The engine's budget is full: drop the other tables and the pixels of every section (both are sent again on demand), then try once more.
+      const makeSpace = () => { tables.makeRoom(tables.get(slot), Infinity); pixels.makeRoom(undefined, Infinity); };
+      /** @type {Record<string, ResidentInput>} */
+      const fresh = {};
+      for (const name of TABLE_BUFFERS) {
+        const buffer = snapshot.buffers[name];
+        const token = await put(bytesOf(buffer.data), buffer.dtype, buffer.shape, signal, transient, buffer.sha256, makeSpace);
+        fresh[name] = { token, identity: snapshot.identity, bytes: buffer.data.byteLength * (buffer.dtype === 'utf8json' ? TABLE_METADATA_CHARGE : 1) };
+      }
+      const { kept, superseded } = tables.keep(slot, tables.get(slot) ?? entry, fresh, { group: TABLE_BUFFERS, key: snapshot.identity });
+      if (!kept) throw new EngineError('LIMIT_EXCEEDED', 'table');
+      for (const token of superseded) transient.add(token);
+      for (const input of Object.values(fresh)) transient.delete(input.token);
+      return tableTokens(snapshot.identity, /** @type {ResidentEntry} */ (tables.get(slot)));
     } finally {
       void releaseTokens([...transient]);
     }
@@ -368,11 +467,14 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
     if (typeof bridge.restart !== 'function') throw new EngineError('ENGINE_UNAVAILABLE');
     resident.invalidateAll();
     pixels.invalidateAll();
+    tables.invalidateAll();
     unwrap(await bridge.restart({ automatic }));
     await ready();
   }
 
-  return { analyze, ready, restart, hasMasks, canDerive, forget, releaseAll, ensurePixels, hasPixels, residentBytes: resident.bytes, residentSections: resident.owners,
-    residentPixelBytes: pixels.bytes, residentPixelSections: pixels.owners,
-    stats: () => ({ ...stats, residentBytes: resident.bytes(), residentPixelBytes: pixels.bytes(), residentPixelSections: pixels.owners() }) };
+  return { analyze, ready, restart, hasMasks, canDerive, forget, releaseAll, ensurePixels, hasPixels, ensureTable, hasTable,
+    residentBytes: resident.bytes, residentSections: resident.owners, residentPixelBytes: pixels.bytes, residentPixelSections: pixels.owners,
+    residentTableBytes: tables.bytes, residentTables: tables.owners,
+    stats: () => ({ ...stats, residentBytes: resident.bytes(), residentPixelBytes: pixels.bytes(), residentPixelSections: pixels.owners(),
+      residentTableBytes: tables.bytes(), residentTables: tables.owners() }) };
 }

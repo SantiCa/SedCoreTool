@@ -10,7 +10,7 @@ const configPath = path.join(root, 'tsconfig.json');
 const baselinePath = path.join(root, 'tools/typecheck-baseline.json');
 const slash = (text) => text.replaceAll('\\', '/');
 const relative = (file) => slash(path.relative(root, file));
-const strictFiles = new Set(['app/js/sectiondepth.js', 'app/js/sectionanalysis.js', 'app/js/residentstore.js', 'app/js/sectionpixels.js', 'app/js/engineclient.js', 'app/js/engineanalysis.js', 'app/js/unetmodel.js', 'app/js/core.js', 'app/js/state.js', 'app/js/imageproc.js']);
+const strictFiles = new Set(['app/js/sectiondepth.js', 'app/js/sectionanalysis.js', 'app/js/residentstore.js', 'app/js/sectionpixels.js', 'app/js/tablesnapshot.js', 'app/js/engineclient.js', 'app/js/engineanalysis.js', 'app/js/unetmodel.js', 'app/js/core.js', 'app/js/state.js', 'app/js/imageproc.js']);
 const host = { getCurrentDirectory: () => root, getCanonicalFileName: (f) => f, getNewLine: () => '\n' };
 
 function diagnosticKey(diagnostic) {

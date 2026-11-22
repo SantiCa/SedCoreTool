@@ -3667,3 +3667,33 @@ Updated 21 November 2026.
   --tiled` all passed. Open: the GitHub run of the fix (Windows and Linux expected green; macOS fails in Q15's step).
   *Done (22 Nov 2026):* GitHub run `44969532221` (`647b480`): *Desktop builds* green on Windows and Linux; macOS fails only at "reopened,
   no redraw by hand", which is card Q15 (agreed scope split: the failure of this card is gone on all three systems).
+
+### M8.4.10 - Record tables resident in the engine — state: Done (22 Nov 2026, development gate)
+
+- **Goal:** the tables that M8.5a, M8.5d and M6 consume (depth/age records, data tables, multiproxy series) can be held in the engine
+  in one columnar format, so those methods take handles. No scientific method changes.
+- **Read first:** M8.4.9 (the registry); contract §4-§5 (the convention for missing values: a value column and a `<name>_valid`
+  column, never NaN); `app/js/log.js`, `geo.js` (`featureSeries`, `buildSamples`), `sheet.js` for the shapes of the tables.
+- **Change:** a pure module `app/js/tablesnapshot.js`: `buildTableSnapshot(columns)` takes named numeric columns (plain arrays,
+  null for missing) and returns `f64le` value columns, `u8` validity columns, the names and units as a small `utf8json` table and an
+  identity; limits (columns, rows, bytes) stated and enforced; decoding on the engine side in a helper of `methods/validation.py`
+  (`table(inputs, name, columns)`) that rejects a shape, a non-finite valid value or a name that is not allowed, naming the field. Contract
+  §4 gets a "tables" paragraph. Resident through `residentstore.js`.
+- **Do not touch:** the interface's tables and formulas; saved projects.
+- **Model:** most capable, effort medium (the engine helper validates tables that may be corrupt or hostile; bounded, exact tests).
+- **Tests:** round trip of random tables with missing values, exact for every value and every missing slot; rejection cases for the
+  helper; limits; the identity changes with any value, name or unit and with nothing else; a probe method that returns column sums.
+- **Done when:** the tests pass and the probe through the real engine equals the interface's own sums.
+- **As built (22 Nov 2026; Opus sub-agent, medium; reviewed line by line):** a table is three engine inputs, `<name>` (`utf8json`
+  `{version, rows, columns:[{name, unit}]}`), `<name>_values` (`f64le[columns, rows]`) and `<name>_valid` (`u8[columns, rows]`, a missing
+  slot holds 0), so that a method declares fixed input names. Column names are free text (proxy names such as "Ca/Ti"); a method names the
+  ones it accepts. Pure module `app/js/tablesnapshot.js` (`buildTableSnapshot`, limits 256 columns, 1,048,576 rows, 8 MiB of cells, 32 KiB
+  description, 256-byte names, 64-byte units; empty tables refused). Engine helper `src/sedcoretool/methods/validation.py::table` (the card
+  said `methods/validation.py`; it lives in `sedcoretool/methods/`) refuses every violation naming the input. Resident through a third
+  `residentstore.js` instance in `engineclient.js` (`ensureTable`, `hasTable`): 16 MiB as charged and 16 tables, so 480 of 512 MiB and 224 of
+  256 handles, no budget change (contract §3); contract §4 "Tables" added. The probe is test-only (`tests/test_engine_tables.py`, worker
+  script as in M8.4.9): column sums through the real worker are bit-identical to the JavaScript sums of the same f64 values in row order (no
+  tolerance). Tests: 13 Node, 41 Python (28 rejection cases); 12 of 12 manual mutants killed. `app.js` 4,647 → 4,647. Known limits: the
+  analysis's budget-full fallback does not drop tables; no method takes a table yet; memory and timing with tables resident not measured.
+  **Checks (Windows):** `check_all --desktop --tiled` all passed after refreshing the bundled runtime (`npm run prepare-runtime -- --offline`):
+  pytest 973 / 9 skipped, npm 646 / 0, typecheck, sync, ruff, `desktop.mjs` engine off and on, `tiled-sections.mjs`.

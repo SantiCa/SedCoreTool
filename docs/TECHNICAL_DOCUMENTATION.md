@@ -183,6 +183,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `maskchanges.js` | Which rows of each section's label and exclusion masks changed since the engine last received them: `createMaskChanges` (mark, take, restore, mark all) and `indexRangeOfPairs` (the pixels named by an edit-history list). A hint for the engine path, never a proof (§26.2) | Yes |
 | `residentstore.js` | The registry of buffers the engine keeps between requests, per section (card M8.4.9, taken out of `engineclient.js`): `createResidentStore` with a byte bound and an owner bound, least recently used first, a group of buffers replaced together under one key, `forget`, `releaseAll`, `invalidateAll`. `engineclient.js` holds one for analysis inputs and one for pixels | Yes |
 | `sectionpixels.js` | The working pixels of a section as engine buffers (card M8.4.9): `buildPixelBuffers` (views `u8[h,w,4]` and `u16le[h,w,4]`), `describePixels` (the SHA-256 of each buffer and the pixel identity, remembered in `s._pxid`), `pixelIdentity` | Yes |
+| `tablesnapshot.js` | A record table as engine buffers (card M8.4.10): `buildTableSnapshot` (named numeric columns with `null` for missing values to `f64le[columns, rows]` values, `u8[columns, rows]` validity and a `utf8json` description, with the table identity and the limits `MAX_TABLE_*`), `tableInputNames` | Yes |
 | `sectionanalysis.js` | Analysis of one section without the DOM: effective class of each object, class-index table, row counts (cached per section), interval bins with no-data padding, ages and manual indices (§3.2), plus the builders of the engine method's input snapshot and reference result columns (`buildIntervalSnapshot`, `referenceColumns`), the revision key of a section's calculation (`analysisRevision`) and the conversion of engine result columns to `s.bins` (`resultToBins`). `app.js::analyze` passes the project state in | Yes |
 | `imageproc.js` | Enhancement, detection, connected components, magic wand, lasso, descriptors, rotation, downsampling | ✓ |
 | `edit.js` | Editing algorithms: scissors, merging, undo records, project migration | ✓ |
@@ -231,7 +232,8 @@ import of app.js or access to browser globals; it is included after unet.js in t
 
 Python package (`src/sedcoretool/`): `io.py` (images and masks), `segmentation.py` (masks from a threshold, a
 colour palette or a U-Net), `kernels/` (pure array primitives: intervals, counting, index tiers, age interpolation; §25.2),
-`methods/` (versioned scientific methods for the engine, for now `section.intervals/1`; §25.2),
+`methods/` (versioned scientific methods for the engine, for now `section.intervals/1`, and in `validation.py` the strict input checks they
+share, including `table`, the decoder of record tables of card M8.4.10; §25.2),
 `pipeline.py` (intervals, percentages, indices), `indices.py` (BI and ii schemes),
 `depth.py` (depth and age), `export.py` (CSV and Excel), `plotting.py` (matplotlib figure), `cli.py` (command line),
 `unet/` (U-Net dataset, training, evaluation, prediction, tiling and metrics), `engine/` (experimental desktop
@@ -3065,6 +3067,24 @@ in memory, is refused. A failed or cancelled upload keeps what was resident and 
 replaced) and a restart of the engine cover the pixels as well. When the engine reports its session budget full, the client drops the pixels
 of other sections (for an analysis also their inputs) and tries once more; `stats().budgetFull` counts it. The budget measurement is in the
 [engine contract §3](roadmap-engine-contract.md#3-private-transport-v1).
+
+**Record tables kept in the engine (card M8.4.10).** No engine method takes a table yet; this is the service that depth/age parsing,
+multiproxy methods and M6 will use (M8.5 slices a and d). `tablesnapshot.js::buildTableSnapshot(columns)` takes named numeric columns of one
+length, in order, each value a finite number or `null` (missing), and returns three buffers: `<name>` (`utf8json`, `{version: 1, rows, columns:
+[{name, unit}]}`), `<name>_values` (`f64le[columns, rows]`, column *i* in row *i*) and `<name>_valid` (`u8[columns, rows]`, 1 present, 0
+missing; a missing slot holds 0). NaN, infinities, `undefined` and other types are refused at the source, never turned into missing values.
+Limits, refused with the field at fault: 1-256 columns, 1-1,048,576 rows, 8 MiB of values and validity together (9 bytes per cell), 32 KiB
+of description, non-empty unique names of at most 256 UTF-8 bytes, units of at most 64. The *table identity* is the SHA-256 of
+`table/1|<rows>|<JSON of [name, unit, SHA-256 of the column's values, SHA-256 of its validity] per column>`: it changes with any value,
+missing slot, name, unit or the column order and with nothing else. `engineclient.js::ensureTable(owner, key, snapshot)` makes the table
+resident as the table `key` of `owner` and returns the tokens `meta`, `values`, `valid`; the same identity sends nothing again, a new one
+replaces and releases the three old buffers. Tables have a registry of their own (`residentstore.js`): 16 MiB as the engine charges them
+(the description 64 times) and 16 tables, least recently used first; a larger table is refused before anything is sent (`LIMIT_EXCEEDED`,
+field `table`). When the engine reports its budget full, the client drops the other tables and all resident pixels and tries once more.
+`forget(owner)`, `releaseAll` and a restart cover tables. On the engine side `methods/validation.py::table(inputs, name, columns, *, required)`
+decodes a table for a method and refuses, naming the field, a missing or malformed description, another version, the limits above, a
+repeated, empty or not accepted column name, a missing required column, buffers of another type or shape, a validity byte other than 0 or 1,
+a present value that is not finite and a missing slot that does not hold 0.
 
 The [M8.1 contract](roadmap-engine-contract.md) specifies later scientific inputs/results and predeclared
 acceptance gates. Current transport/worker regression tests exercise corruption, admission, cancellation,

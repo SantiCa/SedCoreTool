@@ -29,9 +29,8 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
   rebuild its grey image).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 (splitting a too-dense section) approved as recommended and delivered (M8.4.41–M8.4.43).
-- **Next (order decided by the maintainer, 22 Nov 2026):** **Q15** (Q14 done), then **M8.4.10** (record tables resident in the
-  engine; most capable, effort medium), **M8.4.11** (gate of part B; fast, effort low), then M8.5 (needs A1). `Q10` before V0.153; `A4` open.
-- **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) done, milestone gate met (M8.4.19); part B: M8.4.9 done
+- **Next (order decided by the maintainer, 22 Nov 2026):** Q15 waits for GitHub; M8.4.10 done; next **M8.4.11** (gate of part B; fast, effort low), then M8.5 (needs A1). `Q10` before V0.153; `A4` open.
+- **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) done, milestone gate met (M8.4.19); part B: M8.4.9 and M8.4.10 done
   (22 Nov 2026); M8.5 must not start. The engine path fails the timing gate of
   [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates) for whole sections; the tile store is the
   answer for large images.
@@ -486,22 +485,7 @@ be decoded by the interface at all, and that card will carry the parity evidence
 
 - [x] **M8.4.9 - Section pixels resident in the engine** (done 22 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased); record: [history](roadmap-history.md#m849---section-pixels-resident-in-the-engine)).
 
-#### M8.4.10 - Record tables resident in the engine — state: Ready
-
-- **Goal:** the tables that M8.5a, M8.5d and M6 consume (depth/age records, data tables, multiproxy series) can be held in the engine
-  in one columnar format, so those methods take handles. No scientific method changes.
-- **Read first:** M8.4.9 (the registry); contract §4-§5 (the convention for missing values: a value column and a `<name>_valid`
-  column, never NaN); `app/js/log.js`, `geo.js` (`featureSeries`, `buildSamples`), `sheet.js` for the shapes of the tables.
-- **Change:** a pure module `app/js/tablesnapshot.js`: `buildTableSnapshot(columns)` takes named numeric columns (plain arrays,
-  null for missing) and returns `f64le` value columns, `u8` validity columns, the names and units as a small `utf8json` table and an
-  identity; limits (columns, rows, bytes) stated and enforced; decoding on the engine side in a helper of `methods/validation.py`
-  (`table(inputs, name, columns)`) that rejects a shape, a non-finite valid value or a name that is not allowed, naming the field. Contract
-  §4 gets a "tables" paragraph. Resident through `residentstore.js`.
-- **Do not touch:** the interface's tables and formulas; saved projects.
-- **Model:** most capable, effort medium (the engine helper validates tables that may be corrupt or hostile; bounded, exact tests).
-- **Tests:** round trip of random tables with missing values, exact for every value and every missing slot; rejection cases for the
-  helper; limits; the identity changes with any value, name or unit and with nothing else; a probe method that returns column sums.
-- **Done when:** the tests pass and the probe through the real engine equals the interface's own sums.
+- [x] **M8.4.10 - Record tables resident in the engine** (done 22 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased); record: [history](roadmap-history.md#m8410---record-tables-resident-in-the-engine)).
 
 #### M8.4.11 - Milestone gate of part B — state: after M8.4.10
 
