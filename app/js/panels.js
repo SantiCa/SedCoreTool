@@ -7,6 +7,16 @@ import { renderGeoMap } from './multiproxy.js';
 /* ───────────── resizable / collapsible side panels and resizable maps (V23) ───────────── */
 export let panelPrefs = {};
 try { panelPrefs = JSON.parse(localStorage.getItem('ichantool.panels') || '{}'); } catch { panelPrefs = {}; }
+/** Card Q10: runs `up` once when the pointer is released or the browser cancels it (lost capture, palm rejection, alert), so drag state never sticks. */
+export function onPointerEnd(el, up, capture = false) {
+  const end = (ev) => { el.removeEventListener('pointerup', end, capture); el.removeEventListener('pointercancel', end, capture); up(ev); };
+  el.addEventListener('pointerup', end, capture); el.addEventListener('pointercancel', end, capture);
+}
+/** Card Q10: loads an SVG text as an image through a Blob URL (a data: URL of a large figure is slow and can exceed limits) and always revokes the URL. */
+export async function withSvgImage(svg, use) {
+  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
+  try { const img = new Image(); img.src = url; await img.decode(); return await use(img); } finally { URL.revokeObjectURL(url); }
+}
 export const savePanels = () => { try { localStorage.setItem('ichantool.panels', JSON.stringify(panelPrefs)); } catch { /* storage blocked */ } };
 const panelSides = (m) => (m === 'section' ? ['l', 'r'] : m === 'data' ? [] : ['l']);
 const splitL = document.createElement('div'), splitR = document.createElement('div');
@@ -41,7 +51,7 @@ function dragSplitter(el, side) {
       w.style.setProperty(side === 'l' ? '--lw' : '--rw', px + 'px'); placeSplitters();
     };
     const up = () => { el.classList.remove('drag'); el.removeEventListener('pointermove', move); savePanels(); resizeCanvases?.(); if (mode === 'geo' && S.geo.view.tab === 'map') renderGeoMap(); };
-    el.addEventListener('pointermove', move); el.addEventListener('pointerup', up, { once: true });
+    el.addEventListener('pointermove', move); onPointerEnd(el, up);
   });
   el.addEventListener('dblclick', (e) => { if (!e.target.closest('button')) { const p = (panelPrefs[mode] ||= {}); delete p[side]; p[side + 'c'] = false; savePanels(); applyPanels(); } });
   el.querySelector('button').addEventListener('click', () => { const p = (panelPrefs[mode] ||= {}); p[side + 'c'] = !p[side + 'c']; savePanels(); applyPanels(); });
@@ -72,7 +82,7 @@ for (const h of document.querySelectorAll('.rszh, .rszv')) {
     const move = (ev) => { if (horiz) z.w = Math.round(Math.max(320, ev.clientX - r.left)); else z.h = Math.round(Math.max(240, ev.clientY - r.top)); applyFrame(id); };
     const up = () => { h.removeEventListener('pointermove', move); f.classList.remove('sizing'); try { localStorage.setItem('ichantool.mapFrames', JSON.stringify(frameSizes)); } catch { /* storage blocked */ } redrawFrame(id); };
     f.classList.add('sizing');
-    h.addEventListener('pointermove', move); h.addEventListener('pointerup', up, { once: true });
+    h.addEventListener('pointermove', move); onPointerEnd(h, up);
   });
   h.addEventListener('dblclick', () => { const z = (frameSizes[id] ||= {}); if (horiz) delete z.w; else delete z.h; applyFrame(id); try { localStorage.setItem('ichantool.mapFrames', JSON.stringify(frameSizes)); } catch { /* storage blocked */ } redrawFrame(id); });
 }

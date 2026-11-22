@@ -10,7 +10,7 @@ import { interpAge, parseAgeModel, toCSV } from './core.js';
 import { buildLogSVG, compositeRows, decodeText, eventShadeOptions, eventShading, mergedStyle, parseTable, validHexColor } from './log.js';
 import { renderFigure, verticalStyleHTML } from './figures.js';
 import { INTERP_DEFAULT, INTERP_METHODS, RAMPS, colorRange, contourLevels, contourSegments, interpolate, maskLand, rampColor, visibleSeaOptions } from './interp.js';
-import { frameRatio, panelPrefs, placeSplitters, savePanels } from './panels.js';
+import { frameRatio, panelPrefs, placeSplitters, savePanels, withSvgImage } from './panels.js';
 
 /* ───────────── multiproxy tool: numeric records, interval layers and automatic interval classification ─────────────
    Independent of the ichnotaxon suggestions of the Section mode (learn.js). State lives in S.geo (key kept for file compatibility). */
@@ -1297,10 +1297,12 @@ export async function exportMapPNG(build, name, width) {
     bgWidth = Math.min(4096, width);
     let svg = build(); await Promise.all([...bgPromises.values()].map((p) => p.catch(() => {})));
     svg = build(); // second pass uses the high-resolution images now in the cache
-    const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); await img.decode();
-    const k = width / img.width, c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-    const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
-    const blob = await new Promise((r) => c.toBlob(r, 'image/png')); if (blob) await saveFile(name, blob, 'image/png');
+    const blob = await withSvgImage(svg, async (img) => {
+      const k = width / img.width, c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
+      return new Promise((r) => c.toBlob(r, 'image/png'));
+    });
+    if (blob) await saveFile(name, blob, 'image/png');
   } finally { bgWidth = prev; }
 }
 

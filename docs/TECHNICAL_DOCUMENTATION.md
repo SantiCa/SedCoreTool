@@ -194,6 +194,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `locmap.js` | Core location map: coordinate reference systems, frame, grid, scale | ✓ |
 | `plot.js` | Plots of the Data tab (stratigraphic log, XY, fits) | ✓ |
 | `sheet.js` | Formulas of the Data tab (own parser, no `eval`) | ✓ |
+| `dataedit.js` | Rules of the Data tab edits and record list: original cell value, manual-column delete, remove by id (card Q10) | ✓ |
 | `exportio.js` | Tables written to files and records read from tables | ✓ |
 | `zip.js` | Minimal ZIP writer and reader for project packages | ✓ |
 | `unet.js` | U-Net tiling, normalisation, blending and resampling (same rules as the Python package) | ✓ |

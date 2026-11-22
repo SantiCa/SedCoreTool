@@ -1,9 +1,10 @@
 import { rowAtDepth } from './sectiondepth.js';
 /* Composite log: shared drawing for the column view and independent figures, records and track controls. */
 import { $, S, fmt, hex, uid } from './state.js';
-import { analyze, armed, busy, compositeMarks, compositeTaxonPoints, effClassArray, esc, idListOf, idMode, legendOf, markDirty, needPixels, requestRender, resizeCanvases, safe, saveFile, toast, updateTip, withProv } from './app.js';
+import { analyze, analyzeSections, armed, busy, compositeMarks, compositeTaxonPoints, effClassArray, esc, idListOf, idMode, legendOf, markDirty, needPixels, requestRender, resizeCanvases, safe, saveFile, toast, updateTip, withProv } from './app.js';
 import { geoOverlay, loadLand, logInteract, readTableFile, renderGeo, renderGeoLogs, renderImportReport } from './multiproxy.js';
 import { applyPanels } from './panels.js';
+import { removeById } from './dataedit.js';
 import { disposeDataTable, renderData } from './datatab.js';
 import { FIG_PANELS, arrowMarksSVG, axisErr, coreRatio, editSVGLabels, figTraces, panelDataURL, renderFigPanel, renderFigure, scheduleFigure } from './figures.js';
 
@@ -552,7 +553,9 @@ $('logPanel').addEventListener('change', (e) => {
 $('logHeight').addEventListener('input', (e) => { $('logHeightOut').textContent = e.target.value + ' px'; });
 $('logAll').addEventListener('click', () => { S.logView.from = S.logView.to = null; markDirty(); scheduleLog(0); });
 $('logSVGBtn').addEventListener('click', () => { if (lastLog) saveFile(`${safe(S.name)}_registro.svg`, lastLog.svg, 'image/svg+xml'); });
-$('logCSVBtn').addEventListener('click', () => {
+$('logCSVBtn').addEventListener('click', async () => {
+  if (!lastLog) return;
+  await analyzeSections(S.sections); renderLog();   // card Q10: bins still pending in the engine are final before the file is written
   if (!lastLog) return;
   saveFile(`${safe(S.name)}_registro.csv`, withProv(windowCSV({ rows: lastLog.rows, from: lastLog.from, to: lastLog.to, classes: lastLog.classes, records: lastLog.records, units: lastLog.base, ageUnits: S.age.units,
     recordMode: /** @type {HTMLSelectElement | null} */ ($('logCsvMode'))?.value === 'point' ? 'point' : 'mean', model: lastLog.model })), 'text/csv');   // card Q4
@@ -617,7 +620,7 @@ $('recList').addEventListener('click', (e) => {
   if (!e.target.dataset.del) return;
   if (!armed(e.target, '?')) return;
   const id = e.target.closest('.rec').dataset.id;
-  S.records.splice(S.records.findIndex((r) => r.id === id), 1); renderRecList(); markDirty(); scheduleLog(0);
+  if (!removeById(S.records, id)) return; renderRecList(); markDirty(); scheduleLog(0);
 });
 
 $('recFile').addEventListener('change', async (e) => {

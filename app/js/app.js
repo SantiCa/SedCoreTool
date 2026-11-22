@@ -45,7 +45,7 @@ import { TileChanges, trimTileHistory } from './tiledundo.js';
 import { createTiledSourcePanel } from './tiledsource.js';
 import { chooseFolderVersion } from './folderversion.js';
 import { renderData } from './datatab.js';
-import { frameRatio, panelPrefs, savePanels } from './panels.js';
+import { frameRatio, onPointerEnd, panelPrefs, savePanels } from './panels.js';
 import { addRecordFromTable, defaultLogView, forgetLastImport, lastLog, mode, renderLog, renderLogPanel, renderRecList, scheduleLog, sectionCanvas, navigationPreviewCanvas, clearNavigationPreviews, setMode } from './columns.js';
 import { GROUP_COLORS, addImported, addNamedIntervals, attachMapZoom, coreListUI, defaultGeo, exportMapPNG, geoComputeSamples, geoLand, geoLayer, geoMarkDirty, geoRT, geoReset, geoTrain, interpUI, loadGeoDemo, loadLand, mapBackground, mapStyleUI, mapTip, normalizeGeo, renderGeo, renderGeoMap, scheduleGeo, valueLayer, initMultiproxy } from './multiproxy.js';
 /** Delivery number (V27…): shown in the header, the start screen, the help, the window title, project files and the name of the offline file. */
@@ -1248,7 +1248,7 @@ let engineRefresh = 0;
 const engineBridge = /** @type {any} */ (window).corantoolDesktop?.engine;
 const engineAnalysis = engineBridge?.enabled === true ? createEngineAnalysis({ client: createEngineClient(engineBridge), project: analysisProject, maskChanges, onNotice: (key) => toast(t(key), 6000), onChange: () => {
   clearTimeout(engineRefresh);
-  engineRefresh = setTimeout(() => { renderResults(); requestRender(); if (mode === 'log') scheduleLog(0); else if (mode !== 'section') setMode(mode); }, 50);
+  engineRefresh = setTimeout(() => { renderResults(); requestRender(); if (mode === 'log') scheduleLog(0); else if (mode !== 'section' && !(['data', 'fig', 'geo'].includes(mode) && document.activeElement?.closest('input, textarea, select, [contenteditable]'))) setMode(mode); }, 50);   // card Q10: never rebuild a tab while a cell or field is being edited
 } }) : null;
 /** Brings the bins of the sections up to date. Resolves when every section has a final state (always, without the engine). */
 export function analyzeSections(sections) {
@@ -1653,7 +1653,7 @@ view.addEventListener('pointerdown', (e) => {
   if (px < navBox.x || px > navBox.x + navBox.w || py < navBox.y - 3 || py > navBox.y + navBox.h + 3) return;
   e.stopImmediatePropagation(); e.preventDefault(); view.setPointerCapture(e.pointerId); navTo(py);
   const move = (ev) => navTo(ev.clientY - r.top), up = () => view.removeEventListener('pointermove', move, true);
-  view.addEventListener('pointermove', move, true); view.addEventListener('pointerup', up, { once: true, capture: true });
+  view.addEventListener('pointermove', move, true); onPointerEnd(view, up, true);
 }, true);
 /** Whole analysis area in view (height fits). */
 function fitAll() {
@@ -1803,7 +1803,7 @@ prof.addEventListener('pointerdown', (e) => {   // V0.24: drag the right edge of
   const r = prof.getBoundingClientRect();
   const move = (ev) => { (S.settings.sideW ||= {})[L.id] = Math.round(Math.max(16, ev.clientX - r.left - L.x0)); requestRender(); };
   const up = () => { prof._drag = false; prof.removeEventListener('pointermove', move); markDirty(); if ($('profMenu').open) renderProfMenu(); };
-  prof.addEventListener('pointermove', move); prof.addEventListener('pointerup', up, { once: true });
+  prof.addEventListener('pointermove', move); onPointerEnd(prof, up);
 });
 prof.addEventListener('pointerdown', (e) => {
   if (e.offsetX > PROF_EDGE) return;
@@ -1811,7 +1811,7 @@ prof.addEventListener('pointerdown', (e) => {
   const vp = prof.parentElement, r = vp.getBoundingClientRect();
   const move = (ev) => { const w = Math.round(Math.max(140, Math.min(r.width - 200, r.right - ev.clientX))); panelPrefs.profW = w; vp.style.setProperty('--pw', w + 'px'); resizeCanvases(); };
   const up = () => { prof._drag = false; prof.removeEventListener('pointermove', move); savePanels(); };
-  prof.addEventListener('pointermove', move); prof.addEventListener('pointerup', up, { once: true });
+  prof.addEventListener('pointermove', move); onPointerEnd(prof, up);
 });
 prof.addEventListener('dblclick', (e) => { if (e.offsetX <= PROF_EDGE) { delete panelPrefs.profW; savePanels(); applyProfWidth(); } });
 /** Menu of the side column: each track shown or hidden, its width, and records from Data. */
@@ -4501,7 +4501,7 @@ function updateFloat() {
   let d = null;
   $('floatHead').addEventListener('pointerdown', (e) => { if (e.target.closest('button')) return; const r = $('float').getBoundingClientRect(); d = { x: e.clientX - r.left, y: e.clientY - r.top }; $('floatHead').setPointerCapture(e.pointerId); });
   $('floatHead').addEventListener('pointermove', (e) => { if (!d) return; const f = $('float'); f.style.left = e.clientX - d.x + 'px'; f.style.top = e.clientY - d.y + 'px'; f.style.right = 'auto'; f.style.bottom = 'auto'; });
-  $('floatHead').addEventListener('pointerup', () => { d = null; });
+  for (const ev of ['pointerup', 'pointercancel']) $('floatHead').addEventListener(ev, () => { d = null; });
 }
 
 /** A second window: read-only view of one project that follows the changes saved by the main window. */

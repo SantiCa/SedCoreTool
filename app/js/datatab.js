@@ -10,6 +10,8 @@ import { FIT_KINDS, PLOT_COLORS, PLOT_TYPES, buildStratPlot, buildXYPlot } from 
 import { toCSV } from './core.js';
 import { csvCommentText } from './exportio.js';
 import { mountTableViewport } from './tableview.js';
+import { withSvgImage } from './panels.js';
+import { deleteManualColumn, originalCellValue } from './dataedit.js';
 import { createIntervalLookup, intervalsOnAxis } from './geo.js';
 import { validHexColor } from './log.js';
 import { FUNCTIONS, cellName, evalCells, parseFormula } from './sheet.js';
@@ -106,7 +108,7 @@ $('dBody').addEventListener('click', (e) => {
   else if (a === 'dup') { S.plots.push({ ...JSON.parse(JSON.stringify(p)), name: p.name + ' (2)' }); S.plotCur = S.plots.length - 1; }
   else if (a === 'del') { S.plots.splice(S.plotCur, 1); S.plotCur = 0; }
   else if (a === 'svg') { if (plotLast) saveFile(`${safe(p.name)}.svg`, plotLast.full(), 'image/svg+xml'); return; }
-  else if (a === 'png') { if (plotLast) busy(async () => { const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(plotLast.full()); await img.decode(); const c = document.createElement('canvas'); c.width = img.width * 3; c.height = img.height * 3; const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height); const b = await new Promise((r) => c.toBlob(r, 'image/png')); if (b) await saveFile(`${safe(p.name)}.png`, b, 'image/png'); }); return; }
+  else if (a === 'png') { if (plotLast) busy(() => withSvgImage(plotLast.full(), async (img) => { const c = document.createElement('canvas'); c.width = img.width * 3; c.height = img.height * 3; const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height); const b = await new Promise((r) => c.toBlob(r, 'image/png')); if (b) await saveFile(`${safe(p.name)}.png`, b, 'image/png'); })); return; }
   else if (a === 'csv') {
     const rows = [['core', p.v, 'variable', 'value']];
     for (const c of S.cores.filter((q) => p.cores.includes(q.id))) for (const y of p.ys) { const X = plotCol(c, p.v), Y = plotCol(c, y.col); for (let i = 0; i < X.length; i++) if (X[i] != null && Y[i] != null) rows.push([c.name, X[i], y.col, Y[i]]); }
@@ -137,11 +139,13 @@ export function renderData() {
   if (view !== 'table') disposeDataTable();
   if (view === 'cols') renderDataCols(); else if (view === 'cells') renderDataCells(); else if (view === 'plot') renderDataPlot(); else renderDataTable();
 }
-function tableModel(limit = Infinity, offset = 0) {
-  const cores = dataCores(), names = new Map();
-  for (const c of cores) for (const [k, v] of Object.entries(c.src)) if (!names.has(k)) names.set(k, v);
-  const cols = [...names.entries()].sort((a, b) => SRC_ORDER[a[1]] - SRC_ORDER[b[1]] || a[0].localeCompare(b[0]));
-  const layers = $('dLayers').checked ? S.geo.layers.filter((L) => S.geo.intervals.some((q) => q.layer === L.id && cores.some((c) => c.id === q.core))) : [];
+/** @param {{ base?: any, lookups: Map<string, any> }} [memo] card Q10: columns, layers and interval lookups reused across the scroll frames of one render */
+function tableModel(limit = Infinity, offset = 0, memo = undefined) {
+  const cores = memo?.base?.cores || dataCores(), names = new Map();
+  if (!memo?.base) for (const c of cores) for (const [k, v] of Object.entries(c.src)) if (!names.has(k)) names.set(k, v);
+  const cols = memo?.base?.cols || [...names.entries()].sort((a, b) => SRC_ORDER[a[1]] - SRC_ORDER[b[1]] || a[0].localeCompare(b[0]));
+  const layers = memo?.base?.layers || (/** @type {HTMLInputElement} */ ($('dLayers')).checked ? S.geo.layers.filter((L) => S.geo.intervals.some((q) => q.layer === L.id && cores.some((c) => c.id === q.core))) : []);
+  if (memo && !memo.base) memo.base = { cores, cols, layers };
   const rows = [];
   let totalRows = 0;
   for (const c of cores) {
@@ -150,12 +154,17 @@ function tableModel(limit = Infinity, offset = 0) {
     totalRows += n;
     const displayed = Math.min(n - first, Math.max(0, limit - rows.length));
     if (!displayed) continue;
-    const intervalNames = new Map();
-    const ivs = new Map(layers.map((L) => {
-      const intervals = intervalsOnAxis(S.geo.intervals.filter((q) => q.core === c.id && q.layer === L.id), c.depth ? 'depth' : 'age', c);
-      for (const q of intervals) intervalNames.set(q, geoCat(q.cat)?.name || '');
-      return [L.id, createIntervalLookup(intervals)];
-    }));
+    const { intervalNames, ivs } = memo?.lookups.get(c.id) || (() => {
+      const names2 = new Map();
+      const lookups = new Map(layers.map((L) => {
+        const intervals = intervalsOnAxis(S.geo.intervals.filter((q) => q.core === c.id && q.layer === L.id), c.depth ? 'depth' : 'age', c);
+        for (const q of intervals) names2.set(q, geoCat(q.cat)?.name || '');
+        return [L.id, createIntervalLookup(intervals)];
+      }));
+      const made = { intervalNames: names2, ivs: lookups };
+      memo?.lookups.set(c.id, made);
+      return made;
+    })();
     for (let i = first; i < first + displayed; i++) {
       const x = c.depth ? c.depth[i] : c.age[i];
       rows.push({ c, i, depth: c.depth?.[i] ?? null, age: c.age?.[i] ?? null, vals: cols.map(([k]) => c.proxies[k]?.[i] ?? null),
@@ -184,7 +193,7 @@ function renderDataTable() {
     /** @type {HTMLInputElement} */ ($('dLayers')).checked]);
   const scrollTop = dataViewportOn && previous?.dataset.context === context ? previous.scrollTop : 0;
   disposeDataTable();
-  const M = tableModel(dataViewportOn ? 0 : dataLimit), multi = M.cores.length > 1, nEd = editCount(M.cores);
+  const memo = { lookups: new Map() }, M = tableModel(dataViewportOn ? 0 : dataLimit, 0, memo), multi = M.cores.length > 1, nEd = editCount(M.cores);
   $('dInfo').textContent = t('data.info', { r: M.totalRows, c: M.cols.length });
   const colLetter = (i) => cellName(i, 0).replace(/\d+$/, '');
   const fixed = (multi ? 1 : 0) + 2;
@@ -217,12 +226,12 @@ function renderDataTable() {
     <div class="dsgrid"><table class="dtable sheet ${dataViewportOn ? 'dsviewport' : ''}" ${dataViewportOn ? `style="width:${esc(50 + (multi ? 180 : 0) + 256 + M.cols.length * 132 + M.layers.length * 180)}px"` : ''}>
       ${dataViewportOn ? `<colgroup>${[50, ...(multi ? [180] : []), 128, 128, ...M.cols.map(() => 132), ...M.layers.map(() => 180)].map((width) => `<col style="width:${esc(width)}px">`).join('')}</colgroup>` : ''}
       <thead>${head}</thead><tbody>${body}</tbody></table></div>
-    ${M.totalRows > dataLimit ? `<p><button class="btn small" id="dMore">${t('data.more', { n: M.totalRows - dataLimit })}</button></p>` : ''}`;
+    ${!dataViewportOn && M.totalRows > dataLimit ? `<p><button class="btn small" id="dMore">${t('data.more', { n: M.totalRows - dataLimit })}</button></p>` : ''}`;
   if (dataViewportOn) {
     const grid = /** @type {HTMLElement} */ ($('dBody').querySelector('.dsgrid')); grid.dataset.context = context;
-    dataViewport = mountTableViewport({ grid, body: grid.querySelector('tbody'), rowCount: Math.min(dataLimit, M.totalRows),
+    dataViewport = mountTableViewport({ grid, body: grid.querySelector('tbody'), rowCount: M.totalRows,
       columnCount: fixed + 1 + M.cols.length + M.layers.length, scrollTop,
-      renderRows: (start, end) => tableRowsHTML(tableModel(end - start, start), start) });
+      renderRows: (start, end) => tableRowsHTML(tableModel(end - start, start, memo), start) });
   }
   if ($('dMore')) $('dMore').onclick = () => { dataLimit += 1000; renderDataTable(); };
   if (f && $('dsCore')) $('dsCore').value = fcol?.core || (f.type === 'man' ? M.cores[0]?.id : 'all') || 'all';
@@ -323,7 +332,7 @@ $('dBody').addEventListener('focusout', (e) => {
     if (k >= 0) u.v[k] = v; else { u.d.push(d); u.v.push(v); }
   } else {   // V0.35: any other value is kept as an edit over the original, flagged and reversible
     c.edits ||= {}; const E = (c.edits[col] ||= {}), prev = E[x];
-    const orig = prev ? prev.o : (td.dataset.before === '' ? null : +td.dataset.before.replace(',', '.'));
+    const orig = prev ? prev.o : originalCellValue(c, col, x);   // card Q10: the stored number, not the 6-decimal text
     if (orig != null && v != null && Math.abs(orig - v) <= 1e-12 * Math.max(1, Math.abs(orig))) delete E[x];
     else E[x] = { v, o: orig, at: new Date().toISOString() };
     if (!Object.keys(E).length) delete c.edits[col];
@@ -344,7 +353,7 @@ function renderDataCols() {
     <div class="colrow"><input type="text" id="ncName" placeholder="${t('data.newName')}"><input type="text" id="ncFormula" placeholder="[XRF Ba/Ti] / TOC_pct"><select id="ncCore"><option value="all">${t('data.allCores')}</option>${cores}</select><button class="btn small primary" id="ncAdd">${t('data.addCalc')}</button></div></div>
     <h3>${t('data.manTitle')}</h3><p class="note">${t('data.manHelp')}</p>
     <div class="row"><input type="text" id="nmName" placeholder="${t('data.newName')}"><select id="nmCore">${cores}</select><button class="btn small" id="nmAdd">${t('data.addMan')}</button></div>
-    <div style="display:grid;gap:4px">${S.cores.flatMap((c) => Object.keys(c.user || {}).map((k) => `<div class="row"><span>${esc(c.name)} · <b>${esc(k)}</b> (${c.user[k].v.filter((v) => v != null).length})</span><button class="btn small ghost" data-delman="${esc(c.id)}|${esc(k)}">✕</button></div>`)).join('')}</div>`;
+    <div style="display:grid;gap:4px">${S.cores.flatMap((c) => Object.keys(c.user || {}).map((k) => `<div class="row"><span>${esc(c.name)} · <b>${esc(k)}</b> (${c.user[k].v.filter((v) => v != null).length})</span><button class="btn small ghost" data-delman-core="${esc(c.id)}" data-delman-col="${esc(k)}">✕</button></div>`)).join('')}</div>`;
   $('ncAdd').onclick = () => {
     const name = $('ncName').value.trim(), formula = $('ncFormula').value.trim(); if (!name || !formula) return;
     S.sheet.columns.push({ name, formula, core: $('ncCore').value }); refreshAllCores(); geoRT.dirty = true; markDirty(); renderDataCols();
@@ -361,9 +370,9 @@ $('dBody').addEventListener('change', (e) => {
 });
 $('dBody').addEventListener('click', (e) => {
   const d = e.target.closest('button')?.dataset; if (!d) return;
-  if ((d.del != null || d.delman) && !armed(e.target, '?')) return;
+  if ((d.del != null || d.delmanCol != null) && !armed(e.target, '?')) return;
   if (d.del != null) { S.sheet.columns.splice(+d.del, 1); refreshAllCores(); geoRT.dirty = true; markDirty(); renderDataCols(); }
-  else if (d.delman) { const [id, k] = d.delman.split('|'), c = S.cores.find((x) => x.id === id); if (c) { delete c.user[k]; refreshCoreData(c); markDirty(); renderDataCols(); } }
+  else if (d.delmanCol != null) { if (deleteManualColumn(S.cores, d.delmanCore, d.delmanCol)) { refreshCoreData(S.cores.find((x) => x.id === d.delmanCore)); markDirty(); renderDataCols(); } }
 });
 const CELL_COLS = 10, CELL_ROWS = 40;
 function cellResults() {

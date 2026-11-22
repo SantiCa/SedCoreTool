@@ -17,9 +17,9 @@ Updated 22 November 2026. Rules for this block: [AGENTS.md §1 step 8](../AGENTS
 not appended). Earlier status records, check logs and audit texts: [roadmap-history.md § Status log](roadmap-history.md#status-log-until-21-november-2026).
 
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.152, `8ee9776`) is contained in it.
-- **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153; Q10 must be done before it.
-- **Last verified code commit:** M8.5.3 `1fc0a54`: `check_all --desktop` passed on Windows (pytest 994/9 skipped, `npm test` 660/660,
-  typecheck, ruff, desktop e2e engine off and on).
+- **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153 (Q10, its prerequisite, done).
+- **Last verified code commit:** Q10 (this commit): `check_all --desktop --smoke` passed on Windows (pytest 1024/9 skipped, `npm test`
+  667/667, typecheck, ruff, desktop e2e engine off and on, smoke).
 - **GitHub:** M8.5.1 `904cbcf` and M8.5.2 `8074285`: `tests` and *Desktop builds* green (Windows, macOS, Linux). M8.5.3: read its result
   at the start of the next card.
 - **Checks due:** none locally; the GitHub result of the M8.5.3 push.
@@ -30,8 +30,8 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
 - **Next:** A1 designed (contract §9, cards M8.5.1-M8.5.15); Y1-Y11 and the limits of §9.7 approved as recommended (22 Nov 2026).
-  Run in progress: M8.5.1-M8.5.5 done (`method.run` in the engine and from the page; `core.ages/1` in the engine). Proposed to the
-  maintainer: pause M8.5, do **Q10**, then V0.153 if asked; otherwise next is M8.5.6 (waits for Y9). `Q10` before V0.153; `A4` open.
+  M8.5.1-M8.5.5 done (`method.run` in the engine and from the page; `core.ages/1` in the engine). M8.5 paused by the maintainer for
+  Q10 (done) and V0.153, which waits for the maintainer's request. Afterwards: M8.5.6 (waits for Y9). `Q10` before V0.153; `A4` open.
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). The engine path fails the timing gate of
   [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates) for whole sections; the tile store is the
   answer for large images.
@@ -1031,7 +1031,8 @@ web/frontend security, UI correctness and architecture cards sit here.
   undoes the centring. *Change:* the delayed first fit is skipped when the view changed meanwhile; *Tests:* an e2e step that selects an unseen
   section and centres on an object at once, and checks the view a few frames later; *Done when:* the object is centred.
 
-- [ ] **Q10 - Data-tab edit precision, virtualized table cap, engine-refresh/CSV races & SVG PNG Blob export.**
+- [x] **Q10 - Data-tab edit precision, virtualized table cap, engine-refresh/CSV races & SVG PNG Blob export.** (done 22 Nov 2026,
+  development gate)
   - *Goal:* fix verified runtime, UX and data-accuracy defects across the Data tab, Core log, Figures and pointer interactions.
   - *Read first:* `app/js/datatab.js` (`108, 176, 222-224, 266, 325, 346, 365`); `app/js/columns.js` (`53, 555, 618`); `app/js/app.js`
     (`1257, 1662, 1812, 1820, 4521`); `app/js/figures.js` (`124, 724, 965`); `app/js/multiproxy.js` (`1300`); `app/js/panels.js` (`44, 75`).
@@ -1050,6 +1051,14 @@ web/frontend security, UI correctness and architecture cards sit here.
   - *Tests:* Node tests for small-value (`1.23e-8`) edit + restore, column name with `|`, `autoPick` with null `feat`, `recList` missing-id guard;
     smoke/e2e test scrolling a 10,000-row virtualized table without clicking "Show more" and exporting a large PNG via Blob URL.
   - *Done when:* all new tests plus `npm test`, `npm run typecheck` and `tests/e2e/smoke.mjs` pass; development gate.
+  - *As built:* new pure module `app/js/dataedit.js` (`originalCellValue`, `removeById`, `deleteManualColumn`; `dataedit.test.mjs`, 3).
+    `datatab.js`: the original of an edit is the stored number; with the viewport on, every row is shown (no 400 cap, no "Show more") and
+    `tableModel` is memoized per render; manual-column delete carries core and column separately. `panels.js`: `onPointerEnd` (up and
+    cancel) and `withSvgImage` (Blob URL, revoked in `finally`), used by datatab, figures, multiproxy, panels and app. `app.js`:
+    `engineRefresh` skips `setMode` while a field is edited in data/fig/geo. `columns.js`: the log CSV awaits `analyzeSections`; the record
+    delete ignores a missing id. `autoPick` with null `feat` was already safe (no change). `table-viewport.mjs` (smoke) now asserts no cap,
+    a 10,000-row scroll and a Blob-URL PNG. Checks (Windows): `check_all --desktop --smoke` passed (pytest 1024/9 skipped, `npm test`
+    667/667, typecheck, ruff, e2e desktop off/on, smoke). `app.js` 4,647 lines before and after.
 
 - [ ] **A4 - Modular decomposition of remaining `app.js` workflows (post-M8.4.19).**
   - *Goal:* reduce `app.js` from 4,664 lines to wiring only by extracting the remaining cohesive controller workflows into dedicated modules, one
