@@ -9,7 +9,7 @@ export { pxPerCm, depthAtRow, rowAtDepth };
 import { withProvenance, ageModelText, bioturbationTable, objectsTable } from './exportio.js';
 
 import { DEFAULT_FILTERS, FILTER_PRESETS, DEFAULT_DETECT, traceSeparation, localSeparability, applyFilters, detectMask, components, regionGrow, polygonPixels, objectStats, features, rotate90, downsampleRGBA, autoLevels, gammaForMedian, factorThatFits, workingBytes, WORKING_MEMORY_LIMIT } from './imageproc.js';
-import { parseTable, decodeText, invertModel, toAxis, compositeRows, abbrevs, traceSymbolPath, validHexColor } from './log.js';
+import { parseTable, decodeText, invertModel, toAxis, abbrevs, traceSymbolPath, validHexColor } from './log.js';
 import { storageAvailable, listProjects, getProject, putProject, putMeta, deleteProject, getPref, setPref, putLite, listLite, getMeta, putImage, getImage, gcImages, forgetSections } from './storage.js';
 import { INTERP_DEFAULT } from './interp.js';
 
@@ -31,6 +31,7 @@ import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlac
 import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks.js';
 import { nestedIndicator, singleFlight } from './singleflight.js';
 import { joinCoreTables } from './coremerge.js';
+import { mergeCoreData } from './coredata.js';
 import { createTiledProject } from './tiledproject.js';
 import { FORMAT_VERSION_WINDOW, opensReadOnly, projectFormatVersion, serTiledSection } from './tiledrecord.js';
 import { createTiledSplitController } from './tiledsplitui.js';
@@ -2893,50 +2894,9 @@ function activateCore(id, silent = false) {
   if (!silent) { markDirty(); scheduleGeo(); renderData(); }
 }
 
-/** Series of one core from its images (bioturbation per interval) and external records, in core units. */
-function coreImageParts(c) {
-  const parts = [], base = c.units || 'm', model = c.ageModel.model;
-  if (c.sections.length) {
-    const f = (s) => UNIT_TO_CM[s.units] / UNIT_TO_CM[base];
-    for (const s of c.sections) analyze(s);
-    const rows = compositeRows(c.sections.map((s) => ({ name: s.name, bins: s.bins.map((b) => ({ ...b, dTop: b.dTop * f(s), dBottom: b.dBottom * f(s), depth: b.depth * f(s) })) })), { axis: 'depth', model });
-    const vals = { [t('geo.p.bio')]: rows.map((r) => r.pct), BI: rows.map((r) => r.BI), ii: rows.map((r) => r.ii) };
-    S.classes.forEach((k, j) => { if (k.counts && rows.some((r) => r.classPct[j] > 0)) vals[`% ${k.name}`] = rows.map((r) => r.classPct[j]); });
-    parts.push({ depth: rows.map((r) => r.depth), age: null, vals, src: 'img' });
-  }
-  const inv = model ? invertModel(model) : null;
-  for (const rec of c.records) for (const se of rec.series) {
-    const depth = rec.axis === 'age' ? (inv ? se.x.map((a) => interpAge(inv, a)) : null) : se.x;
-    if (depth) parts.push({ depth, age: rec.axis === 'age' ? se.x : null, vals: { [se.name]: se.y }, src: 'rec' });
-  }
-  return parts;
-}
-
 /** Recompute the derived arrays of a core (all sources merged on the union of depths). */
 export function refreshCoreData(c) {
-  if (c.frozen) return; // read-only copy (windows built from the light index)
-  const parts = coreImageParts(c), model = c.ageModel.model;
-  if (c.imp) parts.push({ depth: c.imp.depth, age: c.imp.age, vals: c.imp.proxies || {}, src: 'imp' });
-  for (const [name, u] of Object.entries(c.user || {})) parts.push({ depth: u.d, age: null, vals: { [name]: u.v }, src: 'man' });
-  c.ageText = c.ageModel.text; c.src = {};
-  const withDepth = parts.filter((q) => q.depth);
-  let rows = [];
-  if (withDepth.length) {
-    for (const q of withDepth) q.depth.forEach((d, i) => { if (d != null) rows.push({ d, a: q.age?.[i] ?? null, q, i }); });
-    rows.sort((x, y) => x.d - y.d);
-    c.depth = rows.map((r) => r.d);
-    const ages = rows.map((r) => r.a ?? (model ? interpAge(model, r.d) : null));
-    c.age = ages.some((v) => v != null) ? ages : null;
-  } else {
-    const q = parts.find((x) => x.age); // age-only core (no depth anywhere)
-    if (q) q.age.forEach((a, i) => rows.push({ d: null, a, q, i }));
-    c.depth = null; c.age = rows.length ? rows.map((r) => r.a) : null;
-  }
-  c.proxies = {};
-  for (const q of parts) for (const name of Object.keys(q.vals)) { c.proxies[name] = rows.map(() => null); c.src[name] = q.src; }
-  rows.forEach((r, k) => { for (const [name, arr] of Object.entries(r.q.vals)) c.proxies[name][k] = arr?.[r.i] ?? null; });
-  applyCellEdits(c);   // V0.35
-  applyComputedColumns(c);
+  mergeCoreData(c, { classes: S.classes, bioLabel: t('geo.p.bio'), analyzeSection: analyze, afterMerge: (core) => { applyCellEdits(core); applyComputedColumns(core); } });
 }
 export function refreshAllCores() { for (const c of S.cores) refreshCoreData(c); }
 

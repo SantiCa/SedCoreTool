@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const js = (name) => fs.readFileSync(path.join(root, 'app/js', name), 'utf8');
 /** `app.js` may not grow beyond this many lines; a card that makes it shorter lowers the number (AGENTS §4, card M8.4.30). */
-const APP_JS_CEILING = 4647;
+const APP_JS_CEILING = 4607;
 
 function tableRow(label) {
   const line = fs.readFileSync(path.join(root, 'docs/ARCHITECTURE.md'), 'utf8').split('\n').find((l) => l.startsWith(`| ${label} |`));

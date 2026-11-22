@@ -6,6 +6,7 @@
   },
   "include": [
     "app/js/core.js",
+    "app/js/coredata.js",
     "app/js/sectiondepth.js",
     "app/js/sectionanalysis.js",
     "app/js/maskchanges.js",
