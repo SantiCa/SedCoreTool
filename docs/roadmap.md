@@ -29,8 +29,8 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
   most capable, medium), **Q11** (hostile ML settings stop the classifier), **Q12** (an evicted placeholder section cannot rebuild its grey image).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
-- **Next:** A1 designed (22 Nov 2026; contract §9, cards M8.5.1-M8.5.15). M8.5.1 (operation table; most capable, medium) starts
-  after the maintainer answers decisions **Y1-Y11** and reviews the engineering limits of contract §9.7. `Q10` before V0.153; `A4` open.
+- **Next:** A1 designed (contract §9, cards M8.5.1-M8.5.15); Y1-Y11 and the limits of §9.7 approved as recommended (22 Nov 2026).
+  Run in progress: **M8.5.1** (operation table; most capable, medium), then the M8.5 cards in order. `Q10` before V0.153; `A4` open.
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). The engine path fails the timing gate of
   [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates) for whole sections; the tile store is the
   answer for large images.
@@ -522,6 +522,7 @@ method works on regions of the tile store, never on a whole decoded raster.
 #### Decisions for M8.5 (A1)
 
 Collected by design card A1 (22 Nov 2026) so that they are answered once (AGENTS §6). Each card below names the decisions it waits for.
+**Answered 22 Nov 2026: the maintainer approved Y1-Y11 as recommended, and the engineering limits of contract §9.7.**
 
 - **Y1 - Order of the slices.** A slice starts only after the previous slice's milestone gate ([How work is accepted](#how-work-is-accepted)).
   (a) Slice (a) first, then (d); (b) (d) first; (c) the first path of both, up to their timing cards, before either gate (an exception to
