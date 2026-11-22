@@ -61,7 +61,8 @@ calculates everything itself; with it on, the interval table of each section com
 | Renderer-facing engine bridge (`engine-ipc.js`, `engineclient.js`, `engineanalysis.js`) | **built, experimental, off by default** (M8.3.6–M8.3.7) | §3.2, §3.3 |
 | Section intervals calculated by the engine (`section.intervals/1`) and shown by the interface | **built, experimental, off by default** (M8.3.7); slower than JavaScript, see the M8.3.8 evidence | contract §4–§5 |
 | Section inputs kept in the engine between analyses; edits sent as changed rows (`buffer.derive`); remembered counts; one packed result | **built, experimental, off by default** (M8.4.2-M8.4.5); timing gate of contract §7 not met | §4, contract §3 |
-| Engine restart after a failure (once by itself, then the user's Retry): **built, experimental** (M8.4.7). Working pixels of small sections held by the engine (`u16le` buffers, `ensurePixels`): **built, experimental, used by no method yet** (M8.4.9). Record tables (M8.4.10) and the gate of part B (M8.4.11); several sections in one request (M8.4.6, deferred); remaining methods (M8.5) | **planned** | roadmap |
+| Engine restart after a failure (once by itself, then the user's Retry): **built, experimental** (M8.4.7). Working pixels of small sections (`u16le` buffers, `ensurePixels`, M8.4.9) and record tables (`ensureTable`, M8.4.10) held by the engine: **built, experimental, used by no method yet**; gate of part B met (M8.4.11). Several sections in one request (M8.4.6, deferred); remaining methods (M8.5) | **planned** | roadmap |
+| `method.run`: methods of section, core and project scope, two priorities, superseding by target, table outputs; operation table in the coordinator instead of a chain of conditions | **planned** (designed by card A1, 22 Nov 2026; cards M8.5.1-M8.5.3) | [contract §9](roadmap-engine-contract.md#9-methods-of-section-core-and-project-scope-methodrun-card-a1) |
 | Tile store for large images (pixel pyramid, versioned mask tiles), tiled viewer and editing, analysis on tiles, saving of large projects | **planned** (part C of M8.4, cards M8.4.12-M8.4.19; chosen 15 Nov 2026) | §3.4 |
 
 The engine experiment is enabled only by the environment variable `SEDCORETOOL_ENGINE_EXPERIMENT=1`. Keep that
@@ -298,7 +299,8 @@ Follow the steps in order; each step is one small commit with its own tests.
 4. **Method.** Write `methods/<method>.py` (`NAME`, `parse`, `run`), add it to `registry.py`, and add a test that
    runs it directly on every fixture and compares with the reference: exact for counts, row bounds, indices and
    missing-value patterns; the declared tolerance for floating-point values.
-5. **Engine.** Advertise the method in `hello`; add a transport test that sends a fixture through the real
+5. **Engine.** Advertise the method in `hello` (once `method.run` is built: describe its scope, inputs, priorities and outputs in
+   `engine/specs.py`, [contract §9.6](roadmap-engine-contract.md#96-method-table)); add a transport test that sends a fixture through the real
    coordinator and worker and gets the same result; test cancellation and an invalid input.
 6. **Main process.** Add the narrow call to `engine-ipc.js` and `preload.js`, with origin, shape and size checks and
    Node tests.

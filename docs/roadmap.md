@@ -29,8 +29,8 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
   most capable, medium), **Q11** (hostile ML settings stop the classifier), **Q12** (an evicted placeholder section cannot rebuild its grey image).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
-- **Next:** **A1** (design of engine methods of core or project scope; most capable, effort high), then the M8.5 slice cards it produces.
-  `Q10` before V0.153; `A4` open.
+- **Next:** A1 designed (22 Nov 2026; contract §9, cards M8.5.1-M8.5.15). M8.5.1 (operation table; most capable, medium) starts
+  after the maintainer answers decisions **Y1-Y11** and reviews the engineering limits of contract §9.7. `Q10` before V0.153; `A4` open.
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). The engine path fails the timing gate of
   [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates) for whole sections; the tile store is the
   answer for large images.
@@ -97,7 +97,7 @@ command line call the same code directly.
 | 2 | M8.2 Engine process, bundled runtime, packaging | done at the development gate; milestone gate in card M8.3.9; release items in the checklist |
 | 3 | **M8.3 First scientific slice: section intervals** | **done; milestone gate M8.3.9 passed (14 Nov 2026)** |
 | 4 | M8.4 Engine-resident section data and fast analysis | part A done up to M8.4.5 (M8.4.7, M8.4.8 left); then part C (tiles, option A of 15 Nov 2026); then part B |
-| 5 | M8.5 Remaining methods, one slice at a time | cards written when M8.4 passes its milestone gate |
+| 5 | M8.5 Remaining methods, one slice at a time | first cards written by A1 (22 Nov 2026); decisions Y1-Y11 waiting |
 | 6 | M8.6 Release gate, default-on, duplicate JavaScript science removed, HTML version frozen | idem |
 | 7 | Statistics (M6) and radiographs (M7), both **required for 1.0**; then validation and publication | [roadmap-future.md](roadmap-future.md) |
 | 8 | Conditional: acceleration (M4), interface shell (M9) | [roadmap-future.md](roadmap-future.md) |
@@ -519,6 +519,245 @@ method works on regions of the tile store, never on a whole decoded raster.
     interrupted-save regressions; storage identifiers and old project readers retained; documents and CI updated
     in the same delivery; engine errors stay visible; every earlier milestone gate passed.
 
+#### Decisions for M8.5 (A1)
+
+Collected by design card A1 (22 Nov 2026) so that they are answered once (AGENTS §6). Each card below names the decisions it waits for.
+
+- **Y1 - Order of the slices.** A slice starts only after the previous slice's milestone gate ([How work is accepted](#how-work-is-accepted)).
+  (a) Slice (a) first, then (d); (b) (d) first; (c) the first path of both, up to their timing cards, before either gate (an exception to
+  the rule). *Recommended: (a)*: its first method is small and reuses `kernels/ages.py`, and (d) uses each core's ages.
+- **Y2 - First method of slice (a).** (a) `core.ages/1`: the age model applied to the depths of a core's rows (`core.js::interpAge`,
+  `interpAgeRange`); (b) the record reader (`log.js::parseTable`: large; its rules decide what is imported and saved); (c) computed columns
+  (`sheet.js`). *Recommended: (a).*
+- **Y3 - First method of slice (d).** (a) `multiproxy.samples/1`, an exact port of `geo.js::buildSamples` (resampling, ratios, logarithms,
+  missing values, scaling, interval-layer columns), on which rules, classifiers, cross-validation and maps depend; (b) rules and labels;
+  (c) one classifier. *Recommended: (a).*
+- **Y4 - Parity of floating values that later decisions use.** `Math.log10`, the sums of means and standard deviations and z-scores may
+  differ in the last bits between JavaScript and NumPy, and a classifier's threshold can then fall on the other side. (a) Bit-identical
+  required; a card that cannot reach it stops. (b) Tolerances fixed now: exact for grids, core indices, missing-value patterns, resampled
+  raw values, converted depths and ages, and 0/1 layer columns; 2 units in the last place for logarithms; |Δ| ≤ 1e-12 · max(1, |reference|)
+  for means, standard deviations, z-scores and model variables; labels exact on the fixtures, and a label that differs is shown to the
+  maintainer with its sample, never accepted by the card. *Recommended: (b).*
+- **Y5 - Interval averaging (council, card S5).** With a grid step coarser than a record's spacing, interpolation keeps one value out of
+  many and can alias. (a) Interpolation only. (b) A setting `resample: interpolate | interval_mean` (the mean of the samples with
+  g − step/2 ≤ x < g + step/2, like the core-column CSV's `mean(lo, hi)` of card Q4), default `interpolate`: no result changes unless chosen.
+  (c) As (b), with `interval_mean` for new projects when the step exceeds the record's median spacing; existing projects keep their stored
+  setting (the pattern of decision K). (b) and (c) add an optional saved field `geo.settings.resample` (AGENTS §3.5) and a method version
+  `multiproxy.samples/2`; `/1` stays exact. *Recommended: (c)*, after `/1` is accepted and a comparison on the demo data has been shown.
+- **Y6 - Effective sample size and event-level errors (council, S5).** Needed by the evaluation cards of slice (d), not by the cards
+  written now. (a) Added metrics, existing ones unchanged: n_eff = n · (1 − ρ1) / (1 + ρ1) per core, ρ1 the lag-1 autocorrelation of
+  the correct/incorrect indicator along the axis, clipped to [0, 1); an event is a run of consecutive samples of one class; event recall =
+  share of described intervals overlapped at least 50 % by a predicted event of their class; boundary error = distance from each described
+  boundary to the nearest predicted boundary between the same two classes, in axis units (median and 90th percentile). (b) Other
+  definitions given by the maintainer. *Recommended: (a).*
+- **Y7 - Results reproducible by script.** The migrated methods are callable in-process (D7) but no public function exposes them. (a) At
+  the end of each slice one card adds thin public functions (for example `sedcoretool.records.ages_at`,
+  `sedcoretool.multiproxy.build_samples`), documented and tested: an addition, nothing breaks; (b) only at M8.6; (c) none.
+  *Recommended: (a).*
+- **Y8 - Capacity of project tables.** The 16 MiB of resident tables (M8.4.10) hold about 1.8 million cells (9 bytes each); with the
+  flag on, a larger project is refused visibly (`LIMIT_EXCEEDED`). (a) Keep 16 MiB and decide from card M8.5.12's measurement of a large
+  generated project, as M8.4.9 decided the session budget; (b) raise it now (for example 64 MiB taken from the 192 MiB pixel bound).
+  *Recommended: (a).*
+- **Y9 - Timing targets of the new paths, fixed before measuring** (contract §7). The matched formula compares with JavaScript work of a
+  few milliseconds that no out-of-process path can match (D11). (a) The matched formula as the gate. (b) Absolute targets on the primary
+  reference host, warm, from the request to the decoded result, the matched formula still reported: `core.ages/1` for a core of up to
+  100,000 rows p95 ≤ 150 ms (the edit target of §7); `multiproxy.samples/1` for the whole project p95 ≤ 300 ms (the project-wide setting
+  target of §7). A failed target stops the slice's interface card until the maintainer decides. *Recommended: (b).*
+- **Y10 - Batch jobs** (training, cross-validation). (a) A second worker for batch jobs (contract §9.4, stage 2): interactive work never
+  waits; one more Python process while a batch job runs, its memory measured by card M8.5.14. (b) One worker; the running batch job is
+  cancelled and started again after each interactive job: no extra memory, repeated work. *Recommended: (a).*
+- **Y11 - Classifiers of slice (d).** (a) Exact ports of `geo.js` (random forest, k-NN, naive Bayes, perceptron, k-means) with the same
+  mulberry32 generator and seeds, so results do not change (ARCHITECTURE §5.1); (b) scikit-learn implementations (a new dependency, AGENTS
+  §3.9, and changed results); (c) (a), with scikit-learn as an independent reference in tests only. *Recommended: (a).*
+
+#### M8.5 cards
+
+Written by design card A1 from [contract §9](roadmap-engine-contract.md#9-methods-of-section-core-and-project-scope-methodrun-card-a1).
+Every behaviour change is behind the existing engine experiment flag (no new flag); every card records the lines of `app.js` before and
+after. The order is the order of this list; cards written later take the next free number and go before the gate card of their slice.
+
+- [ ] **M8.5.1 - Operation table in the coordinator** (Ready).
+  - *Goal:* `Coordinator.dispatch` looks operations up in a table (contract §9.5) instead of a chain of conditions; nothing changes on the
+    wire or in behaviour.
+  - *Read first:* contract §9.5 and §3 (operations, errors); `engine/server.py` (`receive`, `dispatch`, `store_operation`, `submit_mask`,
+    `admit_analysis`); `desktop/engine.js` (`OPERATIONS`); `tests/app/engine-ipc.test.mjs` (how it compares with `specs.py`).
+  - *Change:* `src/sedcoretool/engine/server.py`; a test comparing the table with `desktop/engine.js` `OPERATIONS`.
+  - *Do not touch:* responses, error codes and fields, the order of answers (mask requests still answered from `MaskIO`), `desktop/`, methods.
+  - *Model:* most capable, effort medium (the dispatcher is the boundary for hostile requests; behaviour-preserving).
+  - *Steps:* (1) `Operation(kind, handler)` and the table, kinds `control`, `job`, `mask`; `hello` alone before the handshake. (2) Each
+    branch becomes a handler method, body unchanged. (3) `dispatch`: handshake check, lookup (`UNSUPPORTED_METHOD` when unknown), handler.
+  - *Tests:* every existing engine test unchanged (`pytest tests/test_engine*.py`); the comparison test; `npm test`; `tests/e2e/desktop.mjs`
+    engine on.
+  - *Done when:* no `if operation ==` chain is left in `dispatch` and these checks pass; development gate.
+- [ ] **M8.5.2 - `method.run` in the engine** (after M8.5.1).
+  - *Goal:* the coordinator runs any method of its method table with scope, priority, superseding, declared dimensions and table outputs
+    (contract §9.1-§9.4, §9.6, §9.7); test-only probe methods exercise every scope; no production method uses it yet.
+  - *Read first:* contract §9, §3 (job execution, the `section.analyze` row), §4 "Tables"; `engine/specs.py`; `engine/server.py`
+    (`admit_analysis`, `resolve_inputs`, `adopt_results`, `start_next`, `poll`, `job.cancel`); `engine/method_worker.py::run`;
+    `engine/worker.py::MethodJob`; `engine/buffers.py` (handle limit); `tests/test_engine_tables.py` (the probe of M8.4.10).
+  - *Change:* `engine/specs.py` (`MethodSpec`; `section.intervals/1` described in it), `server.py`, `method_worker.py` (declared dimensions,
+    table outputs, `summary`), `worker.py` (`accepts`), `buffers.py` (1,024 handles); tests; contract §3 (handle limit).
+  - *Do not touch:* `section.analyze` on the wire and its results; `methods/section_intervals.py`; `desktop/`; `app/`.
+  - *Model:* most capable, effort high (protocol, queue and cancellation semantics; hostile input).
+  - *Steps:* (1) `MethodSpec` and a test that each method module agrees with its entry. (2) Admission of `method.run` in the order and
+    with the field names of §9.2, families included. (3) Two waiting queues ordered as §9.4; superseding by (method, target). (4)
+    `inputs_key`; adoption generalised (declared dimensions, empty result, tables, summary ≤ 8 KiB); `section.analyze` uses the same path
+    and keeps its answer. (5) 1,024 handles.
+  - *Tests:* probe methods registered only by the test's worker script, one per scope (`probe.section/1` sums a mask, `probe.core/1` returns
+    a table's column sums as a table output, `probe.project/1` sums a family of up to 128 tables), through the real coordinator and worker,
+    exact; one refusal per row of §9.2, a family with a gap, 129 members, wrong scope or priority, a settings hash that does not match;
+    superseding (a waiting job answered `cancelled`, a running one cancelled, another target untouched); a waiting interactive job starts
+    before an earlier waiting batch job; `BUSY` at the fifth waiting job of one priority; an empty result; an oversized summary is
+    `INTERNAL`; equal `inputs_key` for equal bytes under different revisions. `pytest tests/test_engine*.py`, `ruff`.
+  - *Done when:* these and every existing engine test pass; development gate.
+- [ ] **M8.5.3 - `method.run` from the page** (after M8.5.2).
+  - *Goal:* the page can request `method.run` through the main process and decode its columns and tables; no interface uses it yet.
+  - *Read first:* contract §9; `desktop/engine-ipc.js` (`analyzeSection`, `ANALYSES`, token limit), `desktop/engine.js` (`OPERATIONS`,
+    `ADVERTISED_METHODS`, timeouts), `desktop/preload.js`; `app/js/engineclient.js` (`analyze`, `ensureTable`, `put`, `unpack`),
+    `app/js/tablesnapshot.js`, `app/js/residentstore.js`.
+  - *Change:* `engine-ipc.js` (`runMethod` with the closed fields of §9.2, a mirror of the method table, 1,024 tokens per page),
+    `engine.js` (allow `method.run`; deadline by priority), `preload.js` (`runMethod`), `engineclient.js` (`run(method, {scope, target,
+    revision, priority, inputs}, {signal})` returning `{dimensions, columns, tables, summary, provenance, inputsKey}`; at most 128 resident
+    tables), `tablesnapshot.js` (`readTableResult(description, values, valid)`, the inverse of `buildTableSnapshot`, `null` where missing).
+  - *Do not touch:* `analyzeSection` and the section path; controllers; `app.js`.
+  - *Model:* most capable, effort medium (boundary that validates the page's requests).
+  - *Tests:* Node: `runMethod` refuses an unknown field, method, scope or priority, a family gap, another page's token, a call beyond the
+    per-page limit; the mirror equals `specs.py`; `run` with a fake bridge decodes columns and tables exactly, an abort cancels, a cancelled
+    or failed job rejects; `readTableResult` of `buildTableSnapshot(x)` equals `x` for random tables with missing values. `npm test`,
+    `npm run typecheck`, `python tools/build_standalone.py`, `tests/e2e/desktop.mjs` engine on and off.
+  - *Done when:* these pass; development gate. The first desktop use comes with M8.5.8.
+- [ ] **M8.5.4 - Contract and reference fixtures of `core.ages/1`** (slice a; waits for Y1, Y2, Y4).
+  - *Goal:* the contract describes `core.ages/1`, and fixtures made by today's JavaScript fix its expected results.
+  - *Read first:* contract §4 "Tables", §7 (numerical parity), §9; TECHNICAL_DOCUMENTATION §5; `app/js/core.js` (`parseAgeModelDetailed`,
+    `interpAge`, `interpAgeRange`); `src/sedcoretool/kernels/ages.py`; ARCHITECTURE §5.1 steps 1-2.
+  - *Change:* contract §9.8 (new); `tools/make_core_ages_fixtures.mjs`; `tests/fixtures/core_ages/`.
+  - *Do not touch:* `core.js` and the callers of `interpAge`.
+  - *Model:* fast, effort medium.
+  - *Steps:* (1) Contract: scope `core`, priority `interactive`; inputs `settings` (`{version:1}`), table `age_model` (columns `depth`, `age`,
+    and `age_min` with `age_max` or neither; nothing missing; at least 2 rows; depth strictly increasing and min ≤ max, as
+    `parseAgeModelDetailed` leaves them), table `query` (column `depth`, missing allowed); output table `ages` (`age`, plus `age_min`,
+    `age_max` when the model has a range), missing where the depth is missing or outside the model (no extrapolation); summary `{rows,
+    outside}`; tolerance 1e-9 declared age units (§7), missing pattern exact. (2) Fixtures from `core.js` on generated models (2 rows, 1,000
+    rows, age reversals, with and without range) and queries at every knot, at both ends, just outside, missing and 100,000 random depths.
+  - *Tests:* the generator gives the same bytes twice; a Node test re-checks the fixtures against `core.js`.
+  - *Done when:* contract entry and fixtures committed; development gate.
+- [ ] **M8.5.5 - Method `core.ages/1`** (after M8.5.3 and M8.5.4).
+  - *Goal:* the engine computes `core.ages/1` equal to the fixtures within §9.8, through `method.run`.
+  - *Read first:* contract §9.8; ARCHITECTURE §5.1 steps 3-5; `methods/section_intervals.py` (shape of `parse` and `run`),
+    `methods/validation.py::table`, `kernels/ages.py`, `methods/registry.py`, `engine/specs.py`.
+  - *Change:* `methods/core_ages.py`, `registry.py`, `specs.py`, `desktop/engine.js` (`ADVERTISED_METHODS`), the mirror in `engine-ipc.js`;
+    tests; TECHNICAL_DOCUMENTATION §5 (implementation line) and §1.4; ARCHITECTURE §2.
+  - *Do not touch:* `kernels/ages.py` behaviour (the tests of `depth_to_age` unchanged); `core.js`.
+  - *Model:* fast, effort medium.
+  - *Tests:* every fixture directly; refusals naming the field (depth not increasing: `UNSUPPORTED_INPUT`, `age_model.depth`; a missing
+    model value; one range column without the other; one row); transport through the real coordinator and worker, with cancel and
+    superseding. `pytest`, `ruff`, `npm test`.
+  - *Done when:* development gate.
+- [ ] **M8.5.6 - Matched timing of the first path of slice (a)** (after M8.5.5; waits for Y9).
+  - *Goal:* the end-to-end time of `core.ages/1` is measured against Y9's target before any interface card (lesson of M8.3).
+  - *Read first:* contract §7 (matched timing, interactive targets); `tools/measure_engine_analysis.mjs` (how it drives the page and
+    records the host); the M8.4.9 record in the history.
+  - *Change:* `tools/measure_engine_analysis.mjs` (phase `ages`: from `buildTableSnapshot` through `ensureTable` and `run` to the decoded
+    result, against `interpAge` over the same rows with the engine off); `docs/validation/M8.5.6-ages-windows.json`; the card's *As built*.
+  - *Do not touch:* the program's behaviour.
+  - *Model:* fast, effort medium.
+  - *Steps:* cores of the public example and generated cores of 1,000, 10,000 and 100,000 rows; first request, the same table again, one
+    depth changed; one warm-up and six alternating runs (§7); stages reported separately.
+  - *Done when:* the result is recorded with its host; if the target fails, the measurement and the narrowest next correction are recorded
+    and M8.5.8 waits for the maintainer.
+- [ ] **M8.5.7 - A core's merged data out of `app.js`** (after M8.5.6).
+  - *Goal:* `coreImageParts` and `refreshCoreData` (images, records, imported data and manual columns merged into a core's table) move to
+    a pure module without changing behaviour (ARCHITECTURE §5.2), so that M8.5.8 changes only where the age column comes from.
+  - *Read first:* ARCHITECTURE §5.2; `app/js/app.js` (`coreImageParts`, `refreshCoreData`, `refreshAllCores`); `app/js/log.js`
+    (`compositeRows`, `invertModel`); TECHNICAL_DOCUMENTATION §17.1.
+  - *Change:* new `app/js/coredata.js`; one-line wrappers in `app.js`; `ORDER` in `tools/build_standalone.py`;
+    `tests/app/coredata.test.mjs`; `APP_JS_CEILING`; ARCHITECTURE §3.2; TECHNICAL_DOCUMENTATION §1.4.
+  - *Do not touch:* behaviour, `applyCellEdits`, `applyComputedColumns`, saved fields.
+  - *Model:* fast, effort medium.
+  - *Tests:* Node tests of the merge (images, records, imported data and manual columns; an age-only core; age records converted with the
+    inverted model; edits applied); `npm test`, typecheck, standalone build, `tests/e2e/smoke.mjs`.
+  - *Done when:* `app.js` is shorter and the checks pass; development gate.
+- [ ] **M8.5.8 - Row ages of a core from the engine** (engine experiment; blocked until M8.5.6 is accepted; its steps are written then).
+  - *Goal:* with the engine experiment on, the age column of each core's merged table comes from `core.ages/1` (rows with an imported age
+    keep it, as now); a core whose ages are pending shows it, exports wait for it, a failure is visible; with the flag off nothing changes.
+  - *Read first:* contract §9.4 (publication); `app/js/engineanalysis.js` (the pending, ready and error states of sections);
+    `app/js/coredata.js`.
+  - *Change (outline):* a pure module for the per-core state keyed by (target, revision); `coredata.js`; a step of `tests/e2e/desktop.mjs`
+    that compares the age column with the flag on and off on the public example within §9.8.
+  - *Model:* most capable, effort medium (every consumer of a core's table, exports included).
+  - *Done when:* written with the steps; at least the end-to-end comparison on three systems.
+- [ ] **M8.5.9 - Milestone gate of slice (a).** Before it come the remaining cards of slice (a), written after M8.5.6: record axis
+  conversion (`log.js::toAxis`), computed columns (`sheet.js`, a restricted evaluator, never Python `eval`), age-model text and Bacon
+  tables (`parseAgeModelDetailed`, `baconToAgeText`), the record reader if Y2 asks for it, and the public functions of Y7.
+  - *Goal:* the milestone gate on one commit, with the desktop end-to-end steps of every slice (a) path, engine on and off.
+  - *Model:* fast, effort low (reading CI results).
+  - *Done when:* `tests` and *Desktop builds* are green on Windows, macOS and Linux on one commit, or each failure is recorded with its
+    message and a decision of the maintainer.
+- [ ] **M8.5.10 - Contract and reference fixtures of `multiproxy.samples/1`** (slice d; waits for Y1, Y3, Y4).
+  - *Goal:* the contract describes an exact port of `geo.js::buildSamples`, and fixtures made by it fix the expected samples.
+  - *Read first:* contract §9; TECHNICAL_DOCUMENTATION §18.1-§18.2; `app/js/geo.js` (`buildSamples`, `resample`, `featureSeries`,
+    `coreAges`, `coreConverter`, `intervalsOnAxis`, `createIntervalLookup`, `colStats`, `mean`, `std`); `core.js` (`seriesGap`,
+    `interpAge`); `multiproxy.js::geoComputeSamples` (what it passes).
+  - *Change:* contract §9.9 (new); `tools/make_multiproxy_samples_fixtures.mjs`; `tests/fixtures/multiproxy_samples/`.
+  - *Do not touch:* `geo.js`, `multiproxy.js`.
+  - *Model:* fast, effort medium.
+  - *Steps:* (1) Contract: scope `project`, priority `interactive`; `settings` (`axis` depth or age, `step` > 0, `features` and `logs` as
+    column names, `ratios` `[{a, b}]`, `scaling` global, core or none, `missing` drop or mean, `max_gap` a number or null for the automatic
+    rule, `layers` as category counts); family `core<k>` (one table per core, in the order `buildSamples` receives them: `depth` and `age`
+    as left by `refreshCoreData`, and one column per variable that the features and ratios name; an absent column is an absent variable);
+    optional table `intervals` (`core`, `layer`, `cat`, `axis` 0 depth or 1 age, `from`, `to`; non-automatic intervals in source order).
+    Output table `samples`: `core` (k), `x`, `depth`, `age`, then `raw<j>`, `t<j>`, `zc<j>`, `f<j>` per feature and `cat<m>` per layer
+    category; dimensions `samples`, `features`, `categories`. Rules to state exactly: grid from `ceil(min/step)·step`, `g += step` while
+    `g ≤ max + 1e-9`, each value `+g.toFixed(10)` (the exact binary value rounded to 10 decimals, ties away from zero); interpolation in the
+    operation order of `resample` and `interpAge`; the automatic gap of `seriesGap`; a ratio missing when its divisor is 0 or missing;
+    `log10` only for v > 0; means and population SDs summed in row order, an SD of 0 replaced by 1; z of a missing value 0; `scaling: none`
+    gives a missing value the mean; interval ends converted with clamping and dropped when missing or of zero width; what a missing end does
+    in `createIntervalLookup`, as the fixtures show. Tolerances: Y4. (2) Fixtures on `examples/geochem_demo/` (15 generated cores) with the
+    defaults and each option varied, and hand cases: a gap wider than `max_gap` with an exact observation at its edge, a core with one valid
+    position, a step whose grid ties at the 11th decimal (1/2048), an age-only core, a variable absent from one core, a zero divisor,
+    intervals partly and wholly outside the data, `missing: mean` with a core that lacks a variable.
+  - *Tests:* the generator gives the same bytes twice; a Node test re-checks the fixtures against `geo.js`.
+  - *Done when:* contract entry and fixtures committed; development gate.
+- [ ] **M8.5.11 - Method `multiproxy.samples/1`** (after M8.5.10 and, by Y1, the previous slice's gate).
+  - *Goal:* the engine computes `multiproxy.samples/1` equal to the fixtures within Y4, through `method.run` with a family of per-core tables.
+  - *Read first:* contract §9.9; ARCHITECTURE §5.1 steps 3-5; `methods/validation.py::table`; `kernels/ages.py`; `methods/core_ages.py`.
+  - *Change:* `kernels/resample.py` (linear resampling and depth-age conversion in the JavaScript operation order, automatic gap);
+    `methods/multiproxy_samples.py`; registry, specs, `ADVERTISED_METHODS`, the mirror; tests; TECHNICAL_DOCUMENTATION §18.2 (implementation
+    line) and §1.4; ARCHITECTURE §2.
+  - *Do not touch:* `geo.js`; `kernels/ages.py` behaviour.
+  - *Model:* fast, effort medium.
+  - *Tests:* every fixture (exact where Y4 says exact, its tolerances elsewhere); refusals naming the field; transport with 15 and 128
+    cores, cancel and superseding. `pytest`, `ruff`, `npm test`.
+  - *Done when:* development gate.
+- [ ] **M8.5.12 - Matched timing and table capacity of the first path of slice (d)** (after M8.5.11; waits for Y8, Y9).
+  - *Goal:* the end-to-end time of `multiproxy.samples/1` against Y9's target and the tables' memory against Y8, measured before any
+    interface card.
+  - *Read first:* as M8.5.6; contract §3 (budgets; the M8.4.10 paragraph).
+  - *Change:* `tools/measure_engine_analysis.mjs` (phase `samples`, and a seeded generator of a large project: 50 cores × 1,000 rows × 30
+    variables); `docs/validation/M8.5.12-samples-windows.json`; *As built*.
+  - *Do not touch:* the program's behaviour.
+  - *Model:* fast, effort medium.
+  - *Steps:* the demo (15 cores) and the generated project; first request, step changed (no table sent again), one core's value changed
+    (one table sent again), nothing changed; tables' engine charge and budget-full events; process-tree memory with the §7 sampler.
+  - *Done when:* recorded; a failed target or a project that does not fit stops M8.5.13 until the maintainer decides.
+- [ ] **M8.5.13 - Samples from the engine in Multiproxy** (engine experiment; blocked until M8.5.12 is accepted; its steps are written then).
+  - *Goal:* with the engine experiment on, `geoComputeSamples` requests `multiproxy.samples/1` (interactive, the project as target) and
+    publishes by the rule of §9.4; its callers (training, maps, figures, event shading) handle the pending state; a pure adapter rebuilds
+    today's sample objects (`core`, `x`, `depth`, `age`, `raw`, `t`, `zc`, `f`); a failure is visible; with the flag off nothing changes.
+  - *Read first:* `app/js/multiproxy.js` (`geoComputeSamples` and its callers); `app/js/engineanalysis.js`; contract §9.4.
+  - *Model:* most capable, effort medium.
+  - *Done when:* written with the steps; at least a desktop end-to-end comparison of the samples with the flag on and off on the demo, within Y4.
+- [ ] **M8.5.14 - Batch lane** (contract §9.4 stage 2; decision Y10; written with the first batch method of slice d).
+  - *Goal:* batch jobs run on a second worker at lower priority and interactive jobs never wait for them; process-tree memory measured
+    against §7.
+  - *Model:* most capable, effort high (process lifecycle on three systems).
+  - *Done when:* written with the card.
+- [ ] **M8.5.15 - Milestone gate of slice (d).** Before it come the remaining cards of slice (d), written after M8.5.12: labels and rules
+  (`labelSamples`, `ruleMatches`); each classifier (Y11); cross-validation and evaluation with S5's changes (Y5, Y6); training as a batch
+  method (M8.5.14); map interpolation and projections (`interp.js`, `geo.js::makeProjection`); plot fits and statistics (`plot.js`); the
+  public functions of Y7.
+  - *Goal, model and done when:* as M8.5.9, for slice (d).
+
 ## Council cards (audit of 19 November 2026)
 
 Written from the council audit (status block). Each card names its model; the science cards change results only where a decision says so.
@@ -656,10 +895,8 @@ Written from the council audit (status block). Each card names its model; the sc
       column, a secondary non-linear age axis beside depth, a track of dated levels with their errors, BI and ii per described layer as well as
       per interval; a moving average with a window in axis units that stops at gaps (`plot.js`). Presentation in JavaScript; any new
       calculation in Python (AGENTS §4). *Model:* most capable, effort high (design).
-- [ ] **A1 - Engine methods of core or project scope (before M8.5).** A design card: an operation `method.run` with a declared scope
-      (section, core, project), a revision key and two priorities (interactive, batch), operations registered in a table instead of the chain
-      of conditions in `engine/server.py`; the columnar `f64le` series format of the contract for tables; slices (d) and (a) first, because their
-      results end in publications and are not reproducible by script today. *Model:* most capable, effort high (design).
+- [x] **A1 - Engine methods of core or project scope** (done (design) 22 Nov 2026): [contract §9](roadmap-engine-contract.md#9-methods-of-section-core-and-project-scope-methodrun-card-a1);
+      cards M8.5.1-M8.5.15 and decisions Y1-Y11 under [M8.5](#m85-cards).
 - [ ] **U6 - Detection over several cores.** A "Detect in…" dialog with cores and sections to tick, processed one after another within the
       memory budget of §22.3, cancellable (U1); the section selector shows each section's state (detected, traces to review, depth range).
       *Model:* fast tier, effort medium. After U1.

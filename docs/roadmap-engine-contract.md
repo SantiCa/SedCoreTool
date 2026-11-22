@@ -19,7 +19,7 @@ How the code that implements this contract is layered, and the path of one reque
 [ARCHITECTURE.md](ARCHITECTURE.md). Amended on 13 November 2026 (card M8.3.5): §3 now defines `buffer.read`, which downloads
 committed buffers, and the exact shape of the `section.analyze` response; progress events are not yet sent. Amended on
 15 November 2026 (option A for large images, ARCHITECTURE D10-D12): §2 describes the ownership of tiled sections, §6 the new order
-of M8.4, and §7 adds absolute interactive targets and the rule that decides where the interval table of a tiled section is computed. Amended on 16 November 2026 (card M8.4.14, step 1): §8 specifies the tile store's pixel pyramids; not implemented yet.
+of M8.4, and §7 adds absolute interactive targets and the rule that decides where the interval table of a tiled section is computed. Amended on 16 November 2026 (card M8.4.14, step 1): §8 specifies the tile store's pixel pyramids; not implemented yet. Amended on 22 November 2026 (card A1): §9 designs `method.run`, methods of section, core and project scope with two priorities and an operation table; not implemented.
 
 ## 1. Current calculation and ownership inventory
 
@@ -115,6 +115,7 @@ fields rather than silently ignore an unsupported setting. Protocol fixtures in 
 | `buffer.release` | `{handles:[...]}` (at most 64) | `{released:[...]}`; idempotent for previously released handles in this session. Referenced buffers remain pinned until the job ends. |
 | `buffer.read` | `{handle, offset, byte_length}`, 1 ≤ byte_length ≤ 1,048,576, offset + byte_length ≤ the buffer's length; the buffer must be committed and not released | `{offset, byte_length}`, immediately followed by exactly one binary frame holding those bytes. Any error response is not followed by a binary frame. |
 | `section.analyze` | `{method:"section.intervals/1", project, section, revision, settings_hash, inputs}`: project and section are session-local UUIDs, revision a non-negative integer, `settings_hash` the SHA-256 of the `settings` buffer (the coordinator rejects a different value), and `inputs` maps the names of §4 to committed handles of the matching dtype and rank (`labels` `i32le` 2-D, `exclude` `u8` 2-D of the same shape, `stack_offsets` and `stack_members` `u32le` 1-D, the others `utf8json`); `stack_members` may be omitted when there is no overlap, every other name is required, unknown names are rejected | `{project, section, revision, settings_hash, method, dimensions:{bins,classes,schemes}, outputs, layout, provenance}` echoing the request's identity. *Amended in card M8.4.3:* `outputs` holds exactly one entry, `result`, `{handle, dtype:"u8", shape:[N], byte_length, sha256}` of a committed buffer that counts against the session budget until released; it contains every §5 column (including each `<name>_valid`) one after another, and `layout` maps each column name to `{dtype, shape, offset, byte_length}` in it (one buffer instead of about 35 handles and reads). Every column starts at a multiple of 8 bytes, columns do not overlap, nothing in the buffer is unaccounted for, and N is a multiple of 8. Download the buffer with `buffer.read`. `provenance` holds `engine_version`, `runtime_id`, `method`, `revision`, `deterministic`, `input_sha256` (hash of every input buffer by name) and `elapsed_ms`. A rejected input is an error response whose `details.field` names the input and member (for example `settings.roi`). Progress events (`{stage, completed, total}`, at most 10 per second) are part of this contract but are not sent yet; the Electron client of card M8.3.6 does not read events. |
+| `method.run` (designed by card A1, **not implemented**) | §9.2 | §9.3 |
 | `job.cancel` | `{request_id}` | `{state:"requested"}` or `{state:"already_terminal"}`; the target still gets its own one terminal response. |
 | `shutdown` | `{}` | `{}` after cancelling/releasing work; main enforces the shutdown deadline. |
 
@@ -636,3 +637,105 @@ are sent) and the tables whose content changed since the last acknowledged manif
 acknowledges nothing, discards its staged version and is tried again (pauses of 1, 2, 5, 15, then 30 s), after asking for the one automatic
 restart of the engine (card M8.4.7) when the engine is not ready. Clean tiles the page dropped are read back with `mask.read`
 (`MaskLoader`).
+
+## 9. Methods of section, core and project scope: `method.run` (card A1)
+
+**State: designed on 22 November 2026 (card A1); nothing in this section is implemented.** Cards M8.5.1-M8.5.3 of the
+[roadmap](roadmap.md#m85-cards) build it; the methods of M8.5 then use it. `section.analyze` (§3) stays as it is on the wire. Nothing here
+names Electron, IPC channels or the renderer (ARCHITECTURE §3.3); "client" is whatever sends the frames.
+
+### 9.1 Scope, target and inputs
+
+Every method declares exactly one **scope** in the engine's method table (§9.6). The scope says what one result describes, what its
+**target** is and which inputs it may name. Every input is a committed buffer named by its handle; its identity is the SHA-256 that the
+coordinator verified at commit. Pixel identity (§3, card M8.4.9) and table identity (§4 "Tables") are client-side names for groups of
+buffers; the engine itself knows only buffer hashes. The engine never reads project files.
+
+| Scope | One result describes | Inputs it may name | First method |
+|---|---|---|---|
+| `section` | one section | the section inputs of §4 (resident masks), working pixels `rgba`/`rgba16` (§3), tables, `settings` | `section.intervals/1` (also through `section.analyze`); slices (b), (e) |
+| `core` | one core | tables of that core (records, age model, data table), `settings` | `core.ages/1` (card M8.5.4) |
+| `project` | the project, or the group of cores a method works on | a **family** of per-core tables `core<k>` (k = 0 … K−1, K ≤ 128), project tables (for example described intervals), `settings` | `multiproxy.samples/1` (card M8.5.10) |
+
+The **target** is a session-local UUID that the client assigns to the section, core or project, as `project` and `section` are for
+`section.analyze`; saved identifiers are never sent. A family member that is a table brings the three buffers of §4 "Tables": `core<k>`,
+`core<k>_values` and `core<k>_valid`; k is written in decimal without leading zeros and the members are contiguous from 0. Per-core tables,
+rather than one long table, let an edit of one core send one table again and keep each table within the §4 limits.
+
+### 9.2 Request
+
+`method.run` payload, closed fields: `{method, scope, target, revision, priority, settings_hash, inputs}`.
+
+| Field | Rule | Refusal |
+|---|---|---|
+| `method` | a name advertised in `hello` | `UNSUPPORTED_METHOD`, field `method` |
+| `scope` | equal to the method's declared scope (stated so that a client that confuses scopes fails visibly) | `INVALID_REQUEST`, `scope` |
+| `target` | lowercase UUID | `INVALID_REQUEST`, `target` |
+| `revision` | non-negative safe integer: the client's counter of the scientific inputs of (method, target), increased whenever any of them changes; echoed | `INVALID_REQUEST`, `revision` |
+| `priority` | `interactive` or `batch`, and one that the method allows | `INVALID_REQUEST`, `priority` |
+| `settings_hash` | SHA-256 of the method's `settings` input (`utf8json`; every method has one), checked as for `section.analyze` | `INVALID_REQUEST`, `settings_hash` |
+| `inputs` | name → handle: only the method's fixed names and family members; required names present; each family contiguous from 0 and within its maximum | `INVALID_REQUEST`, `inputs`; a wrong dtype or rank is `INVALID_BUFFER` naming the input |
+
+The coordinator checks names, dtypes and ranks (standard library only); the method's `parse` checks content and names the field at fault,
+as `section.intervals/1` does. A request names at most 3 × 128 + 32 handles, about 25 KiB of JSON, within the 64 KiB frame. `method.run`
+also accepts `section.intervals/1`; `section.analyze` remains its existing entry until a card moves the client.
+
+### 9.3 Response
+
+`{method, scope, target, revision, settings_hash, inputs_key, dimensions, outputs, layout, tables, summary, provenance}`:
+
+- `method`, `scope`, `target`, `revision` and `settings_hash` echo the request.
+- `inputs_key`: SHA-256 of the UTF-8 text `method.run/1|<method>|<scope>|` followed by `<name>=<sha256>;` for every input, names in
+  ascending byte order, computed by the coordinator from the hashes it verified. Equal inputs give an equal key whatever the revision; a
+  client may use it as the key of a cache of results.
+- `dimensions`: the names the method declares, each a non-negative safe integer (unlike §5, zero is allowed: a project may give no samples).
+- `outputs` and `layout`: one packed `result` buffer, as for `section.analyze` since card M8.4.3 (8-byte aligned columns, no gaps or
+  overlaps). When every column is empty, `outputs` is `{}` and every layout entry has offset 0 and length 0; a layout shape may then hold 0.
+- `tables`: for every table output `<name>`, its description `{version:1, rows, columns:[{name, unit}]}`; its cells are the layout columns
+  `<name>_values` (`f64le[columns, rows]`) and `<name>_valid` (`u8[columns, rows]`, a missing slot holds 0). This is the §4 "Tables" format
+  of card M8.4.10 used in the other direction; there is no second format. An output table may have 0 rows.
+- `summary`: a closed, method-defined JSON object of at most 8 KiB (counts, flags such as an ignored age range), never cell values; the
+  coordinator answers `INTERNAL` to a larger one or one with a non-finite number.
+- `provenance`: `engine_version`, `runtime_id`, `method`, `scope`, `revision`, `inputs_key`, `input_sha256` (by name), `deterministic` (and,
+  for a stochastic method, seed, generator and version, §4), `queued_ms` and `elapsed_ms`.
+
+### 9.4 Priorities, superseding, cancellation and publication
+
+- **Two priorities.** One waiting queue per priority, at most 4 jobs each (`BUSY` beyond); a waiting `interactive` job always starts
+  before a waiting `batch` job; within a priority, order of arrival.
+- **Batch yields to interactive, in two stages.** Stage 1 (card M8.5.2): one method worker, as today; a running batch job is not
+  interrupted, and every batch method polls cancellation between bounded steps (one fold, one epoch). Stage 2 (card M8.5.14, built with the
+  first batch method; decision Y10): a second long-lived worker runs batch jobs only, started on demand and stopped after 30 s idle, at a
+  lower operating-system priority (Windows `BELOW_NORMAL_PRIORITY_CLASS` through `subprocess` creation flags, `nice` +10 elsewhere; standard
+  library) with native thread pools capped at 1; interactive jobs keep the first worker and never wait for a batch job. Both share the
+  session byte budget.
+- **Superseding.** A new request with the same (method, target) makes the older ones of that pair obsolete: a waiting one is answered
+  `cancelled` at once, a running one is asked to cancel (as by `job.cancel`). Other methods and other targets are never affected.
+- **Cancellation.** `job.cancel` by request ID, unchanged (§3), for both priorities.
+- **Deadlines.** Interactive methods keep the 120 s job deadline. A batch method sends progress events (`{stage, completed, total}`, at
+  most 10 per second) and is stopped when none has arrived for 60 s, as `pyramid.build` is (§8.4).
+- **Publication (client).** A result is published only when it is `ok` and its (method, target, revision) is still the client's current
+  one. A cancelled, stale or failed job changes nothing; the interface shows its pending or error state with the translated
+  `engine.error.<CODE>` message. With the engine experiment on, nothing is recomputed in JavaScript (AGENTS §3.6). No new error codes.
+
+### 9.5 Operation table of the coordinator
+
+`Coordinator.dispatch` (`engine/server.py`) stops being a chain of conditions: a table maps each operation to its kind and handler —
+`control` (answered on the coordinator's thread: `hello`, `buffer.*`, `job.cancel`, `shutdown`, `pyramid.info`, `tile.read`), `job`
+(queued for a worker: `section.analyze`, `method.run`, `buffer.digest`, `pyramid.build`) or `mask` (the `MaskIO` thread, §8.7). `hello` is
+the only operation accepted before the handshake; an unknown name is `UNSUPPORTED_METHOD`, as is an operation whose store folder was not
+given. A test compares the table with the client's allowlist (`desktop/engine.js` `OPERATIONS`). No change on the wire.
+
+### 9.6 Method table
+
+`engine/specs.py` (standard library) describes each method once: name, scope, inputs (dtype, rank, required), families (prefix, kind,
+maximum), allowed priorities, dimension names, table outputs and deadline. `section.intervals/1` is described there too. A test checks that
+each method module agrees with its entry; the main process mirrors the entries and a test compares the two (as for `METHOD_INPUTS` today).
+
+### 9.7 Limits changed by this design
+
+- Handles per engine session 256 → 1,024, and tokens per page in the main process 512 → 1,024: a project request names up to 384 table
+  buffers. A handle costs one record; memory stays bounded by the unchanged 512 MiB session budget.
+- Tables kept resident by a client: at most 128 (was 16); the 16 MiB bound, as charged, is unchanged. A request whose tables do not all fit
+  sends the others for that request only and releases them afterwards. Whether 16 MiB is enough for real multiproxy projects is measured
+  by card M8.5.12 (decision Y8).
