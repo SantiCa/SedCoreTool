@@ -30,10 +30,13 @@ repository (code, comments, documents, commit messages) is written in English.
    the last pushed commits, next card, decisions waiting and standing reminders. Check logs, audit findings and
    progress narratives go into the cards' *As built* or `docs/roadmap-history.md`, never into the status.
 9. **Report to the maintainer in Spanish** (§7).
-10. **One card per session.** After a card is committed, pushed and reported, the next card starts in a new
-    conversation, which picks up from the repository alone (§7). A long conversation carries all its earlier
-    context into every answer and costs far more than a fresh start. In an authorised run of several cards (§6), a
-    director session may stay open and give each card to a fresh sub-agent instead.
+10. **The session directs; a fresh sub-agent writes each card** (decided by the maintainer on 22 November 2026). The
+    main session acts as architect and director: it reads the state, chooses and briefs cards, reviews, checks,
+    commits, pushes and reports, and gives each card to a new sub-agent of the tier and effort the card's `Model:`
+    field asks for (§6 *Director mode*), so that the director's context grows only by briefs, reports and diffs. The
+    director does a task itself only when delegating it would cost more tokens than doing it (a handful of edits it
+    already understands, reading a CI result, recording the roadmap). The session continues with the next card
+    without starting a new conversation; the repository must still allow a new session to pick up at any point (§7).
 
 ## 2. The project and its documents
 
@@ -253,7 +256,7 @@ Done when:    observable acceptance criteria.
   - **One fresh sub-agent per card in a run.** In an authorised run (below), the director gives each card to a new
     sub-agent of the card's tier and effort, with a self-contained brief made from the card and the decisions that
     apply. The sub-agent starts without the conversation's history, as a new session would, and the director's own
-    context grows only by the briefs, reports and diffs. This is how a run respects "one card per session" (§1 step 10).
+    context grows only by the briefs, reports and diffs. This is the default way of working (§1 step 10).
   - **Prepare the next card while one is being written.** While a sub-agent writes card N, the director reads what
     card N+1 needs and writes its brief, without editing the checkout; card N+1 starts as soon as card N is committed.
   - **Limits and fallback.** If the session's tier or effort is lower than what a critical card asks for and cannot be
@@ -301,7 +304,7 @@ Done when:    observable acceptance criteria.
   checks run and the next step. A new session must be able to continue from the repository alone, without any
   chat history.
 - When a card is done: mark it, link its changelog entry, move its long record to `docs/roadmap-history.md` and
-  leave one line in the roadmap. Then end the session (§1 step 10).
+  leave one line in the roadmap. Then the director continues with the next card (§1 step 10).
 - **Report to the maintainer in Spanish, briefly, in a fixed form of about 8 lines:** the result; how it was checked
   (which checks, on which platform); branch and commit (or version number when one was created); which components it
   touches; what is genuinely pending, including checks not run and things not measured; the next card and the tier
