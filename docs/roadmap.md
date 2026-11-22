@@ -30,8 +30,8 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
 - **Next:** A1 designed (contract §9, cards M8.5.1-M8.5.15); Y1-Y11 and the limits of §9.7 approved as recommended (22 Nov 2026).
-  Run in progress: M8.5.1-M8.5.4 done (`method.run` in the engine and from the page; `core.ages/1` specified with fixtures); next
-  **M8.5.5**, then the M8.5 cards in order. `Q10` before V0.153; `A4` open.
+  Run in progress: M8.5.1-M8.5.5 done (`method.run` in the engine and from the page; `core.ages/1` in the engine). Proposed to the
+  maintainer: pause M8.5, do **Q10**, then V0.153 if asked; otherwise next is M8.5.6 (waits for Y9). `Q10` before V0.153; `A4` open.
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). The engine path fails the timing gate of
   [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates) for whole sections; the tile store is the
   answer for large images.
@@ -676,7 +676,7 @@ after. The order is the order of this list; cards written later take the next fr
     just outside, missing and random. `core.js` returns `null` outside the model (no extrapolation) and `NaN` for a `NaN` depth (never sent).
     `tests/app/core-ages-fixtures.test.mjs` (4): byte-identical regeneration, rows recomputed with `interpAge`/`interpAgeRange`. Checks
     (Windows): pytest 994/9 skipped, `npm test` 664/664, typecheck, ruff. `app.js` unchanged.
-- [ ] **M8.5.5 - Method `core.ages/1`** (after M8.5.3 and M8.5.4).
+- [x] **M8.5.5 - Method `core.ages/1`** (done 22 Nov 2026, development gate).
   - *Goal:* the engine computes `core.ages/1` equal to the fixtures within §9.8, through `method.run`.
   - *Read first:* contract §9.8; ARCHITECTURE §5.1 steps 3-5; `methods/section_intervals.py` (shape of `parse` and `run`),
     `methods/validation.py::table`, `kernels/ages.py`, `methods/registry.py`, `engine/specs.py`.
@@ -688,6 +688,13 @@ after. The order is the order of this list; cards written later take the next fr
     model value; one range column without the other; one row); transport through the real coordinator and worker, with cancel and
     superseding. `pytest`, `ruff`, `npm test`.
   - *Done when:* development gate.
+  - *As built:* `methods/core_ages.py` (`parse`, `run` on `kernels/ages.py::interpolate_age`, no extrapolation; table `ages`, summary
+    `{rows, outside}`); registered in `registry.py` and `specs.py`, mirrored in `engine-ipc.js`, advertised in `engine.js`. Refusal codes
+    chosen where §9.8 named none are now written in §9.8. All 8 fixtures match (largest age error 2.3e-13 against 1e-9; missing pattern
+    and summary exact). `tests/test_core_ages.py` (29; 3 fixtures through the real coordinator and worker, cancel, superseding; the running
+    job ends in milliseconds, so it may end `ok` or `cancelled`). Tests pinning the advertised methods updated. Checks (Windows):
+    `check_all --desktop` passed (pytest 1024/9 skipped, `npm test` 664/664, typecheck, ruff, e2e engine off and on); a later `npm test`
+    run failed once in `desktop-hardening.test.mjs` with `EBUSY` removing a temp folder, then passed. `app.js` unchanged.
 - [ ] **M8.5.6 - Matched timing of the first path of slice (a)** (after M8.5.5; waits for Y9).
   - *Goal:* the end-to-end time of `core.ages/1` is measured against Y9's target before any interface card (lesson of M8.3).
   - *Read first:* contract §7 (matched timing, interactive targets); `tools/measure_engine_analysis.mjs` (how it drives the page and

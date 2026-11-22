@@ -332,7 +332,8 @@ test('closing or reloading a page cancels its analyses and releases all of its b
 
 test('the input names the bridge allows agree with the engine specification', () => {
   const specification = readFileSync(path.join(root, 'src', 'sedcoretool', 'engine', 'specs.py'), 'utf8');
-  const table = specification.slice(specification.indexOf('METHOD_INPUTS = {'), specification.indexOf('SETTINGS_INPUT'));
+  // The entry of `section.intervals/1` only: `core.ages/1` follows it in the same table and is compared by engine-run.test.mjs.
+  const table = specification.slice(specification.indexOf('METHOD_INPUTS = {'), specification.indexOf('    CORE_AGES: {'));
   const entries = [...table.matchAll(/'([a-z_]+)': \('([a-z0-9]+)', (\d), (True|False)\)/g)].map((match) => ({ name: match[1], required: match[4] === 'True' }));
   assert.ok(entries.length >= 9);
   const spec = ANALYSES['section.intervals/1'];

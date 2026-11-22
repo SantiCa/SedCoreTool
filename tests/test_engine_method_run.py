@@ -197,7 +197,7 @@ def unpinned(coordinator):
 # ---- the method table ---------------------------------------------------------------------------------------------------------
 
 def test_each_method_module_agrees_with_its_method_table_entry():
-    assert set(specs.METHOD_SPECS) == set(registry.METHODS) == {specs.SECTION_INTERVALS}
+    assert set(specs.METHOD_SPECS) == set(registry.METHODS) == {specs.SECTION_INTERVALS, specs.CORE_AGES}
     for name, spec in specs.METHOD_SPECS.items():
         method = registry.METHODS[name]
         assert spec.name == name == method.NAME
@@ -211,6 +211,9 @@ def test_each_method_module_agrees_with_its_method_table_entry():
     assert (entry.scope, entry.priorities, entry.families, entry.tables, entry.same_shape) == ("section", ("interactive",), (), (), (("labels", "exclude"),))
     result = section_intervals.run(section_intervals.parse(inputs_of(fixtures.load("basic-four-intervals"))))
     assert tuple(result.dimensions) == entry.dimensions and not getattr(result, "tables", None) and not getattr(result, "summary", None)
+    ages = specs.METHOD_SPECS[specs.CORE_AGES]
+    assert ages.inputs is specs.METHOD_INPUTS[specs.CORE_AGES] and (ages.scope, ages.priorities, ages.families, ages.same_shape) == ("core", ("interactive",), (), ())
+    assert (ages.dimensions, ages.tables) == (("rows",), ("ages",)) and not ages.deadline > specs.INTERACTIVE_DEADLINE
     # Output tables have the limits of input tables (§4 "Tables"); specs.py restates them without NumPy.
     for limit in ("MAX_TABLE_COLUMNS", "MAX_TABLE_ROWS", "MAX_TABLE_DATA_BYTES", "MAX_TABLE_NAME_BYTES", "MAX_TABLE_UNIT_BYTES"):
         assert getattr(specs, limit) == getattr(validation, limit), limit
@@ -222,11 +225,11 @@ def test_hello_advertises_the_methods_of_the_method_table_only(probes):
     production, other = new_coordinator()
     try:
         hello = [value for value in frames(production)[0].values() if value["op"] == "hello"][0]
-        assert hello["result"]["methods"] == ["buffer.digest/1", "section.intervals/1"]
+        assert hello["result"]["methods"] == ["buffer.digest/1", "section.intervals/1", "core.ages/1"]
     finally:
         production.close()
     hello = [value for value in frames(coordinator)[0].values() if value["op"] == "hello"][0]
-    assert hello["result"]["methods"] == ["buffer.digest/1", "section.intervals/1", *PROBES]
+    assert hello["result"]["methods"] == ["buffer.digest/1", "section.intervals/1", "core.ages/1", *PROBES]
 
 
 # ---- one probe per scope, through the real coordinator and worker --------------------------------------------------------------

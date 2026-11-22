@@ -32,7 +32,7 @@ describe a planned part as available. When you build a planned part, change its 
                     private stdin/stdout pipes, `SCE1` frames, no network port
 ┌─────────────── Engine process: src/sedcoretool run by the bundled CPython 3.12 ───────────┐
 │  engine/    transport only: frames, buffers, coordinator, job runner, method worker script │
-│  methods/   one module per versioned scientific method (built: section.intervals/1)        │
+│  methods/   one module per versioned scientific method (built: section.intervals/1, core.ages/1) │
 │  kernels/   pure NumPy primitives shared by every caller (built)                           │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
    Python API and command line (pipeline.py, cli.py, batch.py …) call kernels/methods in-process.
@@ -54,9 +54,10 @@ calculates everything itself; with it on, the interval table of each section com
 | Python package: intervals, indices, age, export, batch, CLI, U-Net | built | `src/sedcoretool/` |
 | Engine process: frames, bounded buffers, queue, cancellation, isolated worker | built, off by default | `src/sedcoretool/engine/`, `desktop/engine*.js` |
 | Bundled Python runtime, verified at launch | built (Windows measured; macOS/Linux not yet run) | `desktop/runtime-lock.json`, `tools/prepare_engine_runtime.py` |
-| Engine methods: `buffer.digest/1` (a transport diagnostic) and `section.intervals/1` (the first scientific method) | built | `engine/worker.py`, `engine/method_worker.py` |
+| Engine methods: `buffer.digest/1` (a transport diagnostic), `section.intervals/1` (the first scientific method) and `core.ages/1` | built | `engine/worker.py`, `engine/method_worker.py` |
 | `kernels/` package: binning, counting, classification, age interpolation; `tests/test_architecture.py` | built (M8.3.3) | §3.1 |
 | `methods/` package with the registry and `section.intervals/1`, called directly | built (M8.3.4) | §3.1 |
+| Engine method `core.ages/1` (a core's age model applied to depths) through `method.run`; the interface does not request it yet | built (M8.5.5) | contract §9.8 |
 | Job runner in the engine process: `section.analyze` runs a registered method in the engine's long-lived worker process (one job at a time, replaced after any anomaly), results are adopted as committed buffers and downloaded with `buffer.read` | built (M8.3.5) | §3.1, §4 |
 | Renderer-facing engine bridge (`engine-ipc.js`, `engineclient.js`, `engineanalysis.js`) | **built, experimental, off by default** (M8.3.6–M8.3.7) | §3.2, §3.3 |
 | Section intervals calculated by the engine (`section.intervals/1`) and shown by the interface | **built, experimental, off by default** (M8.3.7); slower than JavaScript, see the M8.3.8 evidence | contract §4–§5 |

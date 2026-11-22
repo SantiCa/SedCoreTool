@@ -232,7 +232,7 @@ import of app.js or access to browser globals; it is included after unet.js in t
 
 Python package (`src/sedcoretool/`): `io.py` (images and masks), `segmentation.py` (masks from a threshold, a
 colour palette or a U-Net), `kernels/` (pure array primitives: intervals, counting, index tiers, age interpolation; §25.2),
-`methods/` (versioned scientific methods for the engine, for now `section.intervals/1`, and in `validation.py` the strict input checks they
+`methods/` (versioned scientific methods for the engine, for now `section.intervals/1` and `core.ages/1`, and in `validation.py` the strict input checks they
 share, including `table`, the decoder of record tables of card M8.4.10; §25.2),
 `pipeline.py` (intervals, percentages, indices), `indices.py` (BI and ii schemes),
 `depth.py` (depth and age), `export.py` (CSV and Excel), `plotting.py` (matplotlib figure), `cli.py` (command line),
@@ -465,7 +465,8 @@ of offending rows is reported. The Python API (`depth_to_age`) applies the same 
 finite pairs. Age reversals remain flagged by the program rather than silently corrected.
 
 Implementation: `depth.py::depth_to_age` (Python) and `core.js::parseAgeModel, interpAge, interpAgeRange,
-baconToAgeText` (program).
+baconToAgeText` (program); engine method `core.ages/1` (`methods/core_ages.py`, [contract §9.8](roadmap-engine-contract.md)), which applies a
+validated model to a table of depths without extrapolation and matches the program's reference fixtures within 1e-9 age units. The interface does not request it yet.
 
 - **Input:** pairs `(depth, age)`, sorted by depth. Separators may be comma, semicolon, tab or space; lines that
   are not numeric and lines starting with `#` are ignored. If a line uses `;` or tab, the comma is the decimal
@@ -2702,6 +2703,8 @@ needed. See [validation and measured scope](#311-automated-tests).
 
 `methods/section_intervals.py` implements engine method `section.intervals/1` (inputs and results: [engine contract](roadmap-engine-contract.md) §4–§5) on the kernels: `parse` validates every input, naming the field, before any calculation; `run` counts in blocks of 256 rows (checking for cancellation between blocks), forms the intervals, applies the minimum-valid rule and the no-data padding (strict comparisons with a 1e-9 depth tolerance, as in the program), classifies the indices, interpolates ages and attaches manual indices. It reproduces all 44 reference fixtures of the JavaScript calculation: row bounds, counts, indices, no-data flags and every missing-value pattern exactly, floating-point columns within 1e-9. It is not yet reachable from the desktop program; the engine process does not advertise it.
 
+`methods/core_ages.py` implements `core.ages/1` ([contract §9.8](roadmap-engine-contract.md)): `parse` refuses, naming the field, a model that is not strictly increasing in depth, has fewer than two rows, a missing value, one range column without the other or a range that does not contain the age; `run` interpolates linearly with `kernels/ages.py::interpolate_age` (no extrapolation) and returns the table `ages` (`age`, plus `age_min` and `age_max` with a range) and the summary `{rows, outside}`. It reproduces the 8 reference fixtures: missing patterns and summary exactly, ages within 1e-9 (largest measured 2.3e-13).
+
 #### Image loading budget
 
 `load_image` and `load_mask` use a fixed budget of **768 MiB** for estimated pixel buffers per load. They
@@ -3013,8 +3016,7 @@ outputs, deadline). The coordinator checks the request's fields in the contract'
 method and target (a waiting one is answered `cancelled`, a running one is asked to cancel), and answers with `inputs_key` (SHA-256 of
 the method, scope and verified input hashes), the declared dimensions (0 allowed), one packed result buffer (none when every column
 is empty), the descriptions of the table outputs, whose cells are the columns `<name>_values` and `<name>_valid` (the table format of
-contract §4), and a summary of at most 8 KiB (larger is `INTERNAL`). Only `section.intervals/1` is in the table, still requested
-through `section.analyze` by the interface.
+contract §4), and a summary of at most 8 KiB (larger is `INTERNAL`). `section.intervals/1` (still requested through `section.analyze` by the interface) and `core.ages/1` (not yet requested by the interface) are in the table.
 
 From the page (card M8.5.3), `desktop/engine-ipc.js::runMethod` takes `{requestKey, method, scope, target, revision, priority,
 settings_hash, inputs}` and nothing else, and checks every field against `METHODS`, the main process's mirror of `METHOD_SPECS` (a test
@@ -3699,11 +3701,11 @@ the 20 fractional-boundary cases with `tests/fixtures/fractional-boundaries.json
 implementation; they say nothing about the engine, which does not calculate sections yet.
 
 **Age-model reference fixtures.** `tests/fixtures/core_ages/` holds 8 synthetic cases (2.9 MB; format in its README) with the inputs of the
-planned engine method `core.ages/1` ([contract §9.8](roadmap-engine-contract.md)) and the result of `core.js::interpAge` and `interpAgeRange`:
+engine method `core.ages/1` ([contract §9.8](roadmap-engine-contract.md)) and the result of `core.js::interpAge` and `interpAgeRange`:
 models of 2 and 1,000 rows, with and without age reversals and range, and queries at every knot, at both ends, just outside, missing and
 100,000 random depths. `tests/app/core-ages-fixtures.test.mjs` requires every committed file to be byte-identical to a regeneration by
-`tools/make_core_ages_fixtures.mjs` (also through its command line) and re-checks each row against `core.js`. The engine does not compute
-`core.ages/1` yet.
+`tools/make_core_ages_fixtures.mjs` (also through its command line) and re-checks each row against `core.js`. The engine method `core.ages/1` reproduces them
+(`tests/test_core_ages.py`; largest age error measured 2.3e-13).
 
 **Temporary diagnostics.** Node tests cover default-off activation, persisted expiry, redaction, two-file
 rotation, queue overflow, independent write failure, bounded reads and atomic export failure. The real

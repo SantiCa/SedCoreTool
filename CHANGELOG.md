@@ -38,6 +38,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.5.5: the engine computes `core.ages/1` (ages of a core's depths from its age model) through `method.run`; the interface does not use it yet.
 - Card M8.5.4: contract §9.8 specifies the engine method `core.ages/1`, with reference fixtures made by today's JavaScript.
 - Card M8.5.3: the page can request `method.run` through the desktop bridge and decode its columns and table outputs; no interface uses it yet.
 - Card M8.5.2: the engine runs `method.run` (contract §9: scopes, priorities, superseding, table outputs, summary), tested with probe methods only; no production method or client uses it yet.

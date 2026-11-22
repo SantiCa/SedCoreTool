@@ -742,7 +742,7 @@ each method module agrees with its entry; the main process mirrors the entries a
 
 ### 9.8 Method `core.ages/1`
 
-**State: specified on 22 November 2026 (card M8.5.4); not implemented (card M8.5.5).** It applies a core's age model to the depths of a
+**State: specified on 22 November 2026 (card M8.5.4); implemented in the engine (card M8.5.5), not yet used by the interface.** It applies a core's age model to the depths of a
 core's rows, as `core.js::interpAge` and `interpAgeRange` do today. Reference fixtures made by that JavaScript:
 `tests/fixtures/core_ages/` (generator `tools/make_core_ages_fixtures.mjs`).
 
@@ -756,7 +756,7 @@ core's rows, as `core.js::interpAge` and `interpAgeRange` do today. Reference fi
 | `summary` | `{"rows": <query rows>, "outside": <query depths present and outside the model>}`; a missing depth is not counted in `outside`. |
 | Dimensions | `rows` = the number of query rows (at least 1). |
 | Tolerance (§7) | `age`, `age_min`, `age_max`: absolute error ≤ 1e-9 in declared age units; the missing pattern and `summary` exactly. |
-| Refusals | As §9.2 and §4 "Tables": the field is named (`age_model.depth` not increasing, a missing value of `age_model`, one range column without the other, fewer than 2 rows, `query.depth` absent). |
+| Refusals | As §9.2 and §4 "Tables": the field is named. `UNSUPPORTED_INPUT`: `age_model.depth` not strictly increasing; `age_model.<column>` with a missing value; `age_model.rows` fewer than 2; `age_model.age_min` or `age_model.age_max` when the range does not contain the age; `settings` of another version; `age_model` when an interpolation is not finite. `INVALID_REQUEST`: `age_model.columns` (one range column without the other, another order, another column); `query.columns.name` (no `depth` column or another column) and `query.columns` (none); `settings` with another field or not an object. |
 
 Behaviour of `core.js` that the fixtures record, so that the contract and the program agree: `interpAge` returns `null` outside the model
 and for a missing depth; `interpAgeRange` interpolates the minimum and the maximum like the age and returns `null` when the model has no
