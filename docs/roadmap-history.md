@@ -3637,7 +3637,7 @@ Updated 21 November 2026.
   settle), also on unmodified `956f3e3` and on GitHub for `956f3e3` on all three systems: not caused by this card (Q14). Not measured:
   macOS, Linux, a clean machine, 16-bit sections in the reference projects.
 
-### Q14 - `tiled-sections.mjs` fails in the M8.4.43 split block on all three systems — state: Done (22 Nov 2026)
+### Q14 - `tiled-sections.mjs` fails in the M8.4.43 split block on all three systems
 
 - (found by M8.4.9, 22 Nov 2026; most capable,
   effort high: mask syncing of split parts, where a mistake could lose user work). On `956f3e3` (M8.4.43) GitHub *Desktop builds* fails in
