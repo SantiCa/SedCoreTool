@@ -38,6 +38,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.5.1: the engine coordinator finds each request's operation in a table instead of a chain of conditions; nothing changes on the wire.
 - Card A1 (design): methods of section, core and project scope through one engine operation `method.run` (contract §9), with the implementing cards M8.5.1-M8.5.15 and decisions Y1-Y11 for the maintainer; no code changes.
 - Card M8.4.11: milestone gate of part B of M8.4 met on GitHub (Windows, macOS, Linux); the memory and timing of resident section pixels repeated on the final commit and stored in `docs/validation/M8.4.11-pixels-windows.json`.
 - Card M8.4.10: record tables (named numeric columns with missing values) can be kept in the engine in one columnar format, built by the new pure module `tablesnapshot.js`, sent with `engineclient.js::ensureTable` under a table budget of their own and checked by `methods/validation.py::table`; no scientific method changes. Details in the card's *As built*.

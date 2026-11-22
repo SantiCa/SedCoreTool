@@ -577,7 +577,7 @@ Written by design card A1 from [contract §9](roadmap-engine-contract.md#9-metho
 Every behaviour change is behind the existing engine experiment flag (no new flag); every card records the lines of `app.js` before and
 after. The order is the order of this list; cards written later take the next free number and go before the gate card of their slice.
 
-- [ ] **M8.5.1 - Operation table in the coordinator** (Ready).
+- [x] **M8.5.1 - Operation table in the coordinator** (done 22 Nov 2026, development gate).
   - *Goal:* `Coordinator.dispatch` looks operations up in a table (contract §9.5) instead of a chain of conditions; nothing changes on the
     wire or in behaviour.
   - *Read first:* contract §9.5 and §3 (operations, errors); `engine/server.py` (`receive`, `dispatch`, `store_operation`, `submit_mask`,
@@ -590,6 +590,12 @@ after. The order is the order of this list; cards written later take the next fr
   - *Tests:* every existing engine test unchanged (`pytest tests/test_engine*.py`); the comparison test; `npm test`; `tests/e2e/desktop.mjs`
     engine on.
   - *Done when:* no `if operation ==` chain is left in `dispatch` and these checks pass; development gate.
+  - *As built:* `server.py`: module-level `OPERATIONS` maps each of the 28 operations to `Operation(kind, handler)` (`control` 11 rows incl.
+    `hello`, `job`: `section.analyze`, `buffer.digest`, `pyramid.build`; `mask`: the 14 `MASK_OPERATIONS`); each former branch is a
+    `Coordinator` handler `(request, data)` with its body unchanged; `dispatch` = handshake check (`HANDSHAKE`), lookup, handler. Tests added
+    in `test_engine_transport.py`: the table equals `desktop/engine.js` `OPERATIONS` and the contract kinds; refusals before the handshake
+    and of unknown/unconfigured operations. Checks (Windows): engine pytest 195 passed/2 skipped before, 197/2 after; ruff clean; `npm test`
+    646/646; `desktop.mjs` engine on passed. `app.js` 4,647 lines before and after.
 - [ ] **M8.5.2 - `method.run` in the engine** (after M8.5.1).
   - *Goal:* the coordinator runs any method of its method table with scope, priority, superseding, declared dimensions and table outputs
     (contract §9.1-§9.4, §9.6, §9.7); test-only probe methods exercise every scope; no production method uses it yet.

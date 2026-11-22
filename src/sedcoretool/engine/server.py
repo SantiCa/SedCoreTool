@@ -12,6 +12,7 @@ import threading
 import time
 from collections import OrderedDict, deque
 from pathlib import Path
+from typing import Callable, NamedTuple
 from uuid import uuid4
 
 if __package__:
@@ -210,77 +211,101 @@ class Coordinator:
             self.attachments = []
 
     def dispatch(self, request, data):
-        operation, payload = request['op'], request['payload']
-        if operation == 'hello':
-            require_fields(payload, ('protocol',))
-            if self.session is not None or type(payload['protocol']) is not int or payload['protocol'] != 1:
-                raise ProtocolError('unsupported handshake')
-            self.session = request['session']
-            return {'protocol': 1, 'engine_version': self.version, 'runtime_id': self.runtime_id,
-                    'methods': list(METHODS), 'limits': {'json_bytes': MAX_JSON, 'chunk_bytes': MAX_CHUNK,
-                    'buffer_bytes': MAX_BUFFER, 'session_bytes': SESSION_BUDGET, 'active_jobs': 1, 'queued_jobs': 4}}
-        if self.session is None:
+        """Contract §9.5: the handshake check, then the operation table. A handler returns the result to answer now, or None when the
+        request is answered later (a queued job, a mask request)."""
+        operation = request['op']
+        if self.session is None and operation != HANDSHAKE:
             raise ProtocolError('handshake required')
-        if operation == 'buffer.begin':
-            return self.store.begin(payload)
-        if operation == 'buffer.derive':
-            return self.store.derive(payload)
-        if operation == 'buffer.chunk':
-            return self.store.append(payload, data)
-        if operation == 'buffer.commit':
-            return self.store.commit(payload)
-        if operation == 'buffer.release':
-            require_fields(payload, ('handles',))
-            handles = payload['handles']
-            if not isinstance(handles, list) or len(handles) > 64 or not all(is_uuid(handle) for handle in handles):
-                raise RequestError('INVALID_REQUEST', 'handles')
-            for handle in handles:
-                self.store.release(handle)
-            return {'released': handles}
-        if operation == 'buffer.read':
-            result, self.attachment = self.store.read(payload)
-            return result
-        if operation == 'section.analyze':
-            self.admit_analysis(request)
-            return None
-        if operation == 'buffer.digest':
-            require_fields(payload, ('handle',))
-            value = self.store.get(payload['handle'], committed=True)
-            if self.active is not None and len(self.jobs) >= 4:
-                raise RequestError('BUSY')
-            value.pins += 1
-            self.jobs.append(request)
-            self.start_next()
-            return None
-        if operation in ('pyramid.build', 'pyramid.info', 'tile.read'):
-            return self.store_operation(request)
-        if operation in MASK_OPERATIONS:
-            if self.projects_root is None:
-                raise RequestError('UNSUPPORTED_METHOD')
-            self.submit_mask(request, data)
-            return None
-        if operation == 'job.cancel':
-            require_fields(payload, ('request_id',))
-            if not is_uuid(payload['request_id']):
-                raise RequestError('INVALID_REQUEST', 'request_id')
-            for job in list(self.jobs):
-                if job['id'] == payload['request_id']:
-                    self.jobs.remove(job)
-                    self.finish(job, 'cancelled')
-                    return {'state': 'requested'}
-            if self.active and self.active['request']['id'] == payload['request_id']:
-                if self.active['cancel_at'] is None:
-                    self.active['cancel_at'] = time.monotonic()
-                    self.active['worker'].cancel()
+        entry = OPERATIONS.get(operation)
+        if entry is None:
+            raise RequestError('UNSUPPORTED_METHOD')
+        return entry.handler(self, request, data)
+
+    # ---- handlers of the operation table (OPERATIONS, after this class) --------------------------------------------
+
+    def hello(self, request, data):
+        payload = request['payload']
+        require_fields(payload, ('protocol',))
+        if self.session is not None or type(payload['protocol']) is not int or payload['protocol'] != 1:
+            raise ProtocolError('unsupported handshake')
+        self.session = request['session']
+        return {'protocol': 1, 'engine_version': self.version, 'runtime_id': self.runtime_id,
+                'methods': list(METHODS), 'limits': {'json_bytes': MAX_JSON, 'chunk_bytes': MAX_CHUNK,
+                'buffer_bytes': MAX_BUFFER, 'session_bytes': SESSION_BUDGET, 'active_jobs': 1, 'queued_jobs': 4}}
+
+    def buffer_begin(self, request, data):
+        return self.store.begin(request['payload'])
+
+    def buffer_derive(self, request, data):
+        return self.store.derive(request['payload'])
+
+    def buffer_chunk(self, request, data):
+        return self.store.append(request['payload'], data)
+
+    def buffer_commit(self, request, data):
+        return self.store.commit(request['payload'])
+
+    def buffer_release(self, request, data):
+        payload = request['payload']
+        require_fields(payload, ('handles',))
+        handles = payload['handles']
+        if not isinstance(handles, list) or len(handles) > 64 or not all(is_uuid(handle) for handle in handles):
+            raise RequestError('INVALID_REQUEST', 'handles')
+        for handle in handles:
+            self.store.release(handle)
+        return {'released': handles}
+
+    def buffer_read(self, request, data):
+        result, self.attachment = self.store.read(request['payload'])
+        return result
+
+    def section_analyze(self, request, data):
+        self.admit_analysis(request)
+        return None
+
+    def buffer_digest(self, request, data):
+        payload = request['payload']
+        require_fields(payload, ('handle',))
+        value = self.store.get(payload['handle'], committed=True)
+        if self.active is not None and len(self.jobs) >= 4:
+            raise RequestError('BUSY')
+        value.pins += 1
+        self.jobs.append(request)
+        self.start_next()
+        return None
+
+    def pyramid_request(self, request, data):
+        return self.store_operation(request)
+
+    def mask_submission(self, request, data):
+        if self.projects_root is None:
+            raise RequestError('UNSUPPORTED_METHOD')
+        self.submit_mask(request, data)
+        return None
+
+    def job_cancel(self, request, data):
+        payload = request['payload']
+        require_fields(payload, ('request_id',))
+        if not is_uuid(payload['request_id']):
+            raise RequestError('INVALID_REQUEST', 'request_id')
+        for job in list(self.jobs):
+            if job['id'] == payload['request_id']:
+                self.jobs.remove(job)
+                self.finish(job, 'cancelled')
                 return {'state': 'requested'}
-            return {'state': 'already_terminal'}
-        if operation == 'shutdown':
-            require_fields(payload, ())
-            self.answer_masks(wait=True)                 # the mask requests received before it are answered before it
-            self.closing = True
-            self.cancel_all()
-            return {}
-        raise RequestError('UNSUPPORTED_METHOD')
+        if self.active and self.active['request']['id'] == payload['request_id']:
+            if self.active['cancel_at'] is None:
+                self.active['cancel_at'] = time.monotonic()
+                self.active['worker'].cancel()
+            return {'state': 'requested'}
+        return {'state': 'already_terminal'}
+
+    def shutdown(self, request, data):
+        require_fields(request['payload'], ())
+        self.answer_masks(wait=True)                 # the mask requests received before it are answered before it
+        self.closing = True
+        self.cancel_all()
+        return {}
 
     # ---- tile store (contract §8) --------------------------------------------------------------------------------
 
@@ -888,6 +913,35 @@ class Coordinator:
                 self.stop_runner()
             finally:
                 self.store.close()
+
+
+class Operation(NamedTuple):
+    """One row of the operation table (contract §9.5). ``kind`` says where the request runs: ``control`` is answered on the coordinator's
+    thread, ``job`` is queued for a worker, ``mask`` runs on the MaskIO thread (§8.7). ``handler(coordinator, request, data)`` returns the
+    result to answer now, or None when the request is answered later."""
+    kind: str
+    handler: Callable
+
+
+HANDSHAKE = 'hello'              # the only operation accepted before the handshake
+OPERATION_KINDS = ('control', 'job', 'mask')
+OPERATIONS = {
+    'hello': Operation('control', Coordinator.hello),
+    'buffer.begin': Operation('control', Coordinator.buffer_begin),
+    'buffer.derive': Operation('control', Coordinator.buffer_derive),
+    'buffer.chunk': Operation('control', Coordinator.buffer_chunk),
+    'buffer.commit': Operation('control', Coordinator.buffer_commit),
+    'buffer.release': Operation('control', Coordinator.buffer_release),
+    'buffer.read': Operation('control', Coordinator.buffer_read),
+    'section.analyze': Operation('job', Coordinator.section_analyze),
+    'buffer.digest': Operation('job', Coordinator.buffer_digest),
+    'pyramid.build': Operation('job', Coordinator.pyramid_request),
+    'pyramid.info': Operation('control', Coordinator.pyramid_request),
+    'tile.read': Operation('control', Coordinator.pyramid_request),
+    **{operation: Operation('mask', Coordinator.mask_submission) for operation in MASK_OPERATIONS},
+    'job.cancel': Operation('control', Coordinator.job_cancel),
+    'shutdown': Operation('control', Coordinator.shutdown),
+}
 
 
 def read_requests(stream, inbox):
