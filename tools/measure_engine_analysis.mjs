@@ -3,7 +3,7 @@
 //
 //   node tools/measure_engine_analysis.mjs --out docs/validation/M8.3.8-windows-v0.150.json [--pairs 6] [--cycles 10]
 //     [--synthetic path/to/package.sedcoretool]     (written by tools/benchmark.py::make_synthetic; needed for the eight-section fixture)
-//     [--only timing,scenarios,responsiveness,stages,cancel,cycles,kill,pixels] [--pixel-pairs 2]   (pixels: card M8.4.9)
+//     [--only timing,scenarios,responsiveness,stages,cancel,cycles,kill,pixels,ages] [--pixel-pairs 2]   (pixels: card M8.4.9; ages: card M8.5.6)
 //
 // Needs `npm i --no-save puppeteer-core@23` at the repository root and `node desktop/scripts/prepare.js --with-examples`.
 // Every sample is recorded. Gates are evaluated from the recorded samples in `verdicts`; nothing is relaxed afterwards.
@@ -488,6 +488,269 @@ for (const fixture of want('pixels') ? fixtures : []) {
   report.results[`pixels_${fixture}`] = record;
 }
 
+// ---- core.ages/1 matched timing and Y9 target (card M8.5.6) ---------------------------------------------------------
+// One fresh process per run, engine off and on in alternating order (1 warm-up pair + PAIRS pairs).
+// Cases: each core of the public example (U1385I-1H) plus deterministic generated cores of 1,000, 10,000 and 100,000 rows
+// (200-knot age model with reversals and age_min/age_max range; query depths with knots, inside, outside and nulls).
+// Scenarios per case (timed warm inside each fresh process):
+//   first:       buildTableSnapshot(age_model, query) -> ensureTable(both) -> client.run('core.ages/1', ...) -> decoded tables.ages
+//   unchanged:   re-run buildTableSnapshot(age_model, query) -> ensureTable(both, cache hit) -> client.run('core.ages/1', ...)
+//   one_changed: middle finite depth perturbed -> buildTableSnapshot(query) -> ensureTable(query) -> client.run('core.ages/1', ...)
+async function agesRun(mode) {
+  const session = await start(mode);
+  try {
+    await loadFixture(session.page, 'public');
+    return await session.page.evaluate(async (on) => {
+      const { createEngineClient } = await import('app://corantool/app/js/engineclient.js');
+      const { buildTableSnapshot, tableInputNames } = await import('app://corantool/app/js/tablesnapshot.js');
+      const { interpAge, interpAgeRange } = await import('app://corantool/app/js/core.js');
+      const I = window.ichantool, S = I.S;
+
+      function seeded(seed) {
+        let state = seed >>> 0;
+        return () => ((state = (Math.imul(state, 1664525) + 1013904223) >>> 0) / 2 ** 32);
+      }
+
+      function makeGeneratedCase(rows) {
+        const next = seeded(856000 + rows);
+        const knots = 200;
+        const mDepth = new Array(knots), mAge = new Array(knots), mMin = new Array(knots), mMax = new Array(knots);
+        let d = 0, a = 0;
+        for (let i = 0; i < knots; i++) {
+          mDepth[i] = d; mAge[i] = a;
+          mMin[i] = a - (0.05 + next() * 0.4);
+          mMax[i] = a + (0.05 + next() * 0.4);
+          d += 0.25 + next() * 3.75;
+          a += (i + 1) % 37 === 0 ? -(0.1 + next() * 1.5) : 0.05 + next() * 2.5;
+        }
+        const model = { depth: mDepth, age: mAge, min: mMin, max: mMax };
+        const first = mDepth[0], last = mDepth[knots - 1], span = last - first;
+        const depths = new Array(rows);
+        const mid = Math.floor(rows / 2);
+        const fixed = new Map([
+          [0, first],
+          [1, mDepth[Math.floor(knots / 2)]],
+          [2, last],
+          [3, first - 1],
+          [4, first - 1e-6],
+          [5, last + 1e-6],
+          [6, last + 1],
+          [7, null],
+          [8, null],
+          [9, null],
+          [10, null],
+          [11, null],
+          [mid, (first + last) / 2],
+        ]);
+        for (let i = 0; i < rows; i++) {
+          depths[i] = fixed.has(i) ? fixed.get(i) : first - 0.02 * span + next() * 1.04 * span;
+        }
+        return { name: `gen_${rows}`, description: `${rows} rows, 200-knot model with reversals and age_min/age_max`, depthUnit: 'm', ageUnit: 'ka', model, depths };
+      }
+
+      function runJs(model, depths) {
+        const hasRange = !!model.min, n = depths.length;
+        const age = new Array(n);
+        const ageMin = hasRange ? new Array(n) : null;
+        const ageMax = hasRange ? new Array(n) : null;
+        const first = model.depth[0], last = model.depth[model.depth.length - 1];
+        let outside = 0;
+        for (let i = 0; i < n; i++) {
+          const d = depths[i];
+          if (d == null) {
+            age[i] = null;
+            if (hasRange) { ageMin[i] = null; ageMax[i] = null; }
+            continue;
+          }
+          if (d < first || d > last) outside++;
+          age[i] = interpAge(model, d);
+          if (hasRange) {
+            const r = interpAgeRange(model, d);
+            ageMin[i] = r ? r.min : null;
+            ageMax[i] = r ? r.max : null;
+          }
+        }
+        return { age, ageMin, ageMax, summary: { rows: n, outside } };
+      }
+
+      function perturbMiddle(depths) {
+        const out = depths.slice();
+        let idx = Math.floor(out.length / 2);
+        if (out[idx] == null) idx = out.findIndex((v) => v != null);
+        if (idx >= 0) out[idx] += 0.001;
+        return out;
+      }
+
+      function checkParity(res, expected, hasRange) {
+        const cols = Object.fromEntries((res.tables?.ages ?? []).map((c) => [c.name, c.values]));
+        const expectedCols = hasRange ? ['age', 'age_min', 'age_max'] : ['age'];
+        const colNamesOk = expectedCols.every((k) => Array.isArray(cols[k]) && cols[k].length === expected.age.length)
+          && (res.tables?.ages?.length === expectedCols.length);
+        let mismatches = colNamesOk ? 0 : 1, missingMismatches = 0, maxAbsError = 0;
+        if (colNamesOk) {
+          const pairs = [['age', expected.age], ...(hasRange ? [['age_min', expected.ageMin], ['age_max', expected.ageMax]] : [])];
+          for (const [colName, expArr] of pairs) {
+            const actArr = cols[colName];
+            for (let i = 0; i < expArr.length; i++) {
+              const a = actArr[i], e = expArr[i];
+              if ((a == null) !== (e == null)) { missingMismatches++; continue; }
+              if (a != null) {
+                const err = Math.abs(a - e);
+                if (err > maxAbsError) maxAbsError = err;
+                if (err > 1e-9) mismatches++;
+              }
+            }
+          }
+        }
+        const summaryMatch = res.summary?.rows === expected.summary.rows && res.summary?.outside === expected.summary.outside;
+        return { mismatches, missing_mismatches: missingMismatches, max_abs_error: maxAbsError, summary_match: summaryMatch,
+          rows: res.summary?.rows ?? null, outside: res.summary?.outside ?? null };
+      }
+
+      const cases = [];
+      const publicCores = S.cores.filter((c) => (c.ageModel?.model ?? S.age?.model) && Array.isArray(c.depth) && c.depth.length > 0);
+      publicCores.forEach((c, idx) => {
+        const model = c.ageModel?.model ?? S.age?.model;
+        cases.push({
+          name: publicCores.length === 1 ? 'public' : `public_${idx}`,
+          description: `Public example core ${c.name}`,
+          depthUnit: c.units || 'm',
+          ageUnit: c.ageModel?.units ?? S.age?.units ?? 'ka',
+          model,
+          depths: [...c.depth],
+        });
+      });
+      for (const rows of [1000, 10000, 100000]) cases.push(makeGeneratedCase(rows));
+
+      const client = on ? createEngineClient(window.corantoolDesktop.engine) : null;
+      const modelNames = tableInputNames('age_model'), queryNames = tableInputNames('query');
+
+      // Warm up the JS interpolators and the core.ages/1 path on a throwaway 2-row core so measured `first` is still non-resident.
+      {
+        const warmModel = { depth: [0, 10], age: [0, 100] }, warmDepths = [1, 5, 11, null];
+        runJs(warmModel, warmDepths);
+        if (on) {
+          const warmOwner = {};
+          const mSnap = await buildTableSnapshot([{ name: 'depth', unit: 'm', values: warmModel.depth }, { name: 'age', unit: 'ka', values: warmModel.age }]);
+          const qSnap = await buildTableSnapshot([{ name: 'depth', unit: 'm', values: warmDepths }]);
+          const mTok = await client.ensureTable(warmOwner, 'age_model', mSnap);
+          const qTok = await client.ensureTable(warmOwner, 'query', qSnap);
+          await client.run('core.ages/1', { scope: 'core', target: crypto.randomUUID(), revision: 1, priority: 'interactive',
+            inputs: { settings: { version: 1 }, [modelNames.meta]: mTok.meta, [modelNames.values]: mTok.values, [modelNames.valid]: mTok.valid,
+              [queryNames.meta]: qTok.meta, [queryNames.values]: qTok.values, [queryNames.valid]: qTok.valid } });
+          client.forget(warmOwner);
+        }
+      }
+
+      const out = {};
+      for (const c of cases) {
+        const hasRange = !!c.model.min;
+        const modelCols = [
+          { name: 'depth', unit: c.depthUnit, values: c.model.depth },
+          { name: 'age', unit: c.ageUnit, values: c.model.age },
+          ...(hasRange ? [{ name: 'age_min', unit: c.ageUnit, values: c.model.min }, { name: 'age_max', unit: c.ageUnit, values: c.model.max }] : []),
+        ];
+        const perturbedDepths = perturbMiddle(c.depths);
+        const caseMeta = { rows: c.depths.length, model_knots: c.model.depth.length, has_range: hasRange, description: c.description };
+
+        if (!on) {
+          const tFirst0 = performance.now(); const rFirst = runJs(c.model, c.depths); const firstMs = performance.now() - tFirst0;
+          const tUnch0 = performance.now(); const rUnch = runJs(c.model, c.depths); const unchangedMs = performance.now() - tUnch0;
+          const tChg0 = performance.now(); const rChg = runJs(c.model, perturbedDepths); const changedMs = performance.now() - tChg0;
+          out[c.name] = {
+            ...caseMeta,
+            first: { total_ms: firstMs, rows: rFirst.summary.rows, outside: rFirst.summary.outside },
+            unchanged: { total_ms: unchangedMs, rows: rUnch.summary.rows, outside: rUnch.summary.outside },
+            one_changed: { total_ms: changedMs, rows: rChg.summary.rows, outside: rChg.summary.outside },
+          };
+        } else {
+          const owner = {};
+          const target = crypto.randomUUID();
+          const expBase = runJs(c.model, c.depths);
+          const expChanged = runJs(c.model, perturbedDepths);
+
+          // Scenario 1: first (nothing resident yet)
+          const t1Start = performance.now();
+          const t1Snap0 = performance.now();
+          const mSnap1 = await buildTableSnapshot(modelCols);
+          const qSnap1 = await buildTableSnapshot([{ name: 'depth', unit: c.depthUnit, values: c.depths }]);
+          const t1SnapMs = performance.now() - t1Snap0;
+          const t1Ens0 = performance.now();
+          const mTok1 = await client.ensureTable(owner, 'age_model', mSnap1);
+          const qTok1 = await client.ensureTable(owner, 'query', qSnap1);
+          const t1EnsMs = performance.now() - t1Ens0;
+          const t1Run0 = performance.now();
+          const res1 = await client.run('core.ages/1', { scope: 'core', target, revision: 1, priority: 'interactive',
+            inputs: { settings: { version: 1 }, [modelNames.meta]: mTok1.meta, [modelNames.values]: mTok1.values, [modelNames.valid]: mTok1.valid,
+              [queryNames.meta]: qTok1.meta, [queryNames.values]: qTok1.values, [queryNames.valid]: qTok1.valid } });
+          const t1RunMs = performance.now() - t1Run0;
+          const t1TotalMs = performance.now() - t1Start;
+
+          // Scenario 2: unchanged (re-builds snapshots, hits resident table cache in ensureTable)
+          const t2Start = performance.now();
+          const t2Snap0 = performance.now();
+          const mSnap2 = await buildTableSnapshot(modelCols);
+          const qSnap2 = await buildTableSnapshot([{ name: 'depth', unit: c.depthUnit, values: c.depths }]);
+          const t2SnapMs = performance.now() - t2Snap0;
+          const t2Ens0 = performance.now();
+          const mTok2 = await client.ensureTable(owner, 'age_model', mSnap2);
+          const qTok2 = await client.ensureTable(owner, 'query', qSnap2);
+          const t2EnsMs = performance.now() - t2Ens0;
+          const t2Run0 = performance.now();
+          const res2 = await client.run('core.ages/1', { scope: 'core', target, revision: 2, priority: 'interactive',
+            inputs: { settings: { version: 1 }, [modelNames.meta]: mTok2.meta, [modelNames.values]: mTok2.values, [modelNames.valid]: mTok2.valid,
+              [queryNames.meta]: qTok2.meta, [queryNames.values]: qTok2.values, [queryNames.valid]: qTok2.valid } });
+          const t2RunMs = performance.now() - t2Run0;
+          const t2TotalMs = performance.now() - t2Start;
+
+          // Scenario 3: one_changed (age_model stays resident, query re-built and re-uploaded)
+          const t3Start = performance.now();
+          const t3Snap0 = performance.now();
+          const qSnap3 = await buildTableSnapshot([{ name: 'depth', unit: c.depthUnit, values: perturbedDepths }]);
+          const t3SnapMs = performance.now() - t3Snap0;
+          const t3Ens0 = performance.now();
+          const mTok3 = await client.ensureTable(owner, 'age_model', mSnap2);
+          const qTok3 = await client.ensureTable(owner, 'query', qSnap3);
+          const t3EnsMs = performance.now() - t3Ens0;
+          const t3Run0 = performance.now();
+          const res3 = await client.run('core.ages/1', { scope: 'core', target, revision: 3, priority: 'interactive',
+            inputs: { settings: { version: 1 }, [modelNames.meta]: mTok3.meta, [modelNames.values]: mTok3.values, [modelNames.valid]: mTok3.valid,
+              [queryNames.meta]: qTok3.meta, [queryNames.values]: qTok3.values, [queryNames.valid]: qTok3.valid } });
+          const t3RunMs = performance.now() - t3Run0;
+          const t3TotalMs = performance.now() - t3Start;
+
+          client.forget(owner);
+
+          out[c.name] = {
+            ...caseMeta,
+            first: { snapshot_ms: t1SnapMs, ensure_ms: t1EnsMs, run_ms: t1RunMs, total_ms: t1TotalMs,
+              engine_queued_ms: res1.provenance?.queued_ms ?? null, engine_reported_ms: res1.provenance?.elapsed_ms ?? null,
+              ...checkParity(res1, expBase, hasRange) },
+            unchanged: { snapshot_ms: t2SnapMs, ensure_ms: t2EnsMs, run_ms: t2RunMs, total_ms: t2TotalMs,
+              engine_queued_ms: res2.provenance?.queued_ms ?? null, engine_reported_ms: res2.provenance?.elapsed_ms ?? null,
+              ...checkParity(res2, expBase, hasRange) },
+            one_changed: { snapshot_ms: t3SnapMs, ensure_ms: t3EnsMs, run_ms: t3RunMs, total_ms: t3TotalMs,
+              engine_queued_ms: res3.provenance?.queued_ms ?? null, engine_reported_ms: res3.provenance?.elapsed_ms ?? null,
+              ...checkParity(res3, expChanged, hasRange) },
+          };
+        }
+      }
+      return out;
+    }, mode === 'on');
+  } finally { await session.stop(); }
+}
+
+if (want('ages')) {
+  log('ages');
+  const record = { warmup: { off: await agesRun('off'), on: await agesRun('on') }, pairs: [] };
+  for (let pair = 0; pair < PAIRS; pair++) {
+    const order = pair % 2 === 0 ? ['off', 'on'] : ['on', 'off'], entry = { order };
+    for (const mode of order) entry[mode] = await agesRun(mode);
+    record.pairs.push(entry);
+  }
+  report.results.ages = record;
+}
+
 // ---- verdicts (the gates of contract §7, evaluated on the recorded samples) -------------------------------------------------
 
 const v = report.verdicts, R = report.results;
@@ -551,6 +814,45 @@ for (const fixture of fixtures) {
     budget_full_events: on.reduce((n, r) => n + r.after_analyses.budgetFull, 0),
     states_ready: px.pairs.every((p) => ['off', 'on'].every((mode) => p[mode].states.every((s) => s === 'ready' || s === null))),
     charge_model: px.charge_model, session_budget_mib: 512 };
+}
+if (R.ages) {
+  const ag = R.ages;
+  const caseNames = Object.keys(ag.pairs[0].on);
+  const scenarios = ['first', 'unchanged', 'one_changed'];
+  const y9LimitMs = 150;
+  const cases = {};
+  let allPass = true;
+  for (const caseName of caseNames) {
+    cases[caseName] = {};
+    for (const scenario of scenarios) {
+      const offSamples = ag.pairs.map((p) => p.off[caseName][scenario].total_ms);
+      const onItems = ag.pairs.map((p) => p.on[caseName][scenario]);
+      const onSamples = onItems.map((x) => x.total_ms);
+      const p95On = percentile(onSamples, 0.95), medianOn = median(onSamples), maxOn = Math.max(...onSamples);
+      const y9Pass = p95On <= y9LimitMs;
+      const mismatches = onItems.reduce((n, x) => n + x.mismatches, 0);
+      const missingMismatches = onItems.reduce((n, x) => n + x.missing_mismatches, 0);
+      const summaryMismatches = onItems.filter((x) => !x.summary_match).length;
+      const maxAbsError = Math.max(...onItems.map((x) => x.max_abs_error));
+      const parityPass = mismatches === 0 && missingMismatches === 0 && summaryMismatches === 0;
+      if (!y9Pass || !parityPass) allPass = false;
+      cases[caseName][scenario] = {
+        y9_target: { pass: y9Pass, p95_on_ms: round(p95On, 2), median_on_ms: round(medianOn, 2), max_on_ms: round(maxOn, 2), limit_ms: y9LimitMs,
+          note: `nearest-rank p95 of ${onSamples.length} samples is the maximum` },
+        matched_timing: timingVerdict(offSamples, onSamples),
+        stages_median_ms: {
+          snapshot_ms: round(median(onItems.map((x) => x.snapshot_ms)), 2),
+          ensure_ms: round(median(onItems.map((x) => x.ensure_ms)), 2),
+          run_ms: round(median(onItems.map((x) => x.run_ms)), 2),
+          engine_queued_ms: round(median(onItems.map((x) => x.engine_queued_ms)), 2),
+          engine_reported_ms: round(median(onItems.map((x) => x.engine_reported_ms)), 2),
+          total_ms: round(medianOn, 2),
+        },
+        parity: { pass: parityPass, mismatches, max_abs_error: maxAbsError, missing_mismatches: missingMismatches, summary_mismatches: summaryMismatches },
+      };
+    }
+  }
+  v.ages = { pass: allPass, n_pairs: ag.pairs.length, cases };
 }
 v.not_measured = ['macOS and Linux', 'a clean Windows machine', 'cold cache after a reboot', 'saturated CPU', 'save interrupted during a job (covered separately by tests/e2e/interrupted-saves.mjs)'];
 

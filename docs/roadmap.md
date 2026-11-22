@@ -19,26 +19,29 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.153, `ba98eb1`) is contained in it.
 - **Released:** V0.153 (22 Nov 2026): integrated into `master` as `ba98eb1`; tag `V0.153` and GitHub Release (8 files, run
   `45058054277`) at the owner's request. The V0.152 Release and tag were deleted at the owner's request; V0.84 and V0.48 remain.
-- **Last verified code commit:** V0.153 `35659e5`: `check_all --e2e` passed on Windows (pytest 1024/9 skipped, `npm test` 667/667,
-  typecheck, sync-version, ruff, e2e desktop off/on, smoke, large16, tiled).
-- **GitHub:** `35659e5`: *Desktop builds* green (Windows, macOS, Linux, run `45048923418`); `tests` green after re-running a macOS failure
-  of `engine.test.mjs` "a start that fails says why" (run `45048923428`, card Q20).
-- **Checks due:** none.
+- **Last verified code commit:** V0.153 `35659e5` (`check_all --e2e` passed on Windows: pytest 1024/9 skipped, `npm test` 667/667,
+  typecheck, sync-version, ruff, e2e desktop off/on, smoke, large16, tiled). M8.5.6 (this commit) touches only the measuring tool and
+  its evidence JSON; focused JS checks (`node --check`, `typecheck`, `engine-gates`, `core-ages-fixtures`, `architecture`, `engine-run`,
+  `trainer`) passed on Windows.
+- **GitHub:** `35659e5` / `2a1f9b5`: `tests` and *Desktop builds* green (Windows, macOS, Linux). `e5092f1` (roadmap-only): `tests` green
+  (`45059995904`), *Desktop builds* failed on Ubuntu in `tiled-sections.mjs` (`45059995895`). Read M8.5.6's push result at the next card.
+- **Checks due:** none locally; the GitHub result of the M8.5.6 push.
 - **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete.
 - **Found, not done:** **Q20** (start-failure test races the exit event; fast, low), **Q19** (intermittent macOS "window: labels"; most capable, medium), **Q18** ("go to the trace" undone by the first
   fit; fast, medium), **Q16** (canvas taller than its pane; fast, medium), **Q17** (spurious BUSY notices and "Retry save" after a reopening;
   most capable, medium), **Q11** (hostile ML settings stop the classifier), **Q12** (an evicted placeholder section cannot rebuild its grey image).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
-- **Next:** A1 designed (contract §9, cards M8.5.1-M8.5.15); Y1-Y11 and the limits of §9.7 approved as recommended (22 Nov 2026).
-  M8.5.1-M8.5.5 done (`method.run` in the engine and from the page; `core.ages/1` in the engine). M8.5 paused by the maintainer for
-  Q10 and V0.153 (both done). Next: M8.5.6 (waits for Y9) when the maintainer resumes M8.5. `A4` open.
+- **Next:** A1 designed (contract §9, cards M8.5.1-M8.5.15); Y1-Y11 and §9.7 limits approved (22 Nov 2026). M8.5.1-M8.5.6 done:
+  `core.ages/1` parity passes (max abs error 5.68e-14), and public/1k/10k plus 100k unchanged meet Y9 (≤ 150 ms), but 100k `first`
+  (p95 208.2 ms) and `one_changed` (p95 165.2 ms) fail Y9 (`docs/validation/M8.5.6-ages-windows.json`), so **M8.5.8 waits for the
+  maintainer** (optimise upload/run path vs adjust Y9 for 100k). Next ready card: **M8.5.7** (pure refactor out of `app.js`, fast/medium); `A4` open.
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). The engine path fails the timing gate of
   [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates) for whole sections; the tile store is the
   answer for large images.
-- **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags);
-  `Q5` part 3 (saved format of long series) only if a save benchmark shows a slow save. Every lettered decision up to X is approved. M8.4.9 kept
-  the 512 MiB session budget by measurement (a third outcome beside the card's two): recorded in contract §3.
+- **Decisions waiting for the maintainer:** M8.5.6 Y9 failure on 100,000-row `core.ages/1` (`first` p95 208.2 ms, `one_changed` 165.2 ms;
+  blocks M8.5.8); promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of long series) only if a
+  save benchmark shows a slow save. Every lettered decision up to Y11 is approved. M8.4.9 kept the 512 MiB session budget by measurement.
 - **Open pull requests (Dependabot, against `master`, not merged):** #26 Electron 45.2.2 → 45.3.4, #24 `softprops/action-gh-release` 2 → 3.
   They wait for the maintainer (AGENTS §5.1).
 - **Standing reminders:** remind the maintainer to run the release-gate tests (the [release checklist](#release-checklist)) when an M8
@@ -696,7 +699,7 @@ after. The order is the order of this list; cards written later take the next fr
     job ends in milliseconds, so it may end `ok` or `cancelled`). Tests pinning the advertised methods updated. Checks (Windows):
     `check_all --desktop` passed (pytest 1024/9 skipped, `npm test` 664/664, typecheck, ruff, e2e engine off and on); a later `npm test`
     run failed once in `desktop-hardening.test.mjs` with `EBUSY` removing a temp folder, then passed. `app.js` unchanged.
-- [ ] **M8.5.6 - Matched timing of the first path of slice (a)** (after M8.5.5; waits for Y9).
+- [x] **M8.5.6 - Matched timing of the first path of slice (a)** (done 22 Nov 2026, development gate; **Y9 failed on 100k `first`/`one_changed`**, M8.5.8 blocked for maintainer decision).
   - *Goal:* the end-to-end time of `core.ages/1` is measured against Y9's target before any interface card (lesson of M8.3).
   - *Read first:* contract §7 (matched timing, interactive targets); `tools/measure_engine_analysis.mjs` (how it drives the page and
     records the host); the M8.4.9 record in the history.
@@ -708,6 +711,22 @@ after. The order is the order of this list; cards written later take the next fr
     depth changed; one warm-up and six alternating runs (§7); stages reported separately.
   - *Done when:* the result is recorded with its host; if the target fails, the measurement and the narrowest next correction are recorded
     and M8.5.8 waits for the maintainer.
+  - *As built (22 Nov 2026; `flash` sub-agent, reviewed by director):* added phase `ages` to `tools/measure_engine_analysis.mjs` and
+    recorded `docs/validation/M8.5.6-ages-windows.json` (Windows 11, Ryzen 7 7700X, 31.1 GiB, Node 22.23.4, Electron 45.2.2, Python
+    3.12.16; 1 warm-up + 6 alternating AB/BA pairs, fresh process per run; nearest-rank p95 of 6 samples is the maximum). Cases: `public`
+    (U1385I-1H, 1,734 rows, 2 knots, no range) and seeded `gen_1000`, `gen_10000`, `gen_100000` (200 knots with reversals and
+    `age_min`/`age_max`). **Parity:** 0 mismatches, 0 missing/summary mismatches across all samples (max abs error `5.68e-14` vs `1e-9`).
+    **Y9 (p95 ≤ 150 ms):** `public` (p95 `90.0`/`50.7`/`65.8` ms), `gen_1000` (`78.4`/`48.3`/`62.3` ms), `gen_10000`
+    (`104.0`/`60.9`/`89.5` ms) and `gen_100000` `unchanged` (med `119.2`, p95 `142.8` ms) **pass**; `gen_100000` **`first`** (med `168.8`,
+    p95 **`208.2`** ms; snap `2.2` / ensure `56.2` / run `109.5` [engine `78.0`] ms) and **`one_changed`** (med `155.3`, p95 **`165.2`**
+    ms; snap `1.6` / ensure `39.0` / run `114.8` [engine `78.0`] ms) **fail** (JS `off` p95 `14.5`/`19.6` ms; matched timing also fails on
+    most cases as expected by Y9). **Bottlenecks & narrowest next correction:** `run_ms` (109.5–116.5 ms: ~78 ms engine file
+    staging/worker/hash + ~32–39 ms settings upload, 3 `readBuffer` chunks for 2.7 MB output, and 300k boxed `Array.from(..., Number)`
+    items in `unpack`/`readTableResult`) plus `ensure_ms` (56.2 / 39.0 ms from 9 sequential IPC round-trips per table: 3 buffers ×
+    begin/append/commit). Narrowest fix: single-call upload for small/single-chunk table buffers (and inline `settings` in `runMethod`)
+    plus avoiding boxed array copies in `unpack`/`readTableResult` (or trimming per-job file staging). **M8.5.8 waits for the maintainer.**
+    Checks (Windows): `node --check tools/measure_engine_analysis.mjs`, `npm run typecheck`, `engine-gates`, `core-ages-fixtures`,
+    `architecture`, `engine-run`, `trainer` all passed. `app.js` 4,647 → 4,647 lines. Not measured: macOS, Linux, clean machine.
 - [ ] **M8.5.7 - A core's merged data out of `app.js`** (after M8.5.6).
   - *Goal:* `coreImageParts` and `refreshCoreData` (images, records, imported data and manual columns merged into a core's table) move to
     a pure module without changing behaviour (ARCHITECTURE §5.2), so that M8.5.8 changes only where the age column comes from.
@@ -720,7 +739,7 @@ after. The order is the order of this list; cards written later take the next fr
   - *Tests:* Node tests of the merge (images, records, imported data and manual columns; an age-only core; age records converted with the
     inverted model; edits applied); `npm test`, typecheck, standalone build, `tests/e2e/smoke.mjs`.
   - *Done when:* `app.js` is shorter and the checks pass; development gate.
-- [ ] **M8.5.8 - Row ages of a core from the engine** (engine experiment; blocked until M8.5.6 is accepted; its steps are written then).
+- [ ] **M8.5.8 - Row ages of a core from the engine** (engine experiment; **Blocked** after M8.5.6 failed Y9 on `gen_100000` `first` and `one_changed`, waiting for maintainer decision; its steps are written then).
   - *Goal:* with the engine experiment on, the age column of each core's merged table comes from `core.ages/1` (rows with an imported age
     keep it, as now); a core whose ages are pending shows it, exports wait for it, a failure is visible; with the flag off nothing changes.
   - *Read first:* contract §9.4 (publication); `app/js/engineanalysis.js` (the pending, ready and error states of sections);

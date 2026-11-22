@@ -1,0 +1,2544 @@
+{
+ "schema": 1,
+ "tool": "tools/measure_engine_analysis.mjs",
+ "started": "2026-11-22T22:14:47.495Z",
+ "commit": "e5092f18d8764a0ce6d23d7ca72e7612cff2f197",
+ "host": {
+  "os": "Windows_NT 10.0.26300",
+  "cpu": "AMD Ryzen 7 7700X 8-Core Processor             ",
+  "logical_cpus": 16,
+  "memory_gib": 31.1,
+  "node": "v22.23.4",
+  "electron": "45.2.2",
+  "runtime": "3.12.16"
+ },
+ "fixtures": {},
+ "parameters": {
+  "pairs": 6,
+  "cycles": 10,
+  "bin_sizes_cm": [
+   2,
+   1.37
+  ]
+ },
+ "results": {
+  "ages": {
+   "warmup": {
+    "off": {
+     "public": {
+      "rows": 2174,
+      "model_knots": 2,
+      "has_range": false,
+      "description": "Public example core U1385I-1H",
+      "first": {
+       "total_ms": 0.29999999701976776,
+       "rows": 2174,
+       "outside": 30
+      },
+      "unchanged": {
+       "total_ms": 0,
+       "rows": 2174,
+       "outside": 30
+      },
+      "one_changed": {
+       "total_ms": 0.10000000149011612,
+       "rows": 2174,
+       "outside": 30
+      }
+     },
+     "gen_1000": {
+      "rows": 1000,
+      "model_knots": 200,
+      "has_range": true,
+      "description": "1000 rows, 200-knot model with reversals and age_min/age_max",
+      "first": {
+       "total_ms": 0.8000000044703484,
+       "rows": 1000,
+       "outside": 36
+      },
+      "unchanged": {
+       "total_ms": 0.19999999552965164,
+       "rows": 1000,
+       "outside": 36
+      },
+      "one_changed": {
+       "total_ms": 0.30000000447034836,
+       "rows": 1000,
+       "outside": 36
+      }
+     },
+     "gen_10000": {
+      "rows": 10000,
+      "model_knots": 200,
+      "has_range": true,
+      "description": "10000 rows, 200-knot model with reversals and age_min/age_max",
+      "first": {
+       "total_ms": 2,
+       "rows": 10000,
+       "outside": 387
+      },
+      "unchanged": {
+       "total_ms": 4.399999998509884,
+       "rows": 10000,
+       "outside": 387
+      },
+      "one_changed": {
+       "total_ms": 1,
+       "rows": 10000,
+       "outside": 387
+      }
+     },
+     "gen_100000": {
+      "rows": 100000,
+      "model_knots": 200,
+      "has_range": true,
+      "description": "100000 rows, 200-knot model with reversals and age_min/age_max",
+      "first": {
+       "total_ms": 13.5,
+       "rows": 100000,
+       "outside": 3889
+      },
+      "unchanged": {
+       "total_ms": 18,
+       "rows": 100000,
+       "outside": 3889
+      },
+      "one_changed": {
+       "total_ms": 14.299999997019768,
+       "rows": 100000,
+       "outside": 3889
+      }
+     }
+    },
+    "on": {
+     "public": {
+      "rows": 1734,
+      "model_knots": 2,
+      "has_range": false,
+      "description": "Public example core U1385I-1H",
+      "first": {
+       "snapshot_ms": 0.30000000447034836,
+       "ensure_ms": 35.899999998509884,
+       "run_ms": 39.79999999701977,
+       "total_ms": 76,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 31,
+       "mismatches": 0,
+       "missing_mismatches": 0,
+       "max_abs_error": 1.4210854715202004e-14,
+       "summary_match": true,
+       "rows": 1734,
+       "outside": 30
+      },
+      "unchanged": {
+       "snapshot_ms": 0.20000000298023224,
+       "ensure_ms": 0.10000000149011612,
+       "run_ms": 30.799999997019768,
+       "total_ms": 31.100000001490116,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 14,
+       "mismatches": 0,
+       "missing_mismatches": 0,
+       "max_abs_error": 1.4210854715202004e-14,
+       "summary_match": true,
+       "rows": 1734,
+       "outside": 30
+      },
+      "one_changed": {
+       "snapshot_ms": 0.20000000298023224,
+       "ensure_ms": 15.5,
+       "run_ms": 31.19999999552965,
+       "total_ms": 46.899999998509884,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 14,
+       "mismatches": 0,
+       "missing_mismatches": 0,
+       "max_abs_error": 1.4210854715202004e-14,
+       "summary_match": true,
+       "rows": 1734,
+       "outside": 30
+      }
+     },
+     "gen_1000": {
+      "rows": 1000,
+      "model_knots": 200,
+      "has_range": true,
+      "description": "1000 rows, 200-knot model with reversals and age_min/age_max",
+      "first": {
+       "snapshot_ms": 0.20000000298023224,
+       "ensure_ms": 55.5,
+       "run_ms": 34.20000000298023,
+       "total_ms": 89.90000000596046,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 30,
+       "mismatches": 0,
+       "missing_mismatches": 0,
+       "max_abs_error": 2.842170943040401e-14,
+       "summary_match": true,
+       "rows": 1000,
+       "outside": 36
+      },
+      "unchanged": {
+       "snapshot_ms": 0.19999999552965164,
+       "ensure_ms": 0.10000000149011612,
+       "run_ms": 31.399999998509884,
+       "total_ms": 31.69999999552965,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 14,
+       "mismatches": 0,
+       "missing_mismatches": 0,
+       "max_abs_error": 2.842170943040401e-14,
+       "summary_match": true,
+       "rows": 1000,
+       "outside": 36
+      },
+      "one_changed": {
+       "snapshot_ms": 0.20000000298023224,
+       "ensure_ms": 16,
+       "run_ms": 31.399999998509884,
+       "total_ms": 47.600000001490116,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 14,
+       "mismatches": 0,
+       "missing_mismatches": 0,
+       "max_abs_error": 2.842170943040401e-14,
+       "summary_match": true,
+       "rows": 1000,
+       "outside": 36
+      }
+     },
+     "gen_10000": {
+      "rows": 10000,
+      "model_knots": 200,
+      "has_range": true,
+      "description": "10000 rows, 200-knot model with reversals and age_min/age_max",
+      "first": {
+       "snapshot_ms": 0.6000000014901161,
+       "ensure_ms": 43.600000001490116,
+       "run_ms": 54,
+       "total_ms": 98.20000000298023,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 46,
+       "mismatches": 0,
+       "missing_mismatches": 0,
+       "max_abs_error": 2.842170943040401e-14,
+       "summary_match": true,
+       "rows": 10000,
+       "outside": 387
+      },
+      "unchanged": {
+       "snapshot_ms": 0.6000000014901161,
+       "ensure_ms": 0,
+       "run_ms": 46.099999994039536,
+       "total_ms": 46.69999999552965,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 31,
+       "mismatches": 0,
+       "missing_mismatches": 0,
+       "max_abs_error": 2.842170943040401e-14,
+       "summary_match": true,
+       "rows": 10000,
+       "outside": 387
+      },
+      "one_changed": {
+       "snapshot_ms": 0.4000000059604645,
+       "ensure_ms": 21.69999999552965,
+       "run_ms": 53.70000000298023,
+       "total_ms": 75.80000000447035,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 30,
+       "mismatches": 0,
+       "missing_mismatches": 0,
+       "max_abs_error": 2.842170943040401e-14,
+       "summary_match": true,
+       "rows": 10000,
+       "outside": 387
+      }
+     },
+     "gen_100000": {
+      "rows": 100000,
+      "model_knots": 200,
+      "has_range": true,
+      "description": "100000 rows, 200-knot model with reversals and age_min/age_max",
+      "first": {
+       "snapshot_ms": 2.3000000044703484,
+       "ensure_ms": 72.5,
+       "run_ms": 118.5,
+       "total_ms": 193.30000000447035,
+       "engine_queued_ms": 15,
+       "engine_reported_ms": 78,
+       "mismatches": 0,
+       "missing_mismatches": 0,
+       "max_abs_error": 5.684341886080802e-14,
+       "summary_match": true,
+       "rows": 100000,
+       "outside": 3889
+      },
+      "unchanged": {
+       "snapshot_ms": 1.5999999940395355,
+       "ensure_ms": 0,
+       "run_ms": 121.70000000298023,
+       "total_ms": 123.29999999701977,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 78,
+       "mismatches": 0,
+       "missing_mismatches": 0,
+       "max_abs_error": 5.684341886080802e-14,
+       "summary_match": true,
+       "rows": 100000,
+       "outside": 3889
+      },
+      "one_changed": {
+       "snapshot_ms": 1.3999999985098839,
+       "ensure_ms": 40.70000000298023,
+       "run_ms": 129.69999999552965,
+       "total_ms": 171.79999999701977,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 78,
+       "mismatches": 0,
+       "missing_mismatches": 0,
+       "max_abs_error": 5.684341886080802e-14,
+       "summary_match": true,
+       "rows": 100000,
+       "outside": 3889
+      }
+     }
+    }
+   },
+   "pairs": [
+    {
+     "order": [
+      "off",
+      "on"
+     ],
+     "off": {
+      "public": {
+       "rows": 2174,
+       "model_knots": 2,
+       "has_range": false,
+       "description": "Public example core U1385I-1H",
+       "first": {
+        "total_ms": 2.1999999955296516,
+        "rows": 2174,
+        "outside": 30
+       },
+       "unchanged": {
+        "total_ms": 0.10000000149011612,
+        "rows": 2174,
+        "outside": 30
+       },
+       "one_changed": {
+        "total_ms": 0,
+        "rows": 2174,
+        "outside": 30
+       }
+      },
+      "gen_1000": {
+       "rows": 1000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "1000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 0.8000000044703484,
+        "rows": 1000,
+        "outside": 36
+       },
+       "unchanged": {
+        "total_ms": 0.19999999552965164,
+        "rows": 1000,
+        "outside": 36
+       },
+       "one_changed": {
+        "total_ms": 0.20000000298023224,
+        "rows": 1000,
+        "outside": 36
+       }
+      },
+      "gen_10000": {
+       "rows": 10000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "10000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 1.1999999955296516,
+        "rows": 10000,
+        "outside": 387
+       },
+       "unchanged": {
+        "total_ms": 1,
+        "rows": 10000,
+        "outside": 387
+       },
+       "one_changed": {
+        "total_ms": 1,
+        "rows": 10000,
+        "outside": 387
+       }
+      },
+      "gen_100000": {
+       "rows": 100000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "100000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 11.800000004470348,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "unchanged": {
+        "total_ms": 13.099999994039536,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "one_changed": {
+        "total_ms": 13.400000005960464,
+        "rows": 100000,
+        "outside": 3889
+       }
+      }
+     },
+     "on": {
+      "public": {
+       "rows": 1734,
+       "model_knots": 2,
+       "has_range": false,
+       "description": "Public example core U1385I-1H",
+       "first": {
+        "snapshot_ms": 0.3999999985098839,
+        "ensure_ms": 26.80000000447035,
+        "run_ms": 62.79999999701977,
+        "total_ms": 90,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 63,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       },
+       "unchanged": {
+        "snapshot_ms": 0.3999999985098839,
+        "ensure_ms": 0.10000000149011612,
+        "run_ms": 45.5,
+        "total_ms": 46,
+        "engine_queued_ms": 14,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       },
+       "one_changed": {
+        "snapshot_ms": 0.20000000298023224,
+        "ensure_ms": 19.69999999552965,
+        "run_ms": 43,
+        "total_ms": 62.899999998509884,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 30,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       }
+      },
+      "gen_1000": {
+       "rows": 1000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "1000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 0.4000000059604645,
+        "ensure_ms": 31,
+        "run_ms": 44.899999998509884,
+        "total_ms": 76.30000000447035,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 30,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       },
+       "unchanged": {
+        "snapshot_ms": 0.3999999985098839,
+        "ensure_ms": 0,
+        "run_ms": 47.899999998509884,
+        "total_ms": 48.29999999701977,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 30,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       },
+       "one_changed": {
+        "snapshot_ms": 0.20000000298023224,
+        "ensure_ms": 12.899999998509884,
+        "run_ms": 49.20000000298023,
+        "total_ms": 62.30000000447035,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 46,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       }
+      },
+      "gen_10000": {
+       "rows": 10000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "10000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 0.7999999970197678,
+        "ensure_ms": 45.70000000298023,
+        "run_ms": 52.5,
+        "total_ms": 99,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       },
+       "unchanged": {
+        "snapshot_ms": 0.5999999940395355,
+        "ensure_ms": 0,
+        "run_ms": 56.5,
+        "total_ms": 57.099999994039536,
+        "engine_queued_ms": 14,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       },
+       "one_changed": {
+        "snapshot_ms": 0.5,
+        "ensure_ms": 25.700000002980232,
+        "run_ms": 52.899999998509884,
+        "total_ms": 79.10000000149012,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 47,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       }
+      },
+      "gen_100000": {
+       "rows": 100000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "100000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 2.4000000059604645,
+        "ensure_ms": 73.39999999850988,
+        "run_ms": 132.39999999850988,
+        "total_ms": 208.20000000298023,
+        "engine_queued_ms": 16,
+        "engine_reported_ms": 77,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "unchanged": {
+        "snapshot_ms": 2.2000000029802322,
+        "ensure_ms": 0.09999999403953552,
+        "run_ms": 113.90000000596046,
+        "total_ms": 116.20000000298023,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 77,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "one_changed": {
+        "snapshot_ms": 1.7999999970197678,
+        "ensure_ms": 39,
+        "run_ms": 119.39999999850988,
+        "total_ms": 160.19999999552965,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 78,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       }
+      }
+     }
+    },
+    {
+     "order": [
+      "on",
+      "off"
+     ],
+     "on": {
+      "public": {
+       "rows": 1734,
+       "model_knots": 2,
+       "has_range": false,
+       "description": "Public example core U1385I-1H",
+       "first": {
+        "snapshot_ms": 0.30000000447034836,
+        "ensure_ms": 26.899999998509884,
+        "run_ms": 32,
+        "total_ms": 59.20000000298023,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       },
+       "unchanged": {
+        "snapshot_ms": 0.29999999701976776,
+        "ensure_ms": 0,
+        "run_ms": 50.400000005960464,
+        "total_ms": 50.70000000298023,
+        "engine_queued_ms": 14,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       },
+       "one_changed": {
+        "snapshot_ms": 0.19999999552965164,
+        "ensure_ms": 17.100000001490116,
+        "run_ms": 41.5,
+        "total_ms": 58.79999999701977,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       }
+      },
+      "gen_1000": {
+       "rows": 1000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "1000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 0.30000000447034836,
+        "ensure_ms": 26.5,
+        "run_ms": 32.19999999552965,
+        "total_ms": 59,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       },
+       "unchanged": {
+        "snapshot_ms": 0.4000000059604645,
+        "ensure_ms": 0,
+        "run_ms": 46.899999998509884,
+        "total_ms": 47.30000000447035,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 46,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       },
+       "one_changed": {
+        "snapshot_ms": 0.10000000149011612,
+        "ensure_ms": 9.199999995529652,
+        "run_ms": 52.80000000447035,
+        "total_ms": 62.100000001490116,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 46,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       }
+      },
+      "gen_10000": {
+       "rows": 10000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "10000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 0.7000000029802322,
+        "ensure_ms": 32.399999998509884,
+        "run_ms": 51,
+        "total_ms": 84.10000000149012,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       },
+       "unchanged": {
+        "snapshot_ms": 0.3999999985098839,
+        "ensure_ms": 0,
+        "run_ms": 48.900000005960464,
+        "total_ms": 49.30000000447035,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 30,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       },
+       "one_changed": {
+        "snapshot_ms": 0.5999999940395355,
+        "ensure_ms": 22.30000000447035,
+        "run_ms": 50.899999998509884,
+        "total_ms": 73.79999999701977,
+        "engine_queued_ms": 15,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       }
+      },
+      "gen_100000": {
+       "rows": 100000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "100000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 2.1999999955296516,
+        "ensure_ms": 51.70000000298023,
+        "run_ms": 104.29999999701977,
+        "total_ms": 158.19999999552965,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 62,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "unchanged": {
+        "snapshot_ms": 2.399999998509884,
+        "ensure_ms": 0,
+        "run_ms": 106.90000000596046,
+        "total_ms": 109.30000000447035,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 63,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "one_changed": {
+        "snapshot_ms": 1.6999999955296516,
+        "ensure_ms": 38.80000000447035,
+        "run_ms": 114.79999999701977,
+        "total_ms": 155.29999999701977,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 78,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       }
+      }
+     },
+     "off": {
+      "public": {
+       "rows": 2174,
+       "model_knots": 2,
+       "has_range": false,
+       "description": "Public example core U1385I-1H",
+       "first": {
+        "total_ms": 2.399999998509884,
+        "rows": 2174,
+        "outside": 30
+       },
+       "unchanged": {
+        "total_ms": 0.10000000149011612,
+        "rows": 2174,
+        "outside": 30
+       },
+       "one_changed": {
+        "total_ms": 0,
+        "rows": 2174,
+        "outside": 30
+       }
+      },
+      "gen_1000": {
+       "rows": 1000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "1000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 0.3999999985098839,
+        "rows": 1000,
+        "outside": 36
+       },
+       "unchanged": {
+        "total_ms": 0.10000000149011612,
+        "rows": 1000,
+        "outside": 36
+       },
+       "one_changed": {
+        "total_ms": 0.09999999403953552,
+        "rows": 1000,
+        "outside": 36
+       }
+      },
+      "gen_10000": {
+       "rows": 10000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "10000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 1.3000000044703484,
+        "rows": 10000,
+        "outside": 387
+       },
+       "unchanged": {
+        "total_ms": 0.8999999985098839,
+        "rows": 10000,
+        "outside": 387
+       },
+       "one_changed": {
+        "total_ms": 1.2999999970197678,
+        "rows": 10000,
+        "outside": 387
+       }
+      },
+      "gen_100000": {
+       "rows": 100000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "100000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 11.699999995529652,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "unchanged": {
+        "total_ms": 12.100000001490116,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "one_changed": {
+        "total_ms": 11.800000004470348,
+        "rows": 100000,
+        "outside": 3889
+       }
+      }
+     }
+    },
+    {
+     "order": [
+      "off",
+      "on"
+     ],
+     "off": {
+      "public": {
+       "rows": 2174,
+       "model_knots": 2,
+       "has_range": false,
+       "description": "Public example core U1385I-1H",
+       "first": {
+        "total_ms": 0.5,
+        "rows": 2174,
+        "outside": 30
+       },
+       "unchanged": {
+        "total_ms": 0.30000000447034836,
+        "rows": 2174,
+        "outside": 30
+       },
+       "one_changed": {
+        "total_ms": 0.09999999403953552,
+        "rows": 2174,
+        "outside": 30
+       }
+      },
+      "gen_1000": {
+       "rows": 1000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "1000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 0.6000000014901161,
+        "rows": 1000,
+        "outside": 36
+       },
+       "unchanged": {
+        "total_ms": 0.20000000298023224,
+        "rows": 1000,
+        "outside": 36
+       },
+       "one_changed": {
+        "total_ms": 0.29999999701976776,
+        "rows": 1000,
+        "outside": 36
+       }
+      },
+      "gen_10000": {
+       "rows": 10000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "10000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 1.7000000029802322,
+        "rows": 10000,
+        "outside": 387
+       },
+       "unchanged": {
+        "total_ms": 2.7999999970197678,
+        "rows": 10000,
+        "outside": 387
+       },
+       "one_changed": {
+        "total_ms": 0.8999999985098839,
+        "rows": 10000,
+        "outside": 387
+       }
+      },
+      "gen_100000": {
+       "rows": 100000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "100000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 12,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "unchanged": {
+        "total_ms": 14.200000002980232,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "one_changed": {
+        "total_ms": 19.599999994039536,
+        "rows": 100000,
+        "outside": 3889
+       }
+      }
+     },
+     "on": {
+      "public": {
+       "rows": 1734,
+       "model_knots": 2,
+       "has_range": false,
+       "description": "Public example core U1385I-1H",
+       "first": {
+        "snapshot_ms": 0.6000000014901161,
+        "ensure_ms": 30.5,
+        "run_ms": 40.899999998509884,
+        "total_ms": 72,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       },
+       "unchanged": {
+        "snapshot_ms": 0.30000000447034836,
+        "ensure_ms": 0.09999999403953552,
+        "run_ms": 45.5,
+        "total_ms": 45.899999998509884,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       },
+       "one_changed": {
+        "snapshot_ms": 0.20000000298023224,
+        "ensure_ms": 16.399999998509884,
+        "run_ms": 49.20000000298023,
+        "total_ms": 65.80000000447035,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 47,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       }
+      },
+      "gen_1000": {
+       "rows": 1000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "1000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 0.5,
+        "ensure_ms": 36.70000000298023,
+        "run_ms": 41.19999999552965,
+        "total_ms": 78.39999999850988,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 30,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       },
+       "unchanged": {
+        "snapshot_ms": 0.30000000447034836,
+        "ensure_ms": 0,
+        "run_ms": 40.899999998509884,
+        "total_ms": 41.20000000298023,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       },
+       "one_changed": {
+        "snapshot_ms": 0.10000000149011612,
+        "ensure_ms": 14.399999998509884,
+        "run_ms": 47.69999999552965,
+        "total_ms": 62.19999999552965,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       }
+      },
+      "gen_10000": {
+       "rows": 10000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "10000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 0.7000000029802322,
+        "ensure_ms": 38.100000001490116,
+        "run_ms": 65.19999999552965,
+        "total_ms": 104,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 46,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       },
+       "unchanged": {
+        "snapshot_ms": 0.3999999985098839,
+        "ensure_ms": 0.10000000149011612,
+        "run_ms": 56.80000000447035,
+        "total_ms": 57.30000000447035,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 46,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       },
+       "one_changed": {
+        "snapshot_ms": 0.3999999985098839,
+        "ensure_ms": 30.19999999552965,
+        "run_ms": 58.900000005960464,
+        "total_ms": 89.5,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 46,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       }
+      },
+      "gen_100000": {
+       "rows": 100000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "100000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 2.899999998509884,
+        "ensure_ms": 74.5,
+        "run_ms": 114.89999999850988,
+        "total_ms": 192.29999999701977,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 78,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "unchanged": {
+        "snapshot_ms": 2.100000001490116,
+        "ensure_ms": 0,
+        "run_ms": 140.70000000298023,
+        "total_ms": 142.80000000447035,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 94,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "one_changed": {
+        "snapshot_ms": 1.3999999985098839,
+        "ensure_ms": 37.399999998509884,
+        "run_ms": 110.5,
+        "total_ms": 149.29999999701977,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 78,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       }
+      }
+     }
+    },
+    {
+     "order": [
+      "on",
+      "off"
+     ],
+     "on": {
+      "public": {
+       "rows": 1734,
+       "model_knots": 2,
+       "has_range": false,
+       "description": "Public example core U1385I-1H",
+       "first": {
+        "snapshot_ms": 0.3999999985098839,
+        "ensure_ms": 26.700000002980232,
+        "run_ms": 34,
+        "total_ms": 61.100000001490116,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 30,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       },
+       "unchanged": {
+        "snapshot_ms": 0.20000000298023224,
+        "ensure_ms": 0.09999999403953552,
+        "run_ms": 44.600000001490116,
+        "total_ms": 44.899999998509884,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 46,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       },
+       "one_changed": {
+        "snapshot_ms": 0.20000000298023224,
+        "ensure_ms": 18.399999998509884,
+        "run_ms": 43,
+        "total_ms": 61.600000001490116,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 46,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       }
+      },
+      "gen_1000": {
+       "rows": 1000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "1000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 0.30000000447034836,
+        "ensure_ms": 25,
+        "run_ms": 34.29999999701977,
+        "total_ms": 59.600000001490116,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 30,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       },
+       "unchanged": {
+        "snapshot_ms": 0.3999999985098839,
+        "ensure_ms": 0,
+        "run_ms": 29.899999998509884,
+        "total_ms": 30.299999997019768,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       },
+       "one_changed": {
+        "snapshot_ms": 0.10000000149011612,
+        "ensure_ms": 10.899999998509884,
+        "run_ms": 34.400000005960464,
+        "total_ms": 45.400000005960464,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 14,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       }
+      },
+      "gen_10000": {
+       "rows": 10000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "10000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 0.8999999985098839,
+        "ensure_ms": 34.399999998509884,
+        "run_ms": 50.5,
+        "total_ms": 85.79999999701977,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 46,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       },
+       "unchanged": {
+        "snapshot_ms": 0.5,
+        "ensure_ms": 0,
+        "run_ms": 56.70000000298023,
+        "total_ms": 57.20000000298023,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 46,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       },
+       "one_changed": {
+        "snapshot_ms": 0.3999999985098839,
+        "ensure_ms": 23.600000001490116,
+        "run_ms": 54.600000001490116,
+        "total_ms": 78.60000000149012,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 47,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       }
+      },
+      "gen_100000": {
+       "rows": 100000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "100000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 2.3000000044703484,
+        "ensure_ms": 56.19999999552965,
+        "run_ms": 121.5,
+        "total_ms": 180,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 78,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "unchanged": {
+        "snapshot_ms": 2.3000000044703484,
+        "ensure_ms": 0,
+        "run_ms": 130.39999999850988,
+        "total_ms": 132.70000000298023,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 78,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "one_changed": {
+        "snapshot_ms": 2.2000000029802322,
+        "ensure_ms": 42.69999999552965,
+        "run_ms": 118.20000000298023,
+        "total_ms": 163.10000000149012,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 78,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       }
+      }
+     },
+     "off": {
+      "public": {
+       "rows": 2174,
+       "model_knots": 2,
+       "has_range": false,
+       "description": "Public example core U1385I-1H",
+       "first": {
+        "total_ms": 0.29999999701976776,
+        "rows": 2174,
+        "outside": 30
+       },
+       "unchanged": {
+        "total_ms": 0.10000000149011612,
+        "rows": 2174,
+        "outside": 30
+       },
+       "one_changed": {
+        "total_ms": 0.10000000149011612,
+        "rows": 2174,
+        "outside": 30
+       }
+      },
+      "gen_1000": {
+       "rows": 1000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "1000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 0.5,
+        "rows": 1000,
+        "outside": 36
+       },
+       "unchanged": {
+        "total_ms": 0.19999999552965164,
+        "rows": 1000,
+        "outside": 36
+       },
+       "one_changed": {
+        "total_ms": 0.20000000298023224,
+        "rows": 1000,
+        "outside": 36
+       }
+      },
+      "gen_10000": {
+       "rows": 10000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "10000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 1.3999999985098839,
+        "rows": 10000,
+        "outside": 387
+       },
+       "unchanged": {
+        "total_ms": 1,
+        "rows": 10000,
+        "outside": 387
+       },
+       "one_changed": {
+        "total_ms": 1.2000000029802322,
+        "rows": 10000,
+        "outside": 387
+       }
+      },
+      "gen_100000": {
+       "rows": 100000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "100000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 14.5,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "unchanged": {
+        "total_ms": 14.099999994039536,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "one_changed": {
+        "total_ms": 13.5,
+        "rows": 100000,
+        "outside": 3889
+       }
+      }
+     }
+    },
+    {
+     "order": [
+      "off",
+      "on"
+     ],
+     "off": {
+      "public": {
+       "rows": 2174,
+       "model_knots": 2,
+       "has_range": false,
+       "description": "Public example core U1385I-1H",
+       "first": {
+        "total_ms": 1.8999999985098839,
+        "rows": 2174,
+        "outside": 30
+       },
+       "unchanged": {
+        "total_ms": 0.10000000149011612,
+        "rows": 2174,
+        "outside": 30
+       },
+       "one_changed": {
+        "total_ms": 0,
+        "rows": 2174,
+        "outside": 30
+       }
+      },
+      "gen_1000": {
+       "rows": 1000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "1000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 0.3999999985098839,
+        "rows": 1000,
+        "outside": 36
+       },
+       "unchanged": {
+        "total_ms": 0.10000000149011612,
+        "rows": 1000,
+        "outside": 36
+       },
+       "one_changed": {
+        "total_ms": 0.09999999403953552,
+        "rows": 1000,
+        "outside": 36
+       }
+      },
+      "gen_10000": {
+       "rows": 10000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "10000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 1,
+        "rows": 10000,
+        "outside": 387
+       },
+       "unchanged": {
+        "total_ms": 1,
+        "rows": 10000,
+        "outside": 387
+       },
+       "one_changed": {
+        "total_ms": 1.2000000029802322,
+        "rows": 10000,
+        "outside": 387
+       }
+      },
+      "gen_100000": {
+       "rows": 100000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "100000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 12.5,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "unchanged": {
+        "total_ms": 11.600000001490116,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "one_changed": {
+        "total_ms": 12.899999998509884,
+        "rows": 100000,
+        "outside": 3889
+       }
+      }
+     },
+     "on": {
+      "public": {
+       "rows": 1734,
+       "model_knots": 2,
+       "has_range": false,
+       "description": "Public example core U1385I-1H",
+       "first": {
+        "snapshot_ms": 0.29999999701976776,
+        "ensure_ms": 23.700000002980232,
+        "run_ms": 35.399999998509884,
+        "total_ms": 59.399999998509884,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 30,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       },
+       "unchanged": {
+        "snapshot_ms": 0.19999999552965164,
+        "ensure_ms": 0.20000000298023224,
+        "run_ms": 30.700000002980232,
+        "total_ms": 31.100000001490116,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 14,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       },
+       "one_changed": {
+        "snapshot_ms": 0.29999999701976776,
+        "ensure_ms": 16.200000002980232,
+        "run_ms": 30.099999994039536,
+        "total_ms": 46.599999994039536,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 14,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       }
+      },
+      "gen_1000": {
+       "rows": 1000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "1000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 0.19999999552965164,
+        "ensure_ms": 25.399999998509884,
+        "run_ms": 35.30000000447035,
+        "total_ms": 60.899999998509884,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       },
+       "unchanged": {
+        "snapshot_ms": 0.29999999701976776,
+        "ensure_ms": 0.10000000149011612,
+        "run_ms": 30,
+        "total_ms": 30.399999998509884,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 15,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       },
+       "one_changed": {
+        "snapshot_ms": 0.20000000298023224,
+        "ensure_ms": 9.5,
+        "run_ms": 37.399999998509884,
+        "total_ms": 47.100000001490116,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       }
+      },
+      "gen_10000": {
+       "rows": 10000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "10000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 0.8000000044703484,
+        "ensure_ms": 31.899999998509884,
+        "run_ms": 51.899999998509884,
+        "total_ms": 84.60000000149012,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 46,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       },
+       "unchanged": {
+        "snapshot_ms": 0.6000000014901161,
+        "ensure_ms": 0,
+        "run_ms": 60.29999999701977,
+        "total_ms": 60.899999998509884,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 46,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       },
+       "one_changed": {
+        "snapshot_ms": 0.6000000014901161,
+        "ensure_ms": 23.899999998509884,
+        "run_ms": 51.70000000298023,
+        "total_ms": 76.20000000298023,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 46,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       }
+      },
+      "gen_100000": {
+       "rows": 100000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "100000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 2,
+        "ensure_ms": 50.399999998509884,
+        "run_ms": 109.5,
+        "total_ms": 161.89999999850988,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 78,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "unchanged": {
+        "snapshot_ms": 2.399999998509884,
+        "ensure_ms": 0,
+        "run_ms": 120.60000000149012,
+        "total_ms": 123,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 78,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "one_changed": {
+        "snapshot_ms": 1.5,
+        "ensure_ms": 39.899999998509884,
+        "run_ms": 111.80000000447035,
+        "total_ms": 153.20000000298023,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 61,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       }
+      }
+     }
+    },
+    {
+     "order": [
+      "on",
+      "off"
+     ],
+     "on": {
+      "public": {
+       "rows": 1734,
+       "model_knots": 2,
+       "has_range": false,
+       "description": "Public example core U1385I-1H",
+       "first": {
+        "snapshot_ms": 0.29999999701976776,
+        "ensure_ms": 26.399999998509884,
+        "run_ms": 34.30000000447035,
+        "total_ms": 61,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 30,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       },
+       "unchanged": {
+        "snapshot_ms": 0.19999999552965164,
+        "ensure_ms": 0.10000000149011612,
+        "run_ms": 44.899999998509884,
+        "total_ms": 45.19999999552965,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 47,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       },
+       "one_changed": {
+        "snapshot_ms": 0.20000000298023224,
+        "ensure_ms": 22,
+        "run_ms": 42.899999998509884,
+        "total_ms": 65.10000000149012,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 1.4210854715202004e-14,
+        "summary_match": true,
+        "rows": 1734,
+        "outside": 30
+       }
+      },
+      "gen_1000": {
+       "rows": 1000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "1000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 0.4000000059604645,
+        "ensure_ms": 35.19999999552965,
+        "run_ms": 40.100000001490116,
+        "total_ms": 75.70000000298023,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       },
+       "unchanged": {
+        "snapshot_ms": 0.20000000298023224,
+        "ensure_ms": 0.09999999403953552,
+        "run_ms": 44.400000005960464,
+        "total_ms": 44.70000000298023,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 46,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       },
+       "one_changed": {
+        "snapshot_ms": 0.09999999403953552,
+        "ensure_ms": 10.700000002980232,
+        "run_ms": 32.899999998509884,
+        "total_ms": 43.69999999552965,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 16,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 1000,
+        "outside": 36
+       }
+      },
+      "gen_10000": {
+       "rows": 10000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "10000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 0.9000000059604645,
+        "ensure_ms": 34.899999998509884,
+        "run_ms": 47.5,
+        "total_ms": 83.30000000447035,
+        "engine_queued_ms": 15,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       },
+       "unchanged": {
+        "snapshot_ms": 0.3999999985098839,
+        "ensure_ms": 0,
+        "run_ms": 44.899999998509884,
+        "total_ms": 45.29999999701977,
+        "engine_queued_ms": 15,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       },
+       "one_changed": {
+        "snapshot_ms": 0.30000000447034836,
+        "ensure_ms": 22.099999994039536,
+        "run_ms": 38.900000005960464,
+        "total_ms": 61.30000000447035,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 31,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 2.842170943040401e-14,
+        "summary_match": true,
+        "rows": 10000,
+        "outside": 387
+       }
+      },
+      "gen_100000": {
+       "rows": 100000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "100000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "snapshot_ms": 2.0999999940395355,
+        "ensure_ms": 60,
+        "run_ms": 106.70000000298023,
+        "total_ms": 168.79999999701977,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 78,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "unchanged": {
+        "snapshot_ms": 2.7000000029802322,
+        "ensure_ms": 0,
+        "run_ms": 116.5,
+        "total_ms": 119.20000000298023,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 77,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "one_changed": {
+        "snapshot_ms": 1.5999999940395355,
+        "ensure_ms": 41,
+        "run_ms": 122.60000000149012,
+        "total_ms": 165.19999999552965,
+        "engine_queued_ms": 0,
+        "engine_reported_ms": 94,
+        "mismatches": 0,
+        "missing_mismatches": 0,
+        "max_abs_error": 5.684341886080802e-14,
+        "summary_match": true,
+        "rows": 100000,
+        "outside": 3889
+       }
+      }
+     },
+     "off": {
+      "public": {
+       "rows": 2174,
+       "model_knots": 2,
+       "has_range": false,
+       "description": "Public example core U1385I-1H",
+       "first": {
+        "total_ms": 0.3999999985098839,
+        "rows": 2174,
+        "outside": 30
+       },
+       "unchanged": {
+        "total_ms": 0.10000000149011612,
+        "rows": 2174,
+        "outside": 30
+       },
+       "one_changed": {
+        "total_ms": 0.10000000149011612,
+        "rows": 2174,
+        "outside": 30
+       }
+      },
+      "gen_1000": {
+       "rows": 1000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "1000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 0.5,
+        "rows": 1000,
+        "outside": 36
+       },
+       "unchanged": {
+        "total_ms": 0.20000000298023224,
+        "rows": 1000,
+        "outside": 36
+       },
+       "one_changed": {
+        "total_ms": 0.19999999552965164,
+        "rows": 1000,
+        "outside": 36
+       }
+      },
+      "gen_10000": {
+       "rows": 10000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "10000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 1.3999999985098839,
+        "rows": 10000,
+        "outside": 387
+       },
+       "unchanged": {
+        "total_ms": 1.2000000029802322,
+        "rows": 10000,
+        "outside": 387
+       },
+       "one_changed": {
+        "total_ms": 1.1000000014901161,
+        "rows": 10000,
+        "outside": 387
+       }
+      },
+      "gen_100000": {
+       "rows": 100000,
+       "model_knots": 200,
+       "has_range": true,
+       "description": "100000 rows, 200-knot model with reversals and age_min/age_max",
+       "first": {
+        "total_ms": 14,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "unchanged": {
+        "total_ms": 14.199999995529652,
+        "rows": 100000,
+        "outside": 3889
+       },
+       "one_changed": {
+        "total_ms": 12.899999998509884,
+        "rows": 100000,
+        "outside": 3889
+       }
+      }
+     }
+    }
+   ]
+  }
+ },
+ "verdicts": {
+  "ages": {
+   "pass": false,
+   "n_pairs": 6,
+   "cases": {
+    "public": {
+     "first": {
+      "y9_target": {
+       "pass": true,
+       "p95_on_ms": 90,
+       "median_on_ms": 61,
+       "max_on_ms": 90,
+       "limit_ms": 150,
+       "note": "nearest-rank p95 of 6 samples is the maximum"
+      },
+      "matched_timing": {
+       "pass": false,
+       "samples": 6,
+       "median": {
+        "off": 0.5,
+        "on": 61,
+        "limit": 50.5,
+        "pass": false
+       },
+       "p95": {
+        "off": 2.399999998509884,
+        "on": 90,
+        "limit": 102.39999999850988,
+        "pass": true
+       }
+      },
+      "stages_median_ms": {
+       "snapshot_ms": 0.3,
+       "ensure_ms": 26.7,
+       "run_ms": 34.3,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 30,
+       "total_ms": 61
+      },
+      "parity": {
+       "pass": true,
+       "mismatches": 0,
+       "max_abs_error": 1.4210854715202004e-14,
+       "missing_mismatches": 0,
+       "summary_mismatches": 0
+      }
+     },
+     "unchanged": {
+      "y9_target": {
+       "pass": true,
+       "p95_on_ms": 50.7,
+       "median_on_ms": 45.2,
+       "max_on_ms": 50.7,
+       "limit_ms": 150,
+       "note": "nearest-rank p95 of 6 samples is the maximum"
+      },
+      "matched_timing": {
+       "pass": true,
+       "samples": 6,
+       "median": {
+        "off": 0.10000000149011612,
+        "on": 45.19999999552965,
+        "limit": 50.100000001490116,
+        "pass": true
+       },
+       "p95": {
+        "off": 0.30000000447034836,
+        "on": 50.70000000298023,
+        "limit": 100.30000000447035,
+        "pass": true
+       }
+      },
+      "stages_median_ms": {
+       "snapshot_ms": 0.2,
+       "ensure_ms": 0.1,
+       "run_ms": 44.9,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 31,
+       "total_ms": 45.2
+      },
+      "parity": {
+       "pass": true,
+       "mismatches": 0,
+       "max_abs_error": 1.4210854715202004e-14,
+       "missing_mismatches": 0,
+       "summary_mismatches": 0
+      }
+     },
+     "one_changed": {
+      "y9_target": {
+       "pass": true,
+       "p95_on_ms": 65.8,
+       "median_on_ms": 61.6,
+       "max_on_ms": 65.8,
+       "limit_ms": 150,
+       "note": "nearest-rank p95 of 6 samples is the maximum"
+      },
+      "matched_timing": {
+       "pass": false,
+       "samples": 6,
+       "median": {
+        "off": 0,
+        "on": 61.600000001490116,
+        "limit": 50,
+        "pass": false
+       },
+       "p95": {
+        "off": 0.10000000149011612,
+        "on": 65.80000000447035,
+        "limit": 100.10000000149012,
+        "pass": true
+       }
+      },
+      "stages_median_ms": {
+       "snapshot_ms": 0.2,
+       "ensure_ms": 17.1,
+       "run_ms": 42.9,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 31,
+       "total_ms": 61.6
+      },
+      "parity": {
+       "pass": true,
+       "mismatches": 0,
+       "max_abs_error": 1.4210854715202004e-14,
+       "missing_mismatches": 0,
+       "summary_mismatches": 0
+      }
+     }
+    },
+    "gen_1000": {
+     "first": {
+      "y9_target": {
+       "pass": true,
+       "p95_on_ms": 78.4,
+       "median_on_ms": 60.9,
+       "max_on_ms": 78.4,
+       "limit_ms": 150,
+       "note": "nearest-rank p95 of 6 samples is the maximum"
+      },
+      "matched_timing": {
+       "pass": false,
+       "samples": 6,
+       "median": {
+        "off": 0.5,
+        "on": 60.899999998509884,
+        "limit": 50.5,
+        "pass": false
+       },
+       "p95": {
+        "off": 0.8000000044703484,
+        "on": 78.39999999850988,
+        "limit": 100.80000000447035,
+        "pass": true
+       }
+      },
+      "stages_median_ms": {
+       "snapshot_ms": 0.3,
+       "ensure_ms": 26.5,
+       "run_ms": 35.3,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 30,
+       "total_ms": 60.9
+      },
+      "parity": {
+       "pass": true,
+       "mismatches": 0,
+       "max_abs_error": 2.842170943040401e-14,
+       "missing_mismatches": 0,
+       "summary_mismatches": 0
+      }
+     },
+     "unchanged": {
+      "y9_target": {
+       "pass": true,
+       "p95_on_ms": 48.3,
+       "median_on_ms": 41.2,
+       "max_on_ms": 48.3,
+       "limit_ms": 150,
+       "note": "nearest-rank p95 of 6 samples is the maximum"
+      },
+      "matched_timing": {
+       "pass": true,
+       "samples": 6,
+       "median": {
+        "off": 0.19999999552965164,
+        "on": 41.20000000298023,
+        "limit": 50.19999999552965,
+        "pass": true
+       },
+       "p95": {
+        "off": 0.20000000298023224,
+        "on": 48.29999999701977,
+        "limit": 100.20000000298023,
+        "pass": true
+       }
+      },
+      "stages_median_ms": {
+       "snapshot_ms": 0.3,
+       "ensure_ms": 0,
+       "run_ms": 40.9,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 31,
+       "total_ms": 41.2
+      },
+      "parity": {
+       "pass": true,
+       "mismatches": 0,
+       "max_abs_error": 2.842170943040401e-14,
+       "missing_mismatches": 0,
+       "summary_mismatches": 0
+      }
+     },
+     "one_changed": {
+      "y9_target": {
+       "pass": true,
+       "p95_on_ms": 62.3,
+       "median_on_ms": 47.1,
+       "max_on_ms": 62.3,
+       "limit_ms": 150,
+       "note": "nearest-rank p95 of 6 samples is the maximum"
+      },
+      "matched_timing": {
+       "pass": true,
+       "samples": 6,
+       "median": {
+        "off": 0.19999999552965164,
+        "on": 47.100000001490116,
+        "limit": 50.19999999552965,
+        "pass": true
+       },
+       "p95": {
+        "off": 0.29999999701976776,
+        "on": 62.30000000447035,
+        "limit": 100.29999999701977,
+        "pass": true
+       }
+      },
+      "stages_median_ms": {
+       "snapshot_ms": 0.1,
+       "ensure_ms": 10.7,
+       "run_ms": 37.4,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 31,
+       "total_ms": 47.1
+      },
+      "parity": {
+       "pass": true,
+       "mismatches": 0,
+       "max_abs_error": 2.842170943040401e-14,
+       "missing_mismatches": 0,
+       "summary_mismatches": 0
+      }
+     }
+    },
+    "gen_10000": {
+     "first": {
+      "y9_target": {
+       "pass": true,
+       "p95_on_ms": 104,
+       "median_on_ms": 84.6,
+       "max_on_ms": 104,
+       "limit_ms": 150,
+       "note": "nearest-rank p95 of 6 samples is the maximum"
+      },
+      "matched_timing": {
+       "pass": false,
+       "samples": 6,
+       "median": {
+        "off": 1.3000000044703484,
+        "on": 84.60000000149012,
+        "limit": 51.30000000447035,
+        "pass": false
+       },
+       "p95": {
+        "off": 1.7000000029802322,
+        "on": 104,
+        "limit": 101.70000000298023,
+        "pass": false
+       }
+      },
+      "stages_median_ms": {
+       "snapshot_ms": 0.8,
+       "ensure_ms": 34.4,
+       "run_ms": 51,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 31,
+       "total_ms": 84.6
+      },
+      "parity": {
+       "pass": true,
+       "mismatches": 0,
+       "max_abs_error": 2.842170943040401e-14,
+       "missing_mismatches": 0,
+       "summary_mismatches": 0
+      }
+     },
+     "unchanged": {
+      "y9_target": {
+       "pass": true,
+       "p95_on_ms": 60.9,
+       "median_on_ms": 57.1,
+       "max_on_ms": 60.9,
+       "limit_ms": 150,
+       "note": "nearest-rank p95 of 6 samples is the maximum"
+      },
+      "matched_timing": {
+       "pass": false,
+       "samples": 6,
+       "median": {
+        "off": 1,
+        "on": 57.099999994039536,
+        "limit": 51,
+        "pass": false
+       },
+       "p95": {
+        "off": 2.7999999970197678,
+        "on": 60.899999998509884,
+        "limit": 102.79999999701977,
+        "pass": true
+       }
+      },
+      "stages_median_ms": {
+       "snapshot_ms": 0.4,
+       "ensure_ms": 0,
+       "run_ms": 56.5,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 31,
+       "total_ms": 57.1
+      },
+      "parity": {
+       "pass": true,
+       "mismatches": 0,
+       "max_abs_error": 2.842170943040401e-14,
+       "missing_mismatches": 0,
+       "summary_mismatches": 0
+      }
+     },
+     "one_changed": {
+      "y9_target": {
+       "pass": true,
+       "p95_on_ms": 89.5,
+       "median_on_ms": 76.2,
+       "max_on_ms": 89.5,
+       "limit_ms": 150,
+       "note": "nearest-rank p95 of 6 samples is the maximum"
+      },
+      "matched_timing": {
+       "pass": false,
+       "samples": 6,
+       "median": {
+        "off": 1.1000000014901161,
+        "on": 76.20000000298023,
+        "limit": 51.100000001490116,
+        "pass": false
+       },
+       "p95": {
+        "off": 1.2999999970197678,
+        "on": 89.5,
+        "limit": 101.29999999701977,
+        "pass": true
+       }
+      },
+      "stages_median_ms": {
+       "snapshot_ms": 0.4,
+       "ensure_ms": 23.6,
+       "run_ms": 51.7,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 46,
+       "total_ms": 76.2
+      },
+      "parity": {
+       "pass": true,
+       "mismatches": 0,
+       "max_abs_error": 2.842170943040401e-14,
+       "missing_mismatches": 0,
+       "summary_mismatches": 0
+      }
+     }
+    },
+    "gen_100000": {
+     "first": {
+      "y9_target": {
+       "pass": false,
+       "p95_on_ms": 208.2,
+       "median_on_ms": 168.8,
+       "max_on_ms": 208.2,
+       "limit_ms": 150,
+       "note": "nearest-rank p95 of 6 samples is the maximum"
+      },
+      "matched_timing": {
+       "pass": false,
+       "samples": 6,
+       "median": {
+        "off": 12,
+        "on": 168.79999999701977,
+        "limit": 62,
+        "pass": false
+       },
+       "p95": {
+        "off": 14.5,
+        "on": 208.20000000298023,
+        "limit": 114.5,
+        "pass": false
+       }
+      },
+      "stages_median_ms": {
+       "snapshot_ms": 2.2,
+       "ensure_ms": 56.2,
+       "run_ms": 109.5,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 78,
+       "total_ms": 168.8
+      },
+      "parity": {
+       "pass": true,
+       "mismatches": 0,
+       "max_abs_error": 5.684341886080802e-14,
+       "missing_mismatches": 0,
+       "summary_mismatches": 0
+      }
+     },
+     "unchanged": {
+      "y9_target": {
+       "pass": true,
+       "p95_on_ms": 142.8,
+       "median_on_ms": 119.2,
+       "max_on_ms": 142.8,
+       "limit_ms": 150,
+       "note": "nearest-rank p95 of 6 samples is the maximum"
+      },
+      "matched_timing": {
+       "pass": false,
+       "samples": 6,
+       "median": {
+        "off": 13.099999994039536,
+        "on": 119.20000000298023,
+        "limit": 63.099999994039536,
+        "pass": false
+       },
+       "p95": {
+        "off": 14.200000002980232,
+        "on": 142.80000000447035,
+        "limit": 114.20000000298023,
+        "pass": false
+       }
+      },
+      "stages_median_ms": {
+       "snapshot_ms": 2.3,
+       "ensure_ms": 0,
+       "run_ms": 116.5,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 77,
+       "total_ms": 119.2
+      },
+      "parity": {
+       "pass": true,
+       "mismatches": 0,
+       "max_abs_error": 5.684341886080802e-14,
+       "missing_mismatches": 0,
+       "summary_mismatches": 0
+      }
+     },
+     "one_changed": {
+      "y9_target": {
+       "pass": false,
+       "p95_on_ms": 165.2,
+       "median_on_ms": 155.3,
+       "max_on_ms": 165.2,
+       "limit_ms": 150,
+       "note": "nearest-rank p95 of 6 samples is the maximum"
+      },
+      "matched_timing": {
+       "pass": false,
+       "samples": 6,
+       "median": {
+        "off": 12.899999998509884,
+        "on": 155.29999999701977,
+        "limit": 62.899999998509884,
+        "pass": false
+       },
+       "p95": {
+        "off": 19.599999994039536,
+        "on": 165.19999999552965,
+        "limit": 119.59999999403954,
+        "pass": false
+       }
+      },
+      "stages_median_ms": {
+       "snapshot_ms": 1.6,
+       "ensure_ms": 39,
+       "run_ms": 114.8,
+       "engine_queued_ms": 0,
+       "engine_reported_ms": 78,
+       "total_ms": 155.3
+      },
+      "parity": {
+       "pass": true,
+       "mismatches": 0,
+       "max_abs_error": 5.684341886080802e-14,
+       "missing_mismatches": 0,
+       "summary_mismatches": 0
+      }
+     }
+    }
+   }
+  },
+  "not_measured": [
+   "macOS and Linux",
+   "a clean Windows machine",
+   "cold cache after a reboot",
+   "saturated CPU",
+   "save interrupted during a job (covered separately by tests/e2e/interrupted-saves.mjs)"
+  ]
+ },
+ "finished": "2026-11-22T22:16:04.228Z"
+}

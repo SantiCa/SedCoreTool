@@ -14,6 +14,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.5.6: added the `ages` matched-timing benchmark for `core.ages/1` and recorded its Windows evidence (`docs/validation/M8.5.6-ages-windows.json`); parity is exact, while the 100,000-row first and one-depth-changed cases exceed the 150 ms Y9 target, so M8.5.8 waits for a maintainer decision.
 - Card Q20 written (not done): the start-failure test of the engine client can classify a failure before the exit event arrives.
 
 ## V0.153 — 2026-11-22
