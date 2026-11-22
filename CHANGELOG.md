@@ -10,6 +10,12 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ---
 
+## Unreleased
+
+### Internal
+
+- Card Q20 written (not done): the start-failure test of the engine client can classify a failure before the exit event arrives.
+
 ## V0.153 — 2026-11-22
 
 ### For users

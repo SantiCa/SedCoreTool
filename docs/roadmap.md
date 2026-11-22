@@ -16,23 +16,23 @@ file and leave one line here.
 Updated 22 November 2026. Rules for this block: [AGENTS.md §1 step 8](../AGENTS.md#1-every-session-in-this-order) (about 30 lines, rewritten,
 not appended). Earlier status records, check logs and audit texts: [roadmap-history.md § Status log](roadmap-history.md#status-log-until-21-november-2026).
 
-- **Branch:** `work/2026-11-13` (pushed); `master` (V0.152, `8ee9776`) is contained in it.
-- **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). V0.153 (22 Nov 2026) asked by the maintainer: version
-  commit on the branch, integrated into `master` after its GitHub checks; no tag or GitHub Release unless the owner asks.
-- **Last verified code commit:** V0.153 (this commit): `check_all --e2e` passed on Windows (pytest 1024/9 skipped, `npm test` 667/667,
+- **Branch:** `work/2026-11-13` (pushed); `master` (V0.153, `ba98eb1`) is contained in it.
+- **Released:** V0.153 (22 Nov 2026): integrated into `master` as `ba98eb1`; tag `V0.153` and GitHub Release (8 files, run
+  `45058054277`) at the owner's request. The V0.152 Release and tag were deleted at the owner's request; V0.84 and V0.48 remain.
+- **Last verified code commit:** V0.153 `35659e5`: `check_all --e2e` passed on Windows (pytest 1024/9 skipped, `npm test` 667/667,
   typecheck, sync-version, ruff, e2e desktop off/on, smoke, large16, tiled).
-- **GitHub:** M8.5.1 `904cbcf` and M8.5.2 `8074285`: `tests` and *Desktop builds* green (Windows, macOS, Linux). M8.5.3: read its result
-  at the start of the next card.
-- **Checks due:** none locally; the GitHub result of the M8.5.3 push.
-- **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete. M8.5 needs design card **A1** first.
-- **Found, not done:** **Q19** (intermittent macOS "window: labels"; most capable, medium), **Q18** ("go to the trace" undone by the first
+- **GitHub:** `35659e5`: *Desktop builds* green (Windows, macOS, Linux, run `45048923418`); `tests` green after re-running a macOS failure
+  of `engine.test.mjs` "a start that fails says why" (run `45048923428`, card Q20).
+- **Checks due:** none.
+- **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete.
+- **Found, not done:** **Q20** (start-failure test races the exit event; fast, low), **Q19** (intermittent macOS "window: labels"; most capable, medium), **Q18** ("go to the trace" undone by the first
   fit; fast, medium), **Q16** (canvas taller than its pane; fast, medium), **Q17** (spurious BUSY notices and "Retry save" after a reopening;
   most capable, medium), **Q11** (hostile ML settings stop the classifier), **Q12** (an evicted placeholder section cannot rebuild its grey image).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
 - **Next:** A1 designed (contract §9, cards M8.5.1-M8.5.15); Y1-Y11 and the limits of §9.7 approved as recommended (22 Nov 2026).
   M8.5.1-M8.5.5 done (`method.run` in the engine and from the page; `core.ages/1` in the engine). M8.5 paused by the maintainer for
-  Q10 (done) and V0.153 (asked 22 Nov 2026). Afterwards: M8.5.6 (waits for Y9). `Q10` before V0.153; `A4` open.
+  Q10 and V0.153 (both done). Next: M8.5.6 (waits for Y9) when the maintainer resumes M8.5. `A4` open.
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). The engine path fails the timing gate of
   [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates) for whole sections; the tile store is the
   answer for large images.
@@ -1020,6 +1020,13 @@ web/frontend security, UI correctness and architecture cards sit here.
   Windows by forcing the pending fit. Fix in `tests/e2e/tiled-sections.mjs`: two animation frames after `selectSection`; `checkProbe` asserts
   the probe's view is still on screen when the pixels are read. Checks (Windows): `check_all --desktop --tiled` all passed. Q16 is unrelated.
   *Result:* run `44977813249` on `1d166e7`: the macOS step now passes; Windows, macOS and Linux green (macOS after a re-run, see Q19).
+- [ ] **Q20 - The start-failure test of the engine client classifies before the exit event** (found by V0.153, 22 Nov 2026; fast tier,
+  effort low). Run `45048923428` attempt 1 on `35659e5`, macOS: `tests/app/engine.test.mjs` "a start that fails says why" got 'the
+  handshake was refused or malformed' instead of 'the process exited before its handshake'; the re-run passed. In `clientFixture`,
+  `exitedFirst` is computed when `start()` rejects (stdout closed), and Node can deliver the child's `exit` event after that. *Change:*
+  classify after `client.exited` (or the 2 s wait already there), keeping "exited first" meaning the process ended without a handshake;
+  the program's own diagnosis is unchanged. *Done when:* the cause is stated and the test no longer depends on event order.
+
 - [ ] **Q19 - `tiled-sections.mjs` "window: labels" fails intermittently on macOS** (found by M8.4.11, 22 Nov 2026; most capable, effort
   medium: it may be a lost edit, not only a test race). First attempt of run `44977813249` on `1d166e7`: the section reopened with a window
   lacked one overlap run (`2+5`, row 3165, columns 58-70) that the cut section had after the same script; the re-run passed. *Read first:*
