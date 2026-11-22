@@ -209,7 +209,7 @@ dialog ol { padding-left: 20px; display: grid; gap: 6px; }
 
 /* modes, projects, composite log */
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
-.seg button { border: 0; background: var(--field); padding: 5px 12px; cursor: pointer; }
+.seg button { border: 0; background: var(--field); padding: 5px 12px; cursor: pointer; white-space: nowrap; }   /* card Q14: a label on two lines made the top bar taller and moved the image under the pointer */
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .btn.proj { display: inline-flex; gap: 6px; align-items: baseline; max-width: 340px; }
