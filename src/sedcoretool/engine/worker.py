@@ -152,15 +152,20 @@ class MethodRunner:
         self.process.stdout.close()
 
 
+RESULT_FIELDS = frozenset({'ok', 'dimensions', 'packed'})
+
+
 class MethodJob:
     """One job on a ``MethodRunner``: the coordinator's handle on it, with the same surface as ``WorkerJob``.
 
-    ``deadline`` is the longest the coordinator lets the job run, in seconds. ``result`` is the approved answer, or ``None``
-    when the worker died, sent something else, or was killed."""
+    ``deadline`` is the longest the coordinator lets the job run, in seconds (the method table's deadline when given). ``result``
+    is the approved answer, or ``None`` when the worker died, sent something else, or was killed."""
 
     deadline = 120
 
-    def __init__(self, runner, job_file, cancel_path):
+    def __init__(self, runner, job_file, cancel_path, *, deadline=None):
+        if deadline is not None:
+            self.deadline = deadline
         self.runner = runner
         self.job_file = job_file
         self.cancel_path = cancel_path
@@ -176,7 +181,12 @@ class MethodJob:
         if set(result) == {'error'}:
             error = result['error']
             return isinstance(error, dict) and set(error) == {'code', 'field'} and isinstance(error['code'], str)
-        return set(result) == {'ok', 'dimensions', 'packed'} and result['ok'] is True and isinstance(result['packed'], dict)
+        # The method worker adds `tables` and `summary` (contract §9.3), both or neither; the coordinator checks their content.
+        fields = set(result)
+        if fields not in (RESULT_FIELDS, RESULT_FIELDS | {'tables', 'summary'}):
+            return False
+        return (result['ok'] is True and isinstance(result['packed'], dict) and isinstance(result['dimensions'], dict)
+                and all(isinstance(result.get(name, {}), dict) for name in ('tables', 'summary')))
 
     def cancel(self):
         self.cancel_path.touch(exist_ok=True)

@@ -121,7 +121,7 @@ def test_small_buffers_cannot_bypass_the_live_handle_limit():
             store.begin(descriptor)
         store.release(next(iter(store.buffers)))
         store.begin(descriptor)
-        assert len(store.buffers) == MAX_HANDLES == 256
+        assert len(store.buffers) == MAX_HANDLES == 1024     # contract §9.7 (card M8.5.2); was 256
     finally:
         store.close()
 
@@ -612,11 +612,13 @@ def test_the_operation_table_matches_the_client_allowlist_and_the_contract_kinds
     client = (Path(__file__).resolve().parents[1] / 'desktop' / 'engine.js').read_text(encoding='utf-8')
     allowlist = re.search(r'const OPERATIONS = new Set\(\[(.*?)\]\);', client, re.S)
     assert allowlist, 'desktop/engine.js no longer declares OPERATIONS as a Set literal'
-    assert set(re.findall(r"'([a-z.]+)'", allowlist.group(1))) == set(OPERATIONS)
+    # Card M8.5.2 added `method.run` to the engine; the client allows it from card M8.5.3, which then removes this exception.
+    engine_only = {'method.run'}
+    assert set(re.findall(r"'([a-z.]+)'", allowlist.group(1))) == set(OPERATIONS) - engine_only
     assert HANDSHAKE in OPERATIONS
     assert all(entry.kind in OPERATION_KINDS and callable(entry.handler) for entry in OPERATIONS.values())
     kinds = {kind: {name for name, entry in OPERATIONS.items() if entry.kind == kind} for kind in OPERATION_KINDS}
-    assert kinds['job'] == {'section.analyze', 'buffer.digest', 'pyramid.build'}
+    assert kinds['job'] == {'section.analyze', 'method.run', 'buffer.digest', 'pyramid.build'}
     assert kinds['mask'] == set(MASK_OPERATIONS)
 
 

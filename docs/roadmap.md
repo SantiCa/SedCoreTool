@@ -18,11 +18,11 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.152, `8ee9776`) is contained in it.
 - **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153; Q10 must be done before it.
-- **Last verified code commit:** M8.4.10, `1d166e7`. Full checks on Windows passed for Q15 (`check_all --desktop --tiled`); M8.4.11
-  repeated the M8.4.9 memory and timing measurement on `1d166e7` (limits held; record in history).
-- **GitHub:** `1d166e7`: `tests` green; *Desktop builds* green on Windows, macOS and Linux (run `44977813249`), macOS only after a re-run of
-  a failure at "window: labels" (card Q19).
-- **Checks due:** none on this state (the last commit only records documents).
+- **Last verified code commit:** M8.5.2 (this commit): `check_all --desktop` passed on Windows (pytest 994/9 skipped, `npm test` 646/646,
+  typecheck, ruff, desktop e2e engine off and on).
+- **GitHub:** `1d166e7` (M8.4.10): `tests` green; *Desktop builds* green on Windows, macOS and Linux (run `44977813249`), macOS only after a
+  re-run of a failure at "window: labels" (card Q19). Result for the M8.5.1 and M8.5.2 pushes: read it at the start of the next card.
+- **Checks due:** none locally; the GitHub result of the M8.5.2 push.
 - **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete. M8.5 needs design card **A1** first.
 - **Found, not done:** **Q19** (intermittent macOS "window: labels"; most capable, medium), **Q18** ("go to the trace" undone by the first
   fit; fast, medium), **Q16** (canvas taller than its pane; fast, medium), **Q17** (spurious BUSY notices and "Retry save" after a reopening;
@@ -30,7 +30,8 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
 - **Next:** A1 designed (contract §9, cards M8.5.1-M8.5.15); Y1-Y11 and the limits of §9.7 approved as recommended (22 Nov 2026).
-  Run in progress: **M8.5.1** (operation table; most capable, medium), then the M8.5 cards in order. `Q10` before V0.153; `A4` open.
+  Run in progress: M8.5.1 and M8.5.2 done; next **M8.5.3** (`method.run` from the page; most capable, medium; it must remove the
+  `engine_only` exception in the M8.5.1 table test), then the M8.5 cards in order. `Q10` before V0.153; `A4` open.
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). The engine path fails the timing gate of
   [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates) for whole sections; the tile store is the
   answer for large images.
@@ -596,7 +597,7 @@ after. The order is the order of this list; cards written later take the next fr
     in `test_engine_transport.py`: the table equals `desktop/engine.js` `OPERATIONS` and the contract kinds; refusals before the handshake
     and of unknown/unconfigured operations. Checks (Windows): engine pytest 195 passed/2 skipped before, 197/2 after; ruff clean; `npm test`
     646/646; `desktop.mjs` engine on passed. `app.js` 4,647 lines before and after.
-- [ ] **M8.5.2 - `method.run` in the engine** (after M8.5.1).
+- [x] **M8.5.2 - `method.run` in the engine** (done 22 Nov 2026, development gate).
   - *Goal:* the coordinator runs any method of its method table with scope, priority, superseding, declared dimensions and table outputs
     (contract §9.1-§9.4, §9.6, §9.7); test-only probe methods exercise every scope; no production method uses it yet.
   - *Read first:* contract §9, §3 (job execution, the `section.analyze` row), §4 "Tables"; `engine/specs.py`; `engine/server.py`
@@ -617,6 +618,18 @@ after. The order is the order of this list; cards written later take the next fr
     before an earlier waiting batch job; `BUSY` at the fifth waiting job of one priority; an empty result; an oversized summary is
     `INTERNAL`; equal `inputs_key` for equal bytes under different revisions. `pytest tests/test_engine*.py`, `ruff`.
   - *Done when:* these and every existing engine test pass; development gate.
+  - *As built:* `specs.py`: `MethodSpec(name, scope, inputs, families, priorities, dimensions, tables, deadline, same_shape)`, `Family`,
+    `METHOD_SPECS` (`section.intervals/1`, inputs = `METHOD_INPUTS`). `server.py`: `method.run` is a `job` operation; `admit_method` checks
+    §9.2 in order; `resolve_inputs` checks fixed names and contiguous complete families (≤ 416 names); `WaitingJobs` holds two queues of 4
+    (`BUSY` beyond, interactive first; other jobs wait as interactive); `enqueue` supersedes by (method, target); `adopt_results` serves both
+    operations (dimensions ≥ 0, empty result without a buffer, table outputs checked against §4 limits and cells, summary ≤ 8 KiB else
+    `INTERNAL`, response must fit one frame, which `section.analyze` now also refuses as `INTERNAL` instead of ending the session);
+    `inputs_key`, `queued_ms`. `method_worker.py` passes `tables`/`summary` and refuses non-zero missing slots. `buffers.py`: 1,024 handles,
+    empty columns allowed. Not built: progress events and the 60 s stall of batch methods (§9.4), with the first batch method.
+    `desktop/engine.js` does not allow `method.run` yet: the M8.5.1 table test excepts it, **M8.5.3 removes that exception**. Tests:
+    `test_engine_method_run.py` (19; probes per scope through the real worker; 7 seeded faults all caught). Checks (Windows):
+    `check_all --desktop` passed (pytest 994/9 skipped, engine 216/2 vs 197/2 before; `npm test` 646/646; typecheck; ruff; desktop e2e
+    engine off and on). `app.js` 4,647 lines before and after.
 - [ ] **M8.5.3 - `method.run` from the page** (after M8.5.2).
   - *Goal:* the page can request `method.run` through the main process and decode its columns and tables; no interface uses it yet.
   - *Read first:* contract §9; `desktop/engine-ipc.js` (`analyzeSection`, `ANALYSES`, token limit), `desktop/engine.js` (`OPERATIONS`,

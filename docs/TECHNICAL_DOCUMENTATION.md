@@ -3007,11 +3007,20 @@ lies about its files or exceeds 120 s is `INTERNAL` and nothing is adopted, and 
 that the worker does not acknowledge within 1.5 s, an abandoned job and the end of the engine kill the worker; an idle worker stops
 after 30 s. Progress events are not sent yet.
 
+`method.run` (contract §9, card M8.5.2) runs any method of the method table (`engine/specs.py` `METHOD_SPECS`: scope `section`,
+`core` or `project`, inputs with dtype and rank, families `core<k>` of up to 128 tables, allowed priorities, dimension names, table
+outputs, deadline). The coordinator checks the request's fields in the contract's order, supersedes the older jobs of the same
+method and target (a waiting one is answered `cancelled`, a running one is asked to cancel), and answers with `inputs_key` (SHA-256 of
+the method, scope and verified input hashes), the declared dimensions (0 allowed), one packed result buffer (none when every column
+is empty), the descriptions of the table outputs, whose cells are the columns `<name>_values` and `<name>_valid` (the table format of
+contract §4), and a summary of at most 8 KiB (larger is `INTERNAL`). Only `section.intervals/1` is in the table, still requested
+through `section.analyze`; the desktop client does not send `method.run` yet.
+
 `buffer.begin`, `chunk`, `commit` and `release` stage data in private temporary files. Validate shape/dtype/
 declared size before allocation; enforce exact offsets, length, SHA-256, finite f64 data and strict metadata
 before commit. Numeric types: `u8`, `u16le`, `i32le`, `u32le`, `u64le`, `f64le` (little-endian, C order); `utf8json` for metadata.
 Buffers are immutable after commit; releasing a queued/active snapshot revokes new access but
-keeps its file pinned until admitted work finishes. Limits: 256 live handles, 256 MiB per numeric buffer,
+keeps its file pinned until admitted work finishes. Limits: 1,024 live handles, 256 MiB per numeric buffer,
 4 MiB per metadata buffer, 512 MiB admitted session budget with a 16 MiB transient reserve. Metadata reserves
 64 times its byte length for parsing/object overhead. The session's staged bytes fit below the planned 1 GiB
 scratch-disk cap; this does not claim total RSS or multi-gigabyte support. Main owns the temporary root and
@@ -3019,7 +3028,8 @@ attempts bounded cleanup after child close, including coordinator failure, check
 recursive removal. External locks can prevent cleanup; abrupt main-process termination can leave an empty
 temporary root after server cleanup.
 
-One job (a digest or an analysis) runs and at most four wait; excess receives BUSY. A worker polls a private cancellation
+One job (a digest, an analysis or a method) runs and at most four wait per priority (`interactive`, `batch`; a waiting interactive job
+starts first, and jobs other than `method.run` are interactive); excess receives BUSY. A worker polls a private cancellation
 marker between reads or blocks of rows; the coordinator starts forced termination after 1.5 s if needed. A worker deadline (30 s for the digest, 120 s for a method)
 prevents unbounded execution. Cancellation has its own acknowledgement and the target's terminal response;
 queued cancellation releases its pin. EOF on a private worker liveness pipe aborts orphaned work. Windows
