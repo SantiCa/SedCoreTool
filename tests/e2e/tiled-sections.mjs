@@ -651,7 +651,10 @@ try {
     const viewBox = () => page.evaluate(() => {
       const r = document.getElementById('view').getBoundingClientRect(), height = (selector) => document.querySelector(selector)?.getBoundingClientRect().height ?? null;
       const { x, y, zoom } = window.ichantool.S.view;
-      return { left: r.left, top: r.top, view: [x, y, zoom], header: height('header.top'), tools: height('#tools'), validation: height('#projectValidation'),
+      // Card Q14: each visible child of the top bar with its height and text, so that a top bar that grows names the element that grew.
+      const headerParts = [...document.querySelectorAll('header.top > *, header.top .acts > *')].filter((el) => !el.hidden && el.getClientRects().length)
+        .map((el) => `${el.id || el.className}:${Math.round(el.getBoundingClientRect().height)}:${(el.textContent || '').trim().slice(0, 40)}`);
+      return { left: r.left, top: r.top, view: [x, y, zoom], header: height('header.top'), headerParts, tools: height('#tools'), validation: height('#projectValidation'),
         scrolled: ['html', '.app', '.work', '.stage', '.viewport'].map((selector) => document.querySelector(selector)?.scrollTop ?? null) };
     });
     let box = await viewBox();
@@ -674,7 +677,8 @@ try {
       // Card Q14: on GitHub (Windows and macOS) one stroke of the first section scripted after a reopening landed 19 rows above the others' place,
       // never seen on the maintainer's computer; if the view moves under the pointer again, say so here rather than in the comparison of the masks.
       const after = await viewBox();
-      assert.deepEqual(after, box, `the view stayed where it was measured during the ${tool} stroke`);
+      const { headerParts: partsAfter, ...placeAfter } = after, { headerParts: partsBefore, ...placeBefore } = box;   // texts may change (save state)
+      assert.deepEqual(placeAfter, placeBefore, `the view stayed where it was measured during the ${tool} stroke; top bar ${JSON.stringify({ partsBefore, partsAfter })}`);
       await idle();
     };
     const objects = () => page.evaluate(() => [...window.ichantool.S.sections[window.ichantool.S.cur].objects.keys()]);

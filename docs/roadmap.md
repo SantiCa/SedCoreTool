@@ -26,7 +26,7 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
   on Windows; it does not.
 - **Checks due:** the GitHub result of this commit (Q14 part b).
 - **Q14 in progress:** part (a) fixed (test defect; see the card); part (b), `window: labels` on GitHub Windows and macOS, waits for the
-  GitHub run of this commit, whose new assertion names what moved under the pointer.
+  GitHub run of this commit: the top bar grows by 18.7 px on GitHub (not here); the test now names the element that grows.
 - **Found, not done:** **Q16** (canvas taller than its pane; fast, medium), **Q17** (spurious BUSY notices; most capable, medium), **Q15** (the macOS/Linux-only failures of
   `tiled-sections.mjs`; most capable, effort medium), **Q11** (hostile ML settings stop the classifier), **Q12**
   (an evicted placeholder section cannot rebuild its grey image).
@@ -749,7 +749,12 @@ web/frontend security, UI correctness and architecture cards sit here.
   GitHub Windows and macOS, also on `4676908`): in the cut section, one brush stroke landed 19 rows higher; the window section is correct.
   Not reproduced locally (4 runs, one at 4x CPU throttling). `draw` now asserts that the view, the canvas box and the layout above it do not
   move during a stroke, so the next CI run names what moved. Checks (Windows): `tiled-sections.mjs` passed twice in a row;
-  `check_all --desktop --tiled` all passed (pytest 932 / 9 skipped, npm 633 / 0). Open: (b) on GitHub.
+  `check_all --desktop --tiled` all passed (pytest 932 / 9 skipped, npm 633 / 0).
+  GitHub run `44966181021` (`f7c1bb9`): on Windows and Linux the new check failed because the **top bar shrank from 66.7 to 48 px during
+  the stroke** (canvas top 139.1 → 120.4 px, the 19 rows); macOS failed earlier at "reopened, no redraw by hand" (Q15). Not reproduced on the
+  workstation, also with every hidden top-bar button shown and a 60-character save state at 1600 and 1200 px in both languages (new step in
+  `tests/e2e/desktop.mjs`, which passes). `tiled-sections.mjs` now names each visible top-bar element with its height and text when the
+  view moves, so the next GitHub run identifies the element that grows. Open: (b) on GitHub.
 
 - [ ] **Q16 - The view canvas is taller than its visible pane and depends on the window's first size** (found by Q14, 22 Nov 2026; fast tier,
   effort medium). At 1600 x 1000 `#view` is 1754 px tall while about 860 px are visible (clipped by `.viewport`): the implicit grid row of

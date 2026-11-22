@@ -182,6 +182,28 @@ try {
   assert.equal(await p.evaluate(() => window.__injected ?? null), null, 'a javascript: link ran nothing');
   assert.equal(run.browser.targets().filter((x) => x.type() === 'page').length, windowsBefore, 'no window opened for file:, javascript:, data: or another app host');
   console.log('Desktop hardening: remote script blocked, navigation away refused, file/javascript/data links open nothing.');
+  // Card Q14: the top bar keeps its height when its hidden buttons and a long save state appear (on GitHub a "Retry save" button made a mode
+  // button wrap onto two lines, and the image under the pointer moved by 19 rows while a stroke was drawn).
+  for (const [width, height] of [[1600, 1000], [1200, 800]]) {
+    await p.setViewport({ width, height });
+    for (let language = 0; language < 2; language++) {
+      const heights = await p.evaluate(async () => {
+        const header = document.querySelector('header.top'), ids = ['saveRetry', 'diagIndicator', 'bkReactivateTop'], state = document.getElementById('saveState');
+        const measure = () => header.getBoundingClientRect().height, before = measure(), text = state.textContent;
+        for (const id of ids) document.getElementById(id).hidden = false;
+        state.textContent = 'W'.repeat(60);
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const crowded = measure();
+        for (const id of ids) document.getElementById(id).hidden = true;
+        state.textContent = text;
+        return { before, crowded, language: document.documentElement.lang };
+      });
+      assert.equal(heights.crowded, heights.before, `the top bar keeps its height at ${width} px with every button shown: ${JSON.stringify(heights)}`);
+      await p.click('#langBtn');
+    }
+  }
+  await p.setViewport(null);
+  console.log('Top bar: same height with every hidden button and a long save state, 1600 and 1200 px, both languages.');
   let backupWindow = 0;
   const backupBrowser = { newPage: async () => {
     const url = `app://corantool/app/index.html?backup-test=${++backupWindow}`;
