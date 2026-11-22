@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { TILE } from '../../app/js/tiledsection.js';
 import { MaskTiles } from '../../app/js/tiledmasks.js';
 import { rowCounts, binRows } from '../../app/js/core.js';
-import { TiledRowCounts, TiledCountsRunner, tileHistogram, columnSpan } from '../../app/js/tiledcounts.js';
+import { TiledRowCounts, TiledCountsRunner, tileHistogram, columnSpan, COUNT_HISTOGRAM_BYTES } from '../../app/js/tiledcounts.js';
 import { allCases } from '../../tools/make_interval_fixtures.mjs';
 import { computeSectionBins, binsFromRowCounts, binRowsOfSection, effectiveClassIndex } from '../../app/js/sectionanalysis.js';
 
@@ -202,4 +202,30 @@ test('every interval fixture case, cut into tiles and counted tile by tile, give
     assert.deepEqual(tiled, computeSectionBins(section, project).bins, name);
   }
   assert.ok(multiTile >= 4, 'cases larger than one tile are included: ' + multiTile);
+});
+
+test('card M8.4.36: beyond the budget the histograms are dropped, nothing more is kept, and the table is refused until the section is opened again', () => {
+  const width = 8 * TILE, height = 8 * TILE, grid = { width, height, rows: 8, cols: 8 };
+  const counts = new TiledRowCounts(grid, { nonEmpty: () => Array.from({ length: 64 }, (_, i) => i) });
+  counts.setArea({ x0: 0, y0: 0, x1: width, y1: height });
+  // A tile whose every row holds 512 different labels: its histogram takes about 1.5 MiB, more than the labels themselves.
+  const noisy = (seed) => { const labels = new Int32Array(TILE * TILE); for (let i = 0; i < labels.length; i++) labels[i] = 1 + ((i * 2654435761 + seed) >>> 0) % 65535; return { labels, exclude: null }; };
+  const first = tileHistogram(noisy(1), 0, 0, width, height, 0, width);
+  assert.ok(first.bytes > 1.4 * 2 ** 20, 'one noisy tile: ' + first.bytes);
+  let peak = 0, committed = 0;
+  for (let tile = 0; tile < 64; tile++) {
+    counts.commit(tile, tileHistogram(noisy(tile), Math.floor(tile / 8), tile % 8, width, height, 0, width));
+    committed++; peak = Math.max(peak, counts.bytes);
+    if (counts.exceeded) break;
+  }
+  assert.ok(counts.exceeded && counts.overBudget, 'the budget was exceeded after ' + committed + ' tiles');
+  assert.ok(peak <= COUNT_HISTOGRAM_BYTES + 2 * 2 ** 20, 'never more than the budget and one tile: ' + peak);
+  assert.deepEqual([counts.bytes, counts.hists.size, counts.fresh.size], [0, 0, 0], 'everything dropped');
+  for (let tile = committed; tile < 64; tile++) counts.commit(tile, tileHistogram(noisy(tile), Math.floor(tile / 8), tile % 8, width, height, 0, width));
+  assert.deepEqual([counts.bytes, counts.fresh.size], [0, 0], 'later tiles are not kept');
+  counts.markChanged([[0, 0]]);
+  assert.equal(counts.setArea({ x0: 0, y0: 0, x1: width / 2, y1: height }), false, 'nothing to count after an edit or an area change');
+  assert.ok(counts.ready && counts.snapshot() === null, 'no reopening cache from such a state');
+  counts.restore([0, width], new Map([[0, tileHistogram({ labels: new Int32Array(TILE * TILE).fill(3), exclude: null }, 0, 0, width, height, 0, width)]]));
+  assert.equal(counts.overBudget, false, 'a section opened again starts within the budget');
 });

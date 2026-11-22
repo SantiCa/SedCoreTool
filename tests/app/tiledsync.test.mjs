@@ -182,6 +182,25 @@ test('the first round sends every table; a round with only tile changes sends no
   assert.deepEqual(sentTables(store, sync.manifest), []);
 });
 
+test('card Q14: a section reopened on a stored version is settled only after one round, which only a request starts; that round sends the tables and no tile', async () => {
+  const s = pageSection(), tiles = new MaskTiles({ width: 512, height: 512 }), store = fakeStore(), first = pageSync(s, CLASSES, tiles, store);
+  tiles.set(0, 0, labelsWith(1), null);
+  await first.request();
+  const saved = first.manifest, calls = store.calls.length;
+  const reopened = new MaskTiles({ width: 512, height: 512 }), sync = pageSync(s, CLASSES, reopened, store);
+  reopened.stored.add(reopened.index(0, 0));
+  sync.manifest = saved;                                                  // as loadTiledSection does
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(sync.settled, false, 'its tables are not acknowledged yet (the page rebuilt them from the record)');
+  assert.equal(sync.running, null, 'and nothing sends them by itself: a save or an edit asks for the round');
+  assert.equal(store.calls.length, calls);
+  await sync.request([]);
+  assert.ok(sync.settled);
+  assert.deepEqual(store.calls.slice(calls), ['begin', 'commit'], 'no tile is sent again');
+  assert.deepEqual(sentTables(store, sync.manifest), [...OBJECT_TABLES, 'stack_members', 'stack_offsets'].sort());
+  assert.deepEqual([...store.manifests.get(sync.manifest).tiles.keys()], ['0.0'], 'on the stored version as its base');
+});
+
 test('a class change sends the object columns and the classes; a new object and a new stack are found though the edit said "tiles only"', async () => {
   const s = pageSection(), classes = CLASSES.map((c) => ({ ...c })), tiles = new MaskTiles({ width: 512, height: 512 }), store = fakeStore();
   const sync = pageSync(s, classes, tiles, store);
@@ -279,4 +298,22 @@ test('MaskLoader: tiles the page dropped are read back once, and a read never re
   tiles.acknowledge([]); tiles.set(0, 3, labelsWith(9), null); tiles.acknowledge([[0, 3]]);
   const missing = [[0, 0], [0, 1], [0, 3]].filter(([r, c]) => tiles.state(r, c) === 'missing');
   if (missing.length) await assert.rejects(failing.want(missing));
+});
+
+test('card M8.4.35: a test hook holds a round after its last tile and before its commit; without it nothing waits', async () => {
+  const tiles = new MaskTiles({ width: 1300, height: 1100 }), store = fakeStore();
+  tiles.set(0, 0, labelsWith(3), null);
+  const sync = new MaskSync({ tiles, api: store.api, tables: () => ({ objects: new Uint8Array([1]) }), sha256: sha, ...instant });
+  assert.equal(sync.beforeCommit, null);
+  let release;
+  sync.beforeCommit = () => new Promise((resolve) => { release = resolve; });
+  const sending = sync.request();
+  for (let i = 0; i < 50 && !release; i++) await new Promise((r) => setTimeout(r, 1));
+  assert.ok(release, 'held');
+  assert.deepEqual(store.calls, ['begin', 'put labels 0.0', 'put exclude 0.0'], 'every tile sent, nothing committed');
+  assert.equal(sync.puts, 2);
+  release();
+  await sending;
+  assert.equal(store.calls.at(-1), 'commit');
+  assert.ok(sync.settled);
 });

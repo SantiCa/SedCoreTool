@@ -17,10 +17,11 @@ else:
     from protocol import MAX_CHUNK, MAX_METADATA, ProtocolError, RequestError, require_fields, require_integer, strict_json
 
 MAX_BUFFER = 256 * MAX_CHUNK
-MAX_HANDLES = 256     # live buffers: a page keeps the inputs of up to 16 sections (9 buffers each) between analyses (card M8.4.2)
+MAX_HANDLES = 1024    # live buffers: resident section inputs and pixels (M8.4.2, M8.4.9), tables (M8.4.10) and the up to 416 handles of one
+                      # `method.run` request (contract §9.7, card M8.5.2); a handle costs one record, the byte budget is unchanged
 SESSION_BUDGET = 512 * MAX_CHUNK
 TRANSIENT_RESERVE = 16 * MAX_CHUNK
-ITEM_BYTES = {'u8': 1, 'i32le': 4, 'u32le': 4, 'u64le': 8, 'f64le': 8, 'utf8json': 1}
+ITEM_BYTES = {'u8': 1, 'u16le': 2, 'i32le': 4, 'u32le': 4, 'u64le': 8, 'f64le': 8, 'utf8json': 1}   # u16le: 16-bit pixels (card M8.4.9)
 
 
 @dataclass
@@ -160,27 +161,36 @@ class BufferStore:
             except ProtocolError as error:
                 raise RequestError('INVALID_BUFFER') from error
 
-    def adopt_packed(self, source, byte_length, sha256, layout):
+    def adopt_packed(self, source, byte_length, sha256, layout, *, allow_empty_columns=False):
         """Take the single result file of a worker as a committed, immutable `u8` buffer; returns `(handle, layout)`.
 
         `layout` maps a column name to `{dtype, shape, offset, byte_length}`: every column must start at a multiple of 8 bytes, lie inside
         the file, not overlap another, have a length equal to its shape times its item size, and the file must end exactly where the last
         column's padding ends, so nothing in it is unaccounted for. The file moves into the store (same filesystem) and is then read once:
         its SHA-256 must be the declared one and every float64 column must hold finite numbers. Nothing stays adopted on failure.
-        One file and one handle replace about 35 of each; opening a file is the expensive step on Windows."""
+        One file and one handle replace about 35 of each; opening a file is the expensive step on Windows.
+        ``allow_empty_columns`` (results of `method.run`, contract §9.3): a column may have a dimension of 0 and a length of 0 (an output
+        table with no rows); the file itself still holds at least 8 bytes."""
         if len(self.buffers) >= MAX_HANDLES:
             raise RequestError('LIMIT_EXCEEDED')
         total = require_integer(byte_length, 'byte_length', 8, MAX_BUFFER)
         if not isinstance(sha256, str) or not re.fullmatch('[0-9a-f]{64}', sha256) or not isinstance(layout, dict) or not 1 <= len(layout) <= 64:
             raise RequestError('INVALID_BUFFER', 'shape')
+        smallest = 0 if allow_empty_columns else 1
         end = 0
-        for part in sorted(layout.values(), key=lambda item: item['offset'] if isinstance(item, dict) and type(item.get('offset')) is int else -1):
+
+        def position(item):          # empty columns first at one offset, so they never seem to overlap the column that starts there
+            if isinstance(item, dict) and type(item.get('offset')) is int and type(item.get('byte_length')) is int:
+                return item['offset'], item['byte_length']
+            return -1, -1
+
+        for part in sorted(layout.values(), key=position):
             valid = (isinstance(part, dict) and set(part) == {'dtype', 'shape', 'offset', 'byte_length'} and isinstance(part['dtype'], str)
                      and part['dtype'] in ITEM_BYTES and part['dtype'] != 'utf8json' and isinstance(part['shape'], list) and 1 <= len(part['shape']) <= 3
-                     and all(type(item) is int and item >= 1 for item in part['shape']) and type(part['offset']) is int and type(part['byte_length']) is int)
+                     and all(type(item) is int and item >= smallest for item in part['shape']) and type(part['offset']) is int and type(part['byte_length']) is int)
             if not valid or part['offset'] % 8 or part['offset'] < end:
                 raise RequestError('INVALID_BUFFER', 'shape')
-            if math.prod(part['shape']) * ITEM_BYTES[part['dtype']] != part['byte_length'] or part['byte_length'] < 1:
+            if math.prod(part['shape']) * ITEM_BYTES[part['dtype']] != part['byte_length'] or part['byte_length'] < smallest:
                 raise RequestError('INVALID_BUFFER', 'shape')
             end = part['offset'] + part['byte_length']
         if total != -(-end // 8) * 8:

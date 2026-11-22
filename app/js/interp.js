@@ -6,6 +6,7 @@
 // Contours by marching squares; colour ramps for the grid and the colour bar.
 
 import { makeProjection, validMapCoords } from './geo.js';
+import { minOf, maxOf } from './core.js';
 
 export const INTERP_METHODS = ['idw', 'nearest', 'tin', 'mincurv', 'rbf', 'kriging', 'movavg'];
 export const INTERP_DEFAULT = {
@@ -21,7 +22,7 @@ export function visibleSeaOptions(options = {}) {
 
 /** Linear system A x = b (Gaussian elimination with partial pivoting); returns null if singular. */
 export function solve(A, b) {
-  const n = b.length, M = A.map((r, i) => [...r, b[i]]), tol = 1e-12 * Math.max(1, ...A.map((r) => Math.max(...r.map(Math.abs))));
+  const n = b.length, M = A.map((r, i) => [...r, b[i]]), tol = 1e-12 * Math.max(1, maxOf(A.map((r) => maxOf(r.map(Math.abs)))));
   for (let c = 0; c < n; c++) {
     let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
     if (Math.abs(M[p][c]) < tol) return null;
@@ -77,7 +78,7 @@ export function fitVariogram(xy, v, model = 'spherical') {
   for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) pairs.push([Math.hypot(xy[i][0] - xy[j][0], xy[i][1] - xy[j][1]), 0.5 * (v[i] - v[j]) ** 2]);
   const mean = v.reduce((a, b) => a + b, 0) / (n || 1), sill = v.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(n - 1, 1) || 1;
   if (pairs.length < 3) return { nugget: 0, sill, range: 1, bins: [] };
-  const hmax = Math.max(...pairs.map((p) => p[0])) / 2 || 1, nb = 8, bins = [];
+  const hmax = maxOf(pairs.map((p) => p[0])) / 2 || 1, nb = 8, bins = [];
   for (let k = 0; k < nb; k++) {
     const a = (k * hmax) / nb, b = ((k + 1) * hmax) / nb, sel = pairs.filter((p) => p[0] > a && p[0] <= b);
     if (sel.length) bins.push({ h: sel.reduce((s, p) => s + p[0], 0) / sel.length, g: sel.reduce((s, p) => s + p[1], 0) / sel.length, n: sel.length });
@@ -213,7 +214,7 @@ export function colorRange(values, o) {
   const v = values.filter((x) => x != null && Number.isFinite(x));
   if (o.scale === 'manual') return [o.vmin, o.vmax];
   if (o.scale === 'sym2' || !v.length) return [-2, 2];
-  const lo = Math.min(...v), hi = Math.max(...v);
+  const lo = minOf(v), hi = maxOf(v);
   if (o.scale === 'symauto') { const m = Math.max(Math.abs(lo), Math.abs(hi)) || 1; return [-m, m]; }
   return lo === hi ? [lo - 1, hi + 1] : [lo, hi];
 }

@@ -148,6 +148,8 @@ input[type=number] { font-family: var(--font-data); font-variant-numeric: tabula
 .empty p { margin: 0; color: #b5aea2; }
 .drop .empty > div { border-color: var(--accent); }
 .statusbar { display: flex; gap: 18px; padding: 4px 12px; min-height: 23px; box-sizing: border-box; align-items: center; font: 11.5px var(--font-data); color: #b5aea2; background: #111413; border-top: 1px solid #262c2b; white-space: nowrap; overflow: hidden; }
+.impreport { margin-top: 8px; } .impreport ul.impnotes { margin: 4px 0 6px 18px; padding: 0; } .imppreview { max-height: 180px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+.imppreview table { border-collapse: collapse; font-size: 12px; } .imppreview th, .imppreview td { padding: 2px 6px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; } .imppreview th { position: sticky; top: 0; background: var(--panel); }
 .busy { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: var(--accent); color: var(--accent-ink); padding: 5px 14px; border-radius: 99px; font-weight: 600; z-index: 3; }
 
 /* right panel */
@@ -207,7 +209,7 @@ dialog ol { padding-left: 20px; display: grid; gap: 6px; }
 
 /* modes, projects, composite log */
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
-.seg button { border: 0; background: var(--field); padding: 5px 12px; cursor: pointer; }
+.seg button { border: 0; background: var(--field); padding: 5px 12px; cursor: pointer; white-space: nowrap; }   /* card Q14: a label on two lines made the top bar taller and moved the image under the pointer */
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .btn.proj { display: inline-flex; gap: 6px; align-items: baseline; max-width: 340px; }
@@ -729,10 +731,12 @@ details.mini[open] { display: grid; gap: 6px; }
           </div>
           <p class="dswarn" id="secRegionWarning" role="status" hidden data-i18n="load.regionWarning"></p>
           <p class="dswarn" id="secMaskWarning" role="status" hidden data-i18n="load.maskWarning"></p>
+          <div class="dswarn" id="secStatsWarning" role="status" hidden><span id="secStatsMsg"></span> <button class="btn small" id="secStatsSplit" hidden></button></div>
           <div class="f" id="secSource" hidden><span data-i18n="tiles.source.title"></span>
             <p class="note" id="secSourceNote" role="status"></p>
             <div class="row"><label class="btn small file" id="secLocateLabel" hidden><span data-i18n="tiles.source.locate"></span><input type="file" id="secLocate" accept="image/*,.tif,.tiff,.tf8,.btf"></label>
-              <button class="btn small" id="secCopySource" hidden data-i18n="tiles.source.copy"></button></div>
+              <button class="btn small" id="secCopySource" hidden data-i18n="tiles.source.copy"></button>
+              <button class="btn small" id="secSplit" hidden data-i18n="tiles.split.btn"></button></div>
           </div>
           <label class="f"><span data-i18n="sec.name"></span><input type="text" id="secName"></label>
           <div class="grid3">
@@ -953,6 +957,7 @@ details.mini[open] { display: grid; gap: 6px; }
         <label class="f"><span data-i18n="fig.title"></span><input type="text" id="figTitle"></label>
         <label class="f"><span data-i18n="fig.caption"></span><textarea id="figCaption" rows="3"></textarea></label>
         <div class="u5" id="figOpts"></div>
+        <label class="f"><span data-i18n="fig.pngRes"></span><select id="figPngDpi"><option value="0" data-i18n="fig.pngRes0"></option><option value="300">300 dpi</option><option value="600">600 dpi</option></select></label>
         <div class="exp sticky u11"><button class="btn small primary" id="figSvg">SVG</button><button class="btn small" id="figPng">PNG</button></div>
         <p class="note" data-i18n="fig.note"></p>
       </div>
@@ -1188,9 +1193,11 @@ details.mini[open] { display: grid; gap: 6px; }
   <div class="u25">
     <label class="f"><span data-i18n="rec.name"></span><input type="text" id="recName"></label>
     <div class="grid2"><label class="f"><span data-i18n="rec.x"></span><select id="recX"></select></label>
-      <label class="f"><span data-i18n="rec.axis"></span><select id="recAxis"><option value="depth" data-i18n="log.depth"></option><option value="age" data-i18n="log.age"></option></select></label></div>
+      <label class="f"><span data-i18n="rec.axis"></span><select id="recAxis"><option value="depth" data-i18n="log.depth"></option><option value="age" data-i18n="log.age"></option></select></label>
+      <label class="f"><span data-i18n="rec.unit"></span><select id="recUnit"></select></label></div>
     <div class="f"><span data-i18n="rec.cols"></span><div id="recCols" class="reccols"></div></div>
     <p class="note" data-i18n="log.recNote"></p>
+    <details class="impreport" open><summary data-i18n="imp.report"></summary><div id="recReport"></div></details>
   </div>
   <div class="row u26"><button class="btn" id="recCancel" data-i18n="confirm.no"></button><button class="btn primary" id="recAdd" data-i18n="rec.add"></button></div>
 </dialog>
@@ -1212,6 +1219,7 @@ details.mini[open] { display: grid; gap: 6px; }
     <div class="f" id="giValRow"><span data-i18n="geo.r.vals"></span><div id="giVals" class="reccols"></div><p class="note" id="giValNote"></p></div>
     <div class="f" id="giProxRow"><span data-i18n="geo.r.proxies"></span><div id="giProx" class="reccols"></div></div>
     <p class="note" id="giNote"></p>
+    <details class="impreport" open><summary data-i18n="imp.report"></summary><div id="giReport"></div></details>
   </div>
   <div class="row u26"><button class="btn" id="giCancel" data-i18n="confirm.no"></button><button class="btn primary" id="giOk" data-i18n="geo.r.ok"></button></div>
 </dialog>

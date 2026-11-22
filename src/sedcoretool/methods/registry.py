@@ -1,9 +1,9 @@
 """Name -> method module. The engine advertises exactly these names in its handshake."""
 
-from . import section_intervals
+from . import core_ages, section_intervals
 from .errors import MethodError
 
-METHODS = {section_intervals.NAME: section_intervals}
+METHODS = {section_intervals.NAME: section_intervals, core_ages.NAME: core_ages}
 
 
 def get(name: str):

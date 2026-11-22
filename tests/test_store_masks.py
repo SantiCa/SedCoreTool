@@ -370,3 +370,202 @@ def test_a_full_disk_is_a_limit(tmp_path, monkeypatch):
     with pytest.raises(masks.MaskError) as error:
         staging.put('labels', 0, 0, sha, data)
     assert (error.value.code, error.value.field) == ('LIMIT_EXCEEDED', 'disk') and staging.tiles == {}
+
+
+class WinError(OSError):
+    """An OSError as Python raises it on Windows, with its Windows error number (``winerror``) on every platform."""
+
+    def __init__(self, winerror, code):
+        super().__init__(code, os.strerror(code))
+        self.windows_code = winerror
+
+    @property
+    def winerror(self):
+        return self.windows_code
+
+
+def test_a_rename_held_for_a_moment_by_another_program_is_tried_again(tmp_path, monkeypatch):
+    """Card M8.4.40: on Windows an antivirus or the indexer can hold a file just written; the rename is tried again a few times."""
+    monkeypatch.setattr(masks, 'REPLACE_RETRY_SECONDS', (0, 0, 0, 0, 0))
+    target = store(tmp_path)
+    real_replace, calls = os.replace, []
+
+    def held_twice(source, destination):
+        calls.append(destination)
+        if len(calls) <= 2:
+            raise WinError(32 if len(calls) == 1 else 5, 13)      # ERROR_SHARING_VIOLATION, then ERROR_ACCESS_DENIED
+        return real_replace(source, destination)
+    monkeypatch.setattr(masks.os, 'replace', held_twice)
+    data, sha = tile_with('labels', lambda t: t.__setitem__((0, 0), 5))
+    target.write_blob(data, sha, 'tile')
+    assert len(calls) == 3
+    assert masks.MaskStore(target.folder).read_blob(sha, len(data), 'tile') == data
+    assert not list(target.folder.rglob('*.tmp'))
+
+
+def test_a_rename_is_tried_again_only_for_a_transient_lock_and_then_fails_cleanly(tmp_path, monkeypatch):
+    monkeypatch.setattr(masks, 'REPLACE_RETRY_SECONDS', (0, 0, 0, 0, 0))
+    target = store(tmp_path)
+    data, sha = tile_with('labels', lambda t: t.__setitem__((0, 0), 5))
+    for error, attempts in ((WinError(32, 13), 6), (WinError(3, 2), 1), (OSError(5, 'Input/output error'), 1)):
+        calls = []
+
+        def failing(source, destination, error=error, calls=calls):
+            calls.append(destination)
+            raise error
+        monkeypatch.setattr(masks.os, 'replace', failing)
+        with pytest.raises(OSError) as raised:
+            target.write_blob(data, sha, 'tile')
+        assert raised.value is error and len(calls) == attempts       # the last error, after 5 more tries only for a sharing violation
+        assert not list(target.folder.rglob('*.tmp')), 'the temporary file is removed'
+
+
+@pytest.mark.parametrize('winerror', [39, 112])
+def test_a_full_windows_disk_is_a_limit_whatever_errno_python_derives(winerror):
+    def full(*_arguments):
+        raise WinError(winerror, 22)                              # EINVAL: what errno says is not used
+    with pytest.raises(masks.MaskError) as error:
+        masks.write_or_disk_error(full)
+    assert (error.value.code, error.value.field) == ('LIMIT_EXCEEDED', 'disk')
+    with pytest.raises(OSError):
+        masks.write_or_disk_error(lambda: (_ for _ in ()).throw(WinError(5, 13)))
+
+
+def test_slice_rows_reuses_tile_blobs_filters_objects_and_stacks_and_preserves_masks(tmp_path, monkeypatch):
+    """Card M8.4.43: slicing a stored version by tile rows reuses every tile blob without re-encoding, filters objects and stacks to those present,
+    keeps stack indices intact, and leaves the source version untouched."""
+    target = store(tmp_path)
+    width, height = 700, 1700                                     # 4 tile rows (0..3), 2 tile cols; bottom row has 164 rows inside
+    labels = np.zeros((height, width), dtype='<i4')
+    exclude = np.zeros((height, width), dtype='u1')
+    labels[20:120, 10:150] = 1                                    # top half only
+    labels[300:700, 50:120] = 2                                   # crosses cut between row 0 and row 1 (y = 512)
+    labels[600:900, 200:350] = -1                                 # stack 1 = [2, 3], in row 1 (top half [0, 2))
+    labels[1200:1500, 500:680] = -2                               # stack 2 = [4, 5], in row 2 (bottom half [2, 4))
+    labels[1600:1700, 10:60] = 6                                  # bottom row (partial tile)
+    exclude[100:200, 600:700] = 1
+    exclude[1100:1400, 0:400] = 1
+    tables = {**object_columns([1, 2, 3, 4, 5, 6, 9], [0, 1, 0, 1, -1, 0, 1], [-1, 0, 1, -1, 0, 1, 0], [0.0, 0.2, 0.4, 0.6, 0.8, 0.9, 1.0]),
+              'classes': CLASSES,
+              'stack_offsets': np.array([0, 0, 2, 4], dtype='<u4').tobytes(),
+              'stack_members': np.array([2, 3, 4, 5], dtype='<u4').tobytes()}
+    staging = masks.Staging(target, 'orig', width, height, None)
+    put_all(staging, labels, exclude)
+    source_manifest = staging.commit(tables)
+    source_meta, source_tiles = target.read_manifest(source_manifest)
+
+    written_blobs = []
+    real_write_blob = target.write_blob
+
+    def spy_write(data, sha256, field):
+        written_blobs.append((sha256, field))
+        return real_write_blob(data, sha256, field)
+    monkeypatch.setattr(target, 'write_blob', spy_write)
+
+    top_res, top_bin = target.slice_rows(source_manifest, 'part1', 0, 2)
+    bot_res, bot_bin = target.slice_rows(source_manifest, 'part2', 2, 4)
+
+    assert all(field != 'tile' for _, field in written_blobs), 'tile blobs are reused directly, never rewritten'
+    assert (top_res['width'], top_res['height']) == (width, 1024)
+    assert (bot_res['width'], bot_res['height']) == (width, height - 1024)
+    assert top_res['sha256'] == hashlib.sha256(top_bin).hexdigest()
+    assert bot_res['sha256'] == hashlib.sha256(bot_bin).hexdigest()
+
+    top_ids = np.frombuffer(top_bin[:top_res['object_count'] * 4], dtype='<u4').tolist()
+    top_stacks = np.frombuffer(top_bin[top_res['object_count'] * 4:], dtype='<u4').tolist()
+    bot_ids = np.frombuffer(bot_bin[:bot_res['object_count'] * 4], dtype='<u4').tolist()
+    bot_stacks = np.frombuffer(bot_bin[bot_res['object_count'] * 4:], dtype='<u4').tolist()
+    assert top_ids == [1, 2, 3] and top_stacks == [1]
+    assert bot_ids == [4, 5, 6] and bot_stacks == [2]
+
+    top_meta, top_tiles = target.read_manifest(top_res['manifest'])
+    bot_meta, bot_tiles = target.read_manifest(bot_res['manifest'])
+    assert top_meta['tables']['classes'] == source_meta['tables']['classes']
+    assert bot_meta['tables']['classes'] == source_meta['tables']['classes']
+    for (row, col), entry in source_tiles.items():
+        if row < 2:
+            assert top_tiles[(row, col)] == entry
+        else:
+            assert bot_tiles[(row - 2, col)] == entry
+
+    # Stack 2 in the bottom half keeps index 2 with an empty slot at index 1 so tile blobs need no re-encoding.
+    bot_off = np.frombuffer(target.read_blob(bot_meta['tables']['stack_offsets']['sha256'], bot_meta['tables']['stack_offsets']['byte_length'], 'tables.stack_offsets'), dtype='<u4').tolist()
+    bot_mem = np.frombuffer(target.read_blob(bot_meta['tables']['stack_members']['sha256'], bot_meta['tables']['stack_members']['byte_length'], 'tables.stack_members'), dtype='<u4').tolist()
+    assert bot_off == [0, 0, 0, 2] and bot_mem == [4, 5]
+
+    # Object metadata matches the original for every kept object.
+    top_cls = np.frombuffer(target.read_blob(top_meta['tables']['object_class']['sha256'], top_meta['tables']['object_class']['byte_length'], 'tables.object_class'), dtype='<i4').tolist()
+    top_conf = np.frombuffer(target.read_blob(top_meta['tables']['object_confidence']['sha256'], top_meta['tables']['object_confidence']['byte_length'], 'tables.object_confidence'), dtype='<f8').tolist()
+    assert top_cls == [0, 1, 0] and top_conf == [0.0, 0.2, 0.4]
+
+    # Reassembling the two parts reproduces the original masks pixel for pixel.
+    fresh = masks.MaskStore(target.folder)
+    assert np.array_equal(np.vstack([read_back(fresh, top_res['manifest'], 'labels'), read_back(fresh, bot_res['manifest'], 'labels')]), labels)
+    assert np.array_equal(np.vstack([read_back(fresh, top_res['manifest'], 'exclude'), read_back(fresh, bot_res['manifest'], 'exclude')]), exclude)
+    assert np.array_equal(read_back(fresh, source_manifest, 'labels'), labels), 'original manifest untouched'
+
+    # Empty slice (no objects or stacks in row 3 if we slice an empty-labels row): all four object columns are None and stack_members is None.
+    empty_staging = masks.Staging(target, 'empty', 512, 1024, None)
+    ex_tile, ex_sha = tile_with('exclude', lambda t: t.__setitem__((10, 10), 1))
+    empty_staging.put('exclude', 1, 0, ex_sha, ex_tile)
+    empty_src = empty_staging.commit({**object_columns([1], [0], [-1], [0.5]), 'classes': CLASSES,
+                                      'stack_offsets': np.array([0, 0], dtype='<u4').tobytes(), 'stack_members': None})
+    empty_res, empty_bin = target.slice_rows(empty_src, 'empty_p2', 1, 2)
+    assert empty_res['object_count'] == 0 and empty_res['stack_count'] == 0 and empty_bin == b''
+    empty_meta, _ = target.read_manifest(empty_res['manifest'])
+    assert all(empty_meta['tables'][name] is None for name in masks.OBJECT_COLUMNS) and empty_meta['tables']['stack_members'] is None
+
+
+def test_slice_rows_refuses_damaged_blobs_bad_ranges_and_disk_full(tmp_path, monkeypatch):
+    """Card M8.4.43: a damaged tile or table blob is refused with INVALID_BUFFER; bad bounds with INVALID_REQUEST; disk full leaves the original intact."""
+    target, manifest, labels, _, _ = committed_version(tmp_path)
+    meta, tiles = target.read_manifest(manifest)
+
+    # Validation errors
+    for bad in (('bad/sec', 0, 1, 'section'), ('p1', -1, 1, 'rows'), ('p1', 1, 1, 'rows'), ('p1', 2, 1, 'rows'), ('p1', 0, 4, 'rows'), ('p1', True, 2, 'rows')):
+        with pytest.raises(masks.MaskError) as error:
+            target.slice_rows(manifest, bad[0], bad[1], bad[2])
+        assert (error.value.code, error.value.field) == ('INVALID_REQUEST', bad[3])
+
+    # Damaged tile blob inside the sliced range is refused
+    tile_sha = tiles[(0, 0)]['labels']
+    tile_path = target.blob_path(tile_sha)
+    good_tile = tile_path.read_bytes()
+    tile_path.write_bytes(zlib.compress(bytes(masks.LAYER_BYTES['labels']), 1))
+    fresh = masks.MaskStore(target.folder)
+    with pytest.raises(masks.MaskError) as error:
+        fresh.slice_rows(manifest, 'p1', 0, 1)
+    assert (error.value.code, error.value.field) == ('INVALID_BUFFER', 'tile')
+    tile_path.write_bytes(good_tile)
+
+    # Damaged exclude blob inside the sliced range is refused
+    ex_sha = tiles[(1, 0)]['exclude']
+    ex_path = target.blob_path(ex_sha)
+    good_ex = ex_path.read_bytes()
+    ex_path.write_bytes(b'corrupt')
+    fresh = masks.MaskStore(target.folder)
+    with pytest.raises(masks.MaskError) as error:
+        fresh.slice_rows(manifest, 'p2', 1, 2)
+    assert (error.value.code, error.value.field) == ('INVALID_BUFFER', 'tile')
+    ex_path.write_bytes(good_ex)
+
+    # Damaged table blob is refused
+    cls_sha = meta['tables']['classes']['sha256']
+    cls_path = target.blob_path(cls_sha)
+    good_cls = cls_path.read_bytes()
+    cls_path.write_bytes(b'corrupt')
+    fresh = masks.MaskStore(target.folder)
+    with pytest.raises(masks.MaskError) as error:
+        fresh.slice_rows(manifest, 'p1', 0, 1)
+    assert (error.value.code, error.value.field) == ('INVALID_BUFFER', 'tables.classes')
+    cls_path.write_bytes(good_cls)
+
+    # Disk full during write leaves only the original manifest on disk and readable
+    def full(*_args):
+        raise OSError(28, 'No space left on device')
+    monkeypatch.setattr(masks, '_write_durably', full)
+    with pytest.raises(masks.MaskError) as error:
+        masks.MaskStore(target.folder).slice_rows(manifest, 'p3', 2, 3)
+    assert (error.value.code, error.value.field) == ('LIMIT_EXCEEDED', 'disk')
+    assert [p.name for p in (target.folder / 'manifests').iterdir()] == [f'{manifest}.json']
+    assert np.array_equal(read_back(masks.MaskStore(target.folder), manifest, 'labels'), labels)

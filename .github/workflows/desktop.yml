@@ -97,6 +97,24 @@ jobs:
         run: node tests/e2e/large-16bit-desktop.mjs
         working-directory: .
         if: ${{ !cancelled() && runner.os != 'Linux' }}
+      # Card M8.4.32: tiled sections (the tile store, saving and reopening, a killed engine, the store folder) on every system
+      - name: Desktop tiled sections (card M8.4.32)
+        run: xvfb-run -a node tests/e2e/tiled-sections.mjs
+        env: { SEDCORETOOL_SHOT_DIR: test-shots }
+        working-directory: .
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+      - name: Desktop tiled sections (card M8.4.32)
+        run: node tests/e2e/tiled-sections.mjs
+        env: { SEDCORETOOL_SHOT_DIR: test-shots }
+        working-directory: .
+        if: ${{ !cancelled() && runner.os != 'Linux' }}
+      - name: Screenshots of a failed tiled-sections step (card M8.4.32)
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: tiled-shots-${{ matrix.os }}
+          path: test-shots/
+          if-no-files-found: ignore
       - run: npm run dist
         if: ${{ !cancelled() }}
         env:

@@ -10,7 +10,7 @@ import { interpAge, parseAgeModel, toCSV } from './core.js';
 import { buildLogSVG, compositeRows, decodeText, eventShadeOptions, eventShading, mergedStyle, parseTable, validHexColor } from './log.js';
 import { renderFigure, verticalStyleHTML } from './figures.js';
 import { INTERP_DEFAULT, INTERP_METHODS, RAMPS, colorRange, contourLevels, contourSegments, interpolate, maskLand, rampColor, visibleSeaOptions } from './interp.js';
-import { frameRatio, panelPrefs, placeSplitters, savePanels } from './panels.js';
+import { frameRatio, panelPrefs, placeSplitters, savePanels, withSvgImage } from './panels.js';
 
 /* ───────────── multiproxy tool: numeric records, interval layers and automatic interval classification ─────────────
    Independent of the ichnotaxon suggestions of the Section mode (learn.js). State lives in S.geo (key kept for file compatibility). */
@@ -305,8 +305,8 @@ function renderGeoPanel() {
   // V25: compact table of cores (name · lat · lon · variables/intervals), full details on hover
   $('geoCores').innerHTML = S.cores.length ? `<table class="gctab"><thead><tr><th>${t('geo.core')}</th><th>Lat</th><th>Lon</th><th title="${esc(t('gx.tip.vi'))}">${t('gx.vi')}</th><th></th></tr></thead><tbody>${S.cores.map((c) => {
     const ni = g.intervals.filter((q) => q.core === c.id).length, nv = Object.keys(c.proxies || {}).length, note = geoCoreNote(c), bad = (!c.age && !c.ageText) || st.features.some((k) => !(featureSeries(c, k, g.ratios) || []).some((v) => v != null));
-    return `<tr class="gcore ${c.id === g.view.core ? 'current' : ''}" data-id="${c.id}"><td><button class="gcname" data-tip="${note}">${esc(c.name)}</button></td>
-      <td><input type="number" step="any" data-k="lat" value="${c.lat ?? ''}" aria-label="lat ${esc(c.name)}"></td><td><input type="number" step="any" data-k="lon" value="${c.lon ?? ''}" aria-label="lon ${esc(c.name)}"></td>
+    return `<tr class="gcore ${c.id === g.view.core ? 'current' : ''}" data-id="${esc(c.id)}"><td><button class="gcname" data-tip="${note}">${esc(c.name)}</button></td>
+      <td><input type="number" step="any" data-k="lat" value="${esc(c.lat ?? '')}" aria-label="lat ${esc(c.name)}"></td><td><input type="number" step="any" data-k="lon" value="${esc(c.lon ?? '')}" aria-label="lon ${esc(c.name)}"></td>
       <td><span class="gcn ${bad ? 'warn' : ''}" data-tip="${note}">${nv} · ${ni}</span></td><td><button class="btn small ghost" data-act="del" data-tip="${esc(t('gx.tip.coreDlg'))}" aria-label="${esc(t('gx.tip.coreDlg'))}">✎</button></td></tr>`;
   }).join('')}</tbody></table>` : `<p class="note">${t('geo.noCores')}</p>`;
   renderGeoSummaries();
@@ -333,9 +333,9 @@ function renderGeoPanel() {
   const names = geoRT.featNames.length ? geoRT.featNames : st.features;
   const fopts = (sel) => names.map((k) => `<option ${k === sel ? 'selected' : ''}>${esc(k)}</option>`).join('');
   const rules = g.rules.map((r, ri) => [r, ri]).filter(([r]) => r.layer === g.activeLayer);
-  $('geoRules').innerHTML = rules.map(([r, ri]) => `<div class="rec rule" data-r="${ri}">
+  $('geoRules').innerHTML = rules.map(([r, ri]) => `<div class="rec rule" data-r="${esc(ri)}">
       <div class="row" style="flex-wrap:nowrap"><label class="chk"><input type="checkbox" data-k="enabled" ${r.enabled !== false ? 'checked' : ''}></label><select data-k="cat">${lopts(r.cat)}</select><button class="btn small ghost" data-act="delrule">✕</button></div>
-      ${r.conds.map((c, ci) => `<div class="row cond" data-c="${ci}" style="flex-wrap:nowrap"><select data-k="feature">${fopts(c.feature)}</select><select data-k="op">${['z>', 'z<', '>', '<'].map((o) => `<option ${o === c.op ? 'selected' : ''}>${o}</option>`).join('')}</select><input type="number" step="any" data-k="value" value="${esc(c.value)}"><button class="btn small ghost" data-act="delcond">✕</button></div>`).join('')}
+      ${r.conds.map((c, ci) => `<div class="row cond" data-c="${esc(ci)}" style="flex-wrap:nowrap"><select data-k="feature">${fopts(c.feature)}</select><select data-k="op">${['z>', 'z<', '>', '<'].map((o) => `<option ${o === c.op ? 'selected' : ''}>${o}</option>`).join('')}</select><input type="number" step="any" data-k="value" value="${esc(c.value)}"><button class="btn small ghost" data-act="delcond">✕</button></div>`).join('')}
       <button class="btn small" data-act="addcond">${t('geo.addCond')}</button></div>`).join('') || `<p class="note">${t('geo.noRules')}</p>`;
   $('geoUseRules').checked = st.useRules;
   renderClassifiers();
@@ -360,30 +360,30 @@ function renderClassifiers() {
   const nDesc = (lid) => g.intervals.filter((q) => q.layer === lid && !q.auto).length;
   $('clfList').innerHTML = g.classifiers.map((c) => {
     const sel = c === cur, stt = clfState(c);
-    let html = `<section class="clf ${sel ? 'sel' : ''}" data-id="${c.id}"><header data-c="sel" title="${esc(t('cl.tip.sel'))}"><b>⚙ ${esc(c.name || t('cl.unnamed'))}</b><span class="clfstate ${stt.cls}">${esc(stt.txt)}</span></header>`;
+    let html = `<section class="clf ${sel ? 'sel' : ''}" data-id="${esc(c.id)}"><header data-c="sel" title="${esc(t('cl.tip.sel'))}"><b>⚙ ${esc(c.name || t('cl.unnamed'))}</b><span class="clfstate ${esc(stt.cls)}">${esc(stt.txt)}</span></header>`;
     if (!sel) return html + '</section>';
     const fv = c.features ?? vars, inFams = fams.filter((l) => !c.targets.includes(l.id)), fl = c.layers ?? featLayers().map((l) => l.id);
     const p = { ...METHODS[c.method].defaults, ...(c.params?.[c.method] || {}) };
     const params = GEO_PARAMS[c.method].map(([k, type, a, b, step]) => {
       const lab = `${c.method}.${k}`, name = t(lab) === lab ? k : t(lab), help = t(`geo.p.${c.method}.${k}`), tip = help === `geo.p.${c.method}.${k}` ? '' : ` title="${esc(help)}"`;
-      if (type === 'bool') return `<label class="chk"${tip}><input type="checkbox" data-p="${k}" ${p[k] ? 'checked' : ''}><span>${esc(name)}</span></label>`;
-      if (type === 'select') return `<label class="f"${tip}><span>${esc(name)}</span><select data-p="${k}">${a.map((o) => `<option ${String(o) === String(p[k]) ? 'selected' : ''}>${o}</option>`).join('')}</select></label>`;
-      return `<label class="f"${tip}><span>${esc(name)}</span><input type="number" data-p="${k}" min="${a}" max="${b}" step="${step}" value="${p[k]}"></label>`;
+      if (type === 'bool') return `<label class="chk"${tip}><input type="checkbox" data-p="${esc(k)}" ${p[k] ? 'checked' : ''}><span>${esc(name)}</span></label>`;
+      if (type === 'select') return `<label class="f"${tip}><span>${esc(name)}</span><select data-p="${esc(k)}">${a.map((o) => `<option ${String(o) === String(p[k]) ? 'selected' : ''}>${o}</option>`).join('')}</select></label>`;
+      return `<label class="f"${tip}><span>${esc(name)}</span><input type="number" data-p="${esc(k)}" min="${esc(a)}" max="${esc(b)}" step="${esc(step)}" value="${esc(p[k])}"></label>`;
     }).join('');
     const run = geoRT.runs.get(c.id);
     const res = c.targets.map((lid) => { const r = run?.byTarget.get(lid), L = geoLayer(lid); if (!L) return ''; const cv = r?.cv;
       return `<div>${esc(L.name)}: ${r?.error ? `<span class="warn">${t(r.error)}</span>` : cv ? t('cl.res', { a: fmt(cv.balancedAccuracy * 100, 0), n: cv.total, k: cv.classes.length }) : r?.model ? t('gx.trained', { m: '' }) : t('gx.untrained')}</div>`; }).join('');
     html += `<div class="clfbody">
       <label class="f"><span>${t('cl.name')}</span><input type="text" data-c="name" value="${esc(c.name)}"></label>
-      <div class="f" title="${esc(t('cl.tip.targets'))}"><span>${t('cl.targets')}</span><div class="chips">${fams.map((l) => `<label><input type="checkbox" data-c="target" value="${l.id}" ${c.targets.includes(l.id) ? 'checked' : ''}>${esc(l.name)} <span class="note">${nDesc(l.id)}</span></label>`).join('') || `<span class="note">${t('cl.noFams')}</span>`}</div></div>
+      <div class="f" title="${esc(t('cl.tip.targets'))}"><span>${t('cl.targets')}</span><div class="chips">${fams.map((l) => `<label><input type="checkbox" data-c="target" value="${esc(l.id)}" ${c.targets.includes(l.id) ? 'checked' : ''}>${esc(l.name)} <span class="note">${nDesc(l.id)}</span></label>`).join('') || `<span class="note">${t('cl.noFams')}</span>`}</div></div>
       <div class="f" title="${esc(t('cl.tip.inputs'))}"><span>${t('cl.inputs')}</span>
         <details><summary>${t('cl.inVars', { n: fv.filter((k) => vars.includes(k)).length, m: vars.length })}</summary><div class="row"><button class="btn small ghost" data-c="vall">${t('cl.all')}</button><button class="btn small ghost" data-c="vnone">${t('cl.none2')}</button></div>
           <div class="chk2">${vars.map((k) => `<label class="chk"><input type="checkbox" data-c="feat" value="${esc(k)}" ${fv.includes(k) ? 'checked' : ''}><span>${esc(k)}</span></label>`).join('') || `<span class="note">${t('cl.noVars')}</span>`}</div></details>
-        <details><summary>${t('cl.inFams', { n: inFams.filter((l) => fl.includes(l.id)).length })}</summary><div class="chk2">${inFams.map((l) => `<label class="chk"><input type="checkbox" data-c="lay" value="${l.id}" ${fl.includes(l.id) ? 'checked' : ''}><span>${esc(l.name)}</span></label>`).join('') || `<span class="note">${t('cl.noOtherFams')}</span>`}</div><p class="note">${t('cl.famsNote')}</p></details></div>
-      <div class="f"><span>${t('cl.model')}</span><div class="clfmodels">${CLF_METHODS.map((m) => `<label title="${esc(t('geo.m.' + m))}"><input type="radio" name="clfm-${c.id}" data-c="method" value="${m}" ${m === c.method ? 'checked' : ''}><span><b>${t('geo.m.name.' + m)}</b><span class="note">${t('cl.m.' + m)}</span></span></label>`).join('')}</div></div>
+        <details><summary>${t('cl.inFams', { n: inFams.filter((l) => fl.includes(l.id)).length })}</summary><div class="chk2">${inFams.map((l) => `<label class="chk"><input type="checkbox" data-c="lay" value="${esc(l.id)}" ${fl.includes(l.id) ? 'checked' : ''}><span>${esc(l.name)}</span></label>`).join('') || `<span class="note">${t('cl.noOtherFams')}</span>`}</div><p class="note">${t('cl.famsNote')}</p></details></div>
+      <div class="f"><span>${t('cl.model')}</span><div class="clfmodels">${CLF_METHODS.map((m) => `<label title="${esc(t('geo.m.' + m))}"><input type="radio" name="clfm-${esc(c.id)}" data-c="method" value="${esc(m)}" ${m === c.method ? 'checked' : ''}><span><b>${t('geo.m.name.' + m)}</b><span class="note">${t('cl.m.' + m)}</span></span></label>`).join('')}</div></div>
       <details><summary>${t('cl.advanced')}</summary><div class="gparams">${params}
-        ${c.method === 'kmeans' ? '' : `<label class="f" title="${esc(t('gx.tip.minProb'))}"><span>${t('geo.minProb')}</span><input type="number" data-c="minProb" min="0" max="1" step="0.05" value="${c.minProb}"></label>`}
-        <label class="f" title="${esc(t('gx.tip.seed'))}"><span>${t('geo.seed')}</span><input type="number" data-c="seed" step="1" value="${c.seed}"></label>
+        ${c.method === 'kmeans' ? '' : `<label class="f" title="${esc(t('gx.tip.minProb'))}"><span>${t('geo.minProb')}</span><input type="number" data-c="minProb" min="0" max="1" step="0.05" value="${esc(c.minProb)}"></label>`}
+        <label class="f" title="${esc(t('gx.tip.seed'))}"><span>${t('geo.seed')}</span><input type="number" data-c="seed" step="1" value="${esc(c.seed)}"></label>
         <label class="chk" title="${esc(t('gx.tip.rules'))}"><input type="checkbox" data-c="useRules" ${c.useRules !== false ? 'checked' : ''}><span>${t('geo.useRules')}</span></label>
         <button class="btn small" data-c="defaults" title="${esc(t('gx.tip.suggest'))}">${t('cl.defaults')}</button></div></details>
       <div class="clfres">${res}</div>
@@ -445,36 +445,77 @@ const IMP_IDS = ['giCore', 'giLat', 'giLon', 'giDepth', 'giAge', 'giWd', 'giFrom
 function openGeoImport(kind, tabs, names) {
   const tab = tabs[0], H = tab.headers, guess = (re) => H.findIndex((h) => re.test(h));
   geoPending = { kind, tabs, names };
-  const sel = (id, i) => { $(id).innerHTML = `<option value="-1">—</option>` + H.map((h, k) => `<option value="${k}" ${k === i ? 'selected' : ''}>${esc(h)}</option>`).join(''); };
+  const sel = (id, i) => { $(id).innerHTML = `<option value="-1">—</option>` + H.map((h, k) => `<option value="${esc(k)}" ${k === i ? 'selected' : ''}>${esc(h)}</option>`).join(''); };
   sel('giCore', guess(/^(core|sondeo|site|hole|station|name|id)/i)); sel('giLat', guess(/lat/i)); sel('giLon', guess(/lon|long/i));
   sel('giDepth', guess(/depth|prof|mbsf|csf|mcd/i)); sel('giAge', guess(/age|edad|\bka\b|cal/i)); sel('giWd', guess(/water|agua|wd/i));
   sel('giFrom', guess(/top|techo|from|desde|inicio|start/i)); sel('giTo', guess(/bot|base|muro|to$|hasta|fin|end/i)); sel('giLayer', guess(/^(layer|capa|tipo|type)$/i));
   const iv = kind === 'intervals';
   for (const [id, show] of [['giCoreRow', kind !== 'core'], ['giLatLonRow', !iv], ['giDepthRow', kind === 'long' || kind === 'core'], ['giWdRow', kind === 'catalogue'],
     ['giProxRow', kind === 'long' || kind === 'core'], ['giIvRow', iv], ['giValRow', iv], ['giDefRow', iv]]) $(id).hidden = !show;
-  $('giDefCore').innerHTML = S.cores.map((c) => `<option value="${c.id}" ${c.id === S.geo.view.core ? 'selected' : ''}>${esc(c.name)}</option>`).join('') + `<option value="__file">${t('geo.r.byFile')}</option>`;
+  $('giDefCore').innerHTML = S.cores.map((c) => `<option value="${esc(c.id)}" ${c.id === S.geo.view.core ? 'selected' : ''}>${esc(c.name)}</option>`).join('') + `<option value="__file">${t('geo.r.byFile')}</option>`;
   const fill = () => {
     const used = IMP_IDS.filter((id) => !$(id).closest('[hidden]')).map((id) => +$(id).value);
     if (iv) {
-      $('giVals').innerHTML = H.map((h, k) => used.includes(k) ? '' : `<label class="chk"><input type="checkbox" value="${k}" ${tab.rows.every((r) => r[k] == null) && tab.text.some((r) => String(r[k] ?? '').trim()) ? 'checked' : ''}><span>${esc(h)}</span></label>`).join('');
+      $('giVals').innerHTML = H.map((h, k) => used.includes(k) ? '' : `<label class="chk"><input type="checkbox" value="${esc(k)}" ${tab.rows.every((r) => r[k] == null) && tab.text.some((r) => String(r[k] ?? '').trim()) ? 'checked' : ''}><span>${esc(h)}</span></label>`).join('');
       $('giValNote').textContent = +$('giLayer').value >= 0 ? t('geo.r.valLong') : t('geo.r.valWide');
-    } else $('giProx').innerHTML = H.map((h, k) => used.includes(k) ? '' : `<label class="chk"><input type="checkbox" value="${k}" ${tab.rows.some((r) => r[k] != null) ? 'checked' : 'disabled'}><span>${esc(h)}</span></label>`).join('');
+    } else $('giProx').innerHTML = H.map((h, k) => used.includes(k) ? '' : `<label class="chk"><input type="checkbox" value="${esc(k)}" ${tab.rows.some((r) => r[k] != null) ? 'checked' : 'disabled'}><span>${esc(h)}</span></label>`).join('');
   };
   IMP_IDS.forEach((id) => ($(id).onchange = fill)); fill();
+  renderImportReport($('giReport'), tab, (next) => { tabs[0] = next; openGeoImport(kind, tabs, names); });   // card Q2
   $('giTitle').textContent = t('geo.imp.' + kind) + (names.length > 1 ? ` (${names.length})` : '');
   $('giNote').textContent = t(iv ? 'geo.r.noteIv' : 'geo.r.note');
   $('geoImpDlg').showModal();
 }
 /** V0.38: table file (CSV/TXT as UTF-8 or Windows-1252, or Excel/ODS); warns about text cells read as empty. */
 export async function readTableFile(f) {
-  let tab;
+  let textOf, sheets = [];
   if (/\.xlsx?$|\.ods$/i.test(f.name)) {
     if (!window.XLSX) await loadLib('xlsx.full.min.js');
-    const wb = window.XLSX.read(await f.arrayBuffer(), { type: 'array' });
-    tab = parseTable(window.XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]], { FS: '\t' }));
-  } else tab = parseTable(decodeText(await f.arrayBuffer()));
-  if (tab.dropped || tab.short) toast(`«${f.name}»: ` + [tab.dropped ? t('imp.dropped', { n: tab.dropped, c: tab.droppedCols.slice(0, 4).join(', ') }) : '', tab.short ? t('imp.short', { r: tab.short }) : ''].filter(Boolean).join('; ') + '.', 8000);
-  return tab;
+    const X = /** @type {any} */ (window).XLSX, wb = X.read(await f.arrayBuffer(), { type: 'array' });
+    sheets = wb.SheetNames;
+    // card Q2: the stored numbers, not the text the sheet's format shows (12.3456 shown as 12.35)
+    textOf = (sheet) => X.utils.sheet_to_csv(wb.Sheets[sheets[sheet] ?? sheets[0]], { FS: '\t', rawNumbers: true });
+  } else { const text = decodeText(await f.arrayBuffer()); textOf = () => text; }
+  /** Card Q2: the same file read again with another sheet or another rule for values below a detection limit. */
+  const read = (/** @type {{sheet?: number, censored?: any}} */ { sheet = 0, censored = 'empty' } = {}) => Object.assign(parseTable(textOf(sheet), { censored }), { file: f.name, sheets, sheet, censoredRule: censored, read });
+  return read();
+}
+/** Card Q2: what the reader did with the file, in the user's words (one entry per kind of change, none when nothing was changed). */
+export function importNotes(tab) {
+  return [
+    tab.sheets?.length > 1 ? t('imp.sheetOf', { s: tab.sheets[tab.sheet], n: tab.sheets.length }) : '',
+    tab.preamble ? t('imp.preamble', { n: tab.preamble }) : '',
+    tab.missingCodes ? t('imp.missing', { n: tab.missingCodes }) : '',
+    tab.censored ? t('imp.censored.' + (tab.censoredRule || 'empty'), { n: tab.censored }) : '',
+    tab.dropped ? t('imp.dropped', { n: tab.dropped, c: tab.droppedCols.slice(0, 4).join(', ') }) : '',
+    tab.ambiguousCols?.length ? t('imp.ambiguous', { c: tab.ambiguousCols.slice(0, 4).join(', ') }) : '',
+    tab.renamed?.length ? t('imp.renamed', { c: tab.renamed.slice(0, 4).join(', ') }) : '',
+    tab.short ? t('imp.short', { r: tab.short }) : '',
+    tab.long ? t('imp.long', { r: tab.long }) : '',
+  ].filter(Boolean);
+}
+/**
+ * Card Q2: the import report inside an import dialog: what the reader changed, the sheet and the rule for values below a detection limit
+ * when they matter (changing them reads the file again and calls `onRead` with the new table), and the first rows as they were read.
+ * @param {HTMLElement} box @param {any} tab @param {(tab: any) => void} onRead
+ */
+export function renderImportReport(box, tab, onRead) {
+  const notes = importNotes(tab), rows = tab.rows.slice(0, 5);
+  const cell = (v, raw) => (v == null ? (String(raw ?? '').trim() ? `<i title="${esc(raw)}">—</i>` : '') : esc(String(v)));
+  box.innerHTML = `
+    ${notes.length ? `<ul class="impnotes">${notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : `<p class="note">${t('imp.clean')}</p>`}
+    <div class="row">
+      ${tab.sheets?.length > 1 ? `<label class="f"><span>${t('imp.sheet')}</span><select data-imp="sheet">${tab.sheets.map((s, k) => `<option value="${esc(k)}" ${k === tab.sheet ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></label>` : ''}
+      ${tab.censored ? `<label class="f"><span>${t('imp.censoredRule')}</span><select data-imp="censored">${['empty', 'half', 'limit'].map((r) => `<option value="${esc(r)}" ${r === tab.censoredRule ? 'selected' : ''}>${t('imp.rule.' + r)}</option>`).join('')}</select></label>` : ''}
+    </div>
+    <div class="imppreview"><table><thead><tr>${tab.headers.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map((r, i) => `<tr>${r.map((v, k) => `<td>${cell(v, tab.text[i]?.[k])}</td>`).join('')}</tr>`).join('')}</tbody></table>
+      <p class="note">${t('imp.previewNote', { n: rows.length, m: tab.rows.length })}</p></div>`;
+  box.querySelectorAll('select[data-imp]').forEach((/** @type {any} */ select) => select.addEventListener('change', () => {
+    const value = /** @type {HTMLSelectElement} */ (select).value;
+    const next = tab.read({ sheet: select.dataset.imp === 'sheet' ? +value : tab.sheet, censored: select.dataset.imp === 'censored' ? value : tab.censoredRule });
+    onRead(next);
+  }));
 }
 
 const norm = (s) => String(s ?? '').trim().toLowerCase();
@@ -645,14 +686,14 @@ export function eventShadeFormHTML(view, core, axis) {
       <div class="grid2">${cats.map((cat) => {
         const color = validHexColor(style.colors?.[cat.id], validHexColor(cat.color, '#999999'));
         const inputColor = color.length === 4 ? '#' + [...color.slice(1)].map((digit) => digit + digit).join('') : color;
-        return `<label class="f"><span>${esc(cat.name)}</span><input type="color" data-event-color="${esc(source.key)}" data-event-class="${esc(cat.id)}" value="${inputColor}"></label>`;
+        return `<label class="f"><span>${esc(cat.name)}</span><input type="color" data-event-color="${esc(source.key)}" data-event-class="${esc(cat.id)}" value="${esc(inputColor)}"></label>`;
       }).join('')}</div>
       <button type="button" class="btn small ghost" data-event-reset="${esc(source.key)}">${t('event.resetColors')}</button>` : ''}</details>`;
   }).join('');
   return `<details class="mini" data-event-panel ${settings.on ? 'open' : ''}><summary>${t('event.title')}</summary>
     <label class="chk"><input type="checkbox" data-event-option="on" ${settings.on ? 'checked' : ''}><span>${t('event.enable')}</span></label>
     <div ${settings.on ? '' : 'hidden'}><p class="note">${t('event.help')}</p>
-    <label class="f"><span>${t('event.area')}</span><select data-event-option="area">${['panel', 'curve'].map((key) => `<option value="${key}" ${settings.area === key ? 'selected' : ''}>${t('event.' + key)}</option>`).join('')}</select></label>
+    <label class="f"><span>${t('event.area')}</span><select data-event-option="area">${['panel', 'curve'].map((key) => `<option value="${esc(key)}" ${settings.area === key ? 'selected' : ''}>${t('event.' + key)}</option>`).join('')}</select></label>
     <label class="f"><span>${t('sh.mode')}</span><select data-event-option="mode"><option value="mix" ${settings.mode !== 'split' ? 'selected' : ''}>${t('sh.mix')}</option><option value="split" ${settings.mode === 'split' ? 'selected' : ''}>${t('sh.split')}</option></select></label>
     ${rows || `<p class="note">${t('event.empty')}</p>`}</div></details>`;
 }
@@ -822,7 +863,7 @@ export function logInteract(box, res, ctx) {
         const b = bandOf.get(c.id), sg = b?.segs.find((q) => q.a0 <= a && a < q.a1);
         const lab = ctx.bandText?.(c.bkey, a) ?? (!sg ? '—' : sg.label === '__ok' ? t('gx.hitOk') : sg.label === '__bad' ? t('gx.hitBad') : geoCat(sg.label)?.name ?? sg.name ?? '—');
         const swCol = sg?.color ? validHexColor(sg.color, '#777777') : '';
-        rows.push(`<tr class="${col === c ? 'on' : ''}"><td>${swCol ? `<span class="sw" style="background:${swCol}"></span>` : ''}${esc(c.title)}</td><td>${esc(lab)}</td></tr>`);
+        rows.push(`<tr class="${col === c ? 'on' : ''}"><td>${swCol ? `<span class="sw" style="background:${esc(swCol)}"></span>` : ''}${esc(c.title)}</td><td>${esc(lab)}</td></tr>`);
       } else if (c.key === 'rec') {
         const R = recs.get(c.title), v = R ? recordAt(R.r.pts, a, R.gap) : null;
         rows.push(`<tr class="${col === c ? 'on' : ''}"><td>${esc(c.title)}</td><td>${digits(v)}</td></tr>`);
@@ -860,7 +901,7 @@ function renderIntervalList(core) {
     rows.push(`<div class="ivhead" style="padding-left:${depth * 14}px">${depth ? '↳ ' : ''}<b>${esc(layer.name)}</b> <span class="note">(${ivs.length})</span></div>`);
     for (const q of ivs) {
       const c = geoCat(q.cat), col = validHexColor(c?.color, '#777777');
-      rows.push(`<div class="row ivrow ${q.auto ? 'auto' : ''} ${q.id === geoSelIv ? 'sel' : ''}" data-id="${esc(q.id)}" style="padding-left:${depth * 14}px"><span class="swatch" style="background:${col}"></span>
+      rows.push(`<div class="row ivrow ${q.auto ? 'auto' : ''} ${q.id === geoSelIv ? 'sel' : ''}" data-id="${esc(q.id)}" style="padding-left:${depth * 14}px"><span class="swatch" style="background:${esc(col)}"></span>
         <select data-k="cat">${layer.cats.map((k) => `<option value="${esc(k.id)}" ${k.id === q.cat ? 'selected' : ''}>${esc(k.name)}</option>`).join('')}</select>
         <input type="number" step="any" data-k="from" value="${+q.from.toPrecision(6)}"><input type="number" step="any" data-k="to" value="${+q.to.toPrecision(6)}">
         <span class="note" title="${esc(t(q.axis === 'age' ? 'log.age' : 'log.depth'))}">${q.axis === 'age' ? esc(S.age.units || 'ka') : esc(core.units || 'm')}</span>
@@ -980,8 +1021,8 @@ function autoPop(cx, cy, bkey, a) {
   const seg = segs.find((q) => a >= q.a0 && a < q.a1), cat = geoCat(seg?.label);
   ivPop(cx, cy, `<h4>⚙ ${esc(c.name)} → ${esc(L.name)}</h4>
     <p>${cat ? `<span class="sw" style="background:${validHexColor(cat.color, '#777777')}"></span>${esc(cat.name)} · ${fmtA(seg.a0)}–${fmtA(seg.a1)} ${esc(axisUnit())}` : t('gx.unsure')}</p>
-    <div class="popcol">${seg ? `<button class="btn small primary" data-pop="one">${t('cl.copyOne', { f: L.name })}</button>` : ''}
-    <button class="btn small" data-pop="all">${t('cl.copyAll', { f: L.name })}</button><button class="btn small ghost" data-pop="close">${t('help.close')}</button></div>
+    <div class="popcol">${seg ? `<button class="btn small primary" data-pop="one">${t('cl.copyOne', { f: esc(L.name) })}</button>` : ''}
+    <button class="btn small" data-pop="all">${t('cl.copyAll', { f: esc(L.name) })}</button><button class="btn small ghost" data-pop="close">${t('help.close')}</button></div>
     <p class="note">${t('cl.copyNote')}</p>`,
   (b) => {
     const act = b.dataset.pop, g = S.geo; if (act === 'close') { closeIvPop(); return; }
@@ -1079,9 +1120,9 @@ export function interpUI(boxId, get, save, redraw, info) {
   if (box.dataset.key === key) { fill(); return; }
   const open = box.querySelector('details')?.open;
   box.dataset.key = key;
-  const num = (k, l, a, b, st, dis = false) => `<label class="f"><span>${t(l)}</span><input type="number" data-ip="${k}" min="${a}" max="${b}" step="${st}" ${dis ? 'disabled' : ''}></label>`;
-  const chk = (k, l) => `<label class="chk"><input type="checkbox" data-ip="${k}"><span>${t(l)}</span></label>`;
-  const sel = (k, l, opts) => `<label class="f"><span>${t(l)}</span><select data-ip="${k}">${opts.map(([v, n]) => `<option value="${v}">${n}</option>`).join('')}</select></label>`;
+  const num = (k, l, a, b, st, dis = false) => `<label class="f"><span>${t(l)}</span><input type="number" data-ip="${esc(k)}" min="${esc(a)}" max="${esc(b)}" step="${esc(st)}" ${dis ? 'disabled' : ''}></label>`;
+  const chk = (k, l) => `<label class="chk"><input type="checkbox" data-ip="${esc(k)}"><span>${t(l)}</span></label>`;
+  const sel = (k, l, opts) => `<label class="f"><span>${t(l)}</span><select data-ip="${esc(k)}">${opts.map(([v, n]) => `<option value="${esc(v)}">${n}</option>`).join('')}</select></label>`;
   const m = o.method, P = {
     idw: num('power', 'ip.power', 1, 6, 0.5) + num('radius', 'ip.radius', 0, 5000, 10) + num('neighbours', 'ip.neigh', 0, 100, 1),
     nearest: num('radius', 'ip.radius', 0, 5000, 10), tin: '', mincurv: num('smooth', 'ip.smooth', 0, 10, 0.1),
@@ -1182,19 +1223,19 @@ export function mapStyleUI(boxId, get, set, redraw) {
     return;
   }
   box.dataset.built = lang();
-  const chk = (k, l) => `<label class="chk"><input type="checkbox" data-k="${k}" ${st[k] ? 'checked' : ''}><span>${t(l)}</span></label>`;
-  const col = (k, l) => `<label class="f"><span>${t(l)}</span><input type="color" data-k="${k}" value="${esc(validHexColor(st[k], MAP_STYLE[k] || '#000000'))}"></label>`;
-  const num = (k, l, a, b, s) => `<label class="f"><span>${t(l)}</span><input type="number" data-k="${k}" min="${a}" max="${b}" step="${s}" value="${esc(st[k])}"></label>`;
+  const chk = (k, l) => `<label class="chk"><input type="checkbox" data-k="${esc(k)}" ${st[k] ? 'checked' : ''}><span>${t(l)}</span></label>`;
+  const col = (k, l) => `<label class="f"><span>${t(l)}</span><input type="color" data-k="${esc(k)}" value="${esc(validHexColor(st[k], MAP_STYLE[k] || '#000000'))}"></label>`;
+  const num = (k, l, a, b, s) => `<label class="f"><span>${t(l)}</span><input type="number" data-k="${esc(k)}" min="${esc(a)}" max="${esc(b)}" step="${esc(s)}" value="${esc(st[k])}"></label>`;
   const ext = view || ['', '', '', ''];
   box.innerHTML = `<details><summary>${t('ms.title')}</summary><div class="msgrid">
-    <label class="f"><span>${t('ms.bg')}</span><select data-k="bg">${Object.keys(MAP_BG).map((k) => `<option value="${k}" ${k === st.bg ? 'selected' : ''}>${t('ms.bg.' + k)}</option>`).join('')}</select></label>
+    <label class="f"><span>${t('ms.bg')}</span><select data-k="bg">${Object.keys(MAP_BG).map((k) => `<option value="${esc(k)}" ${k === st.bg ? 'selected' : ''}>${t('ms.bg.' + k)}</option>`).join('')}</select></label>
     ${num('bgOpacity', 'ms.opacity', 0.1, 1, 0.1)}${chk('coast', 'ms.coast')}
-    <label class="f"><span>${t('ms.proj')}</span><select data-k="proj">${MAP_PROJECTIONS.map((k) => `<option value="${k}" ${k === (st.proj || 'plate') ? 'selected' : ''}>${t('ms.proj.' + k)}</option>`).join('')}</select></label>
-    <label class="f"><span>${t('ms.symbol')}</span><select data-k="symbol">${MAP_SYMBOLS.map((k) => `<option value="${k}" ${k === st.symbol ? 'selected' : ''}>${t('ms.sym.' + k)}</option>`).join('')}</select></label>
+    <label class="f"><span>${t('ms.proj')}</span><select data-k="proj">${MAP_PROJECTIONS.map((k) => `<option value="${esc(k)}" ${k === (st.proj || 'plate') ? 'selected' : ''}>${t('ms.proj.' + k)}</option>`).join('')}</select></label>
+    <label class="f"><span>${t('ms.symbol')}</span><select data-k="symbol">${MAP_SYMBOLS.map((k) => `<option value="${esc(k)}" ${k === st.symbol ? 'selected' : ''}>${t('ms.sym.' + k)}</option>`).join('')}</select></label>
     ${num('size', 'ms.size', 0.3, 4, 0.1)}${chk('sizeByFraction', 'ms.sizeFrac')}${col('pointColor', 'ms.pointColor')}${col('stroke', 'ms.stroke')}
     ${chk('labels', 'ms.labels')}${num('labelSize', 'ms.labelSize', 6, 30, 1)}${col('labelColor', 'ms.labelColor')}${chk('halo', 'ms.halo')}${chk('labelValue', 'ms.labelValue')}
     ${col('land', 'ms.land')}${col('sea', 'ms.sea')}${col('textColor', 'color.textColor')}${col('subColor', 'color.subColor')}${col('bgColor', 'color.bgColor')}${chk('graticule', 'ms.grat')}${chk('scaleBar', 'ms.scale')}${chk('north', 'ms.north')}
-    <label class="f"><span>${t('ms.extent')}</span><span class="row">${[0, 1, 2, 3].map((i) => `<input type="number" step="any" data-e="${i}" value="${esc(ext[i])}">`).join('')}</span></label>
+    <label class="f"><span>${t('ms.extent')}</span><span class="row">${[0, 1, 2, 3].map((i) => `<input type="number" step="any" data-e="${esc(i)}" value="${esc(ext[i])}">`).join('')}</span></label>
     <div class="zbtn"><button class="btn small" data-z="in" title="Zoom +">＋</button><button class="btn small" data-z="out" title="Zoom −">－</button><button class="btn small" data-z="fit">${t('ms.fit')}</button><button class="btn small" data-z="reset">${t('ms.reset')}</button></div>
     <p class="note" style="margin:0;flex-basis:100%">${t('ms.zoomHelp')}<span class="msload"></span></p></div></details>`;
   box.onchange = (e) => {
@@ -1256,10 +1297,12 @@ export async function exportMapPNG(build, name, width) {
     bgWidth = Math.min(4096, width);
     let svg = build(); await Promise.all([...bgPromises.values()].map((p) => p.catch(() => {})));
     svg = build(); // second pass uses the high-resolution images now in the cache
-    const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); await img.decode();
-    const k = width / img.width, c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-    const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
-    const blob = await new Promise((r) => c.toBlob(r, 'image/png')); if (blob) await saveFile(name, blob, 'image/png');
+    const blob = await withSvgImage(svg, async (img) => {
+      const k = width / img.width, c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
+      return new Promise((r) => c.toBlob(r, 'image/png'));
+    });
+    if (blob) await saveFile(name, blob, 'image/png');
   } finally { bgWidth = prev; }
 }
 
@@ -1292,12 +1335,12 @@ function renderGeoModel() {
   html += `<div class="stat"><div data-tip="${esc(t('gx.tip.samples'))}"><b>${geoRT.samples.length}</b><span>${t('geo.samples')}</span></div><div data-tip="${esc(t('gx.tip.byIv'))}"><b>${nInt}</b><span>${t('geo.byIntervals')}</span></div><div data-tip="${esc(t('gx.tip.byRule'))}"><b>${nRule}</b><span>${t('geo.byRules')}</span></div></div>`;
   html += `<div class="bars">${Object.entries(counts).map(([id, n]) => { const c = geoCat(id); return `<div><span><span class="swatch" style="background:${validHexColor(c?.color, '#777777')}"></span>${esc(c?.name || id)}</span><em>${n}</em></div>`; }).join('')}</div>`;
   if (!geoRT.model || !geoRT.preds.length) { box.innerHTML = html + `<p class="note">${t(geoRT.model ? 'geo.retrain' : 'geo.notTrained')}</p><button class="btn primary" id="geoModelTrain">${t('geo.modelTrain')}</button>`; $('geoModelTrain').onclick = () => curC && geoTrain(false, curC.id); return; }
-  html += `<h3>${t('geo.m.name.' + geoRT.model.kind)} · ${t('geo.trainedOn', { n: geoRT.model.n ?? '' })}${geoRT.model.kind === 'mlp' ? ` · ${t('cl.mlpInfo', { s: geoRT.model.sizes.join('–'), e: geoRT.model.epochs })}` : ''}</h3>`;
+  html += `<h3>${t('geo.m.name.' + geoRT.model.kind)} · ${t('geo.trainedOn', { n: geoRT.model.n ?? '' })}${geoRT.model.kind === 'mlp' ? ` · ${t('cl.mlpInfo', { s: esc(geoRT.model.sizes.join('–')), e: esc(geoRT.model.epochs) })}` : ''}</h3>`;
   if (geoRT.cv) {
     const cv = geoRT.cv, name = (id) => esc(geoCat(id)?.name || id);
     html += `<p>${t('geo.cvScheme.' + (cv.scheme === 'leave-one-core-out' ? 'loco' : 'blocks'), { k: cv.folds })}: <span data-tip="${esc(t('gx.accTip'))}">${t('geo.acc')} <b>${fmt(cv.accuracy * 100, 1)}%</b></span> · <span data-tip="${esc(t('gx.baccTip'))}">${t('geo.bacc')} <b>${fmt(cv.balancedAccuracy * 100, 1)}%</b></span> (n = ${cv.total})</p>`;
     if (cv.foldBalanced?.n > 1 && cv.foldBalanced.sd != null) html += `<p class="note">${t('cv.fold', { m: fmt(cv.foldBalanced.mean * 100, 1), sd: fmt(cv.foldBalanced.sd * 100, 1), n: cv.foldBalanced.n })}</p>`;
-    if (cv.coverage) html += `<p class="note">${t('cv.cover', { p: cv.coverage.minProb, s: fmt(cv.coverage.share * 100, 1), a: cv.coverage.accuracy == null ? '—' : fmt(cv.coverage.accuracy * 100, 1) })}</p>`;
+    if (cv.coverage) html += `<p class="note">${t('cv.cover', { p: esc(cv.coverage.minProb), s: fmt(cv.coverage.share * 100, 1), a: cv.coverage.accuracy == null ? '—' : fmt(cv.coverage.accuracy * 100, 1) })}</p>`;
     if (nRule) html += `<p class="note">${t('cv.rules')}</p>`;
     html += `<div class="tablewrap"><table><thead><tr><th data-tip="${esc(t('gx.cmTip'))}">${t('geo.trueVsPred')}</th>${cv.classes.map((c) => `<th>${name(c)}</th>`).join('')}<th>${t('geo.recall')}</th></tr></thead><tbody>${cv.classes.map((c, i) => `<tr><th>${name(c)}</th>${cv.cm[i].map((v, j) => `<td style="${i === j ? 'font-weight:600' : ''}" data-tip="${esc(t(i === j ? 'gx.cmOk' : 'gx.cmBad', { n: v, a: geoCat(c)?.name || c, b: geoCat(cv.classes[j])?.name || cv.classes[j] }))}">${v}</td>`).join('')}<td data-tip="${esc(t('gx.recallTip', { a: geoCat(c)?.name || c, p: fmt((cv.perClass[i].recall ?? 0) * 100, 0) }))}">${fmt((cv.perClass[i].recall ?? 0) * 100, 0)}%</td></tr>`).join('')}</tbody></table></div>`;
     html += `<p class="note">${t('geo.cvNote')}</p>`;
@@ -1567,7 +1610,7 @@ export function initMultiproxy() {
       const q = geoIvAt(L.id, d.a), orig = q && g.intervals.find((x) => x.id === q.id);
       geoSelIv = orig?.id || null; renderIntervalList(geoLast.core);
       if (orig) famPop(e.clientX, e.clientY, orig);
-      else ivPop(e.clientX, e.clientY, `<h4>${esc(L.name)}</h4><p class="note">${t('cl.dragHere', { f: L.name })}</p><div class="row"><button class="btn small ghost" data-pop="close">${t('help.close')}</button></div>`, () => closeIvPop());
+      else ivPop(e.clientX, e.clientY, `<h4>${esc(L.name)}</h4><p class="note">${t('cl.dragHere', { f: esc(L.name) })}</p><div class="row"><button class="btn small ghost" data-pop="close">${t('help.close')}</button></div>`, () => closeIvPop());
       return;
     }
     const v = geoValAt(e) ?? d.a; let a = Math.min(d.a, v), b = Math.max(d.a, v);

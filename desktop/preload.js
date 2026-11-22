@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('corantoolDesktop', {
     appendBuffer: (token, offset, bytes) => ipcRenderer.invoke('engine:appendBuffer', token, offset, bytes),
     commitBuffer: (token) => ipcRenderer.invoke('engine:commitBuffer', token),
     analyzeSection: (request) => ipcRenderer.invoke('engine:analyzeSection', request),
+    runMethod: (request) => ipcRenderer.invoke('engine:runMethod', request),   // `method.run` (contract §9, card M8.5.3)
     cancel: (requestKey) => ipcRenderer.invoke('engine:cancel', requestKey),
     readBuffer: (token, offset, length) => ipcRenderer.invoke('engine:readBuffer', token, offset, length),
     release: (tokens) => ipcRenderer.invoke('engine:release', tokens),
@@ -35,6 +36,19 @@ contextBridge.exposeInMainWorld('corantoolDesktop', {
     // Saving and reopening tiled sections (card M8.4.18a): identifiers only; the main process keeps the source's path.
     maskRetain: (project, keep) => ipcRenderer.invoke('tiles:maskRetain', project, keep),
     maskInfo: (project, manifest, start) => ipcRenderer.invoke('tiles:maskInfo', project, manifest, start),
+    maskSlice: (project, manifest, section, row0, row1) => ipcRenderer.invoke('tiles:maskSlice', project, manifest, section, row0, row1),   // card M8.4.43
+    // Card M8.4.29: a cache of what the page derived from a stored version (a file the engine keeps next to it).
+    derivedPut: (project, manifest, kind, bytes) => ipcRenderer.invoke('tiles:derivedPut', project, manifest, kind, bytes),
+    derivedGet: (project, manifest, kind) => ipcRenderer.invoke('tiles:derivedGet', project, manifest, kind),
+    // Card M8.4.18c: the files of a stored version for a backup folder, and back into a store at a restore (verified by the engine).
+    maskExport: (project, manifest, blobs) => ipcRenderer.invoke('tiles:maskExport', project, manifest, blobs),
+    maskImport: (project, kind, files) => ipcRenderer.invoke('tiles:maskImport', project, kind, files),
+    // Card M8.4.18c step 3: the project's copy of a source to the backup folder (read in pieces) and back (written in pieces, kept only when whole).
+    sourceCopyRead: (project, pyramid, offset) => ipcRenderer.invoke('tiles:sourceCopyRead', project, pyramid, offset),
+    sourceImportBegin: (project, pyramid, name, size) => ipcRenderer.invoke('tiles:sourceImportBegin', project, pyramid, name, size),
+    sourceImportChunk: (token, offset, bytes) => ipcRenderer.invoke('tiles:sourceImportChunk', token, offset, bytes),
+    sourceImportEnd: (token) => ipcRenderer.invoke('tiles:sourceImportEnd', token),
+    sourceImportAbort: (token) => ipcRenderer.invoke('tiles:sourceImportAbort', token),
     rememberSource: (project, pyramid) => ipcRenderer.invoke('tiles:rememberSource', project, pyramid),
     reopen: (project, pyramid, key) => ipcRenderer.invoke('tiles:reopen', project, pyramid, key),
     // Card M8.4.18b: a moved source located again (a File the user chose, sent as its path), and a copy of the source into the project.
@@ -43,6 +57,7 @@ contextBridge.exposeInMainWorld('corantoolDesktop', {
     copySource: (project, pyramid, key) => ipcRenderer.invoke('tiles:copySource', project, pyramid, key),
     // Card M8.4.27: the store folder follows its project (deleted with it; copied when the project is saved under a new identifier).
     deleteProjectStore: (project) => ipcRenderer.invoke('tiles:deleteProjectStore', project),
+    announceProjects: (ids) => ipcRenderer.invoke('tiles:announceProjects', ids),   // card M8.4.34
     copyProjectStore: (from, to, manifests, sources, key) => ipcRenderer.invoke('tiles:copyProjectStore', from, to, manifests, sources, key),
   },
   diagnostics: {

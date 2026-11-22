@@ -32,7 +32,7 @@ describe a planned part as available. When you build a planned part, change its 
                     private stdin/stdout pipes, `SCE1` frames, no network port
 ┌─────────────── Engine process: src/sedcoretool run by the bundled CPython 3.12 ───────────┐
 │  engine/    transport only: frames, buffers, coordinator, job runner, method worker script │
-│  methods/   one module per versioned scientific method (built: section.intervals/1)        │
+│  methods/   one module per versioned scientific method (built: section.intervals/1, core.ages/1) │
 │  kernels/   pure NumPy primitives shared by every caller (built)                           │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
    Python API and command line (pipeline.py, cli.py, batch.py …) call kernels/methods in-process.
@@ -54,14 +54,16 @@ calculates everything itself; with it on, the interval table of each section com
 | Python package: intervals, indices, age, export, batch, CLI, U-Net | built | `src/sedcoretool/` |
 | Engine process: frames, bounded buffers, queue, cancellation, isolated worker | built, off by default | `src/sedcoretool/engine/`, `desktop/engine*.js` |
 | Bundled Python runtime, verified at launch | built (Windows measured; macOS/Linux not yet run) | `desktop/runtime-lock.json`, `tools/prepare_engine_runtime.py` |
-| Engine methods: `buffer.digest/1` (a transport diagnostic) and `section.intervals/1` (the first scientific method) | built | `engine/worker.py`, `engine/method_worker.py` |
+| Engine methods: `buffer.digest/1` (a transport diagnostic), `section.intervals/1` (the first scientific method) and `core.ages/1` | built | `engine/worker.py`, `engine/method_worker.py` |
 | `kernels/` package: binning, counting, classification, age interpolation; `tests/test_architecture.py` | built (M8.3.3) | §3.1 |
 | `methods/` package with the registry and `section.intervals/1`, called directly | built (M8.3.4) | §3.1 |
+| Engine method `core.ages/1` (a core's age model applied to depths) through `method.run`; the interface does not request it yet | built (M8.5.5) | contract §9.8 |
 | Job runner in the engine process: `section.analyze` runs a registered method in the engine's long-lived worker process (one job at a time, replaced after any anomaly), results are adopted as committed buffers and downloaded with `buffer.read` | built (M8.3.5) | §3.1, §4 |
 | Renderer-facing engine bridge (`engine-ipc.js`, `engineclient.js`, `engineanalysis.js`) | **built, experimental, off by default** (M8.3.6–M8.3.7) | §3.2, §3.3 |
 | Section intervals calculated by the engine (`section.intervals/1`) and shown by the interface | **built, experimental, off by default** (M8.3.7); slower than JavaScript, see the M8.3.8 evidence | contract §4–§5 |
 | Section inputs kept in the engine between analyses; edits sent as changed rows (`buffer.derive`); remembered counts; one packed result | **built, experimental, off by default** (M8.4.2-M8.4.5); timing gate of contract §7 not met | §4, contract §3 |
-| Engine restart after a failure (once by itself, then the user's Retry): **built, experimental** (M8.4.7). Engine-held pixels of small sections and record tables (part B, M8.4.9-M8.4.11); several sections in one request (M8.4.6, deferred); remaining methods (M8.5) | **planned** | roadmap |
+| Engine restart after a failure (once by itself, then the user's Retry): **built, experimental** (M8.4.7). Working pixels of small sections (`u16le` buffers, `ensurePixels`, M8.4.9) and record tables (`ensureTable`, M8.4.10) held by the engine: **built, experimental, used by no method yet**; gate of part B met (M8.4.11). Several sections in one request (M8.4.6, deferred); remaining methods (M8.5) | **planned** | roadmap |
+| `method.run`: methods of section, core and project scope, two priorities, superseding by target, table outputs; operation table in the coordinator instead of a chain of conditions | **planned** (designed by card A1, 22 Nov 2026; cards M8.5.1-M8.5.3) | [contract §9](roadmap-engine-contract.md#9-methods-of-section-core-and-project-scope-methodrun-card-a1) |
 | Tile store for large images (pixel pyramid, versioned mask tiles), tiled viewer and editing, analysis on tiles, saving of large projects | **planned** (part C of M8.4, cards M8.4.12-M8.4.19; chosen 15 Nov 2026) | §3.4 |
 
 The engine experiment is enabled only by the environment variable `SEDCORETOOL_ENGINE_EXPERIMENT=1`. Keep that
@@ -78,7 +80,7 @@ import, the code is in the wrong layer: move the code, do not break the rule.
 |---|---|---|---|---|
 | Kernels (built, M8.3.3) | `kernels/` | Pure array functions: bin edges and sums, row/class counts from labels, layers and overlap stacks, tier classification, age interpolation | `numpy`, standard library | pandas, Pillow, file or network IO, environment variables, global state, anything from `engine/` or `methods/` |
 | Methods (built, M8.3.4) | `methods/` | One module per versioned method. Each has `NAME` (for example `"section.intervals/1"`), `parse(inputs) -> snapshot` that validates everything, and `run(snapshot, report, cancelled) -> dict` of named NumPy columns. `registry.py` maps names to modules | `kernels`, `numpy`, standard library | pandas, IO, transport details (frames, handles, sessions) |
-| Engine transport | `engine/` | `protocol.py` frames and strict JSON, `buffers.py` staged buffers, `server.py` coordinator, `worker.py` process wrappers (`DigestJob`; `MethodRunner`, the long-lived method worker, and `MethodJob`, one job on it) and the digest script, `specs.py` input tables, `method_worker.py` the script that runs a method, `lifetime.py` | Coordinator: standard library only. Only the script `method_worker.py` imports `numpy`, `kernels` and `methods` (it runs in its own process and registers the package without running its `__init__`, so pandas and Pillow are not loaded); nothing else may import it | The coordinator must never import NumPy or a method (start-up stays fast and control requests stay responsive). No scientific formulas in this layer |
+| Engine transport | `engine/` | `protocol.py` frames and strict JSON, `buffers.py` staged buffers, `server.py` coordinator, `worker.py` process wrappers (`DigestJob`; `MethodRunner`, the long-lived method worker, and `MethodJob`, one job on it) and the digest script, `specs.py` the method table (`METHOD_SPECS`, contract §9.6), `method_worker.py` the script that runs a method, `lifetime.py` | Coordinator: standard library only. Only the script `method_worker.py` imports `numpy`, `kernels` and `methods` (it runs in its own process and registers the package without running its `__init__`, so pandas and Pillow are not loaded); nothing else may import it | The coordinator must never import NumPy or a method (start-up stays fast and control requests stay responsive). No scientific formulas in this layer |
 | Tile store (pixel pyramids built, M8.4.14; mask tiles stored, M8.4.16) | `store/` | `format.py` (layout, Zarr v2 metadata, `pyramid.json`), `tiles.py` (verified tile reads, cache) and `masks.py` (mask tiles, tables and manifests of tiled sections, contract §8.7), standard library only; `source.py` (sources read in bands with libvips) and `pyramid.py` (the band-by-band build); `identity.py` (the record that finds an existing pyramid without hashing its source again; standard library) | `format`/`tiles`/`masks`/`identity`: the standard library; `source`/`pyramid`: also `numpy`, `pyvips`, `methods.errors` | importing the engine or the public API; the coordinator imports only `format`, `tiles` and `masks`, the method worker the whole store |
 | Public API and CLI | `pipeline.py`, `indices.py`, `depth.py`, `io.py`, `segmentation.py`, `export.py`, `batch.py`, `cli.py`, `plotting.py` | The supported functions and commands. Adapters: validate user input, call kernels/methods, shape the output (DataFrame, CSV, LAS) | `kernels`, `methods`, pandas, Pillow | Starting the engine process; a second copy of a formula that exists in `kernels/` |
 | U-Net (optional) | `unet/` | Tiling, dataset, training, prediction, evaluation. Unchanged until M8.5 | its own optional dependencies | being imported by the base engine |
@@ -96,16 +98,16 @@ matching tier and the Python API the **last**; the kernel takes `precedence="fir
 
 | Kind | Rule | Examples |
 |---|---|---|
-| Pure modules | No `document`, `window` or DOM types; state arrives as arguments. Tested with Node in `tests/app/` | `core.js`, `sectiondepth.js`, `sectionanalysis.js`, `maskchanges.js`, `tiledsection.js`, `tilecache.js`, `tiledmasks.js`, `tiledit.js`, `tiledcounts.js`, `tiledsync.js`, `tiledundo.js`, `singleflight.js`, `taxa.js`, `engineclient.js`, `engineanalysis.js`, `edit.js`, `imageproc.js`, `learn.js`, `log.js`, `geo.js`, `interp.js`, `locmap.js`, `plot.js`, `sheet.js`, `exportio.js`, `zip.js`, `unet.js`, `unetmodel.js`, `navpreview.js`, `figview.js`, `tableview.js` |
+| Pure modules | No `document`, `window` or DOM types; state arrives as arguments. Tested with Node in `tests/app/` | `core.js`, `sectiondepth.js`, `sectionanalysis.js`, `maskchanges.js`, `tiledsection.js`, `tiledrecord.js`, `tiledsplit.js`, `tilecache.js`, `tiledmasks.js`, `tiledit.js`, `tiledcounts.js`, `tiledcache.js`, `tiledbackup.js`, `tiledsync.js`, `tiledundo.js`, `singleflight.js`, `taxa.js`, `coremerge.js`, `residentstore.js`, `sectionpixels.js`, `tablesnapshot.js`, `engineclient.js`, `engineanalysis.js`, `edit.js`, `imageproc.js`, `learn.js`, `log.js`, `geo.js`, `interp.js`, `locmap.js`, `plot.js`, `sheet.js`, `dataedit.js`, `exportio.js`, `zip.js`, `figsize.js`, `pngmeta.js`, `unet.js`, `unetmodel.js`, `navpreview.js`, `figview.js` |
 | State | The shared project state `S` and small helpers | `state.js` |
-| Controllers and views | Read and change `S`, call pure modules, build DOM/SVG, wire events | `app.js`, `columns.js`, `datatab.js`, `figures.js`, `multiproxy.js`, `panels.js`, `diagnostics.js` |
+| Controllers and views | Read and change `S`, call pure modules, build DOM/SVG, wire events | `app.js`, `columns.js`, `datatab.js`, `figures.js`, `multiproxy.js`, `panels.js`, `diagnostics.js`, `folderversion.js`, `tiledproject.js`, `tiledsplitui.js`, `tiledstate.js`, `tiledtools.js`, `tiledview.js`, `tableview.js` |
 | Storage | IndexedDB project library | `storage.js` |
 
 Rules:
 
 1. **No new scientific calculation in JavaScript.** New methods are written in Python (§5.1). Existing JavaScript
    calculations change only to fix or preserve current behaviour, until their M8 slice replaces them.
-2. **`app.js` only shrinks.** It has about 4,200 lines and mixes many workflows. A task that changes a workflow
+2. **`app.js` only shrinks.** It has 4,666 lines (20 Nov 2026, after card M8.4.30); `tests/app/architecture.test.mjs` fails when it grows beyond that ceiling, which each card that shortens it lowers, and checks this table's pure modules for DOM use and imports of controllers. It still mixes many workflows. A task that changes a workflow
    inside `app.js` first moves that workflow's logic into a pure module, without changing behaviour (§5.2), then
    makes its change there. Do not add new logic to `app.js` beyond wiring.
 3. A pure module never imports a controller. Controllers may import each other only for names used inside
@@ -123,7 +125,9 @@ Pure modules for M8.3:
   existing `s.bins` array (`resultToBins`), so that tables, columns, figures and exports do not change.
 - `engineclient.js` — uploads typed arrays in chunks of at most 1 MiB, starts and cancels jobs and downloads
   results through an injected bridge object. In the desktop program the bridge is `window.corantoolDesktop.engine`;
-  in Node tests it is a fake.
+  in Node tests it is a fake. What the engine keeps between requests is recorded in three `residentstore.js` registries with
+  their own bounds: the inputs of analyses (M8.4.2), the working pixels of sections (M8.4.9, described by `sectionpixels.js`) and
+  record tables (M8.4.10, built by `tablesnapshot.js`).
 - `engineanalysis.js` — per-section state with the engine on: pending, ready or error. It keys each request on
   `analysisRevision`, empties `s.bins` while a result is awaited, queues one analysis at a time, cancels a request that
   an edit made obsolete and publishes a result only if the revision is still current. It never computes bins and never
@@ -193,7 +197,8 @@ are proposals with a default that the maintainer confirms or changes before the 
 
 1. **Which sections are tiled.** A section is tiled when its source has more pixels than the working-resolution limit
    (`maxMP`, 8 megapixels by default: the point where today's path starts discarding detail, M8.4.13), the engine is available and the
-   flag of M8.4.15 is on. Every other section keeps today's path (rule 6).
+   flag of M8.4.15 is on. Every other section keeps today's path (rule 6; both paths kept, decided by the maintainer on 21 November 2026
+   after the milestone gate of part C).
 2. **Masks of a tiled section are at full resolution** (confirmed by the maintainer, 16 November 2026): labels and exclusion on level 0 of the pyramid, so the interval
    table counts the source pixels. The resolution selector of today's path (`RES_FACTORS`) does not apply to tiled sections.
 3. **Two folders, chosen by the main process.** The pyramid is a cache keyed by the SHA-256 of the source file
@@ -295,7 +300,8 @@ Follow the steps in order; each step is one small commit with its own tests.
 4. **Method.** Write `methods/<method>.py` (`NAME`, `parse`, `run`), add it to `registry.py`, and add a test that
    runs it directly on every fixture and compares with the reference: exact for counts, row bounds, indices and
    missing-value patterns; the declared tolerance for floating-point values.
-5. **Engine.** Advertise the method in `hello`; add a transport test that sends a fixture through the real
+5. **Engine.** Advertise the method in `hello` (once `method.run` is built: describe its scope, inputs, priorities and outputs in
+   `engine/specs.py`, [contract §9.6](roadmap-engine-contract.md#96-method-table)); add a transport test that sends a fixture through the real
    coordinator and worker and gets the same result; test cancellation and an invalid input.
 6. **Main process.** Add the narrow call to `engine-ipc.js` and `preload.js`, with origin, shape and size checks and
    Node tests.

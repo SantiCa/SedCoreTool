@@ -3,6 +3,7 @@
 //
 //   node tools/measure_engine_analysis.mjs --out docs/validation/M8.3.8-windows-v0.150.json [--pairs 6] [--cycles 10]
 //     [--synthetic path/to/package.sedcoretool]     (written by tools/benchmark.py::make_synthetic; needed for the eight-section fixture)
+//     [--only timing,scenarios,responsiveness,stages,cancel,cycles,kill,pixels] [--pixel-pairs 2]   (pixels: card M8.4.9)
 //
 // Needs `npm i --no-save puppeteer-core@23` at the repository root and `node desktop/scripts/prepare.js --with-examples`.
 // Every sample is recorded. Gates are evaluated from the recorded samples in `verdicts`; nothing is relaxed afterwards.
@@ -413,6 +414,80 @@ if (want('kill')) {
   } finally { await session.stop(); }
 }
 
+// ---- working pixels of small sections resident in the engine (card M8.4.9) ----------------------------------------------------
+// One fresh process per run, engine off and on in alternating order. Every section's pixels are decoded in the page; with the engine on
+// they are then made resident through the program's own client (window.ichantool.enginePixels), next to the masks and tables the first
+// analysis left there. Then every section gets a new mask version (all masks are sent again) and the interval size changes, with the
+// pixels resident. Recorded: the bytes of pixels, masks and tables of each section, what the client keeps resident, how often the
+// engine reported its session budget full (`budgetFull`), the analysis states, and the process-tree memory from the moment the
+// pixels are uploaded to the end of the analyses.
+async function pixelRun(mode, fixture) {
+  const session = await start(mode), sampler = startSampler(session.child.pid);
+  try {
+    await loadFixture(session.page, fixture);
+    const loaded = await session.page.evaluate(async () => {
+      const I = window.ichantool, t0 = performance.now();
+      for (const s of I.S.sections) I.needPixels(s);
+      while (!I.S.sections.every((s) => s.orig) && performance.now() - t0 < 120000) await new Promise((resolve) => setTimeout(resolve, 50));
+      return I.S.sections.every((s) => s.orig);
+    });
+    await sleep(1500);
+    const idle = summarise(sampler.samples.slice(-20)), mark = sampler.mark();
+    const run = await session.page.evaluate(async (on) => {
+      const I = window.ichantool, S = I.S, { buildIntervalSnapshot } = await import('app://corantool/app/js/sectionanalysis.js');
+      const project = { classes: S.classes, settings: S.settings, ageModel: S.age.model, ageUnits: S.age.units }, encoder = new TextEncoder();
+      const sizes = S.sections.map((s) => {
+        const snapshot = buildIntervalSnapshot(s, project);
+        return { w: s.w, h: s.h, bits: s.orig16 ? 16 : 8, pixel_bytes: s.orig.byteLength + (s.orig16?.byteLength ?? 0),
+          mask_bytes: ['labels', 'exclude', 'stack_offsets', 'stack_members'].reduce((n, k) => n + (snapshot[k]?.data?.byteLength ?? 0), 0),
+          table_bytes: ['objects', 'classes', 'settings', 'age_model', 'manual_indices'].reduce((n, k) => n + encoder.encode(JSON.stringify(snapshot[k])).length, 0) };
+      });
+      const time = async (action) => { const t0 = performance.now(); await action(); return performance.now() - t0; };
+      const uploads = [];
+      if (on) for (const s of S.sections) {
+        const t0 = performance.now();
+        try { const tokens = await I.enginePixels(s); uploads.push({ ok: true, ms: performance.now() - t0, rgba16: !!tokens.rgba16 }); }
+        catch (error) { uploads.push({ ok: false, ms: performance.now() - t0, code: error?.code ?? String(error?.message).slice(0, 80) }); }
+      }
+      const afterUpload = I.engineStats();
+      for (const s of S.sections) { s._rc = undefined; s._mv = (s._mv || 0) + 1; }      // a new mask version everywhere: every mask is sent again
+      const fullMs = await time(() => I.analyzeSections(S.sections));
+      S.settings.binCm = 1.37;
+      const intervalMs = await time(() => I.analyzeSections(S.sections));
+      const againMs = on ? await time(async () => { for (const s of S.sections) await I.enginePixels(s); }) : null;
+      const pick = (stats) => stats && { fullMaskUploads: stats.fullMaskUploads, derivations: stats.derivations, budgetFull: stats.budgetFull, residentBytes: stats.residentBytes,
+        residentPixelBytes: stats.residentPixelBytes, residentPixelSections: stats.residentPixelSections };
+      return { sizes, uploads, full_ms: fullMs, interval_ms: intervalMs, pixels_again_ms: againMs, after_upload: pick(afterUpload), after_analyses: pick(I.engineStats()),
+        states: S.sections.map((s) => (s.analysis?.state === 'error' ? `error ${s.analysis.code} ${s.analysis.field ?? ''}` : s.analysis?.state ?? null)) };
+    }, mode === 'on');
+    return { ...run, pixels_loaded: loaded, idle_memory: idle, memory: summarise(sampler.samples.slice(mark)) };
+  } finally { sampler.stop(); await session.stop(); }
+}
+
+const RESIDENT_MASK_BYTES = 256 * MiB, RESIDENT_PIXELS = 192 * MiB, TRANSIENT_RESERVE = 16 * MiB;
+/** The engine's charge for what the client keeps (buffers.py: a metadata table is charged 64 times its bytes, plus the transient reserve). */
+function engineChargeModel(run) {
+  const sum = (key) => run.sizes.reduce((n, s) => n + s[key], 0);
+  const masks = sum('mask_bytes'), tables = sum('table_bytes'), pixels = sum('pixel_bytes'), largestMasks = Math.max(...run.sizes.map((s) => s.mask_bytes));
+  const charge = (maskAndTableBytes) => Math.min(maskAndTableBytes, RESIDENT_MASK_BYTES) + 63 * tables + Math.min(pixels, RESIDENT_PIXELS) + TRANSIENT_RESERVE;
+  // While a section's masks are sent again, its old copy stays until the analysis ends; the client bounds both together by its 256 MiB.
+  return { masks_mib: round(masks / MiB), tables_mib: round(tables / MiB), table_charge_mib: round(64 * tables / MiB), pixels_mib: round(pixels / MiB),
+    resident_charge_mib: round(charge(masks + tables) / MiB), during_full_upload_charge_mib: round(charge(masks + tables + largestMasks) / MiB) };
+}
+const PIXEL_PAIRS = Number(option('pixel-pairs', 2));
+
+for (const fixture of want('pixels') ? fixtures : []) {
+  log('pixels', fixture);
+  const record = { pairs: [] };
+  for (let pair = 0; pair < PIXEL_PAIRS; pair++) {
+    const order = pair % 2 === 0 ? ['off', 'on'] : ['on', 'off'], entry = { order };
+    for (const mode of order) entry[mode] = await pixelRun(mode, fixture);
+    record.pairs.push(entry);
+  }
+  record.charge_model = engineChargeModel(record.pairs[0].on);
+  report.results[`pixels_${fixture}`] = record;
+}
+
 // ---- verdicts (the gates of contract §7, evaluated on the recorded samples) -------------------------------------------------
 
 const v = report.verdicts, R = report.results;
@@ -464,6 +539,18 @@ for (const fixture of fixtures) {
     mismatches: sc.pairs.reduce((n, p) => n + p.on.mismatch_count, 0) };
   out.pass = [out.interval_change, out.edit_undo_redo, out.unchanged, out.memory_peak, out.parity].every((x) => x.pass);
   v[`scenarios_${fixture}`] = out;
+}
+for (const fixture of fixtures) {
+  const px = R[`pixels_${fixture}`];
+  if (!px) continue;
+  const peak = (mode) => median(px.pairs.map((p) => p[mode].memory.peak_mib)), on = px.pairs.map((p) => p.on);
+  v[`pixels_${fixture}`] = {
+    memory_peak: { ...memoryPeakVerdict(peak('off'), peak('on')), basis: 'median over the pairs of the peak of each run, from the pixel upload to the end of the analyses',
+      max_on_mib: Math.max(...on.map((r) => r.memory.peak_mib)), interactive_target_mib: 2048 },
+    all_resident: on.every((r) => r.uploads.every((u) => u.ok) && r.after_analyses.residentPixelSections === r.sizes.length),
+    budget_full_events: on.reduce((n, r) => n + r.after_analyses.budgetFull, 0),
+    states_ready: px.pairs.every((p) => ['off', 'on'].every((mode) => p[mode].states.every((s) => s === 'ready' || s === null))),
+    charge_model: px.charge_model, session_budget_mib: 512 };
 }
 v.not_measured = ['macOS and Linux', 'a clean Windows machine', 'cold cache after a reboot', 'saturated CPU', 'save interrupted during a job (covered separately by tests/e2e/interrupted-saves.mjs)'];
 

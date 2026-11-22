@@ -1,11 +1,16 @@
 // SedCoreTool web — scientific plots of the Data tab (V21), in the spirit of Golden Software Grapher. No DOM.
 // XY plots (line, scatter, line + symbols, step, area, bars; secondary Y axis; log or inverted axes; curve fits with
 // equation and R²) and stratigraphic plots (one panel per variable sharing a vertical depth/age axis).
+import { minOf, maxOf } from './core.js';
 
 const esc3 = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[m]);
 export const PLOT_TYPES = ['line', 'scatter', 'linesym', 'step', 'area', 'bar'];
 export const FIT_KINDS = ['none', 'linear', 'poly', 'exp', 'power', 'log', 'movavg'];
 export const PLOT_COLORS = ['#1f6fb2', '#c0392b', '#2e7d4f', '#8e44ad', '#d68910', '#16a085', '#7f8c8d', '#c2185b', '#5d4037', '#283593'];
+// Card Q9: colours and sizes may come from a project file; only #rgb/#rrggbb colours and finite non-zero sizes reach the SVG.
+const PLOT_HEX_COLOR = /^#[0-9a-f]{3}([0-9a-f]{3})?$/i;
+const seriesColor = (c, i) => (typeof c === 'string' && PLOT_HEX_COLOR.test(c) ? c : PLOT_COLORS[i % PLOT_COLORS.length]);
+const plotSize = (v, fallback) => (Number.isFinite(Number(v)) && Number(v) ? Number(v) : fallback);
 
 /* ───────── statistics and fits ───────── */
 const okv = (v) => v != null && Number.isFinite(v);
@@ -66,7 +71,7 @@ function ticksOf(lo, hi, log, n = 6) {
 /** Axis range from data (with 4 % padding) unless min/max are given. */
 export function axisRange(vals, ax = {}) {
   let v = vals.filter(okv); if (ax.log) v = v.filter((q) => q > 0);
-  let lo = okv(ax.min) ? ax.min : Math.min(...v), hi = okv(ax.max) ? ax.max : Math.max(...v);
+  let lo = okv(ax.min) ? ax.min : minOf(v), hi = okv(ax.max) ? ax.max : maxOf(v);
   if (!v.length && !(okv(ax.min) && okv(ax.max))) return [0, 1];
   if (lo === hi) { lo -= 1; hi += 1; }
   if (!ax.log) { const pad = (hi - lo) * 0.04; if (!okv(ax.min)) lo -= pad; if (!okv(ax.max)) hi += pad; } else if (lo <= 0) lo = hi / 1000;
@@ -83,13 +88,37 @@ function plotSymbol(kind, x, y, r, col) {
 }
 const SYMS = ['circle', 'square', 'triangle', 'diamond'];
 
+/**
+ * Card Q5: a line for the screen, at most four points per pixel column of its ordering axis (the first, lowest, highest and last there, in
+ * their order), so a series of 10^6 points draws as fast as one of a few thousand and looks the same. `points` are screen [x, y] sorted along
+ * `along` (0: x, 1: y); the other coordinate is the value. The export draws every point (`spec.decimate` unset).
+ * @param {readonly (readonly [number, number])[]} points
+ * @param {0 | 1} along
+ * @returns {(readonly [number, number])[]}
+ */
+export function decimatePerPixel(points, along) {
+  const value = 1 - along, out = [];
+  for (let start = 0; start < points.length;) {
+    const column = Math.floor(points[start][along]);
+    let end = start + 1, low = start, high = start;
+    for (; end < points.length && Math.floor(points[end][along]) === column; end++) {
+      if (points[end][value] < points[low][value]) low = end;
+      if (points[end][value] > points[high][value]) high = end;
+    }
+    for (const k of [...new Set([start, low, high, end - 1])].sort((a, b) => a - b)) out.push(points[k]);
+    start = end;
+  }
+  return out;
+}
+
 /** One series drawn with scale functions sx, sy (data → px). Series {x, y, type, color, width, size, symbol, dash, base}. */
-function drawSeries(se, sx, sy, horizontal = false) {
+function drawSeries(se, sx, sy, horizontal = false, decimate = false) {
   const P = xyPairs(se.x, se.y), out = [], col = se.color, w = se.width ?? 1.4, r = se.size ?? 2.6;
   if (!P.length) return '';
   const pt = ([a, b]) => (horizontal ? [sx(b), sy(a)] : [sx(a), sy(b)]); // stratigraphic panels: x = value, y = depth
   const sorted = [...P].sort((p, q) => p[0] - q[0]), dash = se.dash ? ` stroke-dasharray="${se.dash}"` : '';
-  const path = (pts) => pts.map((p, k) => `${k ? 'L' : 'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join('');
+  const thin = (pts) => (decimate ? decimatePerPixel(pts, horizontal ? 1 : 0) : pts);
+  const path = (pts) => thin(pts).map((p, k) => `${k ? 'L' : 'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join('');
   if (se.type === 'area') {
     const base = horizontal ? sx(se.base ?? 0) : sy(se.base ?? 0), pts = sorted.map(pt);
     const poly = horizontal ? [[base, pts[0][1]], ...pts, [base, pts[pts.length - 1][1]]] : [[pts[0][0], base], ...pts, [pts[pts.length - 1][0], base]];
@@ -127,7 +156,7 @@ function drawFit(se, fit, sx, sy, lo, hi, horizontal = false) {
  * legend, grid, font}. axis = {label, min, max, log, invert}. Returns {svg, fits: [{name, eq, r2, n}], stats}.
  */
 export function buildXYPlot(spec) {
-  const W = spec.width || 760, H = spec.height || 480, fs = spec.font || 11;
+  const W = plotSize(spec.width, 760), H = plotSize(spec.height, 480), fs = plotSize(spec.font, 11);
   const hasY2 = spec.series.some((s) => s.y2), L = 64, R = hasY2 ? 66 : 20, T = spec.title ? 34 : 14, B = 48 + (spec.legend !== false ? 18 * Math.ceil(spec.series.length / 4) : 0);
   const pw = W - L - R, ph = H - T - B;
   const xr = axisRange(spec.series.flatMap((s) => s.x), spec.x), yr = axisRange(spec.series.filter((s) => !s.y2).flatMap((s) => s.y), spec.y), y2r = hasY2 ? axisRange(spec.series.filter((s) => s.y2).flatMap((s) => s.y), spec.y2 || {}) : null;
@@ -140,8 +169,8 @@ export function buildXYPlot(spec) {
   s.push(`<defs><clipPath id="pc"><rect x="${L}" y="${T}" width="${pw}" height="${ph}"/></clipPath></defs><g clip-path="url(#pc)">`);
   const fits = [], st = [];
   spec.series.forEach((se, i) => {
-    const color = se.color || PLOT_COLORS[i % PLOT_COLORS.length], ser = { ...se, color, symbol: se.symbol || SYMS[i % SYMS.length] }, ys = se.y2 ? sy2 : sy;
-    s.push(drawSeries(ser, sx, ys));
+    const color = seriesColor(se.color, i), ser = { ...se, color, symbol: se.symbol || SYMS[i % SYMS.length] }, ys = se.y2 ? sy2 : sy;
+    s.push(drawSeries(ser, sx, ys, false, !!spec.decimate));
     if (se.fit && se.fit !== 'none') { const f = fitCurve(se.x, se.y, se.fit, { deg: se.deg, window: se.window }); if (f) { s.push(drawFit(ser, f, sx, ys, xr[0], xr[1])); fits.push({ name: se.name, eq: f.eq, r2: f.r2, n: f.n }); } }
     st.push({ name: se.name, ...plotStats(se.y), r: pearson(se.x, se.y) });
   });
@@ -154,7 +183,7 @@ export function buildXYPlot(spec) {
   s.push(`<text transform="translate(16 ${T + ph / 2}) rotate(-90)" text-anchor="middle" font-weight="600">${esc3(spec.y?.label)}</text>`);
   if (hasY2) s.push(`<text transform="translate(${W - 12} ${T + ph / 2}) rotate(90)" text-anchor="middle" font-weight="600">${esc3(spec.y2?.label)}</text>`);
   if (spec.legend !== false) spec.series.forEach((se, i) => {
-    const col = se.color || PLOT_COLORS[i % PLOT_COLORS.length], x = L + (i % 4) * (pw / 4), y = T + ph + 50 + 18 * Math.floor(i / 4);
+    const col = seriesColor(se.color, i), x = L + (i % 4) * (pw / 4), y = T + ph + 50 + 18 * Math.floor(i / 4);
     s.push(`<line x1="${x}" y1="${y - 4}" x2="${x + 18}" y2="${y - 4}" stroke="${col}" stroke-width="2"/>${se.type === 'scatter' || se.type === 'linesym' ? plotSymbol(se.symbol || SYMS[i % SYMS.length], x + 9, y - 4, 3, col) : ''}<text x="${x + 24}" y="${y}">${esc3(se.name)}${se.y2 ? ' (Y2)' : ''}</text>`);
   });
   s.push('</svg>');
@@ -166,8 +195,8 @@ export function buildXYPlot(spec) {
  * spec = {title, width, height, v: axis (vertical), panels: [{label, series: [{name, x: depth/age, y: value, type, color}], log, min, max, fit}]}.
  */
 export function buildStratPlot(spec) {
-  const np = Math.max(1, spec.panels.length), H = spec.height || 640, fs = spec.font || 11, L = 64, T = (spec.title ? 34 : 14) + 34, B = 26 + (spec.legend !== false ? 18 : 0);
-  const pw = spec.panelWidth || 150, gap = 14, W = Math.max(spec.width || 0, L + np * (pw + gap) + 10), ph = H - T - B;
+  const np = Math.max(1, spec.panels.length), H = plotSize(spec.height, 640), fs = plotSize(spec.font, 11), L = 64, T = (spec.title ? 34 : 14) + 34, B = 26 + (spec.legend !== false ? 18 : 0);
+  const pw = plotSize(spec.panelWidth, 150), gap = 14, W = Math.max(plotSize(spec.width, 0), L + np * (pw + gap) + 10), ph = H - T - B;
   const all = spec.panels.flatMap((p) => p.series.flatMap((se) => se.x));
   const vr = axisRange(all, spec.v), inv = spec.v?.invert !== false;
   const sv = scaler(vr[0], vr[1], T, T + ph, false, !inv); // depth grows downwards
@@ -182,9 +211,9 @@ export function buildStratPlot(spec) {
     if (spec.grid !== false) { for (const v of vt) s.push(`<line x1="${x0}" y1="${sv(v).toFixed(1)}" x2="${x0 + pw}" y2="${sv(v).toFixed(1)}" stroke="#eef1f0"/>`); }
     s.push(`<clipPath id="sp${k}"><rect x="${x0}" y="${T}" width="${pw}" height="${ph}"/></clipPath><g clip-path="url(#sp${k})">`);
     p.series.forEach((se, i) => {
-      const color = se.color || PLOT_COLORS[i % PLOT_COLORS.length]; names.set(se.core || se.name, color);
+      const color = seriesColor(se.color, i); names.set(se.core || se.name, color);
       const ser = { ...se, color, symbol: se.symbol || SYMS[i % SYMS.length] };
-      s.push(drawSeries(ser, sx, sv, true));
+      s.push(drawSeries(ser, sx, sv, true, !!spec.decimate));
       if (p.fit && p.fit !== 'none') { const f = fitCurve(se.x, se.y, p.fit === 'movavg' ? 'movavg' : p.fit, { deg: p.deg, window: p.window }); if (f) { s.push(drawFit(ser, f, sx, sv, vr[0], vr[1], true)); fits.push({ name: `${p.label} · ${se.name}`, eq: f.eq, r2: f.r2, n: f.n }); } }
       st.push({ name: `${p.label} · ${se.name}`, ...plotStats(se.y) });
     });

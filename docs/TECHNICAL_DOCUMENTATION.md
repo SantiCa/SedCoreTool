@@ -162,14 +162,28 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `tiledsection.js` | Tiled sections (card M8.4.15): image sizes read from TIFF, JPEG and PNG headers (`imageDimensions`), the pyramid level that serves as a tiled section's working image (`proxyLevel`) and a level assembled from its tiles into RGBA (`assembleLevel`) and one tile as 8-bit RGBA for display (`tileRgba`) | Yes |
 | `tilecache.js` | Which tiles of a tiled section the viewer needs (card M8.4.15): the level for a zoom (`levelForZoom`: the coarsest with at least one level pixel per screen pixel), the visible tiles plus one ring, nearest the centre first, a coarser cached tile to draw while one is missing (`coarserCover`), a 256 MiB least-recently-used cache that keeps the tiles on screen (`TileCache`) and batched requests, 16 tiles each, two at a time, dropping tiles no longer wanted (`TileScheduler`, keys prefixed per pyramid); where a tile goes on screen (`tilePlacement`) | Yes |
 | `tiledmasks.js` | Masks of tiled sections in the page (card M8.4.16): the cache of level-0 mask tiles (`MaskTiles`: all-zero layers kept as nothing, tiles changed and not acknowledged by the engine never dropped, pinned tiles kept, clean tiles dropped least recently used first beyond 128 MiB), the reduced copy in the working image (`reduceTile`), and the mask layer painted over pixel tiles (`overlayLayout`, `axisMap`, `paintOverlay`) | Yes |
-| `tiledit.js` | Editing the masks of tiled sections (card M8.4.16): the edit window (`EditWindow`: whole level-0 mask tiles as flat arrays, written back tile by tile; `windowRange`, `WINDOW_TILES`) and object statistics kept per tile and summed per object (`tileStats`, `TiledObjectStats`, `affectedTiles`, `tilesUnder`, `TiledStatsRunner`: published per object only when current, tiles prioritised for an operation, card M8.4.28) | Yes |
+| `tiledit.js` | Editing the masks of tiled sections (card M8.4.16): the edit window (`EditWindow`: whole level-0 mask tiles as flat arrays, written back tile by tile; `windowRange`, `WINDOW_TILES`) and object statistics kept per tile and summed per object (`tileStats`, `TiledObjectStats` with its budget `STATS_BUDGET_BYTES`, card M8.4.37, `affectedTiles`, `tilesUnder`, `TiledStatsRunner`: published per object only when current, tiles prioritised for an operation, card M8.4.28) | Yes |
+| `coremerge.js` | Joining the tables of one core from several projects in the units of the first one, with disagreeing values counted (card Q3; moved out of `app.js`) | Yes |
+| `tiledview.js` | The viewer of tiled sections (card M8.4.30 step 4): working image from the pyramid, tile cache and schedulers, mask overlay, the dialog of a long build or copy; context object from `app.js` | No (controller) |
+| `tiledtools.js` | Editing tiled sections (card M8.4.30 step 3): strokes on edit windows, undo and redo of tiled edits, wand, lasso, scissors and object operations, the wait for objects' statistics; context object from `app.js` | No (controller) |
+| `tiledstate.js` | One tiled section's state behind the page (card M8.4.30 step 2): per-tile object statistics, row counts and interval table, reads of level-0 pixels and dropped mask tiles, mask sends to the engine's store; context object from `app.js` | No (controller) |
+| `tiledrecord.js` | The saved record of a tiled section and its row window (card M8.4.42): the record written and validated (`serTiledSection`, `validTiledRecord`), the project's format version (6, or 7 with a window) and whether a newer one opens read-only, and the window's translation of level-0 tile rows, of the last tile and of the working image's band | Yes |
+| `tiledsplit.js` | Splitting a tiled section into parts along mask-tile boundaries (card M8.4.43): alignment to `max(512, 2^level)` (`maxSplitParts`, `splitRowBounds`), X1 suggestion (`splitSuggestion`), continuous depths, clipped analysis area, marks and manual ranges (`planSplitParts`), `mask.slice` payload decoding and format-7 part record building (`buildPartRecord`) | Yes |
+| `tiledsplitui.js` | Interface for splitting a tiled section (card M8.4.43): actionable statistics-budget banner (`#secStatsWarning`), section-panel button (`#secSplit`), confirmation dialog naming every part and its depths (X3a), and failure-safe replacement (`settle -> mask.slice -> loadTiledSection -> swap`) | No (controller) |
+| `tiledproject.js` | The project side of tiled sections (card M8.4.30 step 1): reopening a saved tiled section, the lock of a missing stored version, the store folder that follows its project, the store's part of a save; it receives what it needs from `app.js` in one context object | No (controller) |
 | `taxa.js` | The ichnotaxa of a project (card Q1): use of a class across cores, deleting it from every core and restoring it, repairing labels of classes that no longer exist | Yes |
-| `singleflight.js` | One run at a time with at most one more run for the requests made meanwhile, if the revision changed (card M8.4.31): project saves | Yes |
+| `singleflight.js` | One run at a time with at most one more run for the requests made meanwhile, if the revision changed (card M8.4.31): project saves; `nestedIndicator`, one busy sign for overlapping operations (card M8.4.39) | Yes |
 | `tiledundo.js` | Undo and redo of tiled edits (card M8.4.16 step 5): copies of the mask tiles an edit changed, taken before its first write and swapped with the page's tiles (`TileChanges`); the 64 MiB budget of those copies (`trimTileHistory`) | Yes |
 | `tiledcounts.js` | Row counts of tiled sections (card M8.4.17): the histogram of each tile (`tileHistogram`), their sum under the current classes (`TiledRowCounts`) and the queue that counts changed tiles between frames (`TiledCountsRunner`); no DOM |
+| `tiledbackup.js` | Tiled sections in the folder backup and in packages, and back into the store at a restore (cards M8.4.18c-d): `backupTiledSections` (with the project's copies of sources), `packageTiledSections`, `keptSourceBytes`, `restoreVersion`, `restoreSource`, `manifestBlobs`; no DOM (the folder is a directory handle or a read function) |
+| `folderversion.js` | «Open project folder» at a day of the history (card M8.4.18c): `historyDays` (no DOM) and `chooseFolderVersion` (a dialog) |
+| `tiledcache.js` | The reopening cache of a tiled section (card M8.4.29): `encodeReopenCache` and `decodeReopenCache` (every check; a refusal is `CacheRejected`), `statsCover`; no DOM |
 | `tiledsource.js` | The original image of a tiled section in the section form (card M8.4.18b): where it is, "Locate the image…" and "Copy the image into the project", through `window.corantoolDesktop.tiles` (`createTiledSourcePanel`); `sizeText` | — |
 | `tiledsync.js` | Sending the masks of tiled sections to the engine's store (card M8.4.16): rounds of staged version, dirty tiles and tables, commit and acknowledgement, retried after a failure (`MaskSync`); reading back tiles the page dropped (`MaskLoader`); the tables as bytes (`maskTables`) | Yes |
 | `maskchanges.js` | Which rows of each section's label and exclusion masks changed since the engine last received them: `createMaskChanges` (mark, take, restore, mark all) and `indexRangeOfPairs` (the pixels named by an edit-history list). A hint for the engine path, never a proof (§26.2) | Yes |
+| `residentstore.js` | The registry of buffers the engine keeps between requests, per section (card M8.4.9, taken out of `engineclient.js`): `createResidentStore` with a byte bound and an owner bound, least recently used first, a group of buffers replaced together under one key, `forget`, `releaseAll`, `invalidateAll`. `engineclient.js` holds one for analysis inputs and one for pixels | Yes |
+| `sectionpixels.js` | The working pixels of a section as engine buffers (card M8.4.9): `buildPixelBuffers` (views `u8[h,w,4]` and `u16le[h,w,4]`), `describePixels` (the SHA-256 of each buffer and the pixel identity, remembered in `s._pxid`), `pixelIdentity` | Yes |
+| `tablesnapshot.js` | A record table as engine buffers (card M8.4.10) and back (card M8.5.3, `readTableResult`, for the table outputs of `method.run`): `buildTableSnapshot` (named numeric columns with `null` for missing values to `f64le[columns, rows]` values, `u8[columns, rows]` validity and a `utf8json` description, with the table identity and the limits `MAX_TABLE_*`), `tableInputNames` | Yes |
 | `sectionanalysis.js` | Analysis of one section without the DOM: effective class of each object, class-index table, row counts (cached per section), interval bins with no-data padding, ages and manual indices (§3.2), plus the builders of the engine method's input snapshot and reference result columns (`buildIntervalSnapshot`, `referenceColumns`), the revision key of a section's calculation (`analysisRevision`) and the conversion of engine result columns to `s.bins` (`resultToBins`). `app.js::analyze` passes the project state in | Yes |
 | `imageproc.js` | Enhancement, detection, connected components, magic wand, lasso, descriptors, rotation, downsampling | ✓ |
 | `edit.js` | Editing algorithms: scissors, merging, undo records, project migration | ✓ |
@@ -180,6 +194,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `locmap.js` | Core location map: coordinate reference systems, frame, grid, scale | ✓ |
 | `plot.js` | Plots of the Data tab (stratigraphic log, XY, fits) | ✓ |
 | `sheet.js` | Formulas of the Data tab (own parser, no `eval`) | ✓ |
+| `dataedit.js` | Rules of the Data tab edits and record list: original cell value, manual-column delete, remove by id (card Q10) | ✓ |
 | `exportio.js` | Tables written to files and records read from tables | ✓ |
 | `zip.js` | Minimal ZIP writer and reader for project packages | ✓ |
 | `unet.js` | U-Net tiling, normalisation, blending and resampling (same rules as the Python package) | ✓ |
@@ -191,6 +206,8 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `columns.js` | Composite log of a core: column view, records, order and visibility of chart columns | — |
 | `navpreview.js` | Navigation-only photo/mask reduction and bounded preview ownership | ✓ |
 | `figview.js` | Serializable figure presentation, inherited defaults and independent overrides | ✓ |
+| `figsize.js` | Journal presets (widths in mm, text and line minimums, dpi), `mmToPt`, `pixelsFor`, text, line and raster checks, `panelLabel`, `fitWidths`, Okabe-Ito palette (card P1; not yet used by the figure builders) | ✓ |
+| `pngmeta.js` | PNG `pHYs` (resolution) and `tEXt` chunks added to PNG bytes; reuses `zip.js::crc32` (card P1) | ✓ |
 | `panels.js` | Resizable and collapsible side panels, resizable maps | — |
 | `datatab.js` | Data tab: all data of the project, Grapher-like plots and the spreadsheet view | — |
 | `multiproxy.js` | Multiproxy tool: numeric records, interval layers, classifiers, composite-log readout, manual classification, maps | — |
@@ -216,7 +233,8 @@ import of app.js or access to browser globals; it is included after unet.js in t
 
 Python package (`src/sedcoretool/`): `io.py` (images and masks), `segmentation.py` (masks from a threshold, a
 colour palette or a U-Net), `kernels/` (pure array primitives: intervals, counting, index tiers, age interpolation; §25.2),
-`methods/` (versioned scientific methods for the engine, for now `section.intervals/1`; §25.2),
+`methods/` (versioned scientific methods for the engine, for now `section.intervals/1` and `core.ages/1`, and in `validation.py` the strict input checks they
+share, including `table`, the decoder of record tables of card M8.4.10; §25.2),
 `pipeline.py` (intervals, percentages, indices), `indices.py` (BI and ii schemes),
 `depth.py` (depth and age), `export.py` (CSV and Excel), `plotting.py` (matplotlib figure), `cli.py` (command line),
 `unet/` (U-Net dataset, training, evaluation, prediction, tiling and metrics), `engine/` (experimental desktop
@@ -228,6 +246,8 @@ Desktop program (`desktop/`): `main.js` (window, `app://` protocol and IPC), `pr
 client, page bridge, framing and bundled-runtime verification; §26.2–§26.3), `runtime-lock.json` (pinned runtime artifacts;
 §26.3), `trainer.js` and `model-store.js` (U-Net training and model generations; §9.3), `diagnostics.js` (§26.1)
 and `scripts/` (preparation, build and package checks).
+
+Tools (`tools/`): `check_all.py` runs the end-of-session checks of the development guide §3 one after another and prints one line per check; the full output of each goes to a log file, and the exit code is non-zero if a check failed or a tool is missing (tests: `tests/test_check_all.py`). `make_core_ages_fixtures.mjs` writes the reference fixtures of `core.ages/1` to `tests/fixtures/core_ages/` from `core.js` (§31.1).
 
 ### 1.5 Names and compatibility
 
@@ -293,6 +313,9 @@ accepts unloaded sections, and the existing pixel-loading service makes pixels r
 Pixels are assumed square (same scale horizontally and vertically), which holds for photographs and corrected line
 scans. If they were not, physical areas would carry a constant factor, but percentages would not change, because
 they are proportions of pixels.
+
+Changing a section's depth unit in its form asks first (card Q3): **OK** converts top and bottom to the new unit (100–200 cm become 1–2 m,
+the same position; 12 significant digits), **Cancel** only corrects the unit and keeps the numbers (the section is then at 100–200 m).
 
 ---
 
@@ -443,7 +466,8 @@ of offending rows is reported. The Python API (`depth_to_age`) applies the same 
 finite pairs. Age reversals remain flagged by the program rather than silently corrected.
 
 Implementation: `depth.py::depth_to_age` (Python) and `core.js::parseAgeModel, interpAge, interpAgeRange,
-baconToAgeText` (program).
+baconToAgeText` (program); engine method `core.ages/1` (`methods/core_ages.py`, [contract §9.8](roadmap-engine-contract.md)), which applies a
+validated model to a table of depths without extrapolation and matches the program's reference fixtures within 1e-9 age units. The interface does not request it yet.
 
 - **Input:** pairs `(depth, age)`, sorted by depth. Separators may be comma, semicolon, tab or space; lines that
   are not numeric and lines starting with `#` are ignored. If a line uses `;` or tab, the comma is the decimal
@@ -1069,6 +1093,9 @@ browser (`ml.excluded`). Library examples can be removed.
 **Examples from other projects:** the `lite` index stores, for each labelled trace, `{key, name, x, core, thumb}`
 (`key = project|core|section|object`). They can be added to the project library (`library: {key, name, x, thumb,
 from}`); if the taxon does not exist, it is created with that name.
+A thumbnail (`library[].thumb`, object `th`, `lite` example `thumb`) is used only when it is a base64 data URL of a PNG, JPEG or WebP
+image (`safeImageURL` in `core.js`: `^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$`); any other value is dropped when a project
+is imported or opened (`sanitizeThumbs`) and is not drawn.
 
 **Stored weights** (`Classifier.toJSON`): `k`, `ν`, mean and standard deviation of each descriptor, novelty scale `m`,
 accuracy, counts and the examples (descriptors rounded to 5 decimals). The project file stores `models.project` and
@@ -1329,28 +1356,45 @@ When an age-only table is combined with a depth-based table, the core's age mode
 Implementation: `log.js::parseTable, decodeText, guessAxisColumn`, `exportio.js::recordSeries` and `app.js` (records
 dialog). External records are any measured down-core series added to a core (XRF, colour, susceptibility…).
 
-- **Formats:** CSV, TXT, TSV or DAT, and spreadsheets (`.xlsx`, `.xls`, `.ods`; first sheet) read with SheetJS
-  0.20.3, bundled from `cdn.sheetjs.com/xlsx-0.20.3` with its Apache-2.0 licence (SHA-256 of the bundled file
+- **Formats:** CSV, TXT, TSV or DAT, and spreadsheets (`.xlsx`, `.xls`, `.ods`; the first sheet, with a warning when there are more;
+  the stored numbers, not the text the cell's format shows: `rawNumbers`, card Q2) read with SheetJS
+  0.20.3 (`.xlsx`, `.xls`, `.ods`: the sheet is chosen in the import report), bundled from `cdn.sheetjs.com/xlsx-0.20.3` with its Apache-2.0 licence (SHA-256 of the bundled file
   `cc015130aa8521e7f088f88898eba949ccdcbfb38df0bd129b44b7273c3a6f41`; the online fallback uses the same version
   with an SRI SHA-384 check). This version fixes CVE-2023-30533 and CVE-2024-22363.
-- **Text encoding:** UTF-8 and, if the file is not valid UTF-8 (CSV files saved by Excel on Windows), Windows-1252.
-- **Reading** (`parseTable`):
-  - the separator is detected among tab, semicolon, comma or vertical bar: the first one that splits the first line
-    and all but one of the other first 6 lines; otherwise spaces;
+- **Text encoding:** UTF-16 when the file starts with its byte-order mark (Excel's "Unicode text"); otherwise UTF-8 and, if
+  the file is not valid UTF-8 (CSV files saved by Excel on Windows), Windows-1252.
+- **Reading** (`parseTable`; card Q2 for the rules marked *):
+  - the separator is the one among tab, semicolon, comma or vertical bar that gives the same number of fields (more than one) on most of
+    the first 30 lines; otherwise spaces; * lines before the first line with that number of fields (a title, an instrument's notes) are a
+    preamble, skipped and counted;
   - fields in double quotes may contain the separator and `""`;
-  - decimal comma if the separator is not the comma and a cell like `1,5` or `1.234,5` appears, and none like
-    `1,234.5`;
-  - thousands separators: `1.234,5` with decimal comma, `1,234.5` without it, and `1 234,5`;
-  - header if the first row contains any non-numeric text;
+  - * the decimal separator is decided for each column (never with a comma separator): a decimal comma when the column has a cell like
+    `1,5`, `12,3456` or `1.234,5` and none like `1.5` or `1,234.5`; a decimal point in the opposite case; a column whose only commas are
+    like `1,250` is ambiguous (1.25 or 1250): it is read with a decimal comma, as before, and named in the warning;
+  - thousands separators: `1.234,5` with decimal comma, `1,234.5` without it, and `1 234,5`; * a first group of `0` is never a
+    thousands group (`0.500` is 0.5);
+  - header if the first row contains any non-numeric text; * repeated header names get ` (2)`, ` (3)`…;
   - lines starting with `#` are ignored;
-  - non-numeric cells are treated as empty; they are counted (`dropped`, in mostly numeric columns) together with
-    rows shorter than the header (`short`), and the user is warned on import.
+  - * cells equal to a missing-value code (-999, -999.25, -9999; `MISSING_CODES`) are empty;
+  - * values below a detection limit (`<0.01`, `bdl`, `b.d.l.`, `n.d.`, `<DL`) are empty by default (decision M of the maintainer, 19 Nov
+    2026); the reader can also give half the stated limit or the limit (`censored: 'half' | 'limit'`; a code without a number stays empty);
+  - other non-numeric cells are treated as empty and counted (`dropped`, in mostly numeric columns); rows shorter or longer than the header
+    (`short`, `long`) are counted.
+- **Import report** (`readTableFile`, `importNotes`, `renderImportReport` in `multiproxy.js`; card Q2): the dialogs that open on import (an
+  external record; a multiproxy table) show «How the file was read»: every kind of change with its count (or «Read without changing
+  anything»), the sheet of a workbook with several, the rule for values below a detection limit when there are any (empty, half the limit,
+  the limit), and the first five rows as read, where «—» marks a cell with text read as empty. Changing the sheet or the rule reads the file
+  again. After an external record is added, «Undo import» beside it removes it without asking, while it is the last one imported in the
+  session (not available for multiproxy tables, whose import adds cores and data).
 - **Axis column:** the first header that looks like depth (depth, prof, mbsf, CSF, CCSF, mcd, m, cm) is proposed or,
   if none, age (age, edad, ka, Ma, yr, cal). The user can change it and say whether it is depth or age.
 - **Series:** each chosen column is a series of (axis, value) pairs without empty values, sorted by axis. Each series
   has a colour, visibility and an option to reverse its axis.
-- **Units:** a depth column must be in the same units as the core and an age column in the units of the age model.
-  External records are not converted.
+- **Units** (card Q3): the dialog asks the unit of the axis column (mm, cm or m for depth; a, ka or Ma for age), proposed from its header
+  (`core.js::guessRecordUnit`: `mbsf`, `mcd`, `CCSF`, `(m)` → m; `cm`; `mm`; `ka`, `kyr` → ka; `Ma` → Ma; `yr`, `BP` → a) or, when the header
+  does not say, the core's own unit. The axis is converted on adding (`unitFactor`) to the unit of the open core's uppermost section, or to
+  the age model's unit, and the chosen unit is kept with the record (`unit`). A record that then lies wholly outside the core's depths (or
+  the age model's ages) is reported («check the unit»). Records added before card Q3 have no `unit` and are left as they were.
 
 ---
 
@@ -1445,7 +1489,10 @@ The **Plots** view of the Data tab (`plot.js`, pure) keeps a list of plots per p
   ln y, y > 0), power `y = a·x^b` (on ln x and ln y), logarithmic `y = a + b·ln x`, and a centred moving average of
   `w` points; `R² = 1 − SS_res / SS_tot` in the original scale. A table gives the equation, R² and n.
 - **Statistics per series:** n, mean, standard deviation (n − 1), minimum, median, maximum and, in XY, Pearson's r.
-- Export to SVG, PNG (×3) and CSV (core, axis, variable, value).
+- **On screen,** the lines of line, step and area series are thinned per pixel column of their ordering axis (X, or the vertical
+  axis of a stratigraphic panel): of the consecutive points whose screen coordinate falls in one pixel column, the first, the lowest,
+  the highest and the last are drawn, in their order (`plot.js::decimatePerPixel`). Points of scatter series are not thinned.
+- Export to SVG, PNG (×3) and CSV (core, axis, variable, value); SVG and PNG are built again with every point.
 
 ---
 
@@ -1837,7 +1884,13 @@ more than the data. Outside the core perimeter the values are extrapolated and a
 ## 20. Figures
 
 The **Figures** mode prepares publication figures from the active core or project. All figures have an optional title
-and caption and are exported as SVG (images embedded) and PNG (×2); the location map also exports JPEG.
+and caption and are exported as SVG (images embedded) and PNG (×2 by default; or 300 / 600 dpi, below); the location map also exports JPEG.
+
+**PNG resolution.** The selector «PNG resolution» of the figure panel chooses the export: «×2 (screen)» draws the figure at twice its
+screen size and declares no resolution (as before); 300 or 600 dpi draws it at `dpi / 96` times its screen size (the figure's CSS size, 96 px
+per inch, is taken as its physical size) and adds a `pHYs` chunk right after `IHDR` with `round(dpi / 0.0254)` pixels per metre in both
+directions (600 dpi → 23622, 300 dpi → 11811; unit: metre). A picture wider or taller than 16 384 px, or of more than 2·10⁸ pixels, is
+refused with a message instead of drawn. The pixel and size rules of the journal presets live in `figsize.js` (`pixelsFor(170, 600) = 4016`).
 
 **Saved figures (tabs).** The project keeps a list of figures, shown as tabs above the figure (project fields `figTabs`,
 `[{ id, name, fig }]`, and `figTab`, the active one; `fig` repeats the active figure for files read by older versions).
@@ -2164,6 +2217,11 @@ These settings only affect the drawing, never the result tables or the indices.
 - **Core key:** `coreKey(name)` = lower case, without accents (NFD) and only letters a–z and digits (any other
   character is removed). `sharedCores(lites)` → `Map(coreKey → Map(projectId → projectName))` over projects that are not
   cross-project analyses. A core is shared when it is present in ≥ 2 projects.
+- **The same core in several projects** (`coremerge.js::joinCoreTables`, card Q3): when a multi-project analysis joins a core chosen from
+  several projects, the depths and ages of the others are first converted to the units of the first one (the light copy of each project
+  keeps its depth unit and, since card Q3, its age unit `ageUnits`; copies written before have none and are not converted for age); rows at
+  the same depth (within 1e-6) are merged, and a value that differs from the first project's at the same depth is counted: the message says,
+  per core, how many tables were converted and how many values disagreed (the first project's value is kept).
 - **Map of all cores:** points with the same key are merged; in value mode, the arithmetic mean of the values of the
   projects with data in the window, `n` = sum of samples.
 
@@ -2267,11 +2325,28 @@ with **Import file…** on another computer. **Download full backup (all project
 (`settings.json`), named `sedcoretool_copia_<date>.sedcoretool`. Older `.corantool` packages and older JSON project
 files (with inline images) are still imported. Project identifiers are preserved on import unless the user chooses
 to restore a separate copy after an identifier conflict (§23.3). The library stores images separately from project metadata.
+**Large tiled sections (card M8.4.18d, decision D4).** In the desktop program with the engine on, a package carries each tiled section's stored
+version next to its `project.json` (`<prefix>tiles/<sha256>` and `<prefix>manifests/<sha256>.json`, each file once, exactly as in a folder copy:
+contract §8.7, "Backup folder"; `packageTiledSections` in `tiledbackup.js`, `packageTiledPlan` in `tiledproject.js`). When the projects keep
+copies of their sources (card M8.4.18b), the program asks once, with their total size, whether to include them (`<prefix>sources/<sha256>`, read
+in pieces of 8 MiB checked against their SHA-256); otherwise only each source's identity is in the record. Importing a package restores them
+exactly as a project folder is restored (§23.2: every file verified by the engine or the main process, a missing or damaged one locks its
+section). A section whose version is missing or damaged in the store, and every tiled section of a package made without the engine, is left out:
+the project in the package lists them in `left_out` (`[{core, section}]`, absent when there are none, so other packages are unchanged), and the
+program says so before the package is saved (for every package; for the automatic folder copy, once per session) (card M8.4.33).
 
-Project ZIP import accepts classic stored and Deflate archives. It checks paths, directory and local headers,
+**ZIP64 (card M8.4.18d).** The writer (`zipParts`, `zipFiles`) gives a member the ZIP64 extended information (APPNOTE 4.5.3: version 45,
+0xFFFFFFFF in the 32-bit fields, uncompressed size, compressed size and, in the directory, the local header's offset as 64-bit values) only when
+its size or offset reaches 2^32 - 1, and writes the ZIP64 end record and locator (APPNOTE 4.3.14-4.3.15) only when the directory's size or offset
+reaches it or there are 65,535 members or more; any package that fits the classic format is written byte for byte as before. The reader follows
+the locator when the end record holds 0xFFFF or 0xFFFFFFFF, and requires the ZIP64 end record to end exactly at the locator, the directory to end
+exactly at that record, disk numbers 0, equal member counts, every 64-bit value to be a safe integer and the ZIP64 extra field to be present and
+long enough wherever a 32-bit field is 0xFFFFFFFF; local headers must repeat the sizes (in their own ZIP64 field when they are 0xFFFFFFFF).
+
+Project ZIP import accepts classic and ZIP64 stored and Deflate archives. It checks paths, directory and local headers,
 and declared uncompressed sizes before reading entries. Limits are 16 MiB for the central directory, 128 MiB
-per project or settings JSON, 256 MiB per Deflate member, 1 GiB for Deflate data and less than 4 GiB for all
-members. Each member read is charged to the aggregate limits. Deflate output is checked against the declared size
+per project or settings JSON, 256 MiB per Deflate member, 1 GiB for Deflate data and, for stored members, the size of the file (at least 4 GiB;
+they cannot overlap); the reads of all members together are limited to twice the file's size (at least 4 GiB). Each member read is charged to the aggregate limits. Deflate output is checked against the declared size
 and CRC during extraction. For a stored member, the reader computes CRC-32 in blocks of at most 4 MiB on each
 read and compares it with the directory before returning the original Blob slice. Stored images retain range
 access. The importer reads the project JSON and ingests its referenced images before entering the replacement
@@ -2285,7 +2360,33 @@ Dropbox; Chrome and Edge, and the desktop program), one folder per project:
 - `<name>__<id>/images/` — original images, each stored image key written once;
 - `<name>__<id>/historial/<YYYY-MM-DD>.json` — the last version of each day. The 30 most recent daily copies are kept
   and, of older ones, the first of each month for 12 months; the rest are deleted;
+- `<name>__<id>/tiles/<sha256>` and `<name>__<id>/manifests/<sha256>.json` — the stored versions of the project's tiled sections (card
+  M8.4.18c; format in contract §8.7, "Backup folder"), desktop program with the engine on only;
+- `<name>__<id>/sources/<sha256>` — the copy of a tiled section's source image that the project keeps (card M8.4.18b), written once;
 - `sedcoretool_ajustes.json` — the user settings.
+
+**Tiled sections in the copy (card M8.4.18c, `tiledbackup.js`, `backupTiledOf` and `restoreTiledOf` in `tiledproject.js`).** Before a project's
+`project.json` is written, the stored version that each tiled section's record names is copied into the project's folder unless its manifest is
+already there: the manifest's file is asked of the engine (`mask.export`), the blobs it names that the folder lacks are asked 32 at a time, each
+file is written, read back and its SHA-256 compared with the one the engine sent (`BACKUP_MISMATCH` otherwise), and the manifest is written last.
+A section whose version is missing or damaged in the store (`INVALID_REQUEST`, `INVALID_BUFFER`) is taken out of `project.json` and named in
+`left_out`, and the user is told once per session; any other failure (engine stopped or busy, disk, folder) fails the copy, which is retried, and
+the previous `project.json` stays. Without the engine, tiled sections are left out as before. Nothing is ever deleted from `tiles/` and
+`manifests/`. Restoring a project folder («Open project folder»), before the project is stored under its final identifier, reads each tiled
+section's version from the folder into that identifier's store (`mask.import`: the blobs first, at most 32 files or 64 MiB per request, the
+manifest last), unless the store has it already. A missing or damaged file refuses that version whole: its manifest is not written, the section
+keeps its record and opens locked (card M8.4.27), and the user is told which file (`<row>.<col>` of a tile, `tables.<name>`, or `manifest`). A
+project file imported on its own (not as a folder) has no folder to read from: its tiled sections open only if this computer's store has their
+versions. **Source images (step 3).** When the project keeps a copy of a tiled section's source (card M8.4.18b), the copy goes into `sources/<sha256>`
+once: the user is told its name and size first («The automatic copy is saving the original image…»), the main process reads it in pieces of 8 MiB
+(`sourceCopyRead`, each with its SHA-256), the page writes them and then reads the file back and checks every piece again; a file of that name and
+size already there is not written again. A source the project does not keep stays identified by its record only (on another computer the section
+opens grey until its image is located). At a restore, `sources/<sha256>` is sent back in pieces (`sourceImportBegin`, `sourceImportChunk`,
+`sourceImportEnd`); the main process writes them to a temporary file in the project's `sources/` and keeps it as the project's copy only if its size
+and SHA-256 are the saved ones (otherwise the user is told, and the masks are restored all the same); temporary files left by a stop are removed at
+the next start. **Choosing a day.** «Open project folder» on one project folder whose `historial/` holds days asks which state to open
+(`folderversion.js`): the last save (`project.json`) or the last state of a day; that file is restored like `project.json`, with the same folder's
+tiles, manifests and sources.
 
 A copy is requested 20 s after each change and in the background when switching projects; each copy also writes
 every other project modified since the previous copy. Attempts share one in-flight promise per renderer:
@@ -2396,7 +2497,7 @@ are later deleted.
 | File | Content |
 |------|---------|
 | `*_bioturbation.csv` | One row per interval and section: `section, depth_top, depth_bottom, depth, units, age, [age_min, age_max,] age_units, valid_pixels, bioturbation_pct, <class>_pct…, BI, ii, BI_manual, ii_manual` (`age_min`, `age_max` only when the age model has a range) |
-| `*_objects.csv` | One row per object: section, id, class, state, suggestion, confidence, depths, area (cm²), length and width (cm), elongation, verticality, compactness, luminance, contrast, whether it counts |
+| `*_objects.csv` | One row per object: section, id, class, state, suggestion, confidence, depths, area (cm²), length and width (cm), elongation, verticality, compactness, luminance, contrast, whether it counts; the depths and measurements of a tiled section whose statistics were dropped beyond their budget are empty |
 | `*_mask.png` | Full-size mask: black background and every counted pixel in the colour of its class. Compatible with `sedcoretool analyze --palette` (§25.3) |
 | `*_palette.json` | `{class name: "#rrggbb"}` |
 | `*_segmentation_dataset.zip` | U-Net training data (§9.2), for every image of the project with at least one reviewed trace: `images/<core>__<section>.png` (original analysis area, working resolution), `masks/…png` (8-bit grey: 0 = matrix or a class that does not count, k = counted class k, 255 = ignore: excluded zone or trace without a confirmed class; classifier suggestions do not count as reviewed) and `manifest.json` (`kind: "segmentation-dataset"`, classes with their index and, per image, core, section, top, bottom, units, px/cm, size, reduction factor and number of reviewed and unreviewed objects) |
@@ -2602,6 +2703,8 @@ stack, an object-to-class table, CSR stacks) with the same counting rule. No Rus
 needed. See [validation and measured scope](#311-automated-tests).
 
 `methods/section_intervals.py` implements engine method `section.intervals/1` (inputs and results: [engine contract](roadmap-engine-contract.md) §4–§5) on the kernels: `parse` validates every input, naming the field, before any calculation; `run` counts in blocks of 256 rows (checking for cancellation between blocks), forms the intervals, applies the minimum-valid rule and the no-data padding (strict comparisons with a 1e-9 depth tolerance, as in the program), classifies the indices, interpolates ages and attaches manual indices. It reproduces all 44 reference fixtures of the JavaScript calculation: row bounds, counts, indices, no-data flags and every missing-value pattern exactly, floating-point columns within 1e-9. It is not yet reachable from the desktop program; the engine process does not advertise it.
+
+`methods/core_ages.py` implements `core.ages/1` ([contract §9.8](roadmap-engine-contract.md)): `parse` refuses, naming the field, a model that is not strictly increasing in depth, has fewer than two rows, a missing value, one range column without the other or a range that does not contain the age; `run` interpolates linearly with `kernels/ages.py::interpolate_age` (no extrapolation) and returns the table `ages` (`age`, plus `age_min` and `age_max` with a range) and the summary `{rows, outside}`. It reproduces the 8 reference fixtures: missing patterns and summary exactly, ages within 1e-9 (largest measured 2.3e-13).
 
 #### Image loading budget
 
@@ -2852,7 +2955,7 @@ windows can finish loading without a redundant navigation through the desktop cl
 
 ### 26.2 Experimental engine process
 
-Implementation: `desktop/engine.js` (main-process lifecycle/client), `desktop/engine-ipc.js` (the page bridge: `status`, `beginBuffer`, `appendBuffer` (at most 1 MiB, contiguous offsets), `commitBuffer`, `analyzeSection`, `cancel`, `readBuffer`, `release`; only the top frame of an `app://` page may call; at most 256 buffers and 5 running analyses per page; tokens are released when the page navigates, reloads, crashes or closes; a failed call resolves to `{error: {code, field?}}`), `desktop/engine-protocol.js` (framing),
+Implementation: `desktop/engine.js` (main-process lifecycle/client), `desktop/engine-ipc.js` (the page bridge: `status`, `beginBuffer`, `appendBuffer` (at most 1 MiB, contiguous offsets), `commitBuffer`, `analyzeSection`, `runMethod`, `cancel`, `readBuffer`, `release`; only the top frame of an `app://` page may call; at most 1,024 buffers, 5 running analyses and 9 `method.run` jobs per page; tokens are released when the page navigates, reloads, crashes or closes; a failed call resolves to `{error: {code, field?}}`), `desktop/engine-protocol.js` (framing),
 `src/sedcoretool/engine/{protocol,buffers,specs,server,worker}.py` (standard-library coordinator, staged data, input tables and
 worker-process wrappers) and `method_worker.py` (the long-lived script that runs scientific methods, one job at a time, in its own process). This experiment is disabled unless `SEDCORETOOL_ENGINE_EXPERIMENT=1`.
 It uses the verified bundled runtime (§26.3), or an explicitly selected absolute `SEDCORETOOL_ENGINE_PYTHON`
@@ -2878,7 +2981,9 @@ of window loading, reports failure through status and waits for shutdown before 
 Frames use the M8.1 `SCE1` 12-byte header, strict UTF-8 JSON controls <=64 KiB, binary chunks <=1 MiB and
 duplicate-key/depth/finite-number checks. At most 32 requests and two binary chunks are outstanding in main;
 descriptor/binary pairs cannot interleave. Partial/malformed frames, unknown sessions, process exit or request
-timeout invalidate the session. Each fresh start assigns a new UUID; previous handles cannot be reused.
+timeout invalidate the session. Each fresh start assigns a new UUID; previous handles cannot be reused. The coordinator refuses a
+request ID it has seen among the last 65,536 of the session (`INVALID_REQUEST`) and forgets older ones, so a session has no request limit
+(card M8.4.40).
 Two methods are advertised. `buffer.digest/1` (`buffer.digest {handle}`) recomputes a committed buffer's SHA-256 in an
 isolated subprocess and returns `{sha256,byte_length}`; it tests transport and worker ownership. `section.intervals/1`
 (`section.analyze`, inputs and results in the [engine contract](roadmap-engine-contract.md) §3–§5) calculates the interval
@@ -2906,10 +3011,37 @@ lies about its files or exceeds 120 s is `INTERNAL` and nothing is adopted, and 
 that the worker does not acknowledge within 1.5 s, an abandoned job and the end of the engine kill the worker; an idle worker stops
 after 30 s. Progress events are not sent yet.
 
+`method.run` (contract §9, card M8.5.2) runs any method of the method table (`engine/specs.py` `METHOD_SPECS`: scope `section`,
+`core` or `project`, inputs with dtype and rank, families `core<k>` of up to 128 tables, allowed priorities, dimension names, table
+outputs, deadline). The coordinator checks the request's fields in the contract's order, supersedes the older jobs of the same
+method and target (a waiting one is answered `cancelled`, a running one is asked to cancel), and answers with `inputs_key` (SHA-256 of
+the method, scope and verified input hashes), the declared dimensions (0 allowed), one packed result buffer (none when every column
+is empty), the descriptions of the table outputs, whose cells are the columns `<name>_values` and `<name>_valid` (the table format of
+contract §4), and a summary of at most 8 KiB (larger is `INTERNAL`). `section.intervals/1` (still requested through `section.analyze` by the interface) and `core.ages/1` (not yet requested by the interface) are in the table.
+
+From the page (card M8.5.3), `desktop/engine-ipc.js::runMethod` takes `{requestKey, method, scope, target, revision, priority,
+settings_hash, inputs}` and nothing else, and checks every field against `METHODS`, the main process's mirror of `METHOD_SPECS` (a test
+compares the two), before the engine sees the request: a method not in the mirror is `UNSUPPORTED_METHOD`; another scope, a target that
+is not a lowercase UUID, a negative or fractional revision, a priority the method does not allow, a malformed settings hash, an input name
+that is neither a fixed name nor a family member (`inputs.<name>`), a missing required input, more than 416 names, a family with a gap, an
+incomplete member or a member beyond its maximum (`inputs`) are `INVALID_REQUEST`; a token of another page or not committed is
+`INVALID_BUFFER`. A page holds at most 1,024 tokens and 9 `method.run` jobs at once (one running and four waiting per priority; `BUSY`
+beyond). The answer must echo the request and carry exactly the method's dimensions and table outputs, otherwise it is `INTERNAL` and its
+result buffer is released; the page receives a token for the packed result (none when every column is empty) and never an engine handle.
+`desktop/engine.js` allows `method.run` with a client backstop of 10 min for `interactive` (as `section.analyze`) and 20 min for `batch`
+(nine jobs of at most 120 s ahead of it). `app/js/engineclient.js::run(method, {scope, target, revision, priority, inputs}, {signal})` sends
+`inputs.settings` (a plain object) itself as `utf8json`, whose SHA-256 is the settings hash; every other input is a token the caller
+holds. It downloads and checks the packed result, cuts it by its layout (empty columns allowed), decodes each table output with
+`tablesnapshot.js::readTableResult` (`null` where a value is missing; the inverse of `buildTableSnapshot`; a validity other than 0 or 1,
+a present value that is not finite or cells whose shape is not `[columns, rows]` are `INTERNAL`) and returns `{dimensions, columns,
+tables, summary, provenance, inputsKey}`; an abort cancels the job, and a cancelled (or superseded) job rejects with an `AbortError`.
+No interface calls `run` yet.
+
 `buffer.begin`, `chunk`, `commit` and `release` stage data in private temporary files. Validate shape/dtype/
 declared size before allocation; enforce exact offsets, length, SHA-256, finite f64 data and strict metadata
-before commit. Buffers are immutable after commit; releasing a queued/active snapshot revokes new access but
-keeps its file pinned until admitted work finishes. Limits: 256 live handles, 256 MiB per numeric buffer,
+before commit. Numeric types: `u8`, `u16le`, `i32le`, `u32le`, `u64le`, `f64le` (little-endian, C order); `utf8json` for metadata.
+Buffers are immutable after commit; releasing a queued/active snapshot revokes new access but
+keeps its file pinned until admitted work finishes. Limits: 1,024 live handles, 256 MiB per numeric buffer,
 4 MiB per metadata buffer, 512 MiB admitted session budget with a 16 MiB transient reserve. Metadata reserves
 64 times its byte length for parsing/object overhead. The session's staged bytes fit below the planned 1 GiB
 scratch-disk cap; this does not claim total RSS or multi-gigabyte support. Main owns the temporary root and
@@ -2917,7 +3049,8 @@ attempts bounded cleanup after child close, including coordinator failure, check
 recursive removal. External locks can prevent cleanup; abrupt main-process termination can leave an empty
 temporary root after server cleanup.
 
-One job (a digest or an analysis) runs and at most four wait; excess receives BUSY. A worker polls a private cancellation
+One job (a digest, an analysis or a method) runs and at most four wait per priority (`interactive`, `batch`; a waiting interactive job
+starts first, and jobs other than `method.run` are interactive); excess receives BUSY. A worker polls a private cancellation
 marker between reads or blocks of rows; the coordinator starts forced termination after 1.5 s if needed. A worker deadline (30 s for the digest, 120 s for a method)
 prevents unbounded execution. Cancellation has its own acknowledgement and the target's terminal response;
 queued cancellation releases its pin. EOF on a private worker liveness pipe aborts orphaned work. Windows
@@ -2946,7 +3079,43 @@ JavaScript row-count cache); each table is valid for the SHA-256 of its bytes. A
 of the snapshot and uploads only the tables whose bytes changed (an interval-size change sends the settings table alone); a changed
 mask identity uploads the four masks and releases the ones they replace. Buffers that the engine no longer knows (it restarted) give
 `RESIDENT_LOST` and the controller uploads a full snapshot once. A failed or cancelled analysis leaves the resident buffers as they
-were and releases what it uploaded. The engine accepts 256 live buffers; the bridge 512 tokens per page.
+were and releases what it uploaded. The engine accepts 1,024 live buffers; the bridge 1,024 tokens per page.
+
+**Pixels kept in the engine (card M8.4.9).** No engine method uses pixels yet; this is the service the image methods of M8.5 will use.
+`engineclient.js::ensurePixels(owner, section)` (and `engineanalysis.js::ensurePixels(section)`) makes the working image of a section that
+is not tiled resident in the engine and returns its tokens: `rgba`, `u8[h,w,4]` (the 8-bit `orig`), and for a 16-bit source also `rgba16`,
+`u16le[h,w,4]` (`orig16`), both C order with row 0 at the top, exactly the arrays the interface holds after crop, downsampling and rotation
+(`sectionpixels.js::buildPixelBuffers`, views without a copy). Their *pixel identity* (`sectionpixels.js::describePixels`) is the SHA-256 of
+`pixels/1|w|h|bits|<SHA-256 of rgba>|<SHA-256 of rgba16, or empty>`: it changes with any pixel, the size or the bit depth and with nothing
+else. The interface never writes these arrays in place (a crop, a rotation, a new downsampling factor or a reload assigns new arrays), so the
+hashes are computed once per pair of arrays and remembered in `s._pxid` with weak references (never per request, and nothing when the
+engine is off; the first request for a 24.6 MB section, hashing and transfer together, took 100-116 ms on the reference host). A request for pixels of the identity the engine already holds sends nothing, also after the interface
+released and decoded them again; new pixels are sent in chunks of 1 MiB with their SHA-256 and replace both buffers of the old identity,
+which are released. Two requests for the same pixels share one upload. Pixels are bounded separately from the analysis inputs
+(`residentstore.js`, one registry each): 192 MiB and 16 sections, least recently used first; pixels larger than the bound are refused before
+anything is sent (`LIMIT_EXCEEDED`, field `pixels`) and the section's older pixels are released. A tiled section, or one whose pixels are not
+in memory, is refused. A failed or cancelled upload keeps what was resident and releases what it sent. `forget`, `releaseAll` (a project is
+replaced) and a restart of the engine cover the pixels as well. When the engine reports its session budget full, the client drops the pixels
+of other sections (for an analysis also their inputs) and tries once more; `stats().budgetFull` counts it. The budget measurement is in the
+[engine contract §3](roadmap-engine-contract.md#3-private-transport-v1).
+
+**Record tables kept in the engine (card M8.4.10).** No engine method takes a table yet; this is the service that depth/age parsing,
+multiproxy methods and M6 will use (M8.5 slices a and d). `tablesnapshot.js::buildTableSnapshot(columns)` takes named numeric columns of one
+length, in order, each value a finite number or `null` (missing), and returns three buffers: `<name>` (`utf8json`, `{version: 1, rows, columns:
+[{name, unit}]}`), `<name>_values` (`f64le[columns, rows]`, column *i* in row *i*) and `<name>_valid` (`u8[columns, rows]`, 1 present, 0
+missing; a missing slot holds 0). NaN, infinities, `undefined` and other types are refused at the source, never turned into missing values.
+Limits, refused with the field at fault: 1-256 columns, 1-1,048,576 rows, 8 MiB of values and validity together (9 bytes per cell), 32 KiB
+of description, non-empty unique names of at most 256 UTF-8 bytes, units of at most 64. The *table identity* is the SHA-256 of
+`table/1|<rows>|<JSON of [name, unit, SHA-256 of the column's values, SHA-256 of its validity] per column>`: it changes with any value,
+missing slot, name, unit or the column order and with nothing else. `engineclient.js::ensureTable(owner, key, snapshot)` makes the table
+resident as the table `key` of `owner` and returns the tokens `meta`, `values`, `valid`; the same identity sends nothing again, a new one
+replaces and releases the three old buffers. Tables have a registry of their own (`residentstore.js`): 16 MiB as the engine charges them
+(the description 64 times) and 128 tables (16 before card M8.5.3), least recently used first; a larger table is refused before anything is sent (`LIMIT_EXCEEDED`,
+field `table`). When the engine reports its budget full, the client drops the other tables and all resident pixels and tries once more.
+`forget(owner)`, `releaseAll` and a restart cover tables. On the engine side `methods/validation.py::table(inputs, name, columns, *, required)`
+decodes a table for a method and refuses, naming the field, a missing or malformed description, another version, the limits above, a
+repeated, empty or not accepted column name, a missing required column, buffers of another type or shape, a validity byte other than 0 or 1,
+a present value that is not finite and a missing slot that does not hold 0.
 
 The [M8.1 contract](roadmap-engine-contract.md) specifies later scientific inputs/results and predeclared
 acceptance gates. Current transport/worker regression tests exercise corruption, admission, cancellation,
@@ -3072,7 +3241,8 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   new one fits and the disk keeps 1 GiB free; otherwise the build fails with `LIMIT_EXCEEDED` (`disk`).
 - **Reading sources** (`store/source.py`): the format is recognised by the file's first bytes and opened only with libvips' TIFF, JPEG or PNG
   loader; limits are checked on the header (width ≤ 262,144, height ≤ 16,777,216, one 512-row band ≤ 256 MiB, JPEG or PNG ≤ 1 GiB decoded).
-  Samples are copied as stored (8 or 16 bits; 1, 3 or 4 channels).
+  Samples are copied as stored (8 or 16 bits; 1, 3 or 4 channels). Grey with alpha (2 bands) and CMYK (4 bands whose libvips interpretation
+  is `cmyk`, TIFF or JPEG) are refused with `UNSUPPORTED_INPUT` (`source`); a 4-band image is otherwise read as RGBA.
 - **Identity of a source** (`store/identity.py`): a pyramid is named by the SHA-256 of the whole source file. After hashing a file whole the
   engine records its absolute path, size, modification time (ns), the SHA-256 of its first, middle and last MiB and the full SHA-256 in
   `<root>/identities.json` (at most 1,024 entries, 1 MiB); when the same file is added again in the same state its pyramid is found from the
@@ -3087,7 +3257,9 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   second (8 GiB in 81 s), memory below 320 MiB, disk about 1.33 times the decoded image, cancellation answered in 7-15 ms
   ([summary](validation/M8.4.14-summary.md)).
 - **Serving tiles** (`store/tiles.py`, in the coordinator): every tile is checked against the SHA-256 listed in `<level>/.tiles.sha256` before
-  it is sent; verified tiles are kept in a 256 MiB least-recently-used cache. Up to 16 tiles per request, sent in binary frames of at most 1 MiB.
+  it is sent; verified tiles are kept in a 256 MiB least-recently-used cache. The descriptions of the last 64 pyramids used and their levels'
+  hash lists (64 MiB) are kept least recently used first out; a pyramid whose description is dropped keeps no hash list or tile in memory
+  (card M8.4.40). Up to 16 tiles per request, sent in binary frames of at most 1 MiB.
 - **Mask tiles** (`store/masks.py`, in the coordinator; card M8.4.16, not used by the interface yet): the labels (`i32`) and exclusion (`u8`) of a
   tiled section at full resolution, in 512 x 512 tiles on the grid of level 0, plus its objects, classes and overlap-stack tables, stored in
   `<user data>/projects/<project>/tiles/` (the main process passes `<user data>/projects` with `--projects-dir`; nothing there is deleted by a
@@ -3099,6 +3271,11 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   exists only in the coordinator's memory, so a stopped engine leaves every earlier version readable. Blobs and manifests are written to a
   temporary file, flushed to the disk and renamed; a blob or manifest is used only when its bytes match its name (a blob also must decompress
   to exactly its length), and a damaged blob is written again by the next `mask.put` of the same content. Verified blobs are cached (64 MiB).
+  On Windows a rename refused because another program holds the file for a moment (Windows errors 5, 32 and 33) is tried again after 50, 100,
+  200, 400 and 800 ms before the error is reported; a full disk (`ENOSPC`, `EDQUOT`, or Windows errors 39 and 112) is `LIMIT_EXCEEDED`
+  (`disk`). The mask operations run on one thread of the coordinator, one at a time in the order they arrived (at most 16 waiting behind the running one), so
+  `tile.read`, build progress and `job.cancel` are answered while one runs; an open staged version protects its blobs from `mask.retain` and
+  its project from `mask.forget` by the store's folder (card M8.4.40).
   Unused blobs and manifests are not deleted yet (card M8.4.18).
 - **Tiled sections in the interface** (behind the same flag): an image added through the interface whose header says it has more pixels than the
   maximum size when adding images gets a pyramid (a dialog shows the progress and can cancel) and becomes a section whose working image is the
@@ -3122,12 +3299,28 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   object's statistics are the sum of its tiles' (`TiledObjectStats`; bounding box by minimum and maximum), which equals `objectStats` over the
   whole image (integer sums exactly, the luminance sums within a relative 1e-12, `tests/app/tiledit.test.mjs`). After a stroke the tiles within
   3 pixels of what it changed are recomputed one by one between frames from the level-0 pixels of the tile and its neighbours (read through the
-  engine, 48 tiles cached) and the labels as they are at that moment (`TiledStatsRunner`). An object keeps `area` and `stats` in source pixels,
+  engine, 48 tiles cached; the cache is emptied when the section is left, at once or when the run on its way ends, and when the section is closed
+  or deleted, which also stops the runner: card M8.4.39) and the labels as they are at that moment (`TiledStatsRunner`). An object keeps `area` and `stats` in source pixels,
   `sbox` (source bounding box) and `bbox` in working pixels (`floor(source / ds)`); `feat` uses `pxPerCm(s) · ds` source pixels per centimetre.
   An object left with no pixel is removed. These values change only when the object is *current* (card M8.4.28): none of the tiles under its
   `sbox` (`tilesUnder`, no margin) nor of the tiles queued for it since its last update is waiting, being computed or failed; an object whose
   box is not known (no statistics saved) is current only when no tile waits. Until then it keeps its last current values (after a reopening,
   the saved ones), so its total is never the sum of part of its tiles, and a save writes those values.
+  The per-tile statistics may hold 256 MiB per section (`STATS_BUDGET_BYTES`, card M8.4.37), by an estimate measured in Electron's V8
+  (`tools/measure_tiled_stats_memory.mjs`): 160 bytes per object and tile (`STATS_ENTRY_BYTES`), 96 per object (`STATS_OBJECT_BYTES`) and 128 per tile;
+  the measured heap was within 1% of it for tiles of tens of thousands of objects and 7-18% from it for tiles of 200-2,000 ([record](validation/M8.4.37-tiled-stats-memory-electron.json);
+  Node's V8, without pointer compression, takes about 1.8 times as much: [record](validation/M8.4.37-tiled-stats-memory-node.json)). The budget is above
+  the statistics the largest reopening cache can hold (at most about 234 MiB by the estimate), so a section whose statistics can be cached is never cut.
+  Beyond it they are all dropped and none is kept until the section is opened again (which computes them again: with the same masks they go beyond
+  the budget again), as the row histograms below. At the trip the statistics of the whole section are estimated (card M8.4.41,
+  `estimateSectionStatsBytes`): the bytes counted so far divided by the tiles counted, times the section's tiles that hold labels
+  (`MaskTiles.labelledTileCount`), never below what was counted; the message gives the number of parts that would each stay within 80% of the
+  budget (`partsToFitStats`: `max(2, ceil(estimate / (0.8 × budget)))`, `STATS_SPLIT_MARGIN`), or, beyond 8 parts (`STATS_SPLIT_MAX_PARTS`),
+  says that splitting would not be enough and suggests reviewing the detection. When they are dropped: the runner stops, no object is reported
+  (none is removed), every object of the section loses `stats`, `feat`, `area`, `bbox` and `sbox` (the panel and the objects table say the measurements
+  are not available, the classifier has no descriptors for them, a save writes the objects without `st`), operations that need an object's box refuse
+  with that reason, no reopening cache is written, and the page says so once. The synthetic section of M8.4.18d (about 64,300 of 65,535 objects in every
+  tile, about 70 GiB of statistics for its 7,168 tiles) exceeds it at its 26th tile; measured on a grid of 6 x 6 such tiles, the live heap stayed at 250 MiB.
 - **Masks reach the engine's store in the background** (`tiledsync.js`, `desktop/tile-ipc.js`; card M8.4.16 step 4; contract §8.7): 300 ms after
   a change (a stroke, an exclusion rectangle, new statistics, a class), a round sends the dirty tiles and the objects, classes and stack tables as
   a new version on the last acknowledged one; the tiles become clean only after the commit, and only if they did not change meanwhile. If the
@@ -3136,27 +3329,69 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   store"). Clean tiles beyond 128 MiB may be dropped from the page; they are read back from the store when the viewer, a stroke or the
   statistics need them (a stroke over a tile not read back yet asks to try again in a moment). The edit window pins its tiles, and writes a layer
   the tile does not hold as a whole.
-- **Saving and reopening tiled sections** (`serTiledSection`, `settleTiledSections`, `retainStore`, `loadTiledSection`, `placeholderSection` in
-  `app.js`; `desktop/tile-ipc.js`; card M8.4.18a; contract §8.7). *Record:* a tiled section is saved like any section without its `labels` and
-  `exclude` arrays, with its overlap stacks as they are (never renumbered) and with `file: {name, type, tiled: true}` and
-  `tiled: {version: 1, store: 2, manifest, width, height, level, source: {sha256, size, name}}`; `manifest` is a stored version that holds every edit
-  of the section. A project that has a tiled section is written as format version 6; every other project stays version 5, unchanged. A build of
+- **Saving and reopening tiled sections** (`serTiledSection` and `validTiledRecord` in `tiledrecord.js`; `settleTiledSections`, `retainStore`,
+  `loadTiledSection` in `tiledproject.js`; `placeholderSection` in `app.js`; `desktop/tile-ipc.js`; card M8.4.18a; contract §8.7). *Record:* a tiled
+  section is saved like any section without its `labels` and `exclude` arrays, with its overlap stacks as they are (never renumbered) and with
+  `file: {name, type, tiled: true}` and `tiled: {version: 1, store: 2, manifest, width, height, level, source: {sha256, size, name}}`, plus
+  `window: {y0, y1}` for a section that has a row window (below); `manifest` is a stored version that holds every edit of the section. A project that
+  has a tiled section is written as format version 6, and as version 7 when one of its sections has a window (card M8.4.42, decision X4); every other
+  project stays version 5, unchanged. A project of a newer version than the build knows opens read-only (version 7 in a build that knows 6). A build of
   version 5 (V0.151 and earlier) does not open a version 6 project: decoding the tiled record's missing image throws, the load reports that it failed
-  and nothing is written (read from its code, not run; a newer version is also opened read-only).
+  and nothing is written (read from its code, not run).
+  *Row window* (`tiledrecord.js`; card M8.4.42, decision X2a): a section can cover only source rows `[y0, y1)` of its stored image. `width` and
+  `height` are then the window's (`height = y1 - y0`), and the masks, objects, statistics, row counts, analysis area and depths are in the window's
+  coordinates, row 0 being source row `y0`, exactly as for a section made from a source holding only those rows. `y0` is a multiple of 512 (a mask
+  tile) and of `2^level` (a working-image pixel); a record that breaks this, or whose `y1` is beyond the pyramid's height, does not open. Level-0
+  pixel reads (statistics, wand) ask for tile row `row + y0 / 512`, and rows of the last tile below the window read as zero, as the padding of a
+  source that ends there. The working image is rows `y0 / 2^level` to that plus `ceil((y1 - y0) / 2^level)` of its level; its last row averages
+  source rows below `y1` when `y1` is not a multiple of `2^level` and is not the image's last row (display only). The viewer chooses and places the
+  pyramid's tiles shifted by `y0` source pixels and clips them to the section's analysis area.
+  *Splitting a tiled section* (`tiledsplit.js`, `tiledsplitui.js`, `store/masks.py::slice_rows`, `mask.slice`; card M8.4.43, decisions X1–X4): from
+  the statistics-budget banner (`#secStatsWarning`, offering the X1 count when 2–8 parts fit) or from the section panel (`#secSplit`), the user
+  splits a tiled section into parts at mask-tile boundaries aligned to `max(512, 2^level)` near equal heights. A confirmation dialog names every
+  part and its depth range before replacing the original (X3a). Each part is created by `mask.slice` (verifying and reusing the tile blobs by
+  SHA-256 without re-encoding, keeping `classes`, filtering the four object columns to objects present in that tile-row range, and keeping the
+  original indices of used overlap stacks), opened with its row window over the same pyramid, its continuous depths, clipped analysis area, marks
+  and manual ranges. A failure while settling, slicing or loading leaves the original section and its saved version intact; the original's stored
+  version stays in the store until the parts are saved (and in folder backup history).
   *Saving:* each tiled section's sync must first be settled (every tile and table acknowledged by the store); the record is built at that moment, so
   masks, objects and stacks are one state. A section that does not settle within 15 s keeps its last saved record, the rest of the project is saved,
   the save state stays "unsaved" and the page says so once ("The latest edits of a large section have not reached the engine's store yet…"); the next
-  save tries again (decision D1 of card M8.4.18). The store writes tiles, then the manifest atomically, and the record is written last (ARCHITECTURE
+  save tries again (decision D1 of card M8.4.18). A save reads the project only after that wait; if another project was opened (or the same one
+  opened again) meanwhile, the save writes nothing and does not clean up the store (card M8.4.35: each replacement of the open project increments a
+  counter that the save compares before and after `putProject`). The store writes tiles, then the manifest atomically, and the record is written last (ARCHITECTURE
   §3.4 rule 4). After a successful save the page asks the store to keep only the versions its saved records name and the current acknowledged ones
   (`mask.retain`); the engine also keeps every version it committed for a section after the newest one named, whose answer may still be on its
   way to the page (card M8.4.31). *Reopening:* the pyramid is taken from the engine's cache, or built again from the file the main process remembered for the project
   (`sources.json`), accepted only if its SHA-256 is the saved one; the working image is read from it at the saved level. The stored version's tiles are
-  listed (`mask.info`) and each is read back once, for the reduced copy of the masks and the row counts of card M8.4.17; the objects come from the
-  record with their saved statistics, which are then computed again from the tiles and pixels in the background. Without the pyramid and the file the
+  listed (`mask.info`). The reduced copy of the masks, the row counts of card M8.4.17 and the statistics of the objects come from the reopening
+  cache of that version when there is one that passes its checks (below); otherwise each tile is read back once for the first two and the statistics
+  are computed again from the tiles and pixels in the background. The objects come from the record with their saved statistics. Without the pyramid and the file the
   section opens with a grey image, its masks, objects and interval table, and cannot be edited ("The original image of this large section cannot be
   found…"). Without the engine (browser, standalone file, engine experiment off) a tiled section is a grey placeholder without masks or table, nothing
   in it can be changed, and its record is saved back exactly as it was read (decision D2). Folder backups and packages leave tiled sections out
   until cards M8.4.18c and M8.4.18d.
+- **Reopening cache** (`tiledcache.js`, `writeReopenCaches` and `readReopenCache` in `tiledproject.js`; card M8.4.29, decision G; contract §8.7). A
+  file `derived/<manifest>.reopen` in the project's mask folder, written through the engine (`mask.derived.put`, zlib-compressed on disk, at most
+  128 MiB uncompressed) and removed with its manifest by `mask.retain`. It is a cache, not project data: none of it is trusted, and a missing, damaged
+  or refused file only means the section is opened as before. *Written:* after a successful save (and after `mask.retain`), for each tiled section
+  whose saved version the page still holds exactly (the send settled on that manifest, every tile counted, no statistic waiting or failed), unless this
+  session already read or wrote it; the bytes are checked again after they are encoded and nothing is written if the section changed meanwhile. A
+  section whose labelled tiles lack statistics (objects saved before their statistics were computed) gets no cache, so that opening it computes them.
+  *Format* (version 1, little-endian): a 152-byte header (`SCRC`, the version, the manifest's and the source's SHA-256, `ds`, the source and working
+  sizes, the analysis area's columns `[x0, x1)` the histograms were clipped to, the body length and the body's SHA-256, reserved zeros), then a body of
+  three parts, each a `u32` length and its bytes: the **histograms** (per tile, ascending: tile index, rows, flags, pair count, the excluded pixels per
+  row as `u16`, the row offsets as `u32`, the labels as `i32` and their pixel counts as `u16`: the layout of `TileHistogram`), the **reduced copy**
+  (labels `i32` then exclusion `u8` at the working size, each as zero runs: `{zeros u32, literal count u32, samples}` until the size is covered
+  exactly) and the **statistics** (per tile, ascending: tile index, object count, then per object, ascending: id and the 17 fields of `TraceStats` as
+  `f64` in the order `n sx sy sxx syy sxy x0 x1 y0 y1 per sL sLL sA sB rL rN`). *Read:* the whole cache is refused if the magic, version, manifest,
+  source, `ds`, source or working size, a reserved byte, the body length or its SHA-256 differ; if a count or offset lies outside its part or a part
+  has bytes left; if a tile is not ascending, outside the grid or not in the stored version; if a histogram's row count is not the tile's, its flags
+  are not 1-3, its offsets do not start at 0, rise and end at the pair count, its labels are zero or not ascending within a row, a count is zero, or a
+  row's excluded pixels and counts exceed the columns inside the area; if the exclusion holds a value other than 0 or 1; if a statistic is not finite,
+  its count is not a positive integer or its box leaves the source; if a labelled tile has no statistics; if the totals of the objects do not agree
+  (count and box) with the record's; or if an object the record saved with pixels (`st.n > 0`) has no statistics in the cache (card M8.4.39). Accepted, the cache fills the reduced copy, `TiledRowCounts` (`restore`) and `TiledObjectStats` without reading
+  a tile; when the analysis area's columns differ from the cache's, `setArea` marks only the tiles of the columns that changed, and only those are read.
 - **The store folder follows its project** (`deleteStoreOf`, `copyTiledStore`, `storeLocked` in `app.js`; `desktop/tile-ipc.js`; card M8.4.27;
   contract §8.7). Deleting a project from the library also deletes its folder on this computer (`<user data>/projects/<id>/`: masks, the record
   of sources, copies of sources), after the sends of its open sections stopped; if that is not possible the project is still deleted and the page
@@ -3205,7 +3440,9 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   they are rebuilt from all the histograms when the class of an object that existed changes, the number of classes changes or the area's rows change; a
   change of the area's columns counts again the non-empty tiles of the tile columns whose columns inside the area differ, reading back those the page dropped.
   A stack code of a tiled section keeps its members for the life of the section (`compactSectionStacks` does nothing for it). The histograms may hold 64 MiB
-  per section (`COUNT_HISTOGRAM_BYTES`); beyond it no table is computed and the page says so. Until every tile that has to be counted is, the table is empty,
+  per section (`COUNT_HISTOGRAM_BYTES`); beyond it they are all dropped and none is kept until the section is opened again (card M8.4.36: masks with
+  many objects in every row make histograms larger than the tiles, about 11 GB for 7,168 tiles of random labels), no table is computed, no reopening
+  cache is written, and the page says so. Until every tile that has to be counted is, the table is empty,
   never partial. Measured on the size of the `rgb8g` fixture: [sparse](validation/M8.4.17-tiled-counts.json), [dense](validation/M8.4.17-tiled-counts-dense.json).
 - **Wand, lasso, scissors and object operations on tiled sections** (`planWindows`, `pinRanges`, `toWindowRect`, `windowRgba` in `tiledit.js`;
   `tiledPlan` and the following functions in `app.js`; card M8.4.16 step 6): each runs today's function (`regionGrow`, `polygonPixels`,
@@ -3267,7 +3504,7 @@ from the desktop main process (the page cannot request it yet; card M8.4.15) and
   registers a file the user chose (the page gets an opaque token, never the path), builds its pyramid with progress events, cancels, and reads the
   verified tiles of pyramids the page built, through the engine. `desktop/tile-reader.js` reads the store in the main process; it serves only the
   measurement option `SEDCORETOOL_TILE_DELIVERY=direct`.
-- **Tests:** `tests/test_store_source.py`, `tests/test_store_pyramid.py`, `tests/test_engine_store.py` (Python), the tile-store tests of
+- **Tests:** `tests/test_store_source.py`, `tests/test_store_pyramid.py`, `tests/test_store_tiles.py`, `tests/test_engine_store.py` (Python), the tile-store tests of
   `tests/app/engine.test.mjs` (the desktop client and the real engine), `tests/app/tile-ipc.test.mjs` (the bridge and the reader) and
   `tests/app/source-copy.test.mjs` (locating a moved source, the verified copy into the project), `tests/app/project-store.test.mjs` (the
   project's folder deleted and copied with it).
@@ -3291,6 +3528,41 @@ still apply. `sectiondepth.js` follows `core.js`, `sectionanalysis.js` follows `
 
 
 ## 28. Repository engineering and security
+
+**Desktop hardening (cards M8.4.34 and M8.4.38).** `desktop/main.js` exports the pure checks that the tests use: `safeExternalUrl` (only `https:`, `http:` and
+`mailto:`, without credentials in a web address and at most 8,192 characters, are given to `shell.openExternal`), `isAppNavigation` (an address is
+an app page if `resolveAppPath` resolves it inside the web folder), `fromTopAppFrame` (the sender frame is an app page and is its window's main
+frame; every `engine:`, `tiles:` and `trainer:` handler refuses any other caller) and `DESKTOP_SCRIPT_POLICY`. `will-navigate`, `will-redirect` and
+`will-frame-navigate` of every window (the extra windows opened with `window.open` included) are cancelled unless the address is an app page, and
+`setWindowOpenHandler` opens an app page in a window, a web or mail address in the system and nothing else. Every `.html` file served over `app:`
+carries `Content-Security-Policy: script-src 'self' 'wasm-unsafe-eval'` as a header, which adds to (never replaces) the `<meta>` policy of the page.
+`desktop/tile-ipc.js` keeps these sets for the program session (all pages): `opened` (projects for which the page began a stored version or
+reopened a section), `known` (identifiers the page announced with `announceProjects` from the library listing, `announceStoreProjects` in
+`tiledproject.js`, at most 8,192), `created` (projects whose folder `<projects>/<project>` did not exist the first time the session named them,
+recorded in `seen`, at most 65,536 identifiers, then `LIMIT_EXCEEDED`; a project whose folder a confirmed deletion removed joins it) and `written`
+(per project, the manifests this session committed with `maskCommit`, imported with `maskImport` or copied with `copyProjectStore`; after each
+clean-up only those still on disk stay). Every operation that names a project (`maskBegin`, `maskRetain`, `maskInfo`, `maskRead`, `derivedPut`,
+`derivedGet`, `maskExport`, `maskImport`, `rememberSource`, `sourceCopyRead`, `sourceImportBegin`, `sourceInfo`, `locate`, `copySource`) refuses
+one that is neither opened, known nor created (`INVALID_REQUEST`, `project`) before anything reaches the engine; `reopen` is how the page opens a
+saved project (also before its library listing is announced) and adds it to `opened`. `deleteProjectStore` of a project that is not `created` is
+refused unless it is opened or known, and then it needs the answer of `confirm`, a message box of the main process (default button: cancel;
+`{deleted: false, declined: true}` when declined). `maskRetain` of a project that is not `created` adds to the versions to keep every manifest in
+`<projects>/<project>/tiles/manifests/` that is not in `written`, so it removes only versions this session wrote (more than 1,024 to keep:
+`LIMIT_EXCEEDED`, `keep`, nothing removed); in a `created` project it keeps exactly what the page names. `copyProjectStore` needs `from` opened,
+known or created and `to` created (`INVALID_REQUEST`, `from` / `to`). `EngineClient` gives each mask-store operation its own deadline
+(`STORE_DEADLINES_MS` in `desktop/engine.js`; the table is in contract §8.7) instead of the 5 s of an ordinary request, after which the engine is
+stopped.
+
+**Training requests (card M8.4.38).** `trainingOptions` in `desktop/trainer.js` checks a request before anything is written: only the keys `zip`,
+`name`, `val`, `test`, `epochs`, `pretrained`, `tile`, `overlap`, `encoder` and `resume`; `name` a string of at most 1,024 characters (then made
+safe by `safe`); `epochs` an integer from 1 to 10,000 (default 60); `tile` an integer from 64 to 4,096 (default 512); `overlap` an integer from 0
+to 1,024 and below `tile` (default 64); `encoder` one of `resnet18`, `resnet34`, `resnet50` (default `resnet34`); `pretrained` and `resume`
+booleans; `val` and `test` at most 1,024 core names of 1-200 characters, without control characters and never starting with `-`; for a new run
+`zip` the bytes of a ZIP (starting with a local file header or the end record of an empty archive, 22 bytes to 2 GiB; the limit is chosen, not
+measured). A refusal is `INVALID_OPTION` naming the field. The ZIP is written with `fs.promises.writeFile`. `status`, `systemPython` and
+`hasNvidia` run their commands through `capture` (an asynchronous `spawn` with a deadline: 15 s for the searches, 120 s for `unet device`; output
+kept up to 1 M characters). `cancel` ends the running command and everything it started: on Windows `taskkill /pid <pid> /T /F` and then the
+command itself if it is still there; elsewhere the command leads its own process group (`detached`), which gets `SIGKILL`.
 
 **Performance baseline.** The [M0.1 benchmark](benchmarks/M0.1.md) measures browser project opening, IndexedDB
 autosave and interval analysis, and verifies the shared interval results against the public Python API.
@@ -3429,6 +3701,13 @@ result contracts (shapes, contiguous intervals, counts consistent with percentag
 the 20 fractional-boundary cases with `tests/fixtures/fractional-boundaries.json`. They are the target of the Python
 implementation; they say nothing about the engine, which does not calculate sections yet.
 
+**Age-model reference fixtures.** `tests/fixtures/core_ages/` holds 8 synthetic cases (2.9 MB; format in its README) with the inputs of the
+engine method `core.ages/1` ([contract §9.8](roadmap-engine-contract.md)) and the result of `core.js::interpAge` and `interpAgeRange`:
+models of 2 and 1,000 rows, with and without age reversals and range, and queries at every knot, at both ends, just outside, missing and
+100,000 random depths. `tests/app/core-ages-fixtures.test.mjs` requires every committed file to be byte-identical to a regeneration by
+`tools/make_core_ages_fixtures.mjs` (also through its command line) and re-checks each row against `core.js`. The engine method `core.ages/1` reproduces them
+(`tests/test_core_ages.py`; largest age error measured 2.3e-13).
+
 **Temporary diagnostics.** Node tests cover default-off activation, persisted expiry, redaction, two-file
 rotation, queue overflow, independent write failure, bounded reads and atomic export failure. The real
 Electron test enables recording through the interface, uses synthetic private-text canaries, rejects foreign
@@ -3559,10 +3838,7 @@ The percentage difference comes from the JPEG decoder (§3.4), not from the meth
     core's age model; interpolated maps are exploratory; k-NN compares each sample with all training samples (slow
     with hundreds of thousands of samples); MDI importance is biased among correlated proxies; everything is computed
     on the user's computer.
-11. **Known defects, with cards in the roadmap** (found by the audits of 19 November 2026; each item is removed when its card is done):
-    missing-value codes such as -999 are read as values (Q2); spreadsheets are read from their first sheet, with the numbers as the sheet
-    formats them (Q2); changing a section's unit does not convert its depths (Q3);
-    joined projects keep the first core's units (Q3); backups and packages leave tiled sections out (M8.4.33).
+11. **Known defects, with cards in the roadmap** (found by the audits of 19 November 2026; each item is removed when its card is done): none open.
 
 ## 33. Reproducibility
 

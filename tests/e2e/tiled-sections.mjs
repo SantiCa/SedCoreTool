@@ -23,6 +23,32 @@ const electron = createRequire(path.join(root, 'desktop/package.json'))('electro
 const image = process.argv[2] || path.join(root, 'examples/data/idealized_core_0-500cm.jpg');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Card M8.4.32: the process id of this program's engine coordinator (its command line names server.py and the projects folder), found among the
+ * descendants of the program's process (at most six levels down): PowerShell on Windows, `ps` on macOS and Linux. 0 when there is none.
+ * @param {number} rootPid
+ */
+function findCoordinator(rootPid) {
+  if (process.platform === 'win32') {
+    return Number(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      `(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*server.py*' -and $_.CommandLine -like '*projects-dir*' } | Where-Object { $p = $_; $chain = $p.ParentProcessId; $hit = $false; for ($k = 0; $k -lt 6 -and $chain; $k++) { if ($chain -eq ${rootPid}) { $hit = $true; break }; $chain = (Get-CimInstance Win32_Process -Filter "ProcessId=$chain").ParentProcessId }; $hit } | Select-Object -First 1).ProcessId`],
+      { encoding: 'utf8', windowsHide: true }).trim()) || 0;
+  }
+  const rows = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,args='], { encoding: 'utf8' }).split('\n').map((line) => /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)).filter(Boolean)
+    .map((m) => ({ pid: Number(m[1]), ppid: Number(m[2]), args: m[3] }));
+  const parent = new Map(rows.map((r) => [r.pid, r.ppid]));
+  for (const r of rows) {
+    if (!r.args.includes('server.py') || !r.args.includes('projects-dir')) continue;
+    for (let chain = r.ppid, k = 0; chain && k < 6; chain = parent.get(chain), k++) if (chain === rootPid) return r.pid;
+  }
+  return 0;
+}
+
+/** Where a failing step saves its screenshot: SEDCORETOOL_SHOT_DIR on GitHub (uploaded as an artifact, card M8.4.32), else the temporary folder. */
+function shotDir() { const dir = process.env.SEDCORETOOL_SHOT_DIR || os.tmpdir(); fs.mkdirSync(dir, { recursive: true }); return dir; }
+/** The file of a screenshot named `name` in that folder (a function, because the editing steps below have their own `path`). */
+const shotFile = (name) => path.join(shotDir(), name);
+
 async function program(tiled) {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'sedcoretool-tiled-'));
   const env = { ...process.env, SEDCORETOOL_TEST_PROFILE: profile, SEDCORETOOL_ENGINE_EXPERIMENT: '1' };
@@ -54,6 +80,9 @@ async function program(tiled) {
 async function addImage(page) {
   await page.evaluate(() => document.getElementById('openTest').click());
   await page.waitForFunction(() => window.ichantool.S.sections.length === 6, { timeout: 120000 });
+  // The six sections appear before the test project has finished loading (detection, records); its end selects the first section. On GitHub's
+  // machines that came after the tiled section was added, so the probe and the strokes met another image (card M8.4.32, 20 Nov 2026).
+  await page.waitForFunction(() => !window.ichantool.saveBlockers().loading && document.getElementById('busy').hidden, { polling: 200, timeout: 600000 });
   assert.equal(await page.evaluate(() => window.ichantool.serialize().version), 5, 'card M8.4.18a: a project without tiled sections stays format version 5');
   await (await page.$('#addImg')).uploadFile(image);
   await page.waitForSelector('#pcOk', { timeout: 30000 });
@@ -85,12 +114,30 @@ try {
   assert.ok(section.full.w * section.full.h > section.maxMP * 1e6, 'only images above the size limit are tiled');
   assert.ok(section.bins > 0 && !section.bioturbated, 'card M8.4.17: the interval table is counted from the full-resolution masks, which are empty: bins without any bioturbation');
   assert.ok(toasts.some((text) => text.includes(String(section.full.h))), 'the user is told what a tiled section is: ' + JSON.stringify(toasts));
+  // D1: a save waits up to 15 s for the section's masks to reach the store and otherwise keeps it for the next save; on GitHub's machines the
+  // first round of a new section can take longer, so the test saves again, as the program does, until the section is in the record.
   const saved = await on.page.evaluate(async () => {
-    await window.ichantool.saveNow();                                    // card M8.4.18a: a tiled section is saved like the others
-    const project = window.ichantool.serialize();
-    return { names: project.cores.flatMap((core) => core.sections.map((q) => q.name)), version: project.version, manifests: window.ichantool.tiledSaved() };
+    for (let attempt = 0; attempt < 10 && !window.ichantool.tiledSaved().some(Boolean); attempt++) {
+      await window.ichantool.saveNow();                                  // card M8.4.18a: a tiled section is saved like the others
+      for (let k = 0; k < 600 && !window.ichantool.masksSettled(); k++) await new Promise((r) => setTimeout(r, 100));
+    }
+    const project = window.ichantool.serialize(), q = window.ichantool.S.sections.at(-1);
+    return { names: project.cores.flatMap((core) => core.sections.map((q) => q.name)), version: project.version, manifests: window.ichantool.tiledSaved(),
+      why: { blockers: window.ichantool.saveBlockers(), inCores: window.ichantool.S.cores.some((c) => c.sections.includes(q)), tiled: !!q.tiled, maskTiles: !!q.maskTiles,
+        saveState: document.getElementById('saveState')?.dataset.state, settled: window.ichantool.masksSettled(), sync: q._maskSync ? { manifest: q._maskSync.manifest,
+        running: !!q._maskSync.running, wanted: q._maskSync.wanted, stopped: q._maskSync.stopped, failures: q._maskSync.failures } : null, frozen: q.frozen ?? null } };
   });
-  assert.equal(saved.names.length, 7, 'the tiled section is saved with the six others');
+  assert.equal(saved.names.length, 7, 'the tiled section is saved with the six others: ' + JSON.stringify(saved.why) + ' ' + JSON.stringify(toasts.slice(-4)));
+  // Card M8.4.33, changed by card M8.4.18d (decision D4): with the engine a package carries the tiled section and says nothing is left out; the
+  // project as `projectForExport` alone writes it still leaves it out and names it (the path of a package made without the engine, checked below
+  // in the program with the flag off).
+  const toastsBeforePackage = toasts.length;
+  const exported = await on.page.evaluate(async () => { const json = window.ichantool.exportedProject(); await window.ichantool.packageNow();
+    return { sections: json.cores.flatMap((c) => c.sections).length, leftOut: json.left_out, tiled: json.cores.flatMap((c) => c.sections).some((q) => q.tiled) }; });
+  assert.equal(exported.sections, 6, 'the six ordinary sections are packaged');
+  assert.equal(exported.tiled, false);
+  assert.equal(exported.leftOut?.length, 1, 'the tiled section is named in left_out: ' + JSON.stringify(exported.leftOut));
+  assert.ok(!toasts.slice(toastsBeforePackage).some((text) => /secciones grandes por piezas|large tiled sections/.test(text)), 'the package carries it: nothing is said to be left out: ' + JSON.stringify(toasts.slice(toastsBeforePackage)));
   assert.equal(saved.version, 6, 'a project with a tiled section is format version 6');
   assert.ok(saved.manifests.length === 1 && /^[0-9a-f]{64}$/.test(saved.manifests[0]), 'saved with its stored version: ' + JSON.stringify(saved.manifests));
   // Release the working image and ask for it again: it comes back from the pyramid, never from the source file.
@@ -107,8 +154,9 @@ try {
   await on.page.evaluate(() => new Promise((r) => setTimeout(r, 300)));
   // Card M8.4.24: the probe is a function, so it can be repeated (SEDCORETOOL_PROBE_REPEAT=n) with the tile cache emptied each time; a wait that
   // never completes fails here instead of reading a coarser stand-in tile, and a failed probe keeps its evidence.
-  const probe = (fraction = 1 / 3) => on.page.evaluate(async (fraction) => {
-    const { S } = window.ichantool, s = S.sections.at(-1), canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('view'));
+  // Card M8.4.39: with `redraw` false the view is not drawn again by the probe after the tiles arrive: only the viewer's own repaint shows them.
+  const probe = (fraction = 1 / 3, redraw = true) => on.page.evaluate(async (fraction, redraw) => {
+    const { S } = window.ichantool, s = S.sections[S.cur], canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('view'));   // the last section (asserted below) or the one selected
     const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     // Working pixel (vx, vy) at the top left, integer, so source pixel (vx * ds + sx, vy * ds + sy) is at screen (sx, sy).
     const vx = Math.floor(s.w / 2 - canvas.width / s.ds / 2), vy = Math.floor(s.h * fraction);
@@ -118,7 +166,8 @@ try {
     let waits = 0;
     for (; waits < 1200 && !window.ichantool.tilesIdle(); waits++) await new Promise((r) => setTimeout(r, 25));
     const waitedMs = Math.round(performance.now() - started), completed = window.ichantool.tilesIdle();
-    window.ichantool.requestRender(); await frame();
+    if (redraw) window.ichantool.requestRender();
+    await frame();
     // Probes: source pixels that differ from the working image at the same place, so only a drawn level-0 tile can show them.
     const ctx = canvas.getContext('2d'), probes = [], left = 160;   // left of this: the strip and the ruler
     // Card M8.4.24: never on the first or last source row or column of the analysis area, where the viewer draws its dashed border (#e0995a,
@@ -147,18 +196,25 @@ try {
     }
     const bad = probes.find((p) => p.screen.some((v, i) => v !== p.source[i]));
     const evidence = bad ? window.ichantool.tileState(0, Math.floor((bad.sy + vy * s.ds) / 512), Math.floor((bad.sx + vx * s.ds) / 512)) : null;
-    return { probes, level: s.tiled.level, canvas: [canvas.width, canvas.height], view: S.view, roi: s.roi, w: s.w, waitedMs, completed, evidence };
-  }, fraction);
+    // Card Q15: the view on screen when the pixels were read, against the one the probe set (the probe maps screen to source with the latter).
+    return { probes, level: s.tiled.level, canvas: [canvas.width, canvas.height], asked: { x: vx, y: vy, zoom: s.ds }, view: { ...S.view }, roi: s.roi, w: s.w, waitedMs, completed, evidence };
+  }, fraction, redraw);
   const checkProbe = async (drawn, label) => {
     assert.ok(drawn.completed, `${label}: the visible tiles were loaded within 30 s (waited ${drawn.waitedMs} ms): ` + JSON.stringify(drawn.evidence));
     assert.ok(drawn.probes.length >= 10, 'probes where full resolution differs from the working image: ' + JSON.stringify(drawn));
     if (drawn.evidence) {
-      const shot = path.join(os.tmpdir(), `sedcoretool-probe-${process.pid}-${Date.now()}.png`);
+      const shot = shotFile(`sedcoretool-probe-${process.pid}-${Date.now()}.png`);
       await on.page.screenshot({ path: shot });
       console.log(`${label}: probe failed; screenshot ${shot}; tile state ${JSON.stringify(drawn.evidence)}; waited ${drawn.waitedMs} ms`);
     }
+    // Card Q15: a view replaced while the probe waited (on GitHub's macOS machine, the first view of a section just selected, fitted one
+    // animation frame later) puts other pixels under the probes; this names that cause instead of a pixel mismatch.
+    assert.deepEqual(drawn.view, drawn.asked, `${label}: the view the probe set is still the view when the pixels are read`);
     for (const p of drawn.probes) assert.deepEqual(p.screen, p.source, `${label}: drawn pixel = source pixel at ` + JSON.stringify({ ...p, evidence: drawn.evidence }));
   };
+  // Card M8.4.32: the probe and the strokes read the last section; it must be the one on screen.
+  const current = await on.page.evaluate(() => { const { S } = window.ichantool; return { cur: S.cur, last: S.sections.length - 1, name: S.sections[S.cur]?.name }; });
+  assert.equal(current.cur, current.last, 'the tiled section is the current section: ' + JSON.stringify(current));
   const drawn = await probe();
   await checkProbe(drawn, 'probe');
   const repeat = Number(process.env.SEDCORETOOL_PROBE_REPEAT || 0);
@@ -172,9 +228,7 @@ try {
       for (let n = 1; n <= repeat; n++) {
         await on.page.evaluate(() => window.ichantool.clearTiles());
         if (process.env.SEDCORETOOL_PROBE_KILL === '1' && n === 5) {          // once: the program restarts the engine once per session
-          const coordinator = Number(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-            `(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*server.py*' -and $_.CommandLine -like '*projects-dir*' } | Where-Object { $p = $_; $chain = $p.ParentProcessId; $hit = $false; for ($k = 0; $k -lt 6 -and $chain; $k++) { if ($chain -eq ${on.pid}) { $hit = $true; break }; $chain = (Get-CimInstance Win32_Process -Filter "ProcessId=$chain").ParentProcessId }; $hit } | Select-Object -First 1).ProcessId`],
-            { encoding: 'utf8', windowsHide: true }).trim());
+          const coordinator = findCoordinator(on.pid);
           if (coordinator > 0) process.kill(coordinator, 'SIGKILL');
         }
         const again = await probe(0.2 + (n % 7) * 0.08);
@@ -229,12 +283,13 @@ try {
     }
     window.ichantool.setTool('pan');
     const roi = document.getElementById('roiBtn'); roi.click(); await pause(); out.tools.roi = S.tool === 'roi'; window.ichantool.setTool('pan');
-    const before = { w: s.w, h: s.h, ds: s.ds, rot: s.rot, crop: s.crop, filters: JSON.stringify(s.filters) };
-    for (const id of ['detectBtn', 'cropBtn', 'rotL', 'rotR']) { document.getElementById('toast').textContent = ''; document.getElementById(id).click(); await pause(); out.actions[id] = toastText(); }
+    const before = { w: s.w, h: s.h, ds: s.ds, rot: s.rot, crop: s.crop, filters: JSON.stringify(s.filters), detect: JSON.stringify(s.detect) };
+    // Card M8.4.39: the enhancement presets ("best for this section", "apply to all") refuse on a tiled section too.
+    for (const id of ['detectBtn', 'cropBtn', 'rotL', 'rotR', 'presetBest', 'presetAll']) { document.getElementById('toast').textContent = ''; document.getElementById(id).click(); await pause(); out.actions[id] = toastText(); }
     const select = document.getElementById('secRes'); select.value = String(s.ds * 2); select.dispatchEvent(new Event('change', { bubbles: true })); await pause(); out.actions.secRes = toastText(); out.resValue = select.value;
     const gamma = document.getElementById('f-gamma'); document.getElementById('toast').textContent = '';
     gamma.value = '1.8'; gamma.dispatchEvent(new Event('input', { bubbles: true })); await new Promise((r) => setTimeout(r, 300)); out.actions.filter = toastText();
-    out.unchanged = JSON.stringify(before) === JSON.stringify({ w: s.w, h: s.h, ds: s.ds, rot: s.rot, crop: s.crop, filters: JSON.stringify(s.filters) });
+    out.unchanged = JSON.stringify(before) === JSON.stringify({ w: s.w, h: s.h, ds: s.ds, rot: s.rot, crop: s.crop, filters: JSON.stringify(s.filters), detect: JSON.stringify(s.detect) });
     // A wand chosen on the first section does not follow into the tiled one.
     S.cur = 0; window.ichantool.setTool('wand'); S.cur = S.sections.length - 1; window.ichantool.renderSectionForm?.(); out.carried = S.tool;
     return out;
@@ -354,10 +409,14 @@ try {
   // undone and redone. Expected areas follow from the rules of `polygonPixels` (pixel centres) and `splitPieces` (cut pixels join the piece on
   // their left first).
   const ops = await (async () => {
-    const page = on.page, box = await page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
-    const idle = () => page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.masksSettled(), { polling: 50, timeout: 60000 });
+    // The canvas is measured before every stroke: on GitHub's machines it is taller than the window and its pane scrolled by about 29 px between
+    // the lasso and the scissors, so positions measured once put the cut 29 px too low (card M8.4.32, 20 Nov 2026).
+    const page = on.page, viewBox = () => page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
+    let box = await viewBox();
+    const idle = () => page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.masksSettled() && !window.ichantool.objectsWaiting(), { polling: 50, timeout: 60000 });
     const path = async (tool, points, keys = []) => {
       await page.evaluate((tool) => window.ichantool.setTool(tool), tool);
+      box = await viewBox();
       for (const key of keys) await page.keyboard.down(key);
       await page.mouse.move(box.left + points[0][0], box.top + points[0][1]); await page.mouse.down();
       for (let k = 1; k < points.length; k++) {
@@ -382,8 +441,20 @@ try {
     const start = await state();
     await path('lasso', [[100, 520], [200, 520], [200, 580], [100, 580]]);
     const lassoed = await state();
+    // Card M8.4.32: the pointer events the page receives during the cut, to tell a lost or merged move from a wrong mapping if it fails.
+    await page.evaluate(() => {
+      const seen = window.__cutEvents = [], view = document.getElementById('view');
+      for (const type of ['pointerdown', 'pointermove', 'pointerup']) view.addEventListener(type, (e) => { if (seen.length < 200) seen.push([type[7] || type[5], e.clientX, e.clientY, e.getCoalescedEvents?.().length ?? 0]); }, { capture: true });
+      window.addEventListener('pointerup', (e) => { if (seen.length < 200) seen.push(['window-up', e.clientX, e.clientY]); }, { capture: true });
+    });
     await path('cut', [[150, 500], [150, 600]]);
     const cut = await state();
+    cut.pointer = await page.evaluate(() => { const s = window.ichantool.S.sections.at(-1), r = document.getElementById('view').getBoundingClientRect();
+      return { events: window.__cutEvents, view: window.ichantool.S.view, ds: s.ds, rect: [r.left, r.top, r.width, r.height], dpr: window.devicePixelRatio }; });
+    cut.box = box;
+    if (Object.keys(cut.objects).filter((id) => !start.objects[id]).length !== 2) {
+      const shot = shotFile(`sedcoretool-scissors-${process.pid}.png`); await page.screenshot({ path: shot }); cut.shot = shot;
+    }
     const pieces = Object.keys(cut.objects).filter((id) => !start.objects[id]).map(Number);
     await page.evaluate((ids) => window.ichantool.mergeObjects(ids), pieces); await idle();
     const merged = await state();
@@ -409,6 +480,7 @@ try {
     const redone = await state();
     const count = await page.evaluate(() => window.ichantool.S.sections.at(-1).objects.size);
     await page.evaluate(() => window.ichantool.setTool('wand'));
+    box = await viewBox();
     await page.mouse.click(box.left + 400, box.top + 650);
     await page.waitForFunction((n) => window.ichantool.S.sections.at(-1).objects.size > n, { polling: 50, timeout: 60000 }, count);
     await idle();
@@ -420,7 +492,7 @@ try {
   const [lassoId] = fresh(ops.lassoed, ops.start);
   assert.deepEqual(ops.lassoed.objects[lassoId], { area: 6000, sbox: [100, 6520, 199, 6579], cls: ops.lassoed.objects[lassoId].cls }, 'the lasso labels the source pixels whose centres are inside the polygon');
   assert.equal(ops.lassoed.counted[lassoId], 6000);
-  assert.deepEqual(ops.pieces.length, 2, 'the scissors split the object in two: ' + JSON.stringify(ops.cut.objects));
+  assert.deepEqual(ops.pieces.length, 2, 'the scissors split the object in two: ' + JSON.stringify({ objects: ops.cut.objects, toast: ops.cut.toast, undo: [ops.lassoed.undo, ops.cut.undo], canvas: ops.canvas, pointer: ops.cut.pointer, box: ops.cut.box, shot: ops.cut.shot }));
   assert.deepEqual(ops.pieces.map((id) => ops.cut.objects[id].area).sort(), [2880, 3120], 'left 49 + 3 cut columns, right 48 columns, 60 rows');
   for (const id of ops.pieces) assert.equal(ops.cut.counted[id], ops.cut.objects[id].area);
   const [mergedId] = fresh(ops.merged, ops.start);
@@ -478,9 +550,7 @@ try {
   await on.page.evaluate(() => { window.ichantool.setTool('brush'); window.ichantool.S.brushSize = 10; });
   const box = await on.page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
   // Found before the stroke: looking it up takes about a second, longer than a round.
-  const coordinator = Number(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-    `(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*server.py*' -and $_.CommandLine -like '*projects-dir*' } | Where-Object { $p = $_; $chain = $p.ParentProcessId; $hit = $false; for ($k = 0; $k -lt 6 -and $chain; $k++) { if ($chain -eq ${on.pid}) { $hit = $true; break }; $chain = (Get-CimInstance Win32_Process -Filter "ProcessId=$chain").ParentProcessId }; $hit } | Select-Object -First 1).ProcessId`],
-    { encoding: 'utf8', windowsHide: true }).trim());
+  const coordinator = findCoordinator(on.pid);
   assert.ok(coordinator > 0, 'the engine coordinator of this program was found');
   // Card M8.4.16 step 5: the stroke is undone while the engine is down and redone after it is back; each state reaches the store exactly.
   const objectsNow = () => on.page.evaluate(() => [...window.ichantool.S.sections.at(-1).objects.values()].map((o) => [o.id, o.area, String(o.sbox)]));
@@ -493,6 +563,9 @@ try {
   const manifestBeforeStroke = await on.page.evaluate(() => window.ichantool.S.sections.at(-1)._maskSync.manifest);
   const objectsBefore = await objectsNow();
   const putsBefore = await on.page.evaluate(() => window.ichantool.S.sections.at(-1)._maskSync.puts);
+  // Card M8.4.35: the round is held after its last tile and before its commit, so the engine is killed while it is on its way without racing it
+  // (a wait on animation frames timed out on GitHub's macOS, twice in November 2026: the round had committed, or frames did not run).
+  await on.page.evaluate(() => { const sync = window.ichantool.S.sections.at(-1)._maskSync; sync.beforeCommit = () => new Promise((resolve) => { window.__heldRound = resolve; }); });
   await on.page.mouse.move(box.left + 500, box.top + 40); await on.page.mouse.down();
   for (let y = 40; y <= 900; y += 20) await on.page.mouse.move(box.left + 500 + (y % 40), box.top + y);
   await on.page.mouse.up();
@@ -503,10 +576,11 @@ try {
   });
   assert.ok(Object.keys(before).length >= 4, 'the stroke changed several tiles: ' + Object.keys(before));
   // Wait until the round is on its way (its first tile sent, not committed), then kill the coordinator.
-  await on.page.waitForFunction((base) => { const sync = window.ichantool.S.sections.at(-1)._maskSync; return !!sync.running && sync.puts > base; },
-    { polling: 'raf', timeout: 30000 }, putsBefore);
+  await on.page.waitForFunction((base) => { const sync = window.ichantool.S.sections.at(-1)._maskSync; return !!sync.running && sync.puts > base && !!window.__heldRound; },
+    { polling: 50, timeout: 60000 }, putsBefore);
   const manifestAtKill = await on.page.evaluate(() => window.ichantool.S.sections.at(-1)._maskSync.manifest);
   process.kill(coordinator, 'SIGKILL');
+  await on.page.evaluate(() => { const sync = window.ichantool.S.sections.at(-1)._maskSync; sync.beforeCommit = null; window.__heldRound(); window.__heldRound = null; });   // its commit now fails
   const kept = await on.page.evaluate(async (expected) => {
     const s = window.ichantool.S.sections.at(-1), tiles = s.maskTiles;
     return Object.entries(expected).every(([key, sum]) => { const [row, col] = key.split('.').map(Number);
@@ -555,10 +629,10 @@ try {
     for (let k = 0; k < out.length; k += 8192) text += String.fromCharCode(...out.subarray(k, k + 8192));
     return btoa(text);
   }, fs.readFileSync(image).toString('base64')), 'base64'));
-  const added = async (force) => {
+  const added = async (force, file = lossless) => {
     await on.page.evaluate((force) => { window.ichantool.forceTiledSections(force); window.ichantool.S.settings.maxMP = 12; }, force);
     const before = await on.page.evaluate(() => window.ichantool.S.sections.length);
-    await (await on.page.$('#addImg')).uploadFile(lossless);
+    await (await on.page.$('#addImg')).uploadFile(file);
     await on.page.waitForSelector('#pcOk', { timeout: 30000 }); await on.page.click('#pcOk');
     await on.page.waitForFunction((n) => window.ichantool.S.sections.length === n + 1, { timeout: 600000, polling: 200 }, before);
     await on.page.waitForFunction(() => document.getElementById('busy').hidden, { timeout: 600000 });
@@ -576,16 +650,40 @@ try {
       S.active = S.classes[0].id; S.sections[index].roi = { x0: 0, y0: 3000, x1: 620, y1: 4400 };   // bounds the wand and the lasso alike on both paths
       window.ichantool.requestRender();
     }, index);
-    const box = await page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
-    const idle = () => page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.masksSettled(), { polling: 50, timeout: 60000 });
+    // Measured before every stroke, as in the editing steps above (the pane may scroll; card M8.4.32).
+    // Card Q14: with where the view shows the image and what lies above it, so that a stroke placed elsewhere than aimed is reported as such.
+    const viewBox = () => page.evaluate(() => {
+      const r = document.getElementById('view').getBoundingClientRect(), height = (selector) => document.querySelector(selector)?.getBoundingClientRect().height ?? null;
+      const { x, y, zoom } = window.ichantool.S.view;
+      // Card Q14: each visible child of the top bar with its height and text, so that a top bar that grows names the element that grew.
+      const headerParts = [...document.querySelectorAll('header.top > *, header.top .acts > *')].filter((el) => !el.hidden && el.getClientRects().length)
+        .map((el) => `${el.id || el.className}:${Math.round(el.getBoundingClientRect().height)}:${(el.textContent || '').trim().slice(0, 40)}`);
+      return { left: r.left, top: r.top, view: [x, y, zoom], header: height('header.top'), headerParts, tools: height('#tools'), validation: height('#projectValidation'),
+        scrolled: ['html', '.app', '.work', '.stage', '.viewport'].map((selector) => document.querySelector(selector)?.scrollTop ?? null) };
+    });
+    let box = await viewBox();
+    const idle = () => page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.masksSettled() && !window.ichantool.objectsWaiting(), { polling: 50, timeout: 60000 })
+      .catch(async (error) => {                                          // card M8.4.42: what was still waiting, for the failure message
+        const state = await page.evaluate(() => window.ichantool.S.sections.filter((q) => q.tiled).map((q) => ({ id: q.id, window: q.tiled.window ?? null, frozen: q.frozen ?? null,
+          sync: q._maskSync && { settled: q._maskSync.settled, running: !!q._maskSync.running, failures: q._maskSync.failures, lastError: q._maskSync.lastError ?? null },
+          stats: q._statsRunner && { idle: q._statsRunner.idle, failed: q._statsRunner.failed.size } })));
+        throw new Error(error.message + ' ' + JSON.stringify(state) + ' ' + JSON.stringify(toasts.slice(-4)));
+      });
     const draw = async (tool, points) => {
       await page.evaluate((tool) => window.ichantool.setTool(tool), tool);
+      box = await viewBox();
       await page.mouse.move(box.left + points[0][0], box.top + points[0][1]); await page.mouse.down();
       for (let k = 1; k < points.length; k++) {
         const [ax, ay] = points[k - 1], [bx, by] = points[k];
         for (let q = 1; q <= 5; q++) await page.mouse.move(box.left + ax + ((bx - ax) * q) / 5, box.top + ay + ((by - ay) * q) / 5);
       }
-      await page.mouse.up(); await idle();
+      await page.mouse.up();
+      // Card Q14: on GitHub (Windows and macOS) one stroke of the first section scripted after a reopening landed 19 rows above the others' place,
+      // never seen on the maintainer's computer; if the view moves under the pointer again, say so here rather than in the comparison of the masks.
+      const after = await viewBox();
+      const { headerParts: partsAfter, ...placeAfter } = after, { headerParts: partsBefore, ...placeBefore } = box;   // texts may change (save state)
+      assert.deepEqual(placeAfter, placeBefore, `the view stayed where it was measured during the ${tool} stroke; top bar ${JSON.stringify({ partsBefore, partsAfter })}`);
+      await idle();
     };
     const objects = () => page.evaluate(() => [...window.ichantool.S.sections[window.ichantool.S.cur].objects.keys()]);
     await draw('brush', [[100, 200], [300, 200]]);
@@ -601,6 +699,7 @@ try {
     await page.evaluate((ids) => window.ichantool.mergeObjects(ids.slice(-2)), ids); await idle();
     await page.evaluate(() => { const { S } = window.ichantool; S.selected = 0; });
     await page.evaluate(() => window.ichantool.setTool('wand'));
+    box = await viewBox();
     await page.mouse.click(box.left + 500, box.top + 700); await idle();
     await page.evaluate((id) => window.ichantool.assignClass(id, window.ichantool.S.classes[1].id), ids[0]); await idle();
     await page.evaluate((id) => window.ichantool.deleteObjects([id]), ids[1]); await idle();
@@ -608,7 +707,7 @@ try {
     await page.click('#redoBtn'); await idle();
     await page.click('#undoBtn'); await idle();
   };
-  const dump = (index) => on.page.evaluate((index) => {
+  const dumpIn = (page, index) => page.evaluate((index) => {
     const s = window.ichantool.S.sections[index], width = s.tiled ? s.maskTiles.width : s.w, height = s.tiled ? s.maskTiles.height : s.h;
     const at = s.tiled ? (x, y) => s.maskTiles.labelAt(x, y) : (x, y) => s.labels[y * s.w + x];
     const exAt = s.tiled ? (x, y) => { const e = s.maskTiles.get(Math.floor(y / 512), Math.floor(x / 512)); return e?.exclude ? e.exclude[(y % 512) * 512 + (x % 512)] : 0; } : (x, y) => s.exclude[y * s.w + x];
@@ -626,6 +725,7 @@ try {
     const stacks = s.stacks.map((m) => (m ? m.slice().sort((a, b) => a - b) : null));
     return { runs, exRuns, objects, usedStacks: [...new Set(runs.map((r) => r[3]).filter((n) => n.includes('+')))].sort(), stackCount: stacks.length, nextId: s.nextId };
   }, index);
+  const dump = (index) => dumpIn(on.page, index);
   await script(wholeAt); await script(tiledAt);
   const whole = await dump(wholeAt), tiledDump = await dump(tiledAt);
   assert.ok(whole.runs.length > 50 && whole.exRuns.length > 0 && whole.usedStacks.length > 0 && whole.objects.length >= 2, 'the script made labels, exclusion and overlaps: ' + JSON.stringify({ r: whole.runs.length, e: whole.exRuns.length, s: whole.usedStacks, o: whole.objects.length }));
@@ -672,15 +772,28 @@ try {
     const folder = path.join(on.profile, 'projects', project, 'tiles', 'manifests');
     return fs.existsSync(folder) ? fs.readdirSync(folder).filter((f) => /^[0-9a-f]{64}\.json$/.test(f)).map((f) => f.slice(0, 64)).sort() : [];
   };
-  const reopen = () => on.page.evaluate(async () => {
-    const { getProject } = await import(new URL('js/storage.js', location.href).href);
-    await window.ichantool.loadProject(await getProject(window.ichantool.S.id));
-    for (let i = 0; i < 2400 && !(window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle()); i++) await new Promise((r) => setTimeout(r, 50));
-    const s = window.ichantool.S.sections.find((q) => q.id === window.__tiledId);
-    return { frozen: s?.frozen ?? null, missing: !!s?.tiled?.missing, grey: s ? s.orig.subarray(0, 400).every((v, i) => (i % 4 === 3 ? v === 255 : v === 128)) : null };
-  });
+  // Card M8.4.35: when the section is not there after the load, the reason goes into the failure message (a failed load, its message, and
+  // what the stored project holds), since the failure seen on GitHub (`grey: null`) did not say why.
+  const reopenFailures = [];
+  const reopen = async () => {
+    const got = await on.page.evaluate(async () => {
+      const { getProject } = await import(new URL('js/storage.js', location.href).href), id = window.ichantool.S.id, stored = await getProject(id);
+      const errors = [], log = console.error;
+      console.error = (...args) => { errors.push(args.map((a) => String(a?.stack || a?.message || a)).join(' ').slice(0, 600)); log(...args); };
+      let loaded;
+      try { loaded = await window.ichantool.loadProject(stored); } finally { console.error = log; }
+      for (let i = 0; i < 2400 && !(window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle()); i++) await new Promise((r) => setTimeout(r, 50));
+      const s = window.ichantool.S.sections.find((q) => q.id === window.__tiledId);
+      const result = { frozen: s?.frozen ?? null, missing: !!s?.tiled?.missing, grey: s ? s.orig.subarray(0, 400).every((v, i) => (i % 4 === 3 ? v === 255 : v === 128)) : null };
+      return s ? { result } : { result, why: { loaded, errors, toast: document.getElementById('toast')?.textContent ?? '', id, sameId: window.ichantool.S.id === id,
+        storedSections: stored?.cores?.flatMap((c) => c.sections.map((q) => q.id + (q.tiled ? ':tiled' : ''))) ?? null, sections: window.ichantool.S.sections.map((q) => q.id) } };
+    });
+    if (got.why) { reopenFailures.push(got.why); console.error('reopen: the tiled section is not there:', JSON.stringify(got.why)); }
+    return got.result;
+  };
   const sameAsSaved = async (label) => {
     const index = await on.page.evaluate(() => window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId));
+    await on.page.evaluate((i) => window.ichantool.tiledMasksLoad(i), index);      // reopened from the cache, the stored tiles are not in the page yet
     const after = await dump(index), afterTable = await table(index);
     assert.deepEqual(after.runs, beforeSave.runs, label + ': labels'); assert.deepEqual(after.exRuns, beforeSave.exRuns, label + ': exclusion');
     assert.deepEqual(after.usedStacks, beforeSave.usedStacks, label + ': overlaps'); assert.equal(after.nextId, beforeSave.nextId, label + ': nextId');
@@ -697,12 +810,74 @@ try {
     return index;
   };
   const tiledIndex = await on.page.evaluate(() => window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId));
+  // Card M8.4.29: the reopening cache is written after a save in which every statistic and count is current, and read when the section is opened.
+  await on.page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle(), { polling: 200, timeout: 600000 });
   await on.page.evaluate(() => window.ichantool.saveNow());
   const beforeSave = await dump(tiledIndex), beforeTable = await table(tiledIndex);
   const savedManifests = await on.page.evaluate(() => window.ichantool.tiledSaved());
   assert.deepEqual(await manifestsOnDisk(), [...new Set(savedManifests)].sort(), 'after a save the store holds only the saved versions');
+  const sectionState = () => on.page.evaluate(() => { const q = window.ichantool.S.sections.find((x) => x.id === window.__tiledId); return { saved: q._savedRecord?.tiled?.manifest, cached: q._reopenCached ?? null }; });
+  const cacheFile = async () => path.join(on.profile, 'projects', await on.page.evaluate(() => window.ichantool.storeProject()), 'tiles', 'derived', `${(await sectionState()).saved}.reopen`);
+  const waitForCache = async (file) => {
+    for (let i = 0; i < 600 && !fs.existsSync(file); i++) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(fs.existsSync(file), 'the reopening cache was written after the save: ' + file + ' ' + JSON.stringify(fs.existsSync(path.dirname(file)) ? fs.readdirSync(path.dirname(file)) : 'no folder') + JSON.stringify(await on.page.evaluate(() => {
+      const q = window.ichantool.S.sections.find((x) => x.id === window.__tiledId);
+      return { sync: q._maskSync && { settled: q._maskSync.settled, manifest: q._maskSync.manifest }, saved: q._savedRecord?.tiled?.manifest, idle: q._statsRunner?.idle, failed: q._statsRunner?.failed.size,
+        ready: q._counts?.counts.ready, writing: q._reopenWriting, cached: q._reopenCached, frozen: q.frozen };
+    })));
+  };
+  const cachePath = await cacheFile();
+  await waitForCache(cachePath);
   assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  assert.equal((await sectionState()).cached, (await sectionState()).saved, 'the section was reopened from the cache');
   await sameAsSaved('reopened');
+  // Card M8.4.39: in the reopened project the viewer repaints the full-resolution tiles as they arrive, with no pan and no redraw by hand (the
+  // scheduler of the pyramid used to keep the section object of the first opening and drew only for it). A tiled section whose working image is
+  // a coarser level is put on screen with its masks loaded first, so that no mask read redraws the view meanwhile; the probe reads a row of tiles
+  // inside its analysis area that holds no mask (a drawn mask would differ from the source's pixels).
+  const reopenedShown = await on.page.evaluate(async () => {
+    const { S } = window.ichantool, index = S.sections.findIndex((q) => q.tiled && !q.tiled.missing && q.tiled.level > 0), s = S.sections[index];
+    if (!s) return { index };
+    await window.ichantool.tiledMasksLoad(index);
+    window.ichantool.selectSection(index);
+    // Card Q15: a section without a remembered view gets its first view (`fitView`) one animation frame after it is selected; the probe sets its
+    // own view, so that frame must have run first. Without it, on GitHub's macOS machine no frame ran before the probe and the fitted view
+    // (232 %) replaced the probe's (200 %): the probes read other pixels of the image (black objects where the source is white).
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    for (let i = 0; i < 400 && !s.orig; i++) await new Promise((r) => setTimeout(r, 25));
+    const height = /** @type {HTMLCanvasElement} */ (document.getElementById('view')).height, m = s.maskTiles;
+    const empty = (row) => { for (let col = 0; col < m.cols; col++) { const e = m.get(row, col); if (m.stored.has(row * m.cols + col) || e?.labels || e?.exclude) return false; } return true; };
+    let fraction = null;                                          // the probe's tile row is the one at the middle of the view
+    for (let row = 0; row < m.rows && fraction === null; row++) {
+      const vy = Math.floor((row * 512 + 256 - height / 2) / s.ds);
+      if (empty(row) && vy > s.roi.y0 && vy * s.ds + height < s.roi.y1 * s.ds - 1) fraction = (vy + 0.5) / s.h;
+    }
+    return { index, current: S.cur === index, orig: !!s.orig, fraction };
+  });
+  assert.ok(reopenedShown.index >= 0 && reopenedShown.current && reopenedShown.orig && reopenedShown.fraction !== null, 'a reopened tiled section is on screen: ' + JSON.stringify(reopenedShown));
+  await on.page.evaluate(() => window.ichantool.clearTiles());
+  await checkProbe(await probe(reopenedShown.fraction, false), 'reopened, no redraw by hand');
+  // A damaged cache is refused whole: the section is rebuilt from its tiles, equal to what was saved, and the next save writes the cache again
+  // (rebuilding may commit a new version, so the file of the version saved afterwards is the one to look for).
+  const damaged = fs.readFileSync(cachePath);
+  damaged[Math.floor(damaged.length / 2)] ^= 0xff; fs.writeFileSync(cachePath, damaged);
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  assert.equal((await sectionState()).cached, null, 'the damaged cache was not used');
+  await sameAsSaved('damaged cache');
+  await on.page.evaluate(() => window.ichantool.saveNow());
+  await waitForCache(await cacheFile());
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  assert.equal((await sectionState()).cached, (await sectionState()).saved, 'reopened from the cache written again');
+  await sameAsSaved('cache written again');
+  fs.rmSync(await cacheFile());                                     // no cache at all: the same result from the tiles
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  assert.equal((await sectionState()).cached, null, 'no cache, none used');
+  await sameAsSaved('no cache');
+  await on.page.evaluate(() => window.ichantool.saveNow());
+  await waitForCache(await cacheFile());
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  assert.equal((await sectionState()).cached, (await sectionState()).saved, 'reopened from the cache written after a reopening without one');
+  console.log('Reopening cache: written after the save, used on reopening with identical masks, objects and table; a damaged one is refused and rebuilt');
   const pyramid = await on.page.evaluate(() => window.ichantool.S.sections.find((q) => q.id === window.__tiledId).tiled.pyramid);
   fs.rmSync(path.join(on.profile, 'pyramids', pyramid), { recursive: true, force: true });
   assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
@@ -713,6 +888,16 @@ try {
   fs.rmSync(path.join(on.profile, 'pyramids', pyramid), { recursive: true, force: true });
   assert.deepEqual(await reopen(), { frozen: 'source', missing: true, grey: true }, 'no pyramid and no source: grey and locked');
   const lockedIndex = await sameAsSaved('source missing');
+  // Card M8.4.39: its working image, released as the memory budget releases a section that is not on screen, comes back grey and without an error
+  // (it used to be read from a pyramid that is not there).
+  const greyAgain = await on.page.evaluate(async (index) => {
+    const s = window.ichantool.S.sections[index];
+    s.orig = null; s.enh = null; delete s._pxErr;
+    window.ichantool.needPixels(s);
+    for (let i = 0; i < 400 && !s.orig && !s._pxErr; i++) await new Promise((r) => setTimeout(r, 25));
+    return { error: s._pxErr ?? null, grey: !!s.orig && s.orig.subarray(0, 400).every((v, i) => (i % 4 === 3 ? v === 255 : v === 128)) };
+  }, lockedIndex);
+  assert.deepEqual(greyAgain, { error: null, grey: true }, 'a section without pyramid and source reads its grey working image again');
   const nextBefore = await on.page.evaluate((index) => { window.ichantool.S.cur = index; window.ichantool.selectSection(index); const before = window.ichantool.S.sections[index].nextId; window.ichantool.setTool('brush'); return before; }, lockedIndex);
   const viewBox = await on.page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
   await on.page.mouse.move(viewBox.left + 300, viewBox.top + 300); await on.page.mouse.down(); await on.page.mouse.move(viewBox.left + 340, viewBox.top + 300); await on.page.mouse.up();
@@ -782,9 +967,144 @@ try {
   assert.ok(toasts.some((text) => /almac|store/i.test(text)), 'D1: the user is told the large section was not saved');
   assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
   await sameAsSaved('after D1');
+  // Card M8.4.35: a save still waiting for a tiled section when a project is opened writes nothing: it used to write the half-loaded project over the
+  // stored one (GitHub, Linux and macOS, November 2026: the stored project had no section left, and the next reopening found none).
+  const raced = await on.page.evaluate(async () => {
+    const { getProject, getMeta } = await import(new URL('js/storage.js', location.href).href), id = window.ichantool.S.id;
+    const before = await getProject(id), metaBefore = await getMeta(id), count = (d) => d.cores.flatMap((c) => c.sections).length;
+    const index = window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId), s = window.ichantool.S.sections[index];
+    window.ichantool.selectSection(index);
+    window.ichantool.stopMaskSync();                                      // the section cannot settle: the save waits for its deadline
+    window.ichantool.putMaskTile(2, 0, new Int32Array(512 * 512).fill(s.nextId - 1), null);
+    window.ichantool.settleDeadline(2000);
+    const saving = window.ichantool.saveNow();
+    await new Promise((r) => setTimeout(r, 300));
+    const opening = window.ichantool.loadProject(before);                 // opened while the save waits
+    await Promise.all([saving, opening]);
+    window.ichantool.settleDeadline(15000);
+    const after = await getProject(id), metaAfter = await getMeta(id);
+    return { sections: [count(before), count(after)], unchanged: JSON.stringify(after) === JSON.stringify(before), written: metaAfter.updated !== metaBefore.updated };
+  });
+  assert.deepEqual(raced, { sections: [raced.sections[0], raced.sections[0]], unchanged: true, written: false }, 'a save overtaken by an opening writes nothing');
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false });
+  await sameAsSaved('after a save overtaken by an opening');
   // D2: the same project in a program without tiled sections: a placeholder whose record is saved back byte for byte.
   projectRecord = await on.page.evaluate(async () => { const { getProject } = await import(new URL('js/storage.js', location.href).href); return JSON.parse(JSON.stringify(await getProject(window.ichantool.S.id))); });
   console.log('Saving and reopening: identical masks, objects and table after a reopen, a rebuilt pyramid and a missing source (grey, locked); the moved image located (another file refused), copied into the project and reopened from the copy; D1 keeps the saved version');
+  // Card M8.4.18c: the folder backup carries the tiled section: the files of its version are written once, by name (a second backup rewrites none of
+  // them); a restore in another program with an empty store (another computer: another profile) opens it with identical masks and objects; a damaged
+  // file of the folder refuses the section, which opens locked. The folder is a directory of the origin's private file system (as a chosen folder).
+  const backupFiles = (page, folder) => page.evaluate(async (folder) => {
+    const b64 = (bytes) => { let text = ''; for (let i = 0; i < bytes.length; i += 32768) text += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + 32768))); return btoa(text); };
+    const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle(folder, { create: true });
+    await window.ichantool.projectFolderTo(dir);
+    const out = {};
+    const walk = async (handle, prefix) => {
+      for await (const [name, child] of handle.entries()) {
+        if (child.kind === 'directory') await walk(child, prefix + name + '/');
+        else { const file = await child.getFile(); out[prefix + name] = { modified: file.lastModified, b64: b64(new Uint8Array(await file.arrayBuffer())) }; }
+      }
+    };
+    await walk(dir, '');
+    return out;
+  }, folder);
+  const backupTiledId = await on.page.evaluate(() => window.__tiledId);
+  const firstBackup = await backupFiles(on.page, 'backup-m8418c');
+  const backupFolderName = Object.keys(firstBackup).find((name) => name.endsWith('/project.json')).split('/')[0];
+  const backupProject = JSON.parse(Buffer.from(firstBackup[backupFolderName + '/project.json'].b64, 'base64').toString('utf8'));
+  const backedTiled = backupProject.cores.flatMap((c) => c.sections).filter((q) => q.tiled);
+  assert.ok(backedTiled.some((q) => q.id === backupTiledId) && !backupProject.left_out, 'the backup keeps its tiled sections: ' + JSON.stringify(backupProject.left_out ?? null));
+  const versionFiles = Object.keys(firstBackup).filter((name) => name.startsWith(backupFolderName + '/tiles/') || name.startsWith(backupFolderName + '/manifests/'));
+  for (const q of backedTiled) assert.ok(firstBackup[`${backupFolderName}/manifests/${q.tiled.manifest}.json`], 'the version of ' + q.id + ' is in the folder');
+  assert.ok(versionFiles.some((name) => name.includes('/tiles/')), 'its tiles are in the folder');
+  // Step 3: the image the project keeps (copied into it above) is in the folder once, named by its SHA-256, and the user was told its size.
+  const sourceFile = `${backupFolderName}/sources/${pyramid}`;
+  assert.ok(firstBackup[sourceFile] && Buffer.from(firstBackup[sourceFile].b64, 'base64').equals(fs.readFileSync(lossless)), 'the image of the project is in the folder');
+  assert.ok(toasts.some((text) => /imagen original|original image/.test(text)), 'the user was told before the image was copied');
+  const secondBackup = await backupFiles(on.page, 'backup-m8418c');
+  for (const name of [...versionFiles, sourceFile]) assert.equal(secondBackup[name].modified, firstBackup[name].modified, 'not written again: ' + name);
+  const expectedRestore = beforeSave;
+  // Card M8.4.18d: the package of the project carries the tiled versions and, the user agreeing (the dialog is accepted), the image the project keeps.
+  const packaged = Buffer.from(await on.page.evaluate(async () => {
+    const bytes = new Uint8Array(await (await window.ichantool.packageBlob()).arrayBuffer());
+    let text = ''; for (let i = 0; i < bytes.length; i += 32768) text += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + 32768)));
+    return btoa(text);
+  }), 'base64');
+  const { unzipBlob } = await import(new URL('../../app/js/zip.js', import.meta.url).href);
+  const packageMembers = await unzipBlob(new Blob([packaged]));
+  const packagedProject = JSON.parse(await (await packageMembers.get('project.json').get()).text());
+  assert.ok(!packagedProject.left_out && packagedProject.cores.flatMap((c) => c.sections).some((q) => q.id === backupTiledId), 'the package keeps the tiled sections');
+  for (const q of backedTiled) assert.ok(packageMembers.has(`manifests/${q.tiled.manifest}.json`), 'the package holds the version of ' + q.id);
+  assert.ok(packageMembers.has(`sources/${pyramid}`) && Buffer.from(await (await packageMembers.get(`sources/${pyramid}`).get()).arrayBuffer()).equals(fs.readFileSync(lossless)), 'and the image');
+  const other = await program(true);
+  try {
+    const otherToasts = [];
+    await other.page.exposeFunction('tiledToast', (text) => otherToasts.push(text));
+    await other.page.evaluate(() => new MutationObserver(() => { const el = document.getElementById('toast'); if (el && !el.hidden) window.tiledToast(el.textContent); })
+      .observe(document.getElementById('toast'), { attributes: true, childList: true, subtree: true, characterData: true }));
+    const restoreIn = (files, folder, id, chooser = false) => other.page.evaluate(async (files, folder, folderName, id, chooser) => {
+      const top = await (await navigator.storage.getDirectory()).getDirectoryHandle(folder, { create: true });
+      for (const [name, file] of Object.entries(files)) {
+        const parts = name.split('/');
+        let dir = top;
+        for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part, { create: true });
+        const writable = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
+        await writable.write(Uint8Array.from(atob(file.b64), (c) => c.charCodeAt(0))); await writable.close();
+      }
+      const projectFolder = await top.getDirectoryHandle(folderName);
+      const record = JSON.parse(chooser ? await window.ichantool.chooseFolderVersion(projectFolder) : await (await (await projectFolder.getFileHandle('project.json')).getFile()).text());
+      if (id) { record.id = id; record.name += ' (damaged copy)'; }
+      await window.ichantool.restoreFolders([{ folder: projectFolder, text: JSON.stringify(record) }]);
+      for (let i = 0; i < 2400 && !(window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle()); i++) await new Promise((r) => setTimeout(r, 50));
+      const index = window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId);
+      return { index, id: window.ichantool.S.id, frozen: index < 0 ? 'absent' : (window.ichantool.S.sections[index].frozen ?? null), manifest: window.ichantool.S.sections[index]?._savedRecord?.tiled?.manifest ?? null,
+        seen: { name: window.ichantool.S.name, sections: window.ichantool.S.sections.map((q) => q.id), record: record.id, recordSections: record.cores?.flatMap((c) => c.sections.map((q) => q.id)) } };
+    }, files, folder, backupFolderName, id, chooser);
+    await other.page.evaluate((id) => { window.__tiledId = id; }, backupTiledId);
+    // The package opened on another computer (empty profile): the section with its image and the same masks and objects.
+    const fromPackage = await other.page.evaluate(async (b64) => {
+      await window.ichantool.restoreFiles([new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], 'project.sedcoretool')]);
+      for (let i = 0; i < 2400 && !(window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle()); i++) await new Promise((r) => setTimeout(r, 50));
+      const index = window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId), s = window.ichantool.S.sections[index];
+      return { index, frozen: index < 0 ? 'absent' : (s.frozen ?? null), grey: s ? s.orig.subarray(0, 400).every((v, i) => (i % 4 === 3 ? v === 255 : v === 128)) : null };
+    }, packaged.toString('base64'));
+    assert.deepEqual([fromPackage.frozen, fromPackage.grey], [null, false], 'the package opens with its image: ' + JSON.stringify({ fromPackage, toasts: otherToasts.slice(-4) }));
+    await other.page.evaluate((index) => window.ichantool.tiledMasksLoad(index), fromPackage.index);
+    const fromPackageDump = await dumpIn(other.page, fromPackage.index);
+    assert.deepEqual([fromPackageDump.runs, fromPackageDump.exRuns, fromPackageDump.nextId], [expectedRestore.runs, expectedRestore.exRuns, expectedRestore.nextId], 'masks from the package identical');
+    assert.deepEqual(fromPackageDump.objects.map((o) => [o.id, o.cls, o.area, o.bbox]), expectedRestore.objects.map((o) => [o.id, o.cls, o.area, o.bbox]), 'objects from the package identical');
+    // A damaged tile: the section's version is refused whole and it opens locked; the user is told which tile.
+    const ownVersion = backedTiled.find((q) => q.id === backupTiledId).tiled.manifest;
+    const ownTiles = Object.values(JSON.parse(Buffer.from(firstBackup[`${backupFolderName}/manifests/${ownVersion}.json`].b64, 'base64').toString('ascii')).tiles);
+    const damagedFiles = structuredClone(firstBackup), victim = `${backupFolderName}/tiles/${ownTiles[0].labels ?? ownTiles[0].exclude}`;
+    const victimBytes = Buffer.from(damagedFiles[victim].b64, 'base64'); victimBytes[Math.floor(victimBytes.length / 2)] ^= 0xff;
+    damagedFiles[victim].b64 = victimBytes.toString('base64');
+    const damagedRestore = await restoreIn(damagedFiles, 'restore-damaged', 'e2e-damaged-copy');
+    assert.equal(damagedRestore.frozen, 'store', 'a damaged file of the folder: the section opens locked');
+    assert.ok(otherToasts.some((text) => /no se han restaurado|were not restored/.test(text)), 'the user is told: ' + JSON.stringify(otherToasts));
+    assert.ok(!fs.existsSync(path.join(other.profile, 'projects', 'e2e-damaged-copy', 'tiles', 'manifests', damagedRestore.manifest + '.json')), 'never a partial version in the store');
+    // The intact folder, opened at the day of its history (the dialog of «Open project folder»): every version back in the empty store, the
+    // project's image back into the project, and the section opens with its image and the same masks.
+    const day = Object.keys(firstBackup).find((name) => name.startsWith(backupFolderName + '/historial/')).slice(-15, -5);
+    const restoring = restoreIn(firstBackup, 'restore-good', null, true);
+    await other.page.waitForSelector('#folderVersion', { timeout: 120000 });
+    assert.deepEqual(await other.page.$$eval('#folderVersion option', (options) => options.map((o) => o.value)), ['', day], 'the last save and the day of the history');
+    await other.page.select('#folderVersion', day);
+    await other.page.click('#folderVersionOpen');
+    const restored = await restoring;
+    assert.equal(restored.manifest, backedTiled.find((q) => q.id === backupTiledId).tiled.manifest);
+    assert.equal(restored.frozen, null, 'restored on another computer with its image: ' + JSON.stringify({ seen: restored.seen, tiledId: backupTiledId, historyIsProject: firstBackup[`${backupFolderName}/historial/${day}.json`].b64 === firstBackup[`${backupFolderName}/project.json`].b64, historySections: JSON.parse(Buffer.from(firstBackup[`${backupFolderName}/historial/${day}.json`].b64, 'base64').toString('utf8')).cores.flatMap((c) => c.sections.map((q) => q.id)) }));
+    assert.equal(await other.page.evaluate((index) => window.ichantool.S.sections[index].orig.subarray(0, 400).every((v, i) => (i % 4 === 3 ? v === 255 : v === 128)), restored.index), false, 'not grey');
+    const store = await other.page.evaluate(() => window.ichantool.storeProject());
+    for (const q of backedTiled) assert.ok(fs.existsSync(path.join(other.profile, 'projects', store, 'tiles', 'manifests', q.tiled.manifest + '.json')), 'version restored into the store: ' + q.id);
+    assert.ok(fs.readFileSync(path.join(other.profile, 'projects', store, 'sources', pyramid + '.png')).equals(fs.readFileSync(lossless)), 'the image is the copy of the project again');
+    await other.page.evaluate((index) => window.ichantool.tiledMasksLoad(index), restored.index);
+    const got = await dumpIn(other.page, restored.index);
+    assert.deepEqual([got.runs, got.exRuns, got.usedStacks, got.nextId], [expectedRestore.runs, expectedRestore.exRuns, expectedRestore.usedStacks, expectedRestore.nextId], 'restored masks identical');
+    assert.deepEqual(got.objects.map((o) => [o.id, o.cls, o.area, o.bbox]), expectedRestore.objects.map((o) => [o.id, o.cls, o.area, o.bbox]), 'restored objects identical');
+    assert.deepEqual(other.errors, []);
+  } finally { await other.close(); }
+  console.log(`Folder backup: ${versionFiles.length} files of tiled versions written once (a second backup rewrote none); restored in another profile (at a day of its history, chosen in the dialog) with identical masks and objects and its image; a damaged tile refused the section (locked); the package (${packaged.length} bytes, versions and image) opened there identically`);
   // Card M8.4.27: the store folder follows its project. (1) A missing stored version: the project opens, the section is locked and says so, its
   // record is saved back unchanged, the rest is edited and saved; with the version back it opens as before.
   const storeFolder = async (id = null) => path.join(on.profile, 'projects', await on.page.evaluate((id) => window.ichantool.storeProject(id), id));
@@ -877,16 +1197,17 @@ try {
   assert.deepEqual(await dump(quick.index), slowDump, 'the same result after reading the masks back');
   assert.ok(!toasts.slice(toastsBeforeQuick).some((text) => text === tBusy || text === tLoading), 'never "try again"');
   console.log('Reopened, an object spanning two tiles deleted at once (' + quick.ms + ' ms, ' + quick.waitingAtStart + ' tiles waiting at the start, ' + quick.waitingAfter + ' after): equal to the deletion with every statistic current');
-  // Card M8.4.31: edits and saves overlap for 20 s (a tile changes every 100 ms, a save is requested every 200 ms without waiting for the
-  // previous one), so that clean-ups of the store run while versions are being committed. After a final save the store holds exactly the
+  // Card M8.4.31: 150 edits and 75 saves overlap (a tile changes every 100 ms, a save is requested every 200 ms without waiting for the
+  // previous one; about 20 s), so that clean-ups of the store run while versions are being committed. The loop counts edits rather than
+  // running for 20 s: on GitHub's macOS machines 100 ms timers took about 135 ms and 20 s gave 148 edits (card M8.4.32, 20 Nov 2026). After a final save the store holds exactly the
   // saved versions and the reopened section has the masks it had.
   const race = await on.page.evaluate(async () => {
     const { S } = window.ichantool, app = await import(new URL('js/app.js', location.href).href);
     const index = S.sections.findIndex((q) => q.id === window.__tiledId), s = S.sections[index];
     window.ichantool.selectSection(index);
-    const id = [...s.objects.keys()][0], until = performance.now() + 20000, requests = [];
+    const id = [...s.objects.keys()][0], requests = [];
     let edits = 0;
-    while (performance.now() < until) {
+    while (edits < 150) {
       const row = edits % s.maskTiles.rows, col = Math.floor(edits / s.maskTiles.rows) % s.maskTiles.cols, labels = new Int32Array(512 * 512);
       const width = Math.min(512, s.maskTiles.width - col * 512), height = Math.min(1 + (edits % 50), s.maskTiles.height - row * 512);
       for (let y = 0; y < height; y++) labels.fill(id, y * 512, y * 512 + width);   // a band inside the section whose height changes with every edit
@@ -909,6 +1230,269 @@ try {
   const reopenedDump = await dump(await on.page.evaluate(() => window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId)));
   assert.deepEqual([reopenedDump.runs, reopenedDump.exRuns], [raceDump.runs, raceDump.exRuns], 'the reopened masks are the last saved ones');
   console.log(`Edits and saves overlapping for 20 s (${race.edits} edits, ${race.requests} saves requested): the store holds the saved versions and the reopened masks are the last saved ones`);
+  // Card M8.4.37: statistics dropped beyond their budget (forced here: this section is far below it). The object panel says the measurements are not
+  // available, a deletion refuses with that reason instead of "try again", a save keeps the masks, and the next opening computes the statistics again.
+  const toastsBeforeBudget = toasts.length;
+  const dropped37 = await on.page.evaluate(async () => {
+    const { S, t } = window.ichantool, index = S.sections.findIndex((q) => q.id === window.__tiledId), s = S.sections[index];
+    window.ichantool.selectSection(index);
+    const id = [...s.objects.values()].find((o) => o.stats)?.id;
+    S.selected = id; S.multi.clear();
+    s._statsRunner.stats.exceed();
+    const panel = document.getElementById('objInfo')?.textContent ?? '';
+    window.ichantool.deleteObjects([id]);
+    const kept = s.objects.has(id), withStats = [...s.objects.values()].filter((o) => o.stats || o.feat || o.bbox).length;
+    await window.ichantool.saveNow();
+    return { id, panel: panel.includes(t('obj.statsNA')), kept, withStats, limit: t('tiles.statsLimit', { n: 2 }), reopen: t('tiles.statsLimit', { n: 2 }).toLowerCase().includes('opened again') || t('tiles.statsLimit', { n: 2 }).toLowerCase().includes('abrirla'), busy: t('tiles.busy') };
+  });
+  assert.ok(dropped37.id && dropped37.panel && dropped37.kept && dropped37.withStats === 0, 'measurements not available, the deletion refused: ' + JSON.stringify(dropped37));
+  assert.ok(!dropped37.reopen, 'the text no longer promises that reopening helps');
+  assert.ok(toasts.slice(toastsBeforeBudget).includes(dropped37.limit) && !toasts.slice(toastsBeforeBudget).includes(dropped37.busy), 'the reason is given, not "try again"');
+  assert.deepEqual(await reopen(), { frozen: null, missing: false, grey: false }, 'reopened after the statistics were dropped');
+  const afterBudget = await dump(await on.page.evaluate(() => window.ichantool.S.sections.findIndex((q) => q.id === window.__tiledId)));
+  assert.deepEqual([afterBudget.runs, afterBudget.exRuns], [raceDump.runs, raceDump.exRuns], 'the masks are those saved before');
+  assert.ok(await on.page.evaluate((id) => !!window.ichantool.S.sections.find((q) => q.id === window.__tiledId).objects.get(id)?.stats, dropped37.id), 'the statistics are computed again at the next opening');
+  console.log('Statistics dropped beyond their budget: "not available" shown, deletion refused with the reason, masks saved unchanged, statistics computed again on reopening');
+  // Card M8.4.42: a section over a row window [y0, y1) of the stored image and a section made from a source holding only those rows. The rows are cut
+  // from the lossless copy by the page (a PNG of the same pixels) and added twice, tiled at factor 1; the saved record of the second is pointed at the
+  // whole image's pyramid with the window (nothing in the interface makes one yet). Its reopening cache names the other source and is refused, so its
+  // statistics are computed from the whole image's level-0 tiles. The same scripted edits on both (the wand reads pixels) must then give identical
+  // working images, masks, objects with their statistics, and interval table: exact equality, both tiled, the same tiles summed in the same order.
+  {
+    const rows = { y0: 4096, y1: 9096 };
+    const cutPng = path.join(os.tmpdir(), `sedcoretool-window-${process.pid}.png`);
+    fs.writeFileSync(cutPng, Buffer.from(await on.page.evaluate(async ([base64, y0, y1]) => {
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)), bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+      const canvas = new OffscreenCanvas(bitmap.width, y1 - y0); canvas.getContext('2d').drawImage(bitmap, 0, y0, bitmap.width, y1 - y0, 0, 0, bitmap.width, y1 - y0);
+      const out = new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer()); let text = '';
+      for (let k = 0; k < out.length; k += 8192) text += String.fromCharCode(...out.subarray(k, k + 8192));
+      return btoa(text);
+    }, [fs.readFileSync(lossless).toString('base64'), rows.y0, rows.y1]), 'base64'));
+    await added(true);                                                   // the whole image again, tiled at factor 1 (its pyramid is in the engine's cache)
+    const wholePyramid = await on.page.evaluate(() => { const q = window.ichantool.S.sections.at(-1); return { sha256: q.tiled.pyramid, level: q.tiled.level, name: q.tiled.source?.name ?? null, size: q.tiled.source?.size ?? null }; });
+    assert.equal(wholePyramid.level, 0, 'the whole image is tiled at factor 1');
+    const lastIds = async () => on.page.evaluate(() => window.ichantool.S.sections.slice(-1).map((q) => q.id)[0]);
+    await added(true, cutPng); const cutId = await lastIds();
+    await added(true, cutPng); const windowId = await lastIds();
+    const saved = await on.page.evaluate(async (ids) => {
+      const inRecord = () => { const p = window.ichantool.serialize(); return ids.every((id) => p.cores.some((c) => c.sections.some((q) => q.id === id))); };
+      for (let attempt = 0; attempt < 10 && !inRecord(); attempt++) {
+        await window.ichantool.saveNow();
+        for (let k = 0; k < 600 && !window.ichantool.masksSettled(); k++) await new Promise((r) => setTimeout(r, 100));
+      }
+      await window.ichantool.saveNow();
+      const { getProject } = await import(new URL('js/storage.js', location.href).href);
+      return JSON.parse(JSON.stringify(await getProject(window.ichantool.S.id)));
+    }, [cutId, windowId]);
+    const record = saved.cores.flatMap((c) => c.sections).find((q) => q.id === windowId);
+    assert.ok(record?.tiled && record.tiled.height === rows.y1 - rows.y0 && record.tiled.window === undefined && saved.version === 6, 'both cut sections saved, format 6');
+    record.tiled.source = { sha256: wholePyramid.sha256, size: wholePyramid.size, name: wholePyramid.name };
+    record.tiled.window = { y0: rows.y0, y1: rows.y1 };
+    const opened = await on.page.evaluate(async ([project, cutId, windowId]) => {
+      await window.ichantool.loadProject(project);
+      for (let i = 0; i < 2400 && !(window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle()); i++) await new Promise((r) => setTimeout(r, 50));
+      const { S } = window.ichantool, a = S.sections.findIndex((q) => q.id === cutId), b = S.sections.findIndex((q) => q.id === windowId), w = S.sections[b];
+      Object.assign(w, { top: S.sections[a].top, bottom: S.sections[a].bottom, units: S.sections[a].units });   // compare on the same depths
+      const digest = async (q) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', q.orig))].map((v) => v.toString(16).padStart(2, '0')).join('');
+      return { a, b, window: w.tiled?.window ?? null, frozen: w.frozen ?? null, cached: w._reopenCached ?? null, sizes: [S.sections[a], w].map((q) => [q.w, q.h, q.full?.w, q.full?.h]),
+        images: [await digest(S.sections[a]), await digest(w)], readOnly: window.ichantool.saveBlockers().readOnlyProject };
+    }, [saved, cutId, windowId]);
+    assert.deepEqual(opened.window, rows, 'the section was opened with its window: ' + JSON.stringify(opened));
+    assert.equal(opened.frozen, null); assert.equal(opened.cached, null, 'the reopening cache of the other source was refused');
+    assert.equal(opened.readOnly, false, 'a format-7 project is edited by this build');
+    assert.deepEqual(opened.sizes[1], opened.sizes[0], 'the same working and full sizes');
+    assert.equal(opened.images[1], opened.images[0], 'identical working images');
+    await script(opened.a); await script(opened.b);
+    const cut = await dump(opened.a), win = await dump(opened.b);
+    assert.ok(cut.runs.length > 50 && cut.exRuns.length > 0 && cut.usedStacks.length > 0 && cut.objects.length >= 2, 'the script made labels, exclusion and overlaps');
+    assert.deepEqual(win.runs, cut.runs, 'window: labels'); assert.deepEqual(win.exRuns, cut.exRuns, 'window: exclusion');
+    assert.deepEqual(win.usedStacks, cut.usedStacks, 'window: overlaps'); assert.equal(win.nextId, cut.nextId, 'window: nextId');
+    assert.deepEqual(win.objects, cut.objects, 'window: objects with their statistics, exactly');
+    const cutTable = await table(opened.a), winTable = await table(opened.b);
+    assert.ok(cutTable.bins.length > 10 && cutTable.bins.some((b) => b.pct > 0), 'an interval table with bioturbation');
+    assert.deepEqual(winTable.bins, cutTable.bins, 'window: interval table');
+    const version = await on.page.evaluate(async () => { await window.ichantool.saveNow(); return window.ichantool.serialize().version; });
+    assert.equal(version, 7, 'a project with a windowed section is saved as format 7');
+    // Every send of the edited sections has finished before the steps below delete this project's folder.
+    await on.page.waitForFunction(() => window.ichantool.S.cores.flatMap((c) => c.sections).every((q) => !q._maskSync || (q._maskSync.settled && !q._maskSync.running)),
+      { polling: 100, timeout: 120000 });
+    console.log('Window block, sends:', JSON.stringify(await on.page.evaluate(() => window.ichantool.S.sections.filter((q) => q._maskSync).map((q) => ({ id: q.id, failures: q._maskSync.failures, lastError: q._maskSync.lastError ?? null })))));
+    fs.rmSync(cutPng, { force: true });
+    console.log(`Row window ${rows.y0}-${rows.y1} of the stored image against a source of only those rows: identical working image, ${cut.runs.length} label runs, ${cut.objects.length} objects with statistics, ${cutTable.bins.length} bins; saved as format 7`);
+
+    // Card M8.4.43: split a tiled section into parts from the M8.4.41 banner, compare masks/objects/interval tables/depths, verify a half-way
+    // failure leaves the original intact, then save, reopen and folder-backup the parts.
+    {
+      const splitSetup = await on.page.evaluate(async (id) => {
+        const { S } = window.ichantool, idx = S.sections.findIndex((q) => q.id === id), s = S.sections[idx];
+        window.ichantool.selectSection(idx);
+        s.top = 100; s.bottom = 110; s.units = 'cm';
+        s.roi = { x0: 0, y0: 0, x1: s.w, y1: s.h };
+        s.marks = [{ id: 'ms1', x: 50, y: 100, cls: S.classes[0].id }, { id: 'ms2', x: 80, y: 4000, cls: S.classes[1]?.id || S.classes[0].id }];
+        s.manual = [{ from: 100, to: 110, BI: 3, ii: 4 }];
+        // Ensure a tile in the top half AND a tile in the bottom half hold labels so both parts carry masks and objects.
+        const firstId = [...s.objects.keys()][0], secondId = [...s.objects.keys()][1] ?? firstId;
+        const lTop = new Int32Array(512 * 512); for (let y = 20; y < 80; y++) lTop.fill(firstId, y * 512 + 20, y * 512 + 120);
+        const lCross = new Int32Array(512 * 512); for (let y = 480; y < 512; y++) lCross.fill(secondId, y * 512 + 40, y * 512 + 100);
+        const lCross2 = new Int32Array(512 * 512); for (let y = 0; y < 40; y++) lCross2.fill(secondId, y * 512 + 40, y * 512 + 100);
+        window.ichantool.putMaskTile(0, 0, lTop, null);
+        window.ichantool.putMaskTile(4, 0, lCross, null);
+        window.ichantool.putMaskTile(5, 0, lCross2, null);
+        s._maskSync?.request([]);
+        window.ichantool.analyze(s);
+        for (let k = 0; k < 600 && !(window.ichantool.masksSettled() && window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle()); k++) await new Promise((r) => setTimeout(r, 50));
+        await window.ichantool.saveNow();
+        for (let k = 0; k < 600 && !window.ichantool.masksSettled(); k++) await new Promise((r) => setTimeout(r, 50));
+        await window.ichantool.saveNow();
+        // Collect full-resolution pixel digest per row, object pixel counts, and interval-table pixel totals.
+        await window.ichantool.tiledMasksLoad(idx);
+        const W = s.maskTiles.width, H = s.maskTiles.height;
+        const labels = new Int32Array(W * H), exclude = new Uint8Array(W * H), objPx = {};
+        for (let y = 0; y < H; y++) {
+          const tr = Math.floor(y / 512), ty = y - tr * 512;
+          for (let x = 0; x < W; x++) {
+            const tc = Math.floor(x / 512), tx = x - tc * 512, e = s.maskTiles.get(tr, tc);
+            const lv = e?.labels ? e.labels[ty * 512 + tx] : 0, ev = e?.exclude ? e.exclude[ty * 512 + tx] : 0;
+            labels[y * W + x] = lv; exclude[y * W + x] = ev;
+            if (lv > 0) objPx[lv] = (objPx[lv] || 0) + 1;
+            else if (lv < 0) for (const oid of s.stacks[-lv]) objPx[oid] = (objPx[oid] || 0) + 1;
+          }
+        }
+        const hex = async (bytes) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
+        let validSum = 0, bioSum = 0; const clsSum = S.classes.map(() => 0);
+        for (const b of s.bins) {
+          validSum += b.valid;
+          if (b.pct !== null) { bioSum += Math.round((b.pct / 100) * b.valid); b.classPct.forEach((p, k) => { clsSum[k] += Math.round((p / 100) * b.valid); }); }
+        }
+        const classesById = Object.fromEntries([...s.objects.values()].map((o) => [o.id, o.cls]));
+        return { idx, name: s.name, manifest: s._savedRecord.tiled.manifest, top: s.top, bottom: s.bottom, W, H,
+          labelsHash: await hex(new Uint8Array(labels.buffer)), excludeHash: await hex(exclude),
+          objPx, classesById, validSum, bioSum, clsSum, sectionsCount: S.sections.length };
+      }, cutId);
+
+      // (a) Trigger the M8.4.41 budget trip and verify the actionable banner appears.
+      const banner = await on.page.evaluate((idx) => {
+        const s = window.ichantool.S.sections[idx];
+        s._statsRunner.stats.exceed();
+        return {
+          warnHidden: document.getElementById('secStatsWarning').hidden,
+          btnHidden: document.getElementById('secStatsSplit').hidden,
+          btnText: document.getElementById('secStatsSplit').textContent,
+        };
+      }, splitSetup.idx);
+      assert.equal(banner.warnHidden, false, 'M8.4.41 banner is visible');
+      assert.equal(banner.btnHidden, false, 'split button is visible in the banner');
+
+      // (b) Split stopped half-way (simulated disk full on part 2): original section and its stored manifest stay intact.
+      const origManifestFile = path.join(await storeFolder(), 'tiles', 'manifests', `${splitSetup.manifest}.json`);
+      assert.ok(fs.existsSync(origManifestFile), 'original manifest is on disk');
+      const halfWay = await on.page.evaluate(async (idx) => {
+        const s = window.ichantool.S.sections[idx], origSlice = window.corantoolDesktop.tiles.maskSlice;
+        let n = 0;
+        const slice = (...args) => (++n === 2 ? Promise.resolve({ error: { code: 'LIMIT_EXCEEDED', field: 'disk' } }) : origSlice(...args));
+        const out = await window.ichantool.splitTiledSection(s, 2, { confirm: false, slice });
+        return { out: out === null ? null : out.length, stillPresent: window.ichantool.S.sections[idx] === s, count: window.ichantool.S.sections.length, manifest: s._savedRecord.tiled.manifest };
+      }, splitSetup.idx);
+      assert.deepEqual(halfWay, { out: null, stillPresent: true, count: splitSetup.sectionsCount, manifest: splitSetup.manifest }, 'half-way failure leaves original section intact');
+      assert.ok(fs.existsSync(origManifestFile), 'original manifest file stays on disk');
+
+      // (c) Real split from the M8.4.41 banner button + confirmation dialog (X3a).
+      await on.page.click('#secStatsSplit');
+      await on.page.waitForSelector('#splitOk', { timeout: 10000 });
+      const dialogItems = await on.page.evaluate(() => [...document.querySelectorAll('#splitList li')].map((li) => li.textContent));
+      assert.equal(dialogItems.length, 2, 'confirmation names both parts and their depths: ' + JSON.stringify(dialogItems));
+      assert.ok(dialogItems[0].includes('100') && dialogItems[1].includes('110'), 'depths shown in confirmation: ' + JSON.stringify(dialogItems));
+      await on.page.click('#splitOk');
+      await on.page.waitForFunction(([n, idx]) => window.ichantool.S.sections.length === n + 1 && !!window.ichantool.S.sections[idx]?.tiled?.window && !document.querySelector('dialog[open]'),
+        { timeout: 120000, polling: 100 }, [splitSetup.sectionsCount, splitSetup.idx]);
+      await on.page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle(), { polling: 100, timeout: 120000 });
+      assert.ok(fs.existsSync(origManifestFile), 'original manifest stays on disk until the parts are saved');
+
+      const verifyParts = async (label) => {
+        const res = await on.page.evaluate(async ([idx, W, H]) => {
+          const { S } = window.ichantool, parts = [S.sections[idx], S.sections[idx + 1]];
+          for (let k = 0; k < parts.length; k++) await window.ichantool.tiledMasksLoad(idx + k);
+          const labels = new Int32Array(W * H), exclude = new Uint8Array(W * H), objPx = {}, classesById = {};
+          let validSum = 0, bioSum = 0; const clsSum = S.classes.map(() => 0);
+          for (const p of parts) {
+            const py0 = p.tiled.window.y0, pH = p.maskTiles.height;
+            for (const o of p.objects.values()) classesById[o.id] = o.cls;
+            for (let y = 0; y < pH; y++) {
+              const tr = Math.floor(y / 512), ty = y - tr * 512;
+              for (let x = 0; x < W; x++) {
+                const tc = Math.floor(x / 512), tx = x - tc * 512, e = p.maskTiles.get(tr, tc);
+                const lv = e?.labels ? e.labels[ty * 512 + tx] : 0, ev = e?.exclude ? e.exclude[ty * 512 + tx] : 0;
+                labels[(py0 + y) * W + x] = lv; exclude[(py0 + y) * W + x] = ev;
+                if (lv > 0) objPx[lv] = (objPx[lv] || 0) + 1;
+                else if (lv < 0) for (const oid of p.stacks[-lv]) objPx[oid] = (objPx[oid] || 0) + 1;
+              }
+            }
+            for (const b of p.bins) {
+              validSum += b.valid;
+              if (b.pct !== null) { bioSum += Math.round((b.pct / 100) * b.valid); b.classPct.forEach((v, k) => { clsSum[k] += Math.round((v / 100) * b.valid); }); }
+            }
+          }
+          const hex = async (bytes) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
+          return {
+            ids: parts.map((p) => p.id), windows: parts.map((p) => p.tiled.window), frozen: parts.map((p) => p.frozen ?? null),
+            depths: parts.map((p) => [p.top, p.bottom]), marks: parts.map((p) => p.marks.map((m) => [m.id, m.y])),
+            allHaveStats: parts.every((p) => [...p.objects.values()].every((o) => !!o.stats)),
+            labelsHash: await hex(new Uint8Array(labels.buffer)), excludeHash: await hex(exclude),
+            objPx, classesById, validSum, bioSum, clsSum,
+          };
+        }, [splitSetup.idx, splitSetup.W, splitSetup.H]);
+        assert.deepEqual(res.frozen, [null, null], `${label}: both parts unlocked`);
+        assert.equal(res.allHaveStats, true, `${label}: every object in both parts has statistics`);
+        assert.deepEqual(res.windows, [{ y0: 0, y1: 2560 }, { y0: 2560, y1: 5000 }], `${label}: mask-tile aligned windows`);
+        assert.equal(res.depths[0][0], splitSetup.top, `${label}: top depth matches`);
+        assert.equal(res.depths[0][1], res.depths[1][0], `${label}: depths continuous at boundary`);
+        assert.equal(res.depths[1][1], splitSetup.bottom, `${label}: bottom depth matches`);
+        assert.deepEqual(res.marks, [[['ms1', 100]], [['ms2', 4000 - 2560]]], `${label}: marks partitioned and shifted`);
+        assert.equal(res.labelsHash, splitSetup.labelsHash, `${label}: union of labels equals original`);
+        assert.equal(res.excludeHash, splitSetup.excludeHash, `${label}: union of exclusion equals original`);
+        assert.deepEqual(res.objPx, splitSetup.objPx, `${label}: every object keeps its pixels`);
+        for (const [id, cls] of Object.entries(res.classesById)) assert.equal(cls, splitSetup.classesById[id], `${label}: object ${id} keeps its class`);
+        assert.equal(res.validSum, splitSetup.validSum, `${label}: summed valid pixels equal original`);
+        assert.equal(res.bioSum, splitSetup.bioSum, `${label}: summed bioturbated pixels equal original`);
+        assert.deepEqual(res.clsSum, splitSetup.clsSum, `${label}: summed class pixels equal original`);
+        return res;
+      };
+
+      const afterSplit = await verifyParts('after split');
+      // (d) Save (format 7) and reopen: identical parts.
+      const savedVer = await on.page.evaluate(async () => {
+        for (let k = 0; k < 600 && !window.ichantool.masksSettled(); k++) await new Promise((r) => setTimeout(r, 50));
+        await window.ichantool.saveNow();
+        for (let k = 0; k < 600 && !window.ichantool.masksSettled(); k++) await new Promise((r) => setTimeout(r, 50));
+        await window.ichantool.saveNow();
+        return window.ichantool.serialize().version;
+      });
+      assert.equal(savedVer, 7, 'split parts saved as format 7');
+      await on.page.evaluate(async () => {
+        const { getProject } = await import(new URL('js/storage.js', location.href).href);
+        await window.ichantool.loadProject(await getProject(window.ichantool.S.id));
+      });
+      await on.page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.tiledCountsIdle(), { polling: 100, timeout: 120000 });
+      await verifyParts('reopened');
+      // (e) Folder backup carries both split parts and their manifests.
+      const splitBackup = await backupFiles(on.page, 'backup-m8443');
+      const splitBkName = Object.keys(splitBackup).find((name) => name.endsWith('/project.json')).split('/')[0];
+      const splitBkProj = JSON.parse(Buffer.from(splitBackup[splitBkName + '/project.json'].b64, 'base64').toString('utf8'));
+      const splitBkSections = splitBkProj.cores.flatMap((c) => c.sections).filter((q) => afterSplit.ids.includes(q.id));
+      assert.equal(splitBkProj.version, 7, 'folder backup writes format 7');
+      assert.equal(splitBkSections.length, 2, 'folder backup keeps both split parts');
+      for (const q of splitBkSections) {
+        assert.ok(q.tiled?.window && splitBackup[`${splitBkName}/manifests/${q.tiled.manifest}.json`], 'backup holds manifest and window of ' + q.id);
+      }
+      // Card Q14: every send has finished before the steps below. After the reopening above, a section's send is settled only after its first round
+      // (`MaskSync.settled`: the tables of a reopened section count as not yet acknowledged), and only a save or an edit asks for that round; the
+      // sections whose statistics came from their reopening cache are neither edited nor saved here, so without this save the wait never ended.
+      await on.page.evaluate(() => window.ichantool.saveNow());
+      await on.page.waitForFunction(() => window.ichantool.S.cores.flatMap((c) => c.sections).every((q) => !q._maskSync || (q._maskSync.settled && !q._maskSync.running)),
+        { polling: 100, timeout: 120000 });
+      console.log('Split tiled section (M8.4.43): half-way failure kept original intact; UI split produced 2 parts with identical masks, object pixels/classes, summed interval tables and continuous depths; saved (format 7), reopened and folder-backed up');
+    }
+  }
   // (3) Deleting a project from the library deletes its folder, and only that one.
   const originalFolder = manifestFile.slice(0, manifestFile.indexOf(path.sep + 'tiles' + path.sep));
   await on.page.evaluate(async (id) => {
@@ -920,8 +1504,10 @@ try {
   // The folder is renamed first and removed afterwards: wait (the same 10 s) until both are finished, not only the rename (a check between
   // the two found the renamed folder still being removed, 19 Nov 2026).
   const deleting = () => fs.readdirSync(path.join(on.profile, 'projects')).some((name) => name.startsWith('.deleting-'));
-  for (let i = 0; i < 200 && (fs.existsSync(keptFolder) || deleting()); i++) await new Promise((r) => setTimeout(r, 50));
-  assert.ok(!fs.existsSync(keptFolder), 'the deleted project\'s folder is gone');
+  // The page first lets a send round on its way finish, up to 60 s (deleteStoreOf, 20 Nov 2026): the wait follows that bound.
+  for (let i = 0; i < 1400 && (fs.existsSync(keptFolder) || deleting()); i++) await new Promise((r) => setTimeout(r, 50));
+  const listTree = (folder) => { try { return fs.readdirSync(folder, { recursive: true }).slice(0, 20); } catch (error) { return String(error.code); } };
+  assert.ok(!fs.existsSync(keptFolder), 'the deleted project\'s folder is gone: ' + JSON.stringify({ left: listTree(keptFolder), deleting: deleting(), toasts: toasts.slice(-4) }));   // what was left, if it fails again (once in Nov 2026)
   assert.ok(fs.existsSync(originalFolder), 'the other project\'s folder stays');
   assert.ok(!fs.readdirSync(path.join(on.profile, 'projects')).some((name) => name.startsWith('.deleting-')), 'nothing left half-deleted');
   console.log('Store folder: a missing stored version locks its section (record kept, the rest saved); a copy kept on import has its own versions; a deleted project takes its folder');
@@ -949,6 +1535,17 @@ try {
     return { placeholder: true, bins: s.bins.length, same: JSON.stringify(tiledOf(stored)) === JSON.stringify(tiledOf(record)), name: stored.name, version: stored.version };
   }, projectRecord);
   assert.deepEqual(d2, { placeholder: true, bins: 0, same: true, name: projectRecord.name + ' (other build)', version: 6 }, 'D2: placeholder, record unchanged, the rest saved');
+  // Cards M8.4.33 and M8.4.18d: without the engine a package cannot carry the tiled section: it is left out, named, and the user is told first.
+  // (A copy of the project with only its tiled sections: the images of its other sections are in the other program's profile, not in this one.)
+  const offPackage = await off.page.evaluate(async (record) => {
+    await window.ichantool.loadProject({ ...record, id: record.id + '-tiled-only', cores: record.cores.map((c) => ({ ...c, sections: c.sections.filter((q) => q.tiled) })) });
+    const told = [], observer = new MutationObserver(() => { const el = document.getElementById('toast'); if (el && !el.hidden) told.push(el.textContent); });
+    observer.observe(document.getElementById('toast'), { attributes: true, childList: true, subtree: true, characterData: true });
+    const size = await window.ichantool.packageNow();
+    await new Promise((r) => setTimeout(r, 100)); observer.disconnect();
+    return { size, told };
+  }, projectRecord);
+  assert.ok(offPackage.size > 0 && offPackage.told.some((text) => /secciones grandes por piezas|large tiled sections/.test(text)), 'without the engine the package leaves it out and says so: ' + JSON.stringify(offPackage.told));
   assert.deepEqual(off.errors, []);
   console.log('Flag off: today\'s path (factor', section.ds + '); a saved tiled section is a placeholder whose record is saved back unchanged');
 } finally { await off.close(); }

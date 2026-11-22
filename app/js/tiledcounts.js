@@ -86,13 +86,15 @@ export class TiledRowCounts {
     /** The columns `[x0, x1)` the histograms were counted with; null before the first area. @type {[number, number] | null} */
     this.columns = null;
     this.bytes = 0;
+    /** Card M8.4.36: the histograms went beyond `COUNT_HISTOGRAM_BYTES`; they were dropped and none is kept until the section is opened again. */
+    this.exceeded = false;
     /** @type {{nRows: number, nClasses: number, y0: number, y1: number, eff: Int16Array, valid: Uint32Array, bio: Uint32Array, cls: Uint32Array} | null} */
     this.totals = null;
     /** @type {Map<number, number[]>} distinct counted classes of a stack code, for the effective classes of `totals` */
     this.stackMemo = new Map();
   }
   /** Tiles to count again (their pixels changed). @param {Iterable<[number, number]>} positions */
-  markChanged(positions) { for (const [row, col] of positions) this.needed.add(row * this.grid.cols + col); }
+  markChanged(positions) { if (!this.exceeded) for (const [row, col] of positions) this.needed.add(row * this.grid.cols + col); }
   /**
    * The analysis area changed or is new: histograms of tile columns whose columns inside it differ are dropped and counted again; a change of rows
    * only rebuilds the totals. Returns whether anything must be counted. @param {SourceArea} area
@@ -100,6 +102,7 @@ export class TiledRowCounts {
   setArea(area) {
     const { cols, width } = this.grid, old = this.columns;
     this.columns = [area.x0, area.x1];
+    if (this.exceeded) return false;                                   // card M8.4.36: nothing is counted any more
     if (!old) { for (const tile of this.nonEmpty()) this.needed.add(tile); return this.needed.size > 0; }
     if (old[0] === area.x0 && old[1] === area.x1) return this.needed.size > 0;
     const changed = new Set();
@@ -115,14 +118,49 @@ export class TiledRowCounts {
   /** The counted histogram of a tile (null: the tile is empty now). Must follow `setArea`. @param {number} tile @param {TileHistogram | null} hist */
   commit(tile, hist) {
     this.needed.delete(tile);
+    if (this.exceeded) return;
     const pending = this.fresh.get(tile);
     if (pending) this.bytes -= pending.bytes;
     this.fresh.set(tile, hist);
     if (hist) this.bytes += hist.bytes;
+    if (this.bytes > COUNT_HISTOGRAM_BYTES) this.exceed();
+  }
+  /**
+   * Card M8.4.36: beyond the budget the table cannot be computed, and keeping the histograms would let them grow with the section (masks with
+   * many objects in every row take more than the tiles themselves: about 11 GB for 7,168 tiles of random labels). They are all dropped; no tile is
+   * counted until the section is opened again.
+   */
+  exceed() {
+    this.exceeded = true;
+    this.hists.clear(); this.fresh.clear(); this.needed.clear(); this.totals = null; this.stackMemo.clear();
+    this.bytes = 0;
+  }
+  /**
+   * The histograms as they are now, counted ones included, for the reopening cache (card M8.4.29); null while a tile still has to be counted
+   * or no area is set, because such a state is not one a saved version corresponds to.
+   * @returns {{columns: [number, number], hists: Map<number, TileHistogram>} | null}
+   */
+  snapshot() {
+    if (!this.ready || !this.columns || this.exceeded) return null;
+    const hists = new Map(this.hists);
+    for (const [tile, hist] of this.fresh) { if (hist) hists.set(tile, hist); else hists.delete(tile); }
+    return { columns: [this.columns[0], this.columns[1]], hists };
+  }
+  /**
+   * Take the histograms of a reopening cache (card M8.4.29) as if every stored tile had been counted for these columns. Only for a fresh section:
+   * it replaces whatever was there. A following `setArea` with other columns counts again the tiles of the columns that differ, as always.
+   * @param {[number, number]} columns @param {Map<number, TileHistogram>} hists
+   */
+  restore(columns, hists) {
+    this.hists = new Map(hists); this.fresh.clear(); this.needed.clear(); this.totals = null; this.stackMemo.clear();
+    this.columns = [columns[0], columns[1]];
+    this.bytes = 0; this.exceeded = false;
+    for (const hist of this.hists.values()) this.bytes += hist.bytes;
+    if (this.bytes > COUNT_HISTOGRAM_BYTES) this.exceed();
   }
   /** True when every tile that must be counted has been, so the row counts can be asked for. */
   get ready() { return this.needed.size === 0 && this.columns !== null; }
-  get overBudget() { return this.bytes > COUNT_HISTOGRAM_BYTES; }
+  get overBudget() { return this.exceeded || this.bytes > COUNT_HISTOGRAM_BYTES; }
   /** The distinct counted classes of a stack code. @param {number[][]} stacks @param {ArrayLike<number>} eff @param {number} code */
   stackClasses(stacks, eff, code) {
     let found = this.stackMemo.get(code);

@@ -27,6 +27,7 @@
  *     source?: {name: string, size: number | null}, missing?: boolean},
  *   maskTiles?: import('./tiledmasks.js').MaskTiles,
  *   _statsRunner?: import('./tiledit.js').TiledStatsRunner,
+ *   _reopenCached?: string | null, _reopenWriting?: boolean,
  *   frozen?: 'engine' | 'source' | 'store', placeholder?: any, _savedRecord?: any, _tiledRecord?: any,
  *   _counts?: {counts: import('./tiledcounts.js').TiledRowCounts, runner: import('./tiledcounts.js').TiledCountsRunner, limitShown: boolean},
  *   _maskSync?: import('./tiledsync.js').MaskSync, _maskLoader?: import('./tiledsync.js').MaskLoader, _undoTrimShown?: boolean,
@@ -129,6 +130,8 @@ export const CLF_SCOPES = ['core', 'project', 'all'];
 export const ML_DEFAULT = { method: 'knn', k: 5, weights: 'distance', trees: 100, maxDepth: 12, minLeaf: 2, balanced: true, priors: 'uniform', features: 'shape' };
 /** @returns {SectionState | undefined} */
 export const sec = () => S.sections[S.cur];
+/** Card M8.4.39: whether the project holds any section or record, in any core (not only the core on screen). @param {{cores: {sections: any[], records?: any[]}[]}} project */
+export const projectHasData = (project) => project.cores.some((c) => c.sections.length > 0 || (c.records?.length ?? 0) > 0);
 export const uid = () => Math.random().toString(36).slice(2, 9);
 /**
  * @param {string} id

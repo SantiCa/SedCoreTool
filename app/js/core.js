@@ -137,6 +137,46 @@ export function compactStacks(labels, stacks, step = 1) {
 }
 
 export const UNIT_TO_CM = { mm: 0.1, cm: 1, m: 100 };
+/** Years per age unit of the program (`a`, `ka`, `Ma`). */
+export const AGE_YEARS = { a: 1, ka: 1000, Ma: 1e6 };
+
+/**
+ * Card Q3: the unit a record's axis column is probably in, from its header ("Depth (mbsf)" → m, "depth_cm" → cm, "Age (ka BP)" → ka);
+ * null when the header does not say.
+ * @param {string} header @param {'depth' | 'age'} axis @returns {string | null}
+ */
+export function guessRecordUnit(header, axis) {
+  const h = String(header || '').toLowerCase();
+  if (axis === 'depth') {
+    if (/\bmm\b|_mm\b|\(mm\)/.test(h)) return 'mm';
+    if (/\bcm\b|_cm\b|\(cm\)/.test(h)) return 'cm';
+    if (/mbsf|mcd|ccsf|csf|\bm\b|_m\b|\(m\)|metres|meters/.test(h)) return 'm';
+    return null;
+  }
+  if (/\bma\b|myr|\(ma\)|_ma\b/.test(h)) return 'Ma';
+  if (/\bka\b|kyr|\(ka|_ka\b|cal ka/.test(h)) return 'ka';
+  if (/\byr|years|años|\ba\b|\bbp\b|\(a\)|cal yr/.test(h)) return 'a';
+  return null;
+}
+
+/**
+ * Card Q3: the factor that turns values in `from` into `to` (depth units or age units); 1 when either is unknown.
+ * @param {string} from @param {string} to @param {'depth' | 'age'} axis
+ */
+export function unitFactor(from, to, axis) {
+  const table = /** @type {Record<string, number>} */ (axis === 'depth' ? UNIT_TO_CM : AGE_YEARS);
+  return table[from] && table[to] ? table[from] / table[to] : 1;
+}
+
+/**
+ * Card Q3: whether two ranges overlap (a record that lies wholly outside its core's range is probably in another unit).
+ * @param {readonly number[]} xs @param {number} lo @param {number} hi
+ */
+export function rangeOverlaps(xs, lo, hi) {
+  let min = Infinity, max = -Infinity;
+  for (const x of xs) { if (x < min) min = x; if (x > max) max = x; }
+  return xs.length > 0 && max >= Math.min(lo, hi) && min <= Math.max(lo, hi);
+}
 
 /**
  * Per-row pixel counts inside the ROI.
@@ -337,6 +377,16 @@ export function baconToAgeText(text, { center = 'median', depthUnit = 'cm', ageD
   return out.length >= 2 ? out : null;
 }
 
+/** The smallest of `values` (any iterable): exactly `Math.min(...values)` (Infinity when empty, NaN when one is NaN, -0 below +0), without
+ *  passing every value as an argument, which throws a RangeError for long series (card Q5).
+ * @param {Iterable<any>} values
+ * @returns {number} */
+export function minOf(values) { let low = Infinity; for (const v of values) low = Math.min(low, v); return low; }
+/** The largest of `values`: exactly `Math.max(...values)` (-Infinity when empty), for series of any length (card Q5).
+ * @param {Iterable<any>} values
+ * @returns {number} */
+export function maxOf(values) { let high = -Infinity; for (const v of values) high = Math.max(high, v); return high; }
+
 /**
  * @param {readonly (readonly CsvCell[])[]} rows
  * @returns {string}
@@ -455,4 +505,30 @@ export function rleDecode(rle, n, Type = Int32Array) {
   let p = 0;
   for (let k = 0; k < rle.length; k += 2) { out.fill(rle[k], p, p + rle[k + 1]); p += rle[k + 1]; }
   return out;
+}
+
+/** Card Q9: the only image URLs a project may carry (thumbnails written by `canvas.toDataURL`). */
+const SAFE_IMAGE_URL = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+/**
+ * Card Q9: `s` when it is a base64 PNG, JPEG or WebP data URL, else ''. Any other scheme (`javascript:`, `http:`, `data:image/svg+xml`, ...)
+ * or a value with quotes or spaces is refused, so a thumbnail from a project file can be put in `<img src>` safely.
+ * @param {unknown} s
+ * @returns {string}
+ */
+export function safeImageURL(s) { return typeof s === 'string' && SAFE_IMAGE_URL.test(s) ? s : ''; }
+
+/**
+ * Card Q9: remove every thumbnail of a project (library examples, objects of sections) that `safeImageURL` refuses. Changes `project` in
+ * place and returns it; valid thumbnails are kept unchanged. Readers treat a missing thumbnail as "no image".
+ * @template T
+ * @param {T} project
+ * @returns {T}
+ */
+export function sanitizeThumbs(project) {
+  const p = /** @type {any} */ (project);
+  if (!p || typeof p !== 'object') return project;
+  for (const e of Array.isArray(p.library) ? p.library : []) if (e?.thumb && !safeImageURL(e.thumb)) delete e.thumb;
+  const sections = [...(Array.isArray(p.sections) ? p.sections : []), ...(Array.isArray(p.cores) ? p.cores : []).flatMap((/** @type {any} */ c) => (Array.isArray(c?.sections) ? c.sections : []))];
+  for (const q of sections) for (const o of Array.isArray(q?.objects) ? q.objects : []) if (o?.th && !safeImageURL(o.th)) delete o.th;
+  return project;
 }

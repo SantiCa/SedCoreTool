@@ -6,9 +6,11 @@ to stdin; the coordinator never imports NumPy. Numeric inputs are mapped read-on
 the coordinator can delete them; metadata tables are decoded with the same strict JSON rules the transport uses. Results are
 written, packed one after another, to ONE file ``<output_dir>/result.bin`` (little-endian, C order, each column starting at a multiple
 of 8 bytes, the total a multiple of 8) and each job is answered by exactly one JSON frame on stdout:
-``{"ok": true, "dimensions": {...}, "packed": {byte_length, sha256, layout: {name: {dtype, shape, offset, byte_length}}}}``, or
-``{"error": {"code", "field"}}`` for a rejected input, or ``{"cancelled": true}``. One file instead of one per column matters: every file
-open costs about 2 ms on Windows. Anything else (a crash, a killed process, an unexpected exception)
+``{"ok": true, "dimensions": {...}, "packed": {byte_length, sha256, layout: {name: {dtype, shape, offset, byte_length}}}, "tables": {...},
+"summary": {...}}``, or ``{"error": {"code", "field"}}`` for a rejected input, or ``{"cancelled": true}``. ``tables`` describes the result's
+table outputs (contract §9.3; their cells are the columns ``<name>_values`` and ``<name>_valid``) and ``summary`` is the method's small
+summary object; both are ``{}`` for a method that has none. A column may be empty (an output table with no rows); when every column is,
+``byte_length`` is 0. One file instead of one per column matters: every file open costs about 2 ms on Windows. Anything else (a crash, a killed process, an unexpected exception)
 ends the process; the coordinator reports the job as an internal error and starts a new worker for the next one. End of input
 (the coordinator is gone) ends the process at once, even in the middle of a job.
 """
@@ -137,7 +139,7 @@ def run(job_file, modules, memos=None):
     if memos is not None and hasattr(method, 'new_memo'):
         memo = memos.setdefault(job['method'], method.new_memo())
     tables = memos.setdefault('tables', {}) if memos is not None else None
-    inputs = {name: None for name in method.INPUT_NAMES}        # an optional input that was not supplied stays None
+    inputs = {name: None for name in method.INPUT_NAMES}        # an optional input that was not supplied stays None; family members are added
     hashes = {name: spec.get('sha256') for name, spec in job['inputs'].items()}
     derived = {name: spec['derived_from'] for name, spec in job['inputs'].items() if spec.get('derived_from')}
     for name, spec in job['inputs'].items():
@@ -152,6 +154,10 @@ def run(job_file, modules, memos=None):
         return {'cancelled': True}
     except MethodError as error:
         return {'error': {'code': error.code, 'field': error.field}}
+    tables = getattr(result, 'tables', None) or {}
+    for name in tables:
+        if not missing_slots_hold_zero(np, result.columns.get(f'{name}_values'), result.columns.get(f'{name}_valid')):
+            return {'error': {'code': 'INTERNAL', 'field': name}}
     layout, offset, parts = {}, 0, []
     for name, array in result.columns.items():
         array = np.ascontiguousarray(array)
@@ -163,8 +169,19 @@ def run(job_file, modules, memos=None):
         packed[start:start + array.nbytes] = array.reshape(-1).view('u1')
     output.mkdir(parents=True, exist_ok=True)
     packed.tofile(output / 'result.bin')
+    # Table outputs and the summary of `method.run` methods (contract §9.3); the coordinator checks both against the method table.
     return {'ok': True, 'dimensions': result.dimensions,
-            'packed': {'byte_length': offset, 'sha256': hashlib.sha256(packed.data).hexdigest(), 'layout': layout}}
+            'packed': {'byte_length': offset, 'sha256': hashlib.sha256(packed.data).hexdigest(), 'layout': layout},
+            'tables': tables, 'summary': getattr(result, 'summary', None) or {}}
+
+
+def missing_slots_hold_zero(np, values, valid) -> bool:
+    """The cells of a table output use the input format of contract §4 "Tables": validity holds only 0 and 1, and a missing slot holds
+    0. The coordinator checks the shapes and the validity bytes itself; this is the part it cannot check without NumPy."""
+    if values is None or valid is None or np.shape(values) != np.shape(valid):
+        return False
+    valid = np.asarray(valid)
+    return bool(np.all((valid == 0) | (valid == 1)) and not np.any(np.asarray(values)[valid == 0]))
 
 
 def private_stdin():

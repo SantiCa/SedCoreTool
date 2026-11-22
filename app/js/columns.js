@@ -1,13 +1,14 @@
 import { rowAtDepth } from './sectiondepth.js';
 /* Composite log: shared drawing for the column view and independent figures, records and track controls. */
 import { $, S, fmt, hex, uid } from './state.js';
-import { analyze, armed, busy, compositeMarks, compositeTaxonPoints, effClassArray, esc, idListOf, idMode, legendOf, markDirty, needPixels, requestRender, resizeCanvases, safe, saveFile, toast, updateTip, withProv } from './app.js';
-import { geoOverlay, loadLand, logInteract, readTableFile, renderGeo, renderGeoLogs } from './multiproxy.js';
+import { analyze, analyzeSections, armed, busy, compositeMarks, compositeTaxonPoints, effClassArray, esc, idListOf, idMode, legendOf, markDirty, needPixels, requestRender, resizeCanvases, safe, saveFile, toast, updateTip, withProv } from './app.js';
+import { geoOverlay, loadLand, logInteract, readTableFile, renderGeo, renderGeoLogs, renderImportReport } from './multiproxy.js';
 import { applyPanels } from './panels.js';
+import { removeById } from './dataedit.js';
 import { disposeDataTable, renderData } from './datatab.js';
 import { FIG_PANELS, arrowMarksSVG, axisErr, coreRatio, editSVGLabels, figTraces, panelDataURL, renderFigPanel, renderFigure, scheduleFigure } from './figures.js';
 
-import { UNIT_TO_CM, interpAge, topAt } from './core.js';
+import { UNIT_TO_CM, interpAge, topAt, guessRecordUnit, unitFactor, rangeOverlaps, minOf, maxOf } from './core.js';
 import { validSavedRegion } from './edit.js';
 import { LOG_STYLE, ND_STYLE, mergedStyle, taxaOptions, validHexColor, buildLogSVG, compositeRows, guessAxisColumn, invertModel, orderCols, rowsRange, toAxis, windowCSV } from './log.js';
 import { t } from './i18n.js';
@@ -207,7 +208,7 @@ export function logRecords(D, lv = S.logView, records = S.records, selected = nu
 /** V0.23: which image panels the core column shows and how wide the image is. */
 function renderImgPanelsForm() {
   const lv = S.logView, st = lv.style || {}, on = new Set(Array.isArray(lv.imgPanels) ? lv.imgPanels : []), asp = st.imgAspect || 'keep';
-  $('logImgPanels').innerHTML = `<div class="f"><span>${t('log.panels')}</span><div class="chk2">${FIG_PANELS.map((p) => `<label class="chk"><input type="checkbox" data-imgp="${p}" ${on.has(p) ? 'checked' : ''}><span>${t('fig.p.' + p)}</span></label>`).join('')}</div><p class="note">${t('log.panelsNote')}</p></div>
+  $('logImgPanels').innerHTML = `<div class="f"><span>${t('log.panels')}</span><div class="chk2">${FIG_PANELS.map((p) => `<label class="chk"><input type="checkbox" data-imgp="${esc(p)}" ${on.has(p) ? 'checked' : ''}><span>${t('fig.p.' + p)}</span></label>`).join('')}</div><p class="note">${t('log.panelsNote')}</p></div>
     <div class="grid2" style="grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr)"><label class="f"><span>${t('log.imgAspect')}</span><select data-st="imgAspect"><option value="keep" ${asp === 'keep' ? 'selected' : ''}>${t('log.asp.keep')}</option><option value="fixed" ${asp === 'fixed' ? 'selected' : ''}>${t('log.asp.fixed')}</option></select></label>
     ${asp === 'keep' ? `<label class="f"><span>${t('log.imgStretch')}</span><input type="number" data-st="imgStretch" min="0.05" step="0.1" value="${esc(st.imgStretch ?? '')}" placeholder="1"></label>` : `<label class="f"><span>${t('log.imgW')}</span><input type="number" data-st="imgW" min="8" max="600" step="2" value="${esc(st.imgW ?? '')}" placeholder="64"></label>`}</div>`;
 }
@@ -217,7 +218,7 @@ export function ndFormHTML(st) {
   const q = mergedStyle(raw);
   const stroke = validHexColor(raw.markStroke, '#ffffff');
   return `<div class="f"><span>${t('nd.title')}</span><div class="grid2">
-    <label class="f"><span>${t('nd.fill')}</span><select data-st="ndFill">${['hatch', 'solid', 'none'].map((v) => `<option value="${v}" ${q.ndFill === v ? 'selected' : ''}>${t('nd.f.' + v)}</option>`).join('')}</select></label>
+    <label class="f"><span>${t('nd.fill')}</span><select data-st="ndFill">${['hatch', 'solid', 'none'].map((v) => `<option value="${esc(v)}" ${q.ndFill === v ? 'selected' : ''}>${t('nd.f.' + v)}</option>`).join('')}</select></label>
     <label class="f"><span>${t('nd.colors')}</span><span class="row"><input type="color" data-st="ndColor" value="${esc(q.ndColor)}"><input type="color" data-st="ndLine" value="${esc(q.ndLine)}"></span></label>
     <label class="f"><span>${t('nd.text')}</span><input type="text" data-st="ndText" value="${esc(q.ndText || '')}" placeholder="${esc(t('log.noData'))}"></label>
     <span></span></div><div class="chk2"><label class="chk"><input type="checkbox" data-st="ndShow" ${q.ndShow ? 'checked' : ''}><span>${t('nd.show')}</span></label><label class="chk"><input type="checkbox" data-st="ndLabel" ${q.ndLabel ? 'checked' : ''}><span>${t('nd.label')}</span></label><label class="chk"><input type="checkbox" data-st="ndImage" ${q.ndImage ? 'checked' : ''}><span>${t('nd.image')}</span></label></div></div>
@@ -229,7 +230,7 @@ export function ndFormHTML(st) {
 export function arrowFormHTML() {
   const F = S.fig, ex = new Set(Array.isArray(F.arrowExcl) ? F.arrowExcl : []);
   const stroke = validHexColor(F.markStroke, '#ffffff'), labelColor = validHexColor(F.labelColor, '#1c2422');
-  return `<div class="grid2"><label class="f"><span>${t('ar.src')}</span><select id="figArrowSrc">${['all', 'marks', 'objects'].map((v) => `<option value="${v}" ${(F.arrowSrc || 'all') === v ? 'selected' : ''}>${t('ar.src.' + v)}</option>`).join('')}</select></label>
+  return `<div class="grid2"><label class="f"><span>${t('ar.src')}</span><select id="figArrowSrc">${['all', 'marks', 'objects'].map((v) => `<option value="${esc(v)}" ${(F.arrowSrc || 'all') === v ? 'selected' : ''}>${t('ar.src.' + v)}</option>`).join('')}</select></label>
     <label class="f"><span>${t('ar.objScale')}</span><input type="number" id="figObjScale" min="0.2" max="3" step="0.1" value="${esc(F.objScale ?? 1)}"></label>
     <label class="f"><span>${t('mk.size')}</span><input type="number" id="figMarkScale" min="0.2" max="5" step="0.1" value="${esc(F.markScale ?? 1)}"></label>
     <label class="f"><span>${t('mk.stroke')}</span><span class="row"><input type="color" id="figMarkStroke" value="${esc(stroke)}"><input type="number" id="figMarkStrokeW" min="0" max="4" step="0.2" value="${esc(F.markStrokeW ?? 0.8)}" style="width:60px" title="${esc(t('mk.strokeW'))}"></span></label>
@@ -363,7 +364,7 @@ const COLOR_FIELDS = {
 };
 export function colorsFormHTML(style, kind) {
   const st = mergedStyle(style), fields = COLOR_FIELDS[kind] || COLOR_FIELDS.log;
-  return `<div class="f"><span>${t('color.title')}</span><div class="grid2">${fields.map((key) => `<label class="f"><span>${t('color.' + key)}</span><input type="color" data-st="${key}" value="${esc(st[key])}"></label>`).join('')}</div><button type="button" class="btn small" data-colreset="${esc(kind)}">${t('color.reset')}</button><p class="note">${t('color.note')}</p></div>`;
+  return `<div class="f"><span>${t('color.title')}</span><div class="grid2">${fields.map((key) => `<label class="f"><span>${t('color.' + key)}</span><input type="color" data-st="${esc(key)}" value="${esc(st[key])}"></label>`).join('')}</div><button type="button" class="btn small" data-colreset="${esc(kind)}">${t('color.reset')}</button><p class="note">${t('color.note')}</p></div>`;
 }
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-colreset]'); if (!b) return;
@@ -376,7 +377,7 @@ document.addEventListener('click', (e) => {
 });
 /** V0.69: ruler-style vertical scale — number, long, medium and short ticks, each with its own interval and length. */
 export function tickFieldsHTML(st) {
-  const f = (k, step, min, ph) => `<label class="f"><span>${t('st.' + k)}</span><input type="number" data-st="${k}" step="${step}" min="${min}" value="${esc(st?.[k] ?? '')}" placeholder="${esc(ph)}"></label>`;
+  const f = (k, step, min, ph) => `<label class="f"><span>${t('st.' + k)}</span><input type="number" data-st="${esc(k)}" step="${esc(step)}" min="${esc(min)}" value="${esc(st?.[k] ?? '')}" placeholder="${esc(ph)}"></label>`;
   const none = t('st.none'), auto = t('fig.auto2'), au = t('st.auto');
   return `${f('yStep', 'any', 0, au)}${f('yDiv', 1, 1, au)}${f('yMajor', 'any', 0, none)}${f('yMedium', 'any', 0, none)}${f('yMinor', 'any', 0, none)}<span></span>
     ${f('yLabelLen', 0.5, 0.5, 6)}${f('yMajorLen', 0.5, 0.5, 6)}${f('yMediumLen', 0.5, 0.5, 4.5)}${f('yMinorLen', 0.5, 0.5, 3)}
@@ -397,9 +398,9 @@ document.addEventListener('click', (e) => {
   }
 });
 export function styleFormHTML(showTaxa = true, lv = S.logView, kind = 'log') {
-  const st = mergedStyle(lv?.style), num = (k, lab, step = 'any', min = 0) => `<label class="f"><span>${t(lab)}</span><input type="number" data-st="${k}" step="${step}" min="${min}" value="${esc(st[k] ?? '')}" placeholder="${esc(t('fig.auto2'))}"></label>`;
-  const chk = (k, lab) => `<label class="chk"><input type="checkbox" data-st="${k}" ${st[k] ? 'checked' : ''}><span>${t(lab)}</span></label>`;
-  const sel = (k, lab, opts) => `<label class="f"><span>${t(lab)}</span><select data-st="${k}">${opts.map(([v, l]) => `<option value="${v}" ${String(st[k] ?? '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`;
+  const st = mergedStyle(lv?.style), num = (k, lab, step = 'any', min = 0) => `<label class="f"><span>${t(lab)}</span><input type="number" data-st="${esc(k)}" step="${esc(step)}" min="${esc(min)}" value="${esc(st[k] ?? '')}" placeholder="${esc(t('fig.auto2'))}"></label>`;
+  const chk = (k, lab) => `<label class="chk"><input type="checkbox" data-st="${esc(k)}" ${st[k] ? 'checked' : ''}><span>${t(lab)}</span></label>`;
+  const sel = (k, lab, opts) => `<label class="f"><span>${t(lab)}</span><select data-st="${esc(k)}">${opts.map(([v, l]) => `<option value="${esc(v)}" ${String(st[k] ?? '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`;
   return `${colOrderHTML(kind)}<div class="grid2">
     ${sel('yUnit', 'st.yUnit', [['', t('st.native')], ['m', 'm'], ['cm', 'cm'], ['mm', 'mm']])}
     ${sel('yUnitAge', 'st.yUnitAge', [['', t('st.native')], ['a', 'a'], ['ka', 'ka'], ['Ma', 'Ma']])}
@@ -416,10 +417,10 @@ export function speciesFormHTML(st) {
 }
 /** Figure-specific controls use the same vocabulary and settings as the core column. */
 export function taxaFormHTML(q, scope = 'figure') {
-  const select = (key, choices) => `<label class="f"><span>${t('taxa.' + key)}</span><select data-taxa="${key}">${choices.map((value) =>
-    `<option value="${value}" ${q[key] === value ? 'selected' : ''} ${key === 'layout' && value === 'stack' && ['none', 'kite'].includes(q.abundance) ? 'disabled' : ''}>${t('taxa.' + key + '.' + value)}</option>`).join('')}</select></label>`;
+  const select = (key, choices) => `<label class="f"><span>${t('taxa.' + key)}</span><select data-taxa="${esc(key)}">${choices.map((value) =>
+    `<option value="${esc(value)}" ${q[key] === value ? 'selected' : ''} ${key === 'layout' && value === 'stack' && ['none', 'kite'].includes(q.abundance) ? 'disabled' : ''}>${t('taxa.' + key + '.' + value)}</option>`).join('')}</select></label>`;
   const names = S.classes.filter((c) => c.id !== 'artifact').map((c) => c.name), hidden = new Set(q.hidden);
-  return `<div class="f" data-taxa-scope="${scope}"><span>${t('sp.title')}</span><div class="grid2">
+  return `<div class="f" data-taxa-scope="${esc(scope)}"><span>${t('sp.title')}</span><div class="grid2">
     ${select('layout', ['stack', 'overlay', 'separate'])}${select('abundance', ['none', 'bars', 'line', 'area', 'kite'])}
     ${select('occurrence', ['none', 'symbols', 'names', 'both'])}${select('source', ['all', 'objects', 'marks'])}
     ${select('scale', ['auto', 'percent'])}<label class="f"><span>${t('taxa.opacity')}</span><input type="number" data-taxa="opacity" min="0" max="100" step="5" value="${Math.round(q.opacity * 100)}"></label></div>
@@ -477,10 +478,10 @@ export function axesFormHTML(only = null, lv = S.logView, recNames = null) {
     if (id === 'secs') return `<tr class="axsub"><td></td><td colspan="8"><span style="display:grid;gap:6px;width:270px;max-width:100%;text-align:left"><label class="f"><span>${t('st.secOrient')}</span><select data-st="secOrient"><option value="v" ${stl.secOrient !== 'h' ? 'selected' : ''}>${t('st.secV')}</option><option value="h" ${stl.secOrient === 'h' ? 'selected' : ''}>${t('st.secH')}</option></select></label><label class="f"><span>${t('st.secLabel')}</span><select data-st="secLabel"><option value="name" ${stl.secLabel !== 'num' ? 'selected' : ''}>${t('st.secName')}</option><option value="num" ${stl.secLabel === 'num' ? 'selected' : ''}>${t('st.secNum')}</option></select></label></span></td></tr>`;
     if (id !== 'total' && id !== 'species') return '';
     const title = id === 'total' ? 'totalTitle' : 'speciesTitle', lab = id === 'total' ? 'st.totalTitle' : 'st.speciesTitle', ph = id === 'total' ? 'log.total' : 'log.species';
-    const shape = id === 'total' ? `<label class="f"><span>${t('st.totalStyle')}</span><select data-st="totalStyle">${['barsline', 'bars', 'line', 'points'].map((v) => `<option value="${v}" ${(stl.totalStyle || 'barsline') === v ? 'selected' : ''}>${t('st.ts.' + v)}</option>`).join('')}</select></label>` : '';
-    return `<tr class="axsub"><td></td><td colspan="8"><span style="display:grid;gap:6px;width:270px;max-width:100%;text-align:left"><label class="f"><span>${t(lab)}</span><input type="text" data-st="${title}" value="${esc(stl[title] || '')}" placeholder="${esc(t(ph))}"></label>${shape}</span></td></tr>`;
+    const shape = id === 'total' ? `<label class="f"><span>${t('st.totalStyle')}</span><select data-st="totalStyle">${['barsline', 'bars', 'line', 'points'].map((v) => `<option value="${esc(v)}" ${(stl.totalStyle || 'barsline') === v ? 'selected' : ''}>${t('st.ts.' + v)}</option>`).join('')}</select></label>` : '';
+    return `<tr class="axsub"><td></td><td colspan="8"><span style="display:grid;gap:6px;width:270px;max-width:100%;text-align:left"><label class="f"><span>${t(lab)}</span><input type="text" data-st="${esc(title)}" value="${esc(stl[title] || '')}" placeholder="${esc(t(ph))}"></label>${shape}</span></td></tr>`;
   };
-  const cell = (id, k, ph, step = 'any') => `<input type="number" data-ax="${esc(id)}" data-k="${k}" step="${step}" value="${esc(ax[id]?.[k] ?? '')}" placeholder="${esc(ph)}" aria-label="${esc(id + ' ' + k)}" style="width:100%;min-width:54px">`;
+  const cell = (id, k, ph, step = 'any') => `<input type="number" data-ax="${esc(id)}" data-k="${esc(k)}" step="${esc(step)}" value="${esc(ax[id]?.[k] ?? '')}" placeholder="${esc(ph)}" aria-label="${esc(id + ' ' + k)}" style="width:100%;min-width:54px">`;
   return `<div class="f"><span>${t('st.axes')}</span><div style="overflow-x:auto"><table class="axtab" style="font-size:11px;border-collapse:collapse;width:100%">
     <tr><th></th><th>${t('st.ax.w')}</th><th>${t('st.ax.min')}</th><th>${t('st.ax.max')}</th><th>${t('st.ax.div')}</th><th>${t('st.ax.dec')}</th><th>${t('edit.step')}</th><th title="${esc(t('st.ax.revTip'))}">⇄</th><th title="${esc(t('st.ax.logTip'))}">log</th></tr>
     ${cols.filter(([id]) => !only || only.includes(id)).map(([id, name, w]) => `<tr><td title="${esc(name)}" style="max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</td>
@@ -552,7 +553,9 @@ $('logPanel').addEventListener('change', (e) => {
 $('logHeight').addEventListener('input', (e) => { $('logHeightOut').textContent = e.target.value + ' px'; });
 $('logAll').addEventListener('click', () => { S.logView.from = S.logView.to = null; markDirty(); scheduleLog(0); });
 $('logSVGBtn').addEventListener('click', () => { if (lastLog) saveFile(`${safe(S.name)}_registro.svg`, lastLog.svg, 'image/svg+xml'); });
-$('logCSVBtn').addEventListener('click', () => {
+$('logCSVBtn').addEventListener('click', async () => {
+  if (!lastLog) return;
+  await analyzeSections(S.sections); renderLog();   // card Q10: bins still pending in the engine are final before the file is written
   if (!lastLog) return;
   saveFile(`${safe(S.name)}_registro.csv`, withProv(windowCSV({ rows: lastLog.rows, from: lastLog.from, to: lastLog.to, classes: lastLog.classes, records: lastLog.records, units: lastLog.base, ageUnits: S.age.units,
     recordMode: /** @type {HTMLSelectElement | null} */ ($('logCsvMode'))?.value === 'point' ? 'point' : 'mean', model: lastLog.model })), 'text/csv');   // card Q4
@@ -563,23 +566,43 @@ $('logCSVBtn').addEventListener('click', () => {
 const REC_COLORS = ['#0b5394', '#1b7f6a', '#8c2d5a', '#5c4ea0', '#0e7490', '#3c7d22', '#6b5e4b'];
 let pendingTable = null;
 
-export function addRecordFromTable(name, tab, xCol, axis, yCols) {
-  const n0 = S.records.reduce((k, r) => k + r.series.length, 0);
-  const series = recordSeries(tab, xCol, yCols, REC_COLORS, n0);   // V0.44: exportio.js
+export function addRecordFromTable(name, tab, xCol, axis, yCols, unit = null) {
+  const n0 = S.records.reduce((k, r) => k + r.series.length, 0), target = recordAxisUnit(axis);
+  const series = recordSeries(tab, xCol, yCols, REC_COLORS, n0, unit ? unitFactor(unit, target, axis) : 1);   // V0.44: exportio.js; card Q3: converted
   if (!series.length) return false;
-  S.records.push({ id: uid(), name, axis, series });
+  S.records.push({ id: uid(), name, axis, series, ...(unit ? { unit } : {}) });
+  if (unit && !recordAxisOverlaps(series, axis)) toast(t('rec.outside', { u: unit, t: target }), 12000);
   renderRecList(); markDirty(); scheduleLog();
   return true;
 }
 
+/** Card Q3: the unit a record's axis is stored in: the open core's depth unit (that of its uppermost section) or the age model's unit. */
+function recordAxisUnit(axis) {
+  if (axis === 'age') return S.age.units || 'ka';
+  const top = [...S.sections].sort((a, b) => a.top * UNIT_TO_CM[a.units] - b.top * UNIT_TO_CM[b.units])[0];
+  return top?.units || 'cm';
+}
+/** Card Q3: whether a converted record lies, at least in part, within the open core's depths or the age model's ages. */
+function recordAxisOverlaps(series, axis) {
+  const xs = series.flatMap((s) => s.x);
+  if (axis === 'age') { const ages = (S.age.model?.age || []).filter((a) => a != null); return !ages.length || rangeOverlaps(xs, minOf(ages), maxOf(ages)); }
+  if (!S.sections.length) return true;
+  const unit = recordAxisUnit('depth'), f = (s) => UNIT_TO_CM[s.units] / UNIT_TO_CM[unit];
+  return rangeOverlaps(xs, minOf(S.sections.map((s) => s.top * f(s))), maxOf(S.sections.map((s) => s.bottom * f(s))));
+}
+/** Card Q2: the record added by the last import of this session, which «Undo import» removes without asking. */
+let lastImported = null;
+/** Card M8.4.39: the project was closed; its last import can no longer be undone from another one. */
+export function forgetLastImport() { lastImported = null; }
 export function renderRecList() {
   $('recList').innerHTML = S.records.map((r) => `
     <div class="rec" data-id="${esc(r.id)}">
       <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><b>${esc(r.name)}</b><button class="btn small ghost" data-del="1" aria-label="${esc(t('a11y.delete'))}">✕</button></div>
+      ${r.id === lastImported ? `<div class="row"><span class="note">${t('imp.justAdded')}</span><button class="btn small" data-undo="1">${t('imp.undo')}</button></div>` : ''}
       <span class="note">${t(r.axis === 'age' ? 'log.age' : 'log.depth')} · ${r.series[0]?.x.length || 0} ${t('log.points')}</span>
-      ${r.series.map((s, i) => `<div class="row srow"><label class="chk"><input type="checkbox" data-s="${i}" data-k="show" ${s.show ? 'checked' : ''}><span>${esc(s.name)}</span></label>
-        <input type="color" data-s="${i}" data-k="color" value="${esc(validHexColor(s.color, REC_COLORS[i % REC_COLORS.length]))}" aria-label="${esc(t('a11y.color'))}">
-        <label class="chk note"><input type="checkbox" data-s="${i}" data-k="reverse" ${s.reverse ? 'checked' : ''}>${t('log.reverse')}</label></div>`).join('')}
+      ${r.series.map((s, i) => `<div class="row srow"><label class="chk"><input type="checkbox" data-s="${esc(i)}" data-k="show" ${s.show ? 'checked' : ''}><span>${esc(s.name)}</span></label>
+        <input type="color" data-s="${esc(i)}" data-k="color" value="${esc(validHexColor(s.color, REC_COLORS[i % REC_COLORS.length]))}" aria-label="${esc(t('a11y.color'))}">
+        <label class="chk note"><input type="checkbox" data-s="${esc(i)}" data-k="reverse" ${s.reverse ? 'checked' : ''}>${t('log.reverse')}</label></div>`).join('')}
     </div>`).join('') || `<p class="note">${t('log.noRecords')}</p>`;
 }
 $('recList').addEventListener('change', (e) => {
@@ -589,34 +612,54 @@ $('recList').addEventListener('change', (e) => {
   markDirty(); scheduleLog(50);
 });
 $('recList').addEventListener('click', (e) => {
+  if (/** @type {HTMLElement} */ (e.target).dataset.undo) {         // card Q2: «Undo import» of the record just added
+    const at = S.records.findIndex((r) => r.id === lastImported);
+    if (at >= 0) S.records.splice(at, 1);
+    lastImported = null; renderRecList(); markDirty(); scheduleLog(0); return;
+  }
   if (!e.target.dataset.del) return;
   if (!armed(e.target, '?')) return;
   const id = e.target.closest('.rec').dataset.id;
-  S.records.splice(S.records.findIndex((r) => r.id === id), 1); renderRecList(); markDirty(); scheduleLog(0);
+  if (!removeById(S.records, id)) return; renderRecList(); markDirty(); scheduleLog(0);
 });
 
 $('recFile').addEventListener('change', async (e) => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
   try {
-    const tab = await readTableFile(f);
-    if (tab.headers.length < 2 || !tab.rows.length) throw new Error(t('rec.short'));
-    pendingTable = tab;
-    const g = guessAxisColumn(tab.headers);
-    $('recName').value = f.name.replace(/\.[^.]+$/, '');
-    $('recX').innerHTML = tab.headers.map((h, i) => `<option value="${i}" ${i === g.col ? 'selected' : ''}>${esc(h)}</option>`).join('');
-    $('recAxis').value = g.axis;
-    const fillCols = () => {
-      const xc = +$('recX').value;
-      $('recCols').innerHTML = tab.headers.map((h, i) => i === xc ? '' : `<label class="chk"><input type="checkbox" value="${i}" ${tab.rows.some((r) => r[i] != null) ? 'checked' : 'disabled'}><span>${esc(h)}</span></label>`).join('');
-    };
-    $('recX').onchange = fillCols; fillCols();
-    $('recDlg').showModal();
+    openRecordImport(await readTableFile(f), f.name);
   } catch (err) { toast(t('rec.err', { m: err.message || err })); }
 });
+/** The dialog of a new external record; card Q2: with the import report, which may read the file again (another sheet, another rule). */
+function openRecordImport(tab, fileName) {
+  if (tab.headers.length < 2 || !tab.rows.length) throw new Error(t('rec.short'));
+  pendingTable = tab;
+  renderImportReport($('recReport'), tab, (next) => { try { openRecordImport(next, fileName); } catch (err) { toast(t('rec.err', { m: err.message || err })); } });
+  const g = guessAxisColumn(tab.headers);
+  /** @type {any} */ ($('recName')).value = fileName.replace(/\.[^.]+$/, '');
+  $('recX').innerHTML = tab.headers.map((h, i) => `<option value="${esc(i)}" ${i === g.col ? 'selected' : ''}>${esc(h)}</option>`).join('');
+  /** @type {any} */ ($('recAxis')).value = g.axis;
+  // card Q3: the unit of the axis column, proposed from its header (or the core's own unit), converted when the record is added
+  const fillUnits = () => {
+    const axis = /** @type {any} */ ($('recAxis')).value, header = tab.headers[+(/** @type {any} */ ($('recX')).value)] || '';
+    const units = axis === 'age' ? ['a', 'ka', 'Ma'] : ['mm', 'cm', 'm'], guess = guessRecordUnit(header, axis) || recordAxisUnit(axis);
+    $('recUnit').innerHTML = units.map((u) => `<option value="${esc(u)}" ${u === guess ? 'selected' : ''}>${u}</option>`).join('');
+  };
+  $('recAxis').onchange = fillUnits;
+  const fillCols = () => {
+    const xc = +$('recX').value;
+    $('recCols').innerHTML = tab.headers.map((h, i) => i === xc ? '' : `<label class="chk"><input type="checkbox" value="${esc(i)}" ${tab.rows.some((r) => r[i] != null) ? 'checked' : 'disabled'}><span>${esc(h)}</span></label>`).join('');
+  };
+  $('recX').onchange = () => { fillCols(); fillUnits(); }; fillCols(); fillUnits();
+  const dialog = /** @type {any} */ ($('recDlg'));
+  if (!dialog.open) dialog.showModal();
+}
 $('recCancel').addEventListener('click', () => $('recDlg').close());
 $('recAdd').addEventListener('click', () => {
   if (!pendingTable) return;
   const cols = [...$('recCols').querySelectorAll('input:checked')].map((i) => +i.value);
-  if (addRecordFromTable($('recName').value.trim() || 'Registro', pendingTable, +$('recX').value, $('recAxis').value, cols)) $('recDlg').close();
+  const field = (id) => /** @type {any} */ ($(id)).value;
+  if (addRecordFromTable(field('recName').trim() || 'Registro', pendingTable, +field('recX'), field('recAxis'), cols, field('recUnit'))) {
+    lastImported = S.records.at(-1)?.id ?? null; renderRecList(); /** @type {any} */ ($('recDlg')).close();
+  }
   else toast(t('rec.err', { m: t('rec.short') }));
 });

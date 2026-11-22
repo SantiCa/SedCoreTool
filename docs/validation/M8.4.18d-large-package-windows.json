@@ -1,0 +1,47 @@
+{
+  "started": "2026-11-20T23:03:40.303Z",
+  "host": {
+    "os": "Windows_NT 10.0.26300",
+    "cpu": "AMD Ryzen 7 7700X 8-Core Processor             ",
+    "cpus": 16,
+    "memory_gib": 31
+  },
+  "commit": "2f6331bae2e925da74c561935ad913ac6cb2461a",
+  "electron": "v24.22.2",
+  "grid": {
+    "cols": 64,
+    "rows": 112
+  },
+  "version": {
+    "manifest": "5eac9b684be00e54a0ed09cb469d5dc02bd0ad33f8b21673a878a175e60ac08e",
+    "section": "synthetic",
+    "width": 32768,
+    "height": 57344,
+    "tiles": 7168,
+    "objects": 65535,
+    "stored_bytes": 4964279517,
+    "seconds": 135.8,
+    "generated_s": 136.5
+  },
+  "package": {
+    "bytes": 4968642003,
+    "zip64": true,
+    "seconds": 96
+  },
+  "restore": {
+    "project": "8gz6l6j",
+    "found": false,
+    "frozen": "absent",
+    "stored": 0,
+    "toast": "No se ha podido abrir el proyecto: Cannot read properties of undefined (reading 'error'). No se ha guardado nada encima de la copia guardada.",
+    "seconds_with_opening": 465.5
+  },
+  "compared": {
+    "files": 7174,
+    "blobs_decompressed_and_hashed": 64,
+    "manifest_identical": true
+  },
+  "result": "failed",
+  "error": "AssertionError [ERR_ASSERTION]: the section opens with every tile (grey: no source image)\n+ actual - expected\n\n  [\n+   false,\n+   'absent',\n+   0\n-   true,\n-   'source',\n-   7168\n  ]\n\n    at file:///C:/Users/Santiago/Documents/GitHub/CorAnTool-Project/tools/check_large_package.mjs:111:10",
+  "finished": "2026-11-20T23:15:21.783Z"
+}

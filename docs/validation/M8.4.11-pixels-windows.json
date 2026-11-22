@@ -1,0 +1,1072 @@
+{
+ "schema": 1,
+ "tool": "tools/measure_engine_analysis.mjs",
+ "started": "2026-11-22T11:44:32.560Z",
+ "commit": "1d166e771d3aed05b245904d1e58e192527fd0c2",
+ "host": {
+  "os": "Windows_NT 10.0.26300",
+  "cpu": "AMD Ryzen 7 7700X 8-Core Processor             ",
+  "logical_cpus": 16,
+  "memory_gib": 31.1,
+  "node": "v22.23.4",
+  "electron": "45.2.2",
+  "runtime": "3.12.16"
+ },
+ "fixtures": {
+  "synthetic": {
+   "package": "synthetic-m0.1.sedcoretool",
+   "bytes": 12039629,
+   "sha256": "aadd7befe779ba54dd8cf00afdc5ae0007162150b7e354a14ab4bddcf6d9bfbb"
+  }
+ },
+ "parameters": {
+  "pairs": 6,
+  "cycles": 10,
+  "bin_sizes_cm": [
+   2,
+   1.37
+  ]
+ },
+ "results": {
+  "pixels_public": {
+   "pairs": [
+    {
+     "order": [
+      "off",
+      "on"
+     ],
+     "off": {
+      "sizes": [
+       {
+        "w": 346,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10380000,
+        "mask_bytes": 12975008,
+        "table_bytes": 25686
+       },
+       {
+        "w": 351,
+        "h": 7450,
+        "bits": 8,
+        "pixel_bytes": 10459800,
+        "mask_bytes": 13074758,
+        "table_bytes": 26913
+       },
+       {
+        "w": 347,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10410000,
+        "mask_bytes": 13012508,
+        "table_bytes": 25214
+       },
+       {
+        "w": 349,
+        "h": 7450,
+        "bits": 8,
+        "pixel_bytes": 10400200,
+        "mask_bytes": 13000258,
+        "table_bytes": 17598
+       },
+       {
+        "w": 344,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10320000,
+        "mask_bytes": 12900008,
+        "table_bytes": 33782
+       },
+       {
+        "w": 344,
+        "h": 6500,
+        "bits": 8,
+        "pixel_bytes": 8944000,
+        "mask_bytes": 11180008,
+        "table_bytes": 27118
+       }
+      ],
+      "uploads": [],
+      "full_ms": 34.300000000046566,
+      "interval_ms": 3,
+      "pixels_again_ms": null,
+      "after_upload": null,
+      "after_analyses": null,
+      "states": [
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ],
+      "pixels_loaded": true,
+      "idle_memory": {
+       "samples": 20,
+       "peak_mib": 832,
+       "median_mib": 831.3,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 29.2
+      },
+      "memory": {
+       "samples": 9,
+       "peak_mib": 905.7,
+       "median_mib": 870.7,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 25.5
+      }
+     },
+     "on": {
+      "sizes": [
+       {
+        "w": 346,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10380000,
+        "mask_bytes": 12975008,
+        "table_bytes": 25686
+       },
+       {
+        "w": 351,
+        "h": 7450,
+        "bits": 8,
+        "pixel_bytes": 10459800,
+        "mask_bytes": 13074758,
+        "table_bytes": 26913
+       },
+       {
+        "w": 347,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10410000,
+        "mask_bytes": 13012508,
+        "table_bytes": 25214
+       },
+       {
+        "w": 349,
+        "h": 7450,
+        "bits": 8,
+        "pixel_bytes": 10400200,
+        "mask_bytes": 13000258,
+        "table_bytes": 17598
+       },
+       {
+        "w": 344,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10320000,
+        "mask_bytes": 12900008,
+        "table_bytes": 33782
+       },
+       {
+        "w": 344,
+        "h": 6500,
+        "bits": 8,
+        "pixel_bytes": 8944000,
+        "mask_bytes": 11180008,
+        "table_bytes": 27118
+       }
+      ],
+      "uploads": [
+       {
+        "ok": true,
+        "ms": 50.200000000186265,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 55.799999999813735,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 45.5,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 46.5,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 50.800000000046566,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 46.89999999990687,
+        "rgba16": false
+       }
+      ],
+      "full_ms": 368.39999999990687,
+      "interval_ms": 184.69999999995343,
+      "pixels_again_ms": 0.20000000018626451,
+      "after_upload": {
+       "fullMaskUploads": 6,
+       "derivations": 0,
+       "budgetFull": 0,
+       "residentBytes": 76298859,
+       "residentPixelBytes": 60914000,
+       "residentPixelSections": 6
+      },
+      "after_analyses": {
+       "fullMaskUploads": 6,
+       "derivations": 6,
+       "budgetFull": 0,
+       "residentBytes": 76298877,
+       "residentPixelBytes": 60914000,
+       "residentPixelSections": 6
+      },
+      "states": [
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready"
+      ],
+      "pixels_loaded": true,
+      "idle_memory": {
+       "samples": 20,
+       "peak_mib": 960.1,
+       "median_mib": 960.1,
+       "max_processes": 8,
+       "cadence_median_ms": 25.4,
+       "cadence_max_gap_ms": 26.6
+      },
+      "memory": {
+       "samples": 40,
+       "peak_mib": 1006.7,
+       "median_mib": 928.9,
+       "max_processes": 8,
+       "cadence_median_ms": 25.4,
+       "cadence_max_gap_ms": 28.2
+      }
+     }
+    },
+    {
+     "order": [
+      "on",
+      "off"
+     ],
+     "on": {
+      "sizes": [
+       {
+        "w": 346,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10380000,
+        "mask_bytes": 12975008,
+        "table_bytes": 25686
+       },
+       {
+        "w": 351,
+        "h": 7450,
+        "bits": 8,
+        "pixel_bytes": 10459800,
+        "mask_bytes": 13074758,
+        "table_bytes": 26913
+       },
+       {
+        "w": 347,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10410000,
+        "mask_bytes": 13012508,
+        "table_bytes": 25214
+       },
+       {
+        "w": 349,
+        "h": 7450,
+        "bits": 8,
+        "pixel_bytes": 10400200,
+        "mask_bytes": 13000258,
+        "table_bytes": 17598
+       },
+       {
+        "w": 344,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10320000,
+        "mask_bytes": 12900008,
+        "table_bytes": 33782
+       },
+       {
+        "w": 344,
+        "h": 6500,
+        "bits": 8,
+        "pixel_bytes": 8944000,
+        "mask_bytes": 11180008,
+        "table_bytes": 27118
+       }
+      ],
+      "uploads": [
+       {
+        "ok": true,
+        "ms": 52.5999999998603,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 46.800000000046566,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 62.60000000009313,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 49.799999999813735,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 47.5,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 41.300000000046566,
+        "rgba16": false
+       }
+      ],
+      "full_ms": 380.5999999998603,
+      "interval_ms": 183.70000000018626,
+      "pixels_again_ms": 0.09999999986030161,
+      "after_upload": {
+       "fullMaskUploads": 6,
+       "derivations": 0,
+       "budgetFull": 0,
+       "residentBytes": 76298859,
+       "residentPixelBytes": 60914000,
+       "residentPixelSections": 6
+      },
+      "after_analyses": {
+       "fullMaskUploads": 6,
+       "derivations": 6,
+       "budgetFull": 0,
+       "residentBytes": 76298877,
+       "residentPixelBytes": 60914000,
+       "residentPixelSections": 6
+      },
+      "states": [
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready"
+      ],
+      "pixels_loaded": true,
+      "idle_memory": {
+       "samples": 20,
+       "peak_mib": 1001.6,
+       "median_mib": 1001.6,
+       "max_processes": 8,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 28.8
+      },
+      "memory": {
+       "samples": 41,
+       "peak_mib": 1019,
+       "median_mib": 938.3,
+       "max_processes": 8,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 30.5
+      }
+     },
+     "off": {
+      "sizes": [
+       {
+        "w": 346,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10380000,
+        "mask_bytes": 12975008,
+        "table_bytes": 25686
+       },
+       {
+        "w": 351,
+        "h": 7450,
+        "bits": 8,
+        "pixel_bytes": 10459800,
+        "mask_bytes": 13074758,
+        "table_bytes": 26913
+       },
+       {
+        "w": 347,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10410000,
+        "mask_bytes": 13012508,
+        "table_bytes": 25214
+       },
+       {
+        "w": 349,
+        "h": 7450,
+        "bits": 8,
+        "pixel_bytes": 10400200,
+        "mask_bytes": 13000258,
+        "table_bytes": 17598
+       },
+       {
+        "w": 344,
+        "h": 7500,
+        "bits": 8,
+        "pixel_bytes": 10320000,
+        "mask_bytes": 12900008,
+        "table_bytes": 33782
+       },
+       {
+        "w": 344,
+        "h": 6500,
+        "bits": 8,
+        "pixel_bytes": 8944000,
+        "mask_bytes": 11180008,
+        "table_bytes": 27118
+       }
+      ],
+      "uploads": [],
+      "full_ms": 39.199999999953434,
+      "interval_ms": 2.8999999999068677,
+      "pixels_again_ms": null,
+      "after_upload": null,
+      "after_analyses": null,
+      "states": [
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ],
+      "pixels_loaded": true,
+      "idle_memory": {
+       "samples": 20,
+       "peak_mib": 842,
+       "median_mib": 842,
+       "max_processes": 4,
+       "cadence_median_ms": 25.4,
+       "cadence_max_gap_ms": 26.9
+      },
+      "memory": {
+       "samples": 8,
+       "peak_mib": 905.6,
+       "median_mib": 880.8,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 27.9
+      }
+     }
+    }
+   ],
+   "charge_model": {
+    "masks_mib": 72.6,
+    "tables_mib": 0.1,
+    "table_charge_mib": 9.5,
+    "pixels_mib": 58.1,
+    "resident_charge_mib": 156.2,
+    "during_full_upload_charge_mib": 168.7
+   }
+  },
+  "pixels_synthetic": {
+   "pairs": [
+    {
+     "order": [
+      "off",
+      "on"
+     ],
+     "off": {
+      "sizes": [
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8494
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8497
+       }
+      ],
+      "uploads": [],
+      "full_ms": 118.5,
+      "interval_ms": 2.1000000000931323,
+      "pixels_again_ms": null,
+      "after_upload": null,
+      "after_analyses": null,
+      "states": [
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ],
+      "pixels_loaded": true,
+      "idle_memory": {
+       "samples": 20,
+       "peak_mib": 1573.7,
+       "median_mib": 1573.7,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 27.8
+      },
+      "memory": {
+       "samples": 25,
+       "peak_mib": 1806.5,
+       "median_mib": 1721.4,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 29
+      }
+     },
+     "on": {
+      "sizes": [
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8494
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8497
+       }
+      ],
+      "uploads": [
+       {
+        "ok": true,
+        "ms": 115,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 123.4000000001397,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 120.5,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 123.5,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 111.0999999998603,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 120.30000000004657,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 121.60000000009313,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 113.79999999981374,
+        "rgba16": false
+       }
+      ],
+      "full_ms": 1544.1000000000931,
+      "interval_ms": 249.5,
+      "pixels_again_ms": 0.10000000009313226,
+      "after_upload": {
+       "fullMaskUploads": 8,
+       "derivations": 0,
+       "budgetFull": 0,
+       "residentBytes": 245828031,
+       "residentPixelBytes": 196608000,
+       "residentPixelSections": 8
+      },
+      "after_analyses": {
+       "fullMaskUploads": 12,
+       "derivations": 4,
+       "budgetFull": 0,
+       "residentBytes": 245828055,
+       "residentPixelBytes": 196608000,
+       "residentPixelSections": 8
+      },
+      "states": [
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready"
+      ],
+      "pixels_loaded": true,
+      "idle_memory": {
+       "samples": 20,
+       "peak_mib": 1791.8,
+       "median_mib": 1791.8,
+       "max_processes": 8,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 27.7
+      },
+      "memory": {
+       "samples": 129,
+       "peak_mib": 1917,
+       "median_mib": 1851.9,
+       "max_processes": 8,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 29.9
+      }
+     }
+    },
+    {
+     "order": [
+      "on",
+      "off"
+     ],
+     "on": {
+      "sizes": [
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8494
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8497
+       }
+      ],
+      "uploads": [
+       {
+        "ok": true,
+        "ms": 102,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 100.0999999998603,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 103.60000000009313,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 108.69999999995343,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 111.30000000004657,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 104.69999999995343,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 112.19999999995343,
+        "rgba16": false
+       },
+       {
+        "ok": true,
+        "ms": 130.80000000004657,
+        "rgba16": false
+       }
+      ],
+      "full_ms": 1442.3999999999069,
+      "interval_ms": 248.80000000004657,
+      "pixels_again_ms": 0.19999999995343387,
+      "after_upload": {
+       "fullMaskUploads": 8,
+       "derivations": 0,
+       "budgetFull": 0,
+       "residentBytes": 245828031,
+       "residentPixelBytes": 196608000,
+       "residentPixelSections": 8
+      },
+      "after_analyses": {
+       "fullMaskUploads": 12,
+       "derivations": 4,
+       "budgetFull": 0,
+       "residentBytes": 245828055,
+       "residentPixelBytes": 196608000,
+       "residentPixelSections": 8
+      },
+      "states": [
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready",
+       "ready"
+      ],
+      "pixels_loaded": true,
+      "idle_memory": {
+       "samples": 20,
+       "peak_mib": 1671.5,
+       "median_mib": 1671.5,
+       "max_processes": 8,
+       "cadence_median_ms": 25.2,
+       "cadence_max_gap_ms": 27
+      },
+      "memory": {
+       "samples": 123,
+       "peak_mib": 2000.9,
+       "median_mib": 1848.1,
+       "max_processes": 8,
+       "cadence_median_ms": 25.2,
+       "cadence_max_gap_ms": 29.9
+      }
+     },
+     "off": {
+      "sizes": [
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8494
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8496
+       },
+       {
+        "w": 960,
+        "h": 6400,
+        "bits": 8,
+        "pixel_bytes": 24576000,
+        "mask_bytes": 30720008,
+        "table_bytes": 8497
+       }
+      ],
+      "uploads": [],
+      "full_ms": 117.10000000009313,
+      "interval_ms": 2.199999999953434,
+      "pixels_again_ms": null,
+      "after_upload": null,
+      "after_analyses": null,
+      "states": [
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ],
+      "pixels_loaded": true,
+      "idle_memory": {
+       "samples": 20,
+       "peak_mib": 1571.5,
+       "median_mib": 1571.5,
+       "max_processes": 4,
+       "cadence_median_ms": 25.3,
+       "cadence_max_gap_ms": 26.5
+      },
+      "memory": {
+       "samples": 24,
+       "peak_mib": 1782.6,
+       "median_mib": 1718.5,
+       "max_processes": 4,
+       "cadence_median_ms": 25.4,
+       "cadence_max_gap_ms": 29.6
+      }
+     }
+    }
+   ],
+   "charge_model": {
+    "masks_mib": 234.4,
+    "tables_mib": 0.1,
+    "table_charge_mib": 4.1,
+    "pixels_mib": 187.5,
+    "resident_charge_mib": 442,
+    "during_full_upload_charge_mib": 463.6
+   }
+  }
+ },
+ "verdicts": {
+  "pixels_public": {
+   "memory_peak": {
+    "pass": true,
+    "off_mib": 905.6,
+    "on_mib": 1006.7,
+    "limit_mib": 1161.6,
+    "basis": "median over the pairs of the peak of each run, from the pixel upload to the end of the analyses",
+    "max_on_mib": 1019,
+    "interactive_target_mib": 2048
+   },
+   "all_resident": true,
+   "budget_full_events": 0,
+   "states_ready": true,
+   "charge_model": {
+    "masks_mib": 72.6,
+    "tables_mib": 0.1,
+    "table_charge_mib": 9.5,
+    "pixels_mib": 58.1,
+    "resident_charge_mib": 156.2,
+    "during_full_upload_charge_mib": 168.7
+   },
+   "session_budget_mib": 512
+  },
+  "pixels_synthetic": {
+   "memory_peak": {
+    "pass": true,
+    "off_mib": 1782.6,
+    "on_mib": 1917,
+    "limit_mib": 2038.6,
+    "basis": "median over the pairs of the peak of each run, from the pixel upload to the end of the analyses",
+    "max_on_mib": 2000.9,
+    "interactive_target_mib": 2048
+   },
+   "all_resident": true,
+   "budget_full_events": 0,
+   "states_ready": true,
+   "charge_model": {
+    "masks_mib": 234.4,
+    "tables_mib": 0.1,
+    "table_charge_mib": 4.1,
+    "pixels_mib": 187.5,
+    "resident_charge_mib": 442,
+    "during_full_upload_charge_mib": 463.6
+   },
+   "session_budget_mib": 512
+  },
+  "not_measured": [
+   "macOS and Linux",
+   "a clean Windows machine",
+   "cold cache after a reboot",
+   "saturated CPU",
+   "save interrupted during a job (covered separately by tests/e2e/interrupted-saves.mjs)"
+  ]
+ },
+ "finished": "2026-11-22T11:45:35.706Z"
+}

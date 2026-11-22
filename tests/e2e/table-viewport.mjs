@@ -51,7 +51,9 @@ export async function verifyTableViewport(browser, url) {
     await press('PageDown');
     assert.ok(await page.evaluate(() => Number(document.activeElement.closest('tr').dataset.row) > 1));
     await press('Control+End');
-    assert.equal(await page.evaluate(() => document.activeElement.closest('tr').dataset.row), '399');
+    // Card Q10: the window covers every row; there is no 400-row cap and no "Show more" button.
+    assert.equal(await page.evaluate(() => document.activeElement.closest('tr').dataset.row), '2399');
+    assert.equal(await page.$('#dMore'), null);
     assert.equal(await page.evaluate(() => document.activeElement.dataset.col), 'value_5');
     assert.ok(await page.evaluate(() => {
       const grid = document.querySelector('.dsgrid').getBoundingClientRect();
@@ -61,7 +63,7 @@ export async function verifyTableViewport(browser, url) {
     await press('Shift+Tab');
     assert.equal(await page.evaluate(() => document.activeElement.dataset.col), 'value_4');
     await press('ArrowUp');
-    assert.equal(await page.evaluate(() => document.activeElement.closest('tr').dataset.row), '398');
+    assert.equal(await page.evaluate(() => document.activeElement.closest('tr').dataset.row), '2398');
     await press('Control+Home');
     assert.equal(await page.evaluate(() => document.activeElement.closest('tr').dataset.row), '0');
     await press('PageDown'); await press('PageUp');
@@ -70,7 +72,6 @@ export async function verifyTableViewport(browser, url) {
     await page.focus('tr[data-row="1"] td[data-col="value_0"]');
     await page.click('#dsRestoreCell');
     await page.evaluate(captureDataTableCSV, { rowCount: 2400 });
-    await page.click('#dMore');
     await page.setViewport({ width: 900, height: 900 });
     await scrollTo(1190);
     await page.focus('tr[data-row="1199"] td[data-col="value_5"]');
@@ -121,7 +122,7 @@ export async function verifyTableViewport(browser, url) {
     assert.ok(await page.$$eval('tr[data-row]', (rows) => rows.length > 1000));
     await scrollTo(1399);
     assert.ok(await page.$$eval('tr[data-row]', (rows) => rows.length < 100));
-    assert.equal(await page.$$eval('tr[data-row]', (rows) => rows.at(-1).dataset.row), '1399');
+    assert.ok(await page.$('tr[data-row="1399"]'));
     await scrollTo(0);
     const point = await page.evaluate(() => {
       const cell = document.querySelector('tr[data-row="3"] td[data-col="value_0"]').getBoundingClientRect();
@@ -147,10 +148,10 @@ export async function verifyTableViewport(browser, url) {
     assert.ok(drag.text > 0 && drag.to > drag.from + 40 && drag.contiguous, JSON.stringify(drag));
     await scrollTo(1399);
     await page.click('#dsViewport');
-    assert.equal(await page.$$eval('#dBody tbody tr', (rows) => rows.length), 1400);
+    assert.equal(await page.$$eval('#dBody tbody tr', (rows) => rows.length), 400);
     await page.click('#dsViewport');
     await page.select('#dCore', 'table-core-1');
-    assert.equal(await page.$eval('.dsgrid', (grid) => grid.dataset.available), '400');
+    assert.equal(await page.$eval('.dsgrid', (grid) => grid.dataset.available), '1200');
     assert.equal(await page.$eval('tr[data-row="0"] td[data-col]', (cell) => cell.dataset.core), 'table-core-1');
     await page.click('#dLayers');
     assert.equal(await page.$$eval('#dBody th.src-lay', (cells) => cells.length), 0);
@@ -167,7 +168,7 @@ export async function verifyTableViewport(browser, url) {
       const selector = document.getElementById('dCore'); selector.innerHTML = '<option value="__all">All cores</option>'; selector.value = '__all';
       I.setMode('data');
     });
-    await page.click('#dMore'); await scrollTo(549);
+    await scrollTo(549);
     assert.equal(await page.$eval('tr[data-row="549"] td[data-col="lower"]', (cell) => cell.textContent), '9');
     assert.equal(await page.$eval('tr[data-row="549"] td[data-col="lower"]', (cell) => cell.dataset.x), '598');
     assert.equal(await page.$eval('tr[data-row="549"] td[data-col="upper"]', (cell) => cell.textContent), '');
@@ -203,7 +204,7 @@ export async function verifyTableViewport(browser, url) {
     }), 7.75);
     // Repeated entry/exit must leave only the current controller responding to scroll and selection.
     for (let index = 0; index < 3; index++) { await page.click('#modeSection'); await page.click('#modeData'); }
-    await page.click('#dMore'); await scrollTo(600);
+    await scrollTo(600);
     assert.equal(await page.$eval('tr[data-row="600"] td[data-col="double"]', (cell) => cell.textContent), '1198');
     assert.ok(await page.$$eval('tr[data-row]', (rows) => rows.length < 100));
     const inherited = await browser.newPage();
@@ -214,10 +215,7 @@ export async function verifyTableViewport(browser, url) {
     } finally { await inherited.close(); }
     await page.evaluate(prepareDataTableFixture, 100000);
     await page.click('#modeData');
-    await page.evaluate(() => {
-      for (let step = 0; step < 101 && document.getElementById('dMore'); step++) document.getElementById('dMore').click();
-      if (document.getElementById('dMore')) throw new Error('Full viewport fixture did not expand');
-    });
+    assert.equal(await page.$('#dMore'), null);
     await scrollTo(99999);
     assert.equal(await page.$eval('tr[data-row="99999"] td[data-col]', (cell) => cell.dataset.core), 'table-core-1');
     assert.equal(await page.$eval('tr[data-row="99999"] td[data-col]', (cell) => cell.dataset.x), '49999');
@@ -227,6 +225,27 @@ export async function verifyTableViewport(browser, url) {
     assert.equal(await page.evaluate(() => document.activeElement.closest('tr').dataset.row), '0');
     await press('Control+End');
     assert.equal(await page.evaluate(() => document.activeElement.closest('tr').dataset.row), '99999');
+    // Card Q10: 10,000 rows are reachable by scrolling alone, and a large SVG becomes a PNG through a Blob URL that is revoked afterwards.
+    await page.evaluate(prepareDataTableFixture, 10000);
+    await page.click('#modeSection'); await page.click('#modeData');
+    assert.equal(await page.$('#dMore'), null);
+    await scrollTo(9999);
+    assert.ok(await page.$('tr[data-row="9999"]'));
+    assert.ok(await page.$$eval('tr[data-row]', (rows) => rows.length < 100));
+    const png = await page.evaluate(async () => {
+      const { withSvgImage } = await import('./js/panels.js');
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="6000" height="4000">${Array.from({ length: 3000 }, (_, i) => `<rect x="${i}" y="${i % 4000}" width="40" height="40" fill="#369"/>`).join('')}</svg>`;
+      let src = '';
+      const blob = await withSvgImage(svg, async (img) => {
+        src = img.src;
+        const canvas = document.createElement('canvas'); canvas.width = img.width; canvas.height = img.height;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      });
+      const stillLoads = await fetch(src).then(() => true, () => false);
+      return { blobUrl: src.startsWith('blob:'), bytes: blob?.size || 0, stillLoads };
+    });
+    assert.ok(png.blobUrl && png.bytes > 1000 && !png.stillLoads, JSON.stringify(png));
     assert.deepEqual(errors, []);
     console.log('Viewport table: bounded rows, native selection/drag, scrolling edits, keyboard navigation, filters, rollback and age-only cores verified.');
   } finally { await page.close(); }

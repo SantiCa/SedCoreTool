@@ -250,18 +250,84 @@ export function tileStats(source, row, col) {
   return out;
 }
 
+/**
+ * Card M8.4.37: memory the per-tile statistics of one section may hold (the estimate `TiledObjectStats.bytes`); beyond it they are all dropped and
+ * none is kept until the section is opened again, as the row histograms (`COUNT_HISTOGRAM_BYTES`, card M8.4.36). It is above the memory of the
+ * statistics the largest reopening cache can hold (`CACHE_MAX_BYTES`, 140 bytes per object and tile there: at most about 234 MiB by this estimate),
+ * so a section whose statistics can be cached is never cut.
+ */
+export const STATS_BUDGET_BYTES = 256 * 2 ** 20;
+// The estimate, measured in Electron's V8 (pointer compression, as in the page; `tools/measure_tiled_stats_memory.mjs`): one object's statistics in one
+// tile (its `TraceStats` and its entries in the tile's map and in the object's set of tiles) and one object's set of tiles; a tile's map besides.
+// Node's V8 without pointer compression takes about 1.8 times as much.
+export const STATS_ENTRY_BYTES = 160;
+export const STATS_OBJECT_BYTES = 96;
+const STATS_TILE_BYTES = 128;
+/** Card M8.4.41: each part of a section split to fit the statistics aims at this share of the budget. */
+export const STATS_SPLIT_MARGIN = 0.8;
+/** Card M8.4.41: beyond this many parts, splitting the section would not be enough. */
+export const STATS_SPLIT_MAX_PARTS = 8;
+
+/**
+ * Card M8.4.41: the statistics of the whole section, estimated from the tiles counted when the budget tripped: (bytes per counted tile) x (tiles of the
+ * section that hold labels). Never below what was counted.
+ * @param {{bytesCounted: number, tilesCounted: number, labelledTiles: number}} counted bytes (estimate of `TiledObjectStats.bytes`) and numbers of tiles
+ * @returns {number} bytes
+ */
+export function estimateSectionStatsBytes({ bytesCounted, tilesCounted, labelledTiles }) {
+  if (!(tilesCounted > 0)) return bytesCounted;
+  return Math.max(bytesCounted, (bytesCounted / tilesCounted) * labelledTiles);
+}
+
+/**
+ * Card M8.4.41: into how many parts the section must be split so that each part's statistics stay within `STATS_SPLIT_MARGIN` of the budget (at least 2),
+ * or null when that needs more than `STATS_SPLIT_MAX_PARTS` (splitting would not be enough). @param {number} estimateBytes @param {number} [budget] bytes
+ * @returns {number | null}
+ */
+export function partsToFitStats(estimateBytes, budget = STATS_BUDGET_BYTES) {
+  const parts = Math.max(2, Math.ceil(estimateBytes / (budget * STATS_SPLIT_MARGIN)));
+  return parts > STATS_SPLIT_MAX_PARTS ? null : parts;
+}
+
+/**
+ * Card M8.4.41: the key and variables of the message for dropped statistics: how many parts would fit, or "too dense" when no split would.
+ * @param {{estimateBytes?: number | null}} stats @returns {{key: string, vars?: {n: number}}}
+ */
+export function statsLimitMessage(stats) {
+  const parts = partsToFitStats(stats.estimateBytes ?? 0);
+  return parts === null ? { key: 'tiles.statsLimitTooDense' } : { key: 'tiles.statsLimit', vars: { n: parts } };
+}
+
 /** Per-tile statistics of every object of a tiled section and their totals. Tile indices are `row * cols + col`. */
 export class TiledObjectStats {
-  constructor() {
+  /**
+   * @param {{budget?: number, onExceeded?: () => void, labelledTiles?: () => number}} [options] `onExceeded` is called once, when the statistics are
+   * dropped; `labelledTiles` gives the number of tiles of the section that hold labels (card M8.4.41, for the estimate of the whole section)
+   */
+  constructor({ budget = STATS_BUDGET_BYTES, onExceeded = () => {}, labelledTiles = () => 0 } = {}) {
     /** @type {Map<number, Map<number, TraceStats>>} */
     this.byTile = new Map();
     /** @type {Map<number, Set<number>>} */
     this.tilesOf = new Map();
+    this.budget = budget; this.onExceeded = onExceeded; this.labelledTiles = labelledTiles;
+    /** Card M8.4.41: bytes the statistics of the whole section would take, estimated when they were dropped; null until then. @type {number | null} */
+    this.estimateBytes = null;
+    /** The estimate of the tiles' maps and their entries; `bytes` adds the objects' sets of tiles. */
+    this.tileBytes = 0;
+    /** Card M8.4.37: the statistics went beyond the budget; they were dropped and none is kept until the section is opened again. */
+    this.exceeded = false;
   }
-  /** Replace the contributions of one tile; returns the ids whose totals changed. @param {number} tile @param {Map<number, TraceStats>} stats */
+  /** Estimated memory of what is kept. */
+  get bytes() { return this.tileBytes + this.tilesOf.size * STATS_OBJECT_BYTES; }
+  /**
+   * Replace the contributions of one tile; returns the ids whose totals changed. Beyond the budget everything is dropped and no id is returned (a
+   * total is no longer known: it must not be taken for an object without pixels). @param {number} tile @param {Map<number, TraceStats>} stats
+   */
   replaceTile(tile, stats) {
     const changed = new Set();
-    for (const id of this.byTile.get(tile)?.keys() || []) { changed.add(id); this.tilesOf.get(id)?.delete(tile); }
+    if (this.exceeded) return changed;
+    const old = this.byTile.get(tile);
+    for (const id of old?.keys() || []) { changed.add(id); this.tilesOf.get(id)?.delete(tile); }
     if (stats.size) this.byTile.set(tile, stats); else this.byTile.delete(tile);
     for (const id of stats.keys()) {
       changed.add(id);
@@ -270,7 +336,20 @@ export class TiledObjectStats {
       set.add(tile);
     }
     for (const id of changed) if (!this.tilesOf.get(id)?.size) this.tilesOf.delete(id);
+    const tileBytes = (/** @type {Map<number, TraceStats> | undefined} */ m) => (m?.size ? STATS_TILE_BYTES + m.size * STATS_ENTRY_BYTES : 0);
+    this.tileBytes += tileBytes(stats) - tileBytes(old);
+    if (this.bytes > this.budget) { this.exceed(); return new Set(); }
     return changed;
+  }
+  /**
+   * Card M8.4.37: beyond the budget the statistics are all dropped (masks with tens of thousands of objects in every tile, as the synthetic section of
+   * M8.4.18d, would keep about 70 GiB for its 7,168 tiles), and none is kept until the section is opened again.
+   */
+  exceed() {
+    this.exceeded = true;
+    this.estimateBytes = estimateSectionStatsBytes({ bytesCounted: this.bytes, tilesCounted: this.byTile.size, labelledTiles: this.labelledTiles() });
+    this.byTile.clear(); this.tilesOf.clear(); this.tileBytes = 0;
+    this.onExceeded();
   }
   /** An object's statistics over the whole section, or null when it has no pixel. @param {number} id */
   total(id) {
@@ -322,9 +401,32 @@ export class TiledStatsRunner {
     this.deferred = new Set();
     /** @type {{positions: [number, number][], resolve: () => void}[]} */
     this.waiters = [];
+    /** Card M8.4.39: set by `stop` (the section was closed or deleted): nothing more is computed or reported. */
+    this.stopped = false;
+    /** Card M8.4.39: the pixel cache is emptied once the run on its way ends (`releasePixels` during a run). */
+    this.releaseWhenIdle = false;
+  }
+  /**
+   * Card M8.4.39: the section is closed or deleted (card M8.4.37: or its statistics went beyond their budget). The queue is dropped, the pixel
+   * cache emptied, waiting callers released, and nothing is reported any more (a report would change a section that is no longer in the project,
+   * or whose statistics are no longer known). The statistics already computed stay in `stats`.
+   */
+  stop() {
+    this.stopped = true;
+    this.pending.clear(); this.failed.clear(); this.ids.clear(); this.deferred.clear(); this.waitsFor.clear(); this.rgba.clear();
+    const waiters = this.waiters;
+    this.waiters = [];
+    for (const w of waiters) w.resolve();
+  }
+  /** Card M8.4.39: the section is left: its level-0 pixels (up to `cacheTiles` tiles) are dropped now, or when the run on its way ends. */
+  releasePixels() {
+    if (this.running) this.releaseWhenIdle = true;
+    else this.rgba.clear();
   }
   /** @param {[number, number][]} positions @param {Iterable<number>} [ids] */
   queue(positions, ids = []) {
+    if (this.stats.exceeded && !this.stopped) this.stop();              // card M8.4.37: dropped while a reopening cache was restored
+    if (this.stopped) return Promise.resolve();
     const indices = positions.map(([row, col]) => this.tiles.index(row, col));
     for (const tile of indices) this.pending.add(tile);
     if (positions.length) { for (const tile of this.failed) this.pending.add(tile); this.failed.clear(); }
@@ -370,6 +472,7 @@ export class TiledStatsRunner {
   }
   /** Report the objects that are current among those changed; keep the others for later. */
   publish() {
+    if (this.stopped) return;
     const ready = new Set();
     for (const id of [...this.ids, ...this.deferred]) if (this.isCurrent(id)) ready.add(id); else this.deferred.add(id);
     this.ids = new Set();
@@ -380,7 +483,7 @@ export class TiledStatsRunner {
   retry() { return this.failed.size ? this.queue([...this.failed].map((i) => [Math.floor(i / this.tiles.cols), i % this.tiles.cols])) : Promise.resolve(); }
   async run() {
     const cols = this.tiles.cols;
-    while (this.pending.size) {
+    while (this.pending.size && !this.stopped) {
       const tile = /** @type {number} */ (this.pending.values().next().value);
       this.pending.delete(tile);
       this.computing = tile;
@@ -391,10 +494,12 @@ export class TiledStatsRunner {
         await this.loadMasks(around);
         if (around.some(([r, c]) => this.tiles.state(r, c) === 'missing')) throw new Error('mask tile not loaded');
         if (this.tiles.get(row, col)?.labels) await this.loadPixels(row, col);
+        if (this.stopped) { this.computing = -1; break; }
         const changed = this.stats.replaceTile(tile, tileStats({ width: this.tiles.width, height: this.tiles.height, stacks: this.stacks(),
           labelsAt: (r, c) => this.tiles.get(r, c)?.labels || null, rgbaAt: (r, c) => this.rgba.get(r * cols + c) || null }, row, col));
         for (const id of changed) this.ids.add(id);
-      } catch (error) { this.failed.add(tile); this.onError(error); }
+        if (this.stats.exceeded) this.stop();                          // card M8.4.37: nothing more is computed until the section is opened again
+      } catch (error) { if (!this.stopped) { this.failed.add(tile); this.onError(error); } }
       this.computing = -1;
       const done = this.waiters.filter((w) => !this.pendingIn(w.positions));
       if (!this.pending.size || this.ids.size > 256 || done.length) this.publish();
@@ -402,6 +507,7 @@ export class TiledStatsRunner {
       await new Promise((resolve) => setTimeout(resolve, 0));         // let the page draw and take input between tiles
     }
     this.publish();
+    if (this.stopped || this.releaseWhenIdle) { this.releaseWhenIdle = false; this.rgba.clear(); }
   }
   /** The level-0 pixels of a tile and of its neighbours that hold image. @param {number} row @param {number} col */
   async loadPixels(row, col) {

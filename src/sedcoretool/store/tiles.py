@@ -1,7 +1,9 @@
 """Verified tile reads for the engine's coordinator (contract §8.5, ``tile.read``). Standard library only.
 
 A tile is served only after its uncompressed bytes have the SHA-256 that ``<k>/.tiles.sha256`` lists for it (ARCHITECTURE §3.4 rule 3).
-Verified tiles are kept in a least-recently-used cache with a byte budget; a pyramid's description is read once and kept while it is used.
+Verified tiles are kept in a least-recently-used cache with a byte budget. The descriptions of the last ``MAX_DESCRIPTIONS`` pyramids used and
+their levels' hash lists (within ``HASH_CACHE_BYTES``) are kept too, least recently used first out; a pyramid whose description leaves keeps
+nothing else (card M8.4.40).
 """
 
 from __future__ import annotations
@@ -15,6 +17,8 @@ from . import format as fmt
 
 CACHE_BYTES = 256 * 2**20
 MAX_POSITIONS = 16
+MAX_DESCRIPTIONS = 64                    # pyramids whose pyramid.json is kept in memory
+HASH_CACHE_BYTES = 64 * 2**20            # level hash lists kept in memory (32 bytes per tile: about 2 million tiles)
 
 
 class TileError(Exception):
@@ -31,39 +35,51 @@ class TileReader:
         self.cache_bytes = cache_bytes
         self.cache: OrderedDict[tuple, bytes] = OrderedDict()
         self.cached = 0
-        self.descriptions: dict[str, dict] = {}
-        self.hashes: dict[tuple[str, int], bytes] = {}
+        self.descriptions: OrderedDict[str, dict] = OrderedDict()
+        self.hashes: OrderedDict[tuple[str, int], bytes] = OrderedDict()
+        self.hashed = 0
 
     def describe(self, pyramid: str) -> dict:
         """The validated ``pyramid.json`` of a complete pyramid (``fmt.InvalidPyramid`` otherwise)."""
         if not isinstance(pyramid, str) or not fmt.HEX64.fullmatch(pyramid):
             raise fmt.InvalidPyramid('pyramid identifier')
-        if pyramid not in self.descriptions:
-            folder = self.root / pyramid
-            if not folder.is_dir() or folder.is_symlink():
-                raise fmt.InvalidPyramid('no such pyramid')
-            self.descriptions[pyramid] = fmt.read_description(folder)
-        return self.descriptions[pyramid]
+        if pyramid in self.descriptions:
+            self.descriptions.move_to_end(pyramid)
+            return self.descriptions[pyramid]
+        folder = self.root / pyramid
+        if not folder.is_dir() or folder.is_symlink():
+            raise fmt.InvalidPyramid('no such pyramid')
+        description = fmt.read_description(folder)
+        self.descriptions[pyramid] = description
+        while len(self.descriptions) > MAX_DESCRIPTIONS:
+            self.forget(next(iter(self.descriptions)))         # its hash lists and tiles go with it
+        return description
 
     def forget(self, pyramid: str) -> None:
         """Drop everything kept for a pyramid (it was deleted or rebuilt)."""
         self.descriptions.pop(pyramid, None)
         for key in [key for key in self.hashes if key[0] == pyramid]:
-            del self.hashes[key]
+            self.hashed -= len(self.hashes.pop(key))
         for key in [key for key in self.cache if key[0] == pyramid]:
             self.cached -= len(self.cache.pop(key))
 
     def level_hashes(self, pyramid: str, level: dict) -> bytes:
         key = (pyramid, level['level'])
-        if key not in self.hashes:
-            try:
-                data = (self.root / pyramid / str(level['level']) / '.tiles.sha256').read_bytes()
-            except OSError:
-                raise TileError('tile') from None
-            if len(data) != level['rows'] * level['cols'] * 32:
-                raise TileError('tile')
+        if key in self.hashes:
+            self.hashes.move_to_end(key)
+            return self.hashes[key]
+        try:
+            data = (self.root / pyramid / str(level['level']) / '.tiles.sha256').read_bytes()
+        except OSError:
+            raise TileError('tile') from None
+        if len(data) != level['rows'] * level['cols'] * 32:
+            raise TileError('tile')
+        if len(data) <= HASH_CACHE_BYTES:                      # a larger list is used for this read only
             self.hashes[key] = data
-        return self.hashes[key]
+            self.hashed += len(data)
+            while self.hashed > HASH_CACHE_BYTES:
+                self.hashed -= len(self.hashes.popitem(last=False)[1])
+        return data
 
     def read(self, pyramid: str, level_index: int, positions) -> list[bytes]:
         """The uncompressed bytes of each requested tile, in request order. Raises ``TileError`` (nothing partial is returned)."""

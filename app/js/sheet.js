@@ -1,6 +1,7 @@
 // SedCoreTool web — formulas of the Data tab (no DOM, no eval).
 // Column formulas work on whole columns of one core: [XRF Ba/Ti] / TOC_pct, log10(x), zscore(x), movavg(x, 5)…
 // Cell formulas work like a small spreadsheet: =A1*2, =SUM(A1:A5), =MEAN(COL("TOC_pct")), =CORR(COL("a"), COL("b")).
+import { minOf, maxOf } from './core.js';
 
 /** Formula error carrying a key + args; the UI translates it with fxText() (i18n.js). `message` is the key. */
 const ferr = (key, args = {}) => Object.assign(new Error(key), { key, args });
@@ -78,10 +79,10 @@ const FUN = {
   pow: (x, y) => zip(x, y, Math.pow), min2: (x, y) => zip(x, y, Math.min), max2: (x, y) => zip(x, y, Math.max),
   mean: meanOf, average: meanOf, std: stdOf, stdev: stdOf, median: (a) => { const v = vals(a).sort((p, q) => p - q); return v.length ? (v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : null; },
   sum: (...a) => { const v = vals(a); return v.length ? v.reduce((s, x) => s + x, 0) : 0; }, count: (...a) => vals(a).length,
-  min: (...a) => { if (a.length === 2 && Array.isArray(a[0]) && Array.isArray(a[1])) return zip(a[0], a[1], Math.min); const v = vals(a); return v.length ? Math.min(...v) : null; },
-  max: (...a) => { if (a.length === 2 && Array.isArray(a[0]) && Array.isArray(a[1])) return zip(a[0], a[1], Math.max); const v = vals(a); return v.length ? Math.max(...v) : null; },
+  min: (...a) => { if (a.length === 2 && Array.isArray(a[0]) && Array.isArray(a[1])) return zip(a[0], a[1], Math.min); const v = vals(a); return v.length ? minOf(v) : null; },
+  max: (...a) => { if (a.length === 2 && Array.isArray(a[0]) && Array.isArray(a[1])) return zip(a[0], a[1], Math.max); const v = vals(a); return v.length ? maxOf(v) : null; },
   zscore: (x) => { const m = meanOf(x), s = stdOf(x); return map1(x, (v) => (s ? (v - m) / s : 0)); },
-  norm01: (x) => { const v = vals(x), lo = Math.min(...v), hi = Math.max(...v); return map1(x, (q) => (hi > lo ? (q - lo) / (hi - lo) : 0)); },
+  norm01: (x) => { const v = vals(x), lo = minOf(v), hi = maxOf(v); return map1(x, (q) => (hi > lo ? (q - lo) / (hi - lo) : 0)); },
   movavg: (x, n = 3) => { const h = Math.floor(n / 2); return x.map((_, i) => meanOf(x.slice(Math.max(0, i - h), i + h + 1))); },
   diff: (x) => x.map((v, i) => (i && ok(v) && ok(x[i - 1]) ? v - x[i - 1] : null)),
   cumsum: (x) => { let s = 0; return x.map((v) => (ok(v) ? (s += v) : null)); },

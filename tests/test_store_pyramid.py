@@ -13,7 +13,9 @@ import numpy as np
 import pytest
 from PIL import Image
 
-pytest.importorskip("pyvips")
+from conftest import require_pyvips
+
+require_pyvips()
 
 from sedcoretool.methods.errors import Cancelled, MethodError  # noqa: E402
 from sedcoretool.store import format as fmt  # noqa: E402

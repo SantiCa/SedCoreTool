@@ -2,6 +2,7 @@
 // UTM/WGS 84 with zone and hemisphere), map frame, geographic graticule or metric grid, edge labels (DD, DMS or
 // metres), scale bar, north arrow and the SVG. Names are prefixed (lm…) because the offline build joins all modules.
 import { finiteStyleNumber } from './log.js';
+import { minOf, maxOf } from './core.js';
 
 const LM_D = Math.PI / 180, LM_A = 6378137, LM_F = 1 / 298.257223563;
 
@@ -70,7 +71,7 @@ export function lmCRS(id, o = {}) {
 export function lmFitBBox(points, margin = 0.25) {
   const P = points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
   if (!P.length) return [-12, 34, 6, 45];
-  let w = Math.min(...P.map((p) => p.lon)), e = Math.max(...P.map((p) => p.lon)), s = Math.min(...P.map((p) => p.lat)), n = Math.max(...P.map((p) => p.lat));
+  let w = minOf(P.map((p) => p.lon)), e = maxOf(P.map((p) => p.lon)), s = minOf(P.map((p) => p.lat)), n = maxOf(P.map((p) => p.lat));
   const mx = Math.max(0.2, (e - w) * margin), my = Math.max(0.2, (n - s) * margin);
   w -= mx; e += mx; s = Math.max(-85, s - my); n = Math.min(85, n + my);
   return [w, s, e, n].map((v) => +v.toFixed(4));
@@ -91,7 +92,7 @@ export function lmFrame(crs, bbox, width = 900, aspect = 'auto') {
     const lo = w + ((e - w) * k) / 32, la = s + ((n - s) * k) / 32;
     for (const [a, b] of [[lo, s], [lo, n], [w, la], [e, la]]) { const [x, y] = crs.fwd(a, b); xs.push(x); ys.push(y); }
   }
-  let X0 = Math.min(...xs), X1 = Math.max(...xs), Y0 = Math.min(...ys), Y1 = Math.max(...ys);
+  let X0 = minOf(xs), X1 = maxOf(xs), Y0 = minOf(ys), Y1 = maxOf(ys);
   const r = +aspect;
   if (r > 0) { const cur = (Y1 - Y0) / (X1 - X0 || 1); if (cur < r) { const c = (Y0 + Y1) / 2, h = ((X1 - X0) * r) / 2; Y0 = c - h; Y1 = c + h; } else { const c = (X0 + X1) / 2, h = (Y1 - Y0) / r / 2; X0 = c - h; X1 = c + h; } }
   const W = Math.round(width), H = Math.max(40, Math.round((W * (Y1 - Y0)) / (X1 - X0 || 1)));
@@ -213,7 +214,7 @@ export function buildLocMapSVG(o) {
   if (geoGrid) {
     // geographic graticule: meridians and parallels over the whole frame (inverse-projected corners give the range)
     const cs = [[0, 0], [W, 0], [0, H], [W, H], [W / 2, 0], [W / 2, H], [0, H / 2], [W, H / 2]].map(([x, y]) => fr.Pinv(x, y));
-    const lo0 = Math.min(...cs.map((c) => c[0])), lo1 = Math.max(...cs.map((c) => c[0])), la0 = Math.max(-89, Math.min(...cs.map((c) => c[1]))), la1 = Math.min(89, Math.max(...cs.map((c) => c[1])));
+    const lo0 = minOf(cs.map((c) => c[0])), lo1 = maxOf(cs.map((c) => c[0])), la0 = Math.max(-89, minOf(cs.map((c) => c[1]))), la1 = Math.min(89, maxOf(cs.map((c) => c[1])));
     const span = Math.min(lo1 - lo0, (la1 - la0) * 1.4), step = st.gridStep > 0 ? st.gridStep : st.coordFmt === 'dms' ? lmDegStep(span, 5) : lmMetricStep(span, 5);   // DD: 1, 2, 5 × 10ᵏ °
     const mer = lmMultiples(lo0, lo1, step), par = lmMultiples(la0, la1, step), N = 60;
     if (st.grid) {

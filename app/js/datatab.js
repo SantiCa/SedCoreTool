@@ -10,7 +10,10 @@ import { FIT_KINDS, PLOT_COLORS, PLOT_TYPES, buildStratPlot, buildXYPlot } from 
 import { toCSV } from './core.js';
 import { csvCommentText } from './exportio.js';
 import { mountTableViewport } from './tableview.js';
+import { withSvgImage } from './panels.js';
+import { deleteManualColumn, originalCellValue } from './dataedit.js';
 import { createIntervalLookup, intervalsOnAxis } from './geo.js';
+import { validHexColor } from './log.js';
 import { FUNCTIONS, cellName, evalCells, parseFormula } from './sheet.js';
 
 /* ───────────── data tab: all data of the project, computed and manual columns, free cells ───────────── */
@@ -44,22 +47,22 @@ function renderDataPlot() {
   if (!p.ys.length && cols.length) p.ys.push({ col: cols[0], type: 'line', y2: false, fit: 'none', deg: 2, window: 5, log: false, inv: false, color: '' });
   const opt = (list, v) => list.map(([k, n]) => `<option value="${esc(k)}" ${String(k) === String(v) ? 'selected' : ''}>${esc(n)}</option>`).join('');
   const axisOpts = [['depth', t('log.depth')], ['age', t('log.age')], ...cols.map((c) => [c, c])];
-  const ck = (k, l) => `<label class="chk"><input type="checkbox" data-p="${k}" ${p[k] ? 'checked' : ''}><span>${t(l)}</span></label>`;
-  const nm = (k, l, w = 80) => `<label class="f"><span>${t(l)}</span><input type="number" step="any" data-p="${k}" value="${p[k] ?? ''}" style="width:${w}px"></label>`;
-  const yRows = p.ys.map((y, i) => `<div class="prow2" data-y="${i}">
+  const ck = (k, l) => `<label class="chk"><input type="checkbox" data-p="${esc(k)}" ${p[k] ? 'checked' : ''}><span>${t(l)}</span></label>`;
+  const nm = (k, l, w = 80) => `<label class="f"><span>${t(l)}</span><input type="number" step="any" data-p="${esc(k)}" value="${esc(p[k] ?? '')}" style="width:${esc(w)}px"></label>`;
+  const yRows = p.ys.map((y, i) => `<div class="prow2" data-y="${esc(i)}">
       <select data-yk="col">${opt(cols.map((c) => [c, c]), y.col)}</select>
       <select data-yk="type">${opt(PLOT_TYPES.map((k) => [k, t('pl.t.' + k)]), y.type)}</select>
       <select data-yk="fit">${opt(FIT_KINDS.map((k) => [k, t('pl.f.' + k)]), y.fit)}</select>
-      ${y.fit === 'poly' ? `<input type="number" data-yk="deg" min="2" max="6" value="${y.deg}" title="${t('pl.deg')}" style="width:50px">` : ''}${y.fit === 'movavg' ? `<input type="number" data-yk="window" min="3" max="99" step="2" value="${y.window}" title="${t('pl.window')}" style="width:56px">` : ''}
+      ${y.fit === 'poly' ? `<input type="number" data-yk="deg" min="2" max="6" value="${esc(y.deg)}" title="${t('pl.deg')}" style="width:50px">` : ''}${y.fit === 'movavg' ? `<input type="number" data-yk="window" min="3" max="99" step="2" value="${esc(y.window)}" title="${t('pl.window')}" style="width:56px">` : ''}
       ${p.layout === 'xy' ? `<label class="chk"><input type="checkbox" data-yk="y2" ${y.y2 ? 'checked' : ''}><span>Y2</span></label>` : `<label class="chk"><input type="checkbox" data-yk="log" ${y.log ? 'checked' : ''}><span>log</span></label><label class="chk"><input type="checkbox" data-yk="inv" ${y.inv ? 'checked' : ''}><span>${t('pl.inv')}</span></label>`}
-      <input type="color" data-yk="color" value="${y.color || PLOT_COLORS[i % PLOT_COLORS.length]}" title="${t('pl.color')}">
+      <input type="color" data-yk="color" value="${esc(validHexColor(y.color, PLOT_COLORS[i % PLOT_COLORS.length]))}" title="${t('pl.color')}">
       <button class="btn small ghost" data-pa="dely" title="${t('pl.del')}">×</button></div>`).join('');
   box.innerHTML = `<div class="plotwrap"><div class="pctl">
     <div class="row"><select id="plSel" style="flex:1">${opt(S.plots.map((q, i) => [i, q.name]), S.plotCur)}</select><button class="btn small" data-pa="new">+</button><button class="btn small" data-pa="dup">${t('pl.dup')}</button><button class="btn small ghost" data-pa="del">×</button></div>
     <label class="f"><span>${t('pl.name')}</span><input type="text" data-p="name" value="${esc(p.name)}"></label>
     <label class="f"><span>${t('pl.layout')}</span><select data-p="layout">${opt([['strat', t('pl.l.strat')], ['xy', t('pl.l.xy')]], p.layout)}</select></label>
     <p class="note">${t('pl.l.' + p.layout + 'Help')}</p>
-    <div class="f"><span>${t('pl.cores')}</span><div class="chklist">${S.cores.map((c) => `<label class="chk"><input type="checkbox" data-core="${c.id}" ${p.cores.includes(c.id) ? 'checked' : ''}><span>${esc(c.name)}</span></label>`).join('')}</div></div>
+    <div class="f"><span>${t('pl.cores')}</span><div class="chklist">${S.cores.map((c) => `<label class="chk"><input type="checkbox" data-core="${esc(c.id)}" ${p.cores.includes(c.id) ? 'checked' : ''}><span>${esc(c.name)}</span></label>`).join('')}</div></div>
     <label class="f"><span>${t(p.layout === 'strat' ? 'pl.vaxis' : 'pl.xaxis')}</span><select data-p="v">${opt(axisOpts, p.v)}</select></label>
     <div class="f"><span>${t(p.layout === 'strat' ? 'pl.panels' : 'pl.yvars')}</span>${yRows}<button class="btn small" data-pa="addy">+ ${t('pl.addy')}</button></div>
     <details><summary>${t('pl.axes')}</summary><div class="row" style="margin-top:6px">
@@ -76,8 +79,9 @@ function renderDataPlot() {
 function drawDataPlot() {
   const p = curPlot(), out = $('plOut'); if (!out) return;
   if (!p.cores.length || !p.ys.length) { out.innerHTML = `<p class="note">${t('pl.empty')}</p>`; plotLast = null; return; }
-  const { kind, spec } = plotSpec(p), r = kind === 'strat' ? buildStratPlot(spec) : buildXYPlot(spec);
-  plotLast = { ...r, spec, kind };
+  // Card Q5: the screen draws long lines thinned per pixel column; the SVG and PNG exports build the plot again with every point.
+  const { kind, spec } = plotSpec(p), build = kind === 'strat' ? buildStratPlot : buildXYPlot, r = build({ ...spec, decimate: true });
+  plotLast = { ...r, spec, kind, full: () => build(spec).svg };
   const f3 = (v) => (v == null || !Number.isFinite(v) ? '—' : +v.toPrecision(4));
   out.innerHTML = `<div class="psvg">${r.svg}</div>
     ${r.fits.length ? `<h4>${t('pl.fits')}</h4><table class="dtable mtab"><thead><tr><th>${t('pl.series')}</th><th>${t('pl.eq')}</th><th>R²</th><th>n</th></tr></thead><tbody>${r.fits.map((f) => `<tr><td class="txt">${esc(f.name)}</td><td class="txt">${esc(f.eq)}</td><td>${f3(f.r2)}</td><td>${f.n}</td></tr>`).join('')}</tbody></table>` : ''}
@@ -103,8 +107,8 @@ $('dBody').addEventListener('click', (e) => {
   else if (a === 'new') { S.plots.push(defaultPlot(S.plots.length + 1)); S.plotCur = S.plots.length - 1; }
   else if (a === 'dup') { S.plots.push({ ...JSON.parse(JSON.stringify(p)), name: p.name + ' (2)' }); S.plotCur = S.plots.length - 1; }
   else if (a === 'del') { S.plots.splice(S.plotCur, 1); S.plotCur = 0; }
-  else if (a === 'svg') { if (plotLast) saveFile(`${safe(p.name)}.svg`, plotLast.svg, 'image/svg+xml'); return; }
-  else if (a === 'png') { if (plotLast) busy(async () => { const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(plotLast.svg); await img.decode(); const c = document.createElement('canvas'); c.width = img.width * 3; c.height = img.height * 3; const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height); const b = await new Promise((r) => c.toBlob(r, 'image/png')); if (b) await saveFile(`${safe(p.name)}.png`, b, 'image/png'); }); return; }
+  else if (a === 'svg') { if (plotLast) saveFile(`${safe(p.name)}.svg`, plotLast.full(), 'image/svg+xml'); return; }
+  else if (a === 'png') { if (plotLast) busy(() => withSvgImage(plotLast.full(), async (img) => { const c = document.createElement('canvas'); c.width = img.width * 3; c.height = img.height * 3; const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height); const b = await new Promise((r) => c.toBlob(r, 'image/png')); if (b) await saveFile(`${safe(p.name)}.png`, b, 'image/png'); })); return; }
   else if (a === 'csv') {
     const rows = [['core', p.v, 'variable', 'value']];
     for (const c of S.cores.filter((q) => p.cores.includes(q.id))) for (const y of p.ys) { const X = plotCol(c, p.v), Y = plotCol(c, y.col); for (let i = 0; i < X.length; i++) if (X[i] != null && Y[i] != null) rows.push([c.name, X[i], y.col, Y[i]]); }
@@ -126,7 +130,7 @@ function dataCores() { const v = $('dCore').value; return v === '__all' ? S.core
 export function renderData() {
   if (mode !== 'data') return;
   const sel = $('dCore'), cur = sel.value || S.curCore;
-  sel.innerHTML = S.cores.map((c) => `<option value="${c.id}" ${c.id === cur ? 'selected' : ''}>${esc(c.name)}</option>`).join('') + `<option value="__all" ${cur === '__all' ? 'selected' : ''}>${t('data.allCores')}</option>`;
+  sel.innerHTML = S.cores.map((c) => `<option value="${esc(c.id)}" ${c.id === cur ? 'selected' : ''}>${esc(c.name)}</option>`).join('') + `<option value="__all" ${cur === '__all' ? 'selected' : ''}>${t('data.allCores')}</option>`;
   refreshAllCores();
   // V0.35: the sheet replaces the old «computed columns» view; the free cell sheet stays only for projects that use it
   for (const o of $('dView').options) if (o.value === 'cols' || (o.value === 'cells' && !Object.keys(S.sheet.cells || {}).length)) o.hidden = true;
@@ -135,11 +139,13 @@ export function renderData() {
   if (view !== 'table') disposeDataTable();
   if (view === 'cols') renderDataCols(); else if (view === 'cells') renderDataCells(); else if (view === 'plot') renderDataPlot(); else renderDataTable();
 }
-function tableModel(limit = Infinity, offset = 0) {
-  const cores = dataCores(), names = new Map();
-  for (const c of cores) for (const [k, v] of Object.entries(c.src)) if (!names.has(k)) names.set(k, v);
-  const cols = [...names.entries()].sort((a, b) => SRC_ORDER[a[1]] - SRC_ORDER[b[1]] || a[0].localeCompare(b[0]));
-  const layers = $('dLayers').checked ? S.geo.layers.filter((L) => S.geo.intervals.some((q) => q.layer === L.id && cores.some((c) => c.id === q.core))) : [];
+/** @param {{ base?: any, lookups: Map<string, any> }} [memo] card Q10: columns, layers and interval lookups reused across the scroll frames of one render */
+function tableModel(limit = Infinity, offset = 0, memo = undefined) {
+  const cores = memo?.base?.cores || dataCores(), names = new Map();
+  if (!memo?.base) for (const c of cores) for (const [k, v] of Object.entries(c.src)) if (!names.has(k)) names.set(k, v);
+  const cols = memo?.base?.cols || [...names.entries()].sort((a, b) => SRC_ORDER[a[1]] - SRC_ORDER[b[1]] || a[0].localeCompare(b[0]));
+  const layers = memo?.base?.layers || (/** @type {HTMLInputElement} */ ($('dLayers')).checked ? S.geo.layers.filter((L) => S.geo.intervals.some((q) => q.layer === L.id && cores.some((c) => c.id === q.core))) : []);
+  if (memo && !memo.base) memo.base = { cores, cols, layers };
   const rows = [];
   let totalRows = 0;
   for (const c of cores) {
@@ -148,12 +154,17 @@ function tableModel(limit = Infinity, offset = 0) {
     totalRows += n;
     const displayed = Math.min(n - first, Math.max(0, limit - rows.length));
     if (!displayed) continue;
-    const intervalNames = new Map();
-    const ivs = new Map(layers.map((L) => {
-      const intervals = intervalsOnAxis(S.geo.intervals.filter((q) => q.core === c.id && q.layer === L.id), c.depth ? 'depth' : 'age', c);
-      for (const q of intervals) intervalNames.set(q, geoCat(q.cat)?.name || '');
-      return [L.id, createIntervalLookup(intervals)];
-    }));
+    const { intervalNames, ivs } = memo?.lookups.get(c.id) || (() => {
+      const names2 = new Map();
+      const lookups = new Map(layers.map((L) => {
+        const intervals = intervalsOnAxis(S.geo.intervals.filter((q) => q.core === c.id && q.layer === L.id), c.depth ? 'depth' : 'age', c);
+        for (const q of intervals) names2.set(q, geoCat(q.cat)?.name || '');
+        return [L.id, createIntervalLookup(intervals)];
+      }));
+      const made = { intervalNames: names2, ivs: lookups };
+      memo?.lookups.set(c.id, made);
+      return made;
+    })();
     for (let i = first; i < first + displayed; i++) {
       const x = c.depth ? c.depth[i] : c.age[i];
       rows.push({ c, i, depth: c.depth?.[i] ?? null, age: c.age?.[i] ?? null, vals: cols.map(([k]) => c.proxies[k]?.[i] ?? null),
@@ -169,10 +180,10 @@ function tableRowsHTML(M, offset = 0) {
   const multi = M.cores.length > 1;
   return M.rows.map((r, ri) => {
     const x = r.depth ?? r.age;
-    return `<tr data-row="${offset + ri}"><td class="rn">${offset + ri + 1}</td>${multi ? `<td class="txt">${esc(r.c.name)}</td>` : ''}<td class="ax">${fmt(r.depth, 4)}</td><td class="ax">${fmt(r.age, 3)}</td>${r.vals.map((v, j) => {
+    return `<tr data-row="${esc(offset + ri)}"><td class="rn">${offset + ri + 1}</td>${multi ? `<td class="txt">${esc(r.c.name)}</td>` : ''}<td class="ax">${fmt(r.depth, 4)}</td><td class="ax">${fmt(r.age, 3)}</td>${r.vals.map((v, j) => {
       const [k, src] = M.cols[j], ed = src !== 'man' && cellEdit(r.c, k, x), canEdit = dataEditOn && src !== 'calc' && x != null;
       const tip = ed ? t('ds.modTip', { o: ed.o == null ? '—' : fmt(ed.o, 6), d: (ed.at || '').slice(0, 10) }) : '';
-      return `<td${canEdit ? ' contenteditable spellcheck="false"' : ''} class="${ed ? 'mod' : ''}${src === 'calc' ? ' calc' : ''}" data-core="${r.c.id}" data-col="${esc(k)}" data-src="${src}" data-x="${x}"${tip ? ` title="${esc(tip)}"` : ''}>${v == null ? '' : fmt(v, 6)}</td>`;
+      return `<td${canEdit ? ' contenteditable spellcheck="false"' : ''} class="${ed ? 'mod' : ''}${src === 'calc' ? ' calc' : ''}" data-core="${esc(r.c.id)}" data-col="${esc(k)}" data-src="${esc(src)}" data-x="${esc(x)}"${tip ? ` title="${esc(tip)}"` : ''}>${v == null ? '' : fmt(v, 6)}</td>`;
     }).join('')}${r.lay.map((v) => `<td class="txt">${esc(v)}</td>`).join('')}</tr>`;
   }).join('');
 }
@@ -182,16 +193,16 @@ function renderDataTable() {
     /** @type {HTMLInputElement} */ ($('dLayers')).checked]);
   const scrollTop = dataViewportOn && previous?.dataset.context === context ? previous.scrollTop : 0;
   disposeDataTable();
-  const M = tableModel(dataViewportOn ? 0 : dataLimit), multi = M.cores.length > 1, nEd = editCount(M.cores);
+  const memo = { lookups: new Map() }, M = tableModel(dataViewportOn ? 0 : dataLimit, 0, memo), multi = M.cores.length > 1, nEd = editCount(M.cores);
   $('dInfo').textContent = t('data.info', { r: M.totalRows, c: M.cols.length });
   const colLetter = (i) => cellName(i, 0).replace(/\d+$/, '');
   const fixed = (multi ? 1 : 0) + 2;
   const head = `<tr><th class="rn"></th>${multi ? `<th class="txt">${t('geo.core')}</th>` : ''}<th>${t('r.depth')}</th><th>${t('r.age')}</th>${M.cols.map(([k, src], j) => {
     const calc = S.sheet.columns.findIndex((x) => x.name === k);
-    return `<th class="src-${src}" title="${esc(t('data.src.' + src))}"><span class="tag">${colLetter(fixed + j)} · ${t('data.src.' + src)}</span>${esc(k)}${src === 'calc' && calc >= 0 ? ` <button type="button" class="btn small ghost fx" data-fx="${calc}" title="${esc(t('ds.editFx'))}">ƒ</button>` : ''}</th>`;
+    return `<th class="src-${esc(src)}" title="${esc(t('data.src.' + src))}"><span class="tag">${colLetter(fixed + j)} · ${t('data.src.' + src)}</span>${esc(k)}${src === 'calc' && calc >= 0 ? ` <button type="button" class="btn small ghost fx" data-fx="${esc(calc)}" title="${esc(t('ds.editFx'))}">ƒ</button>` : ''}</th>`;
   }).join('')}${M.layers.map((L) => `<th class="src-lay txt"><span class="tag">${t('data.src.lay')}</span>${esc(L.name)}</th>`).join('')}</tr>`;
   const body = tableRowsHTML(M);
-  const cores = S.cores.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  const cores = S.cores.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
   const f = dataFormOpen, fcol = f?.i != null ? S.sheet.columns[f.i] : null;
   const names = [...new Set(M.cols.map(([k]) => k)), 'depth', 'age'];
   const form = f ? `<div class="dsform">
@@ -212,15 +223,15 @@ function renderDataTable() {
       ${nEd || dataViewportOn ? `<button type="button" class="btn small ghost" id="dsRestoreCell" disabled ${nEd ? '' : 'hidden'}>${t('ds.restoreCell')}</button><button type="button" class="btn small ghost" id="dsRestoreAll" ${nEd ? '' : 'hidden'}>${t('ds.restoreAll')}</button>` : ''}
     </div>
     ${dataEditOn ? `<p class="dswarn">${t('ds.warn')}</p>` : ''}${form}
-    <div class="dsgrid"><table class="dtable sheet ${dataViewportOn ? 'dsviewport' : ''}" ${dataViewportOn ? `style="width:${50 + (multi ? 180 : 0) + 256 + M.cols.length * 132 + M.layers.length * 180}px"` : ''}>
-      ${dataViewportOn ? `<colgroup>${[50, ...(multi ? [180] : []), 128, 128, ...M.cols.map(() => 132), ...M.layers.map(() => 180)].map((width) => `<col style="width:${width}px">`).join('')}</colgroup>` : ''}
+    <div class="dsgrid"><table class="dtable sheet ${dataViewportOn ? 'dsviewport' : ''}" ${dataViewportOn ? `style="width:${esc(50 + (multi ? 180 : 0) + 256 + M.cols.length * 132 + M.layers.length * 180)}px"` : ''}>
+      ${dataViewportOn ? `<colgroup>${[50, ...(multi ? [180] : []), 128, 128, ...M.cols.map(() => 132), ...M.layers.map(() => 180)].map((width) => `<col style="width:${esc(width)}px">`).join('')}</colgroup>` : ''}
       <thead>${head}</thead><tbody>${body}</tbody></table></div>
-    ${M.totalRows > dataLimit ? `<p><button class="btn small" id="dMore">${t('data.more', { n: M.totalRows - dataLimit })}</button></p>` : ''}`;
+    ${!dataViewportOn && M.totalRows > dataLimit ? `<p><button class="btn small" id="dMore">${t('data.more', { n: M.totalRows - dataLimit })}</button></p>` : ''}`;
   if (dataViewportOn) {
     const grid = /** @type {HTMLElement} */ ($('dBody').querySelector('.dsgrid')); grid.dataset.context = context;
-    dataViewport = mountTableViewport({ grid, body: grid.querySelector('tbody'), rowCount: Math.min(dataLimit, M.totalRows),
+    dataViewport = mountTableViewport({ grid, body: grid.querySelector('tbody'), rowCount: M.totalRows,
       columnCount: fixed + 1 + M.cols.length + M.layers.length, scrollTop,
-      renderRows: (start, end) => tableRowsHTML(tableModel(end - start, start), start) });
+      renderRows: (start, end) => tableRowsHTML(tableModel(end - start, start, memo), start) });
   }
   if ($('dMore')) $('dMore').onclick = () => { dataLimit += 1000; renderDataTable(); };
   if (f && $('dsCore')) $('dsCore').value = fcol?.core || (f.type === 'man' ? M.cores[0]?.id : 'all') || 'all';
@@ -321,7 +332,7 @@ $('dBody').addEventListener('focusout', (e) => {
     if (k >= 0) u.v[k] = v; else { u.d.push(d); u.v.push(v); }
   } else {   // V0.35: any other value is kept as an edit over the original, flagged and reversible
     c.edits ||= {}; const E = (c.edits[col] ||= {}), prev = E[x];
-    const orig = prev ? prev.o : (td.dataset.before === '' ? null : +td.dataset.before.replace(',', '.'));
+    const orig = prev ? prev.o : originalCellValue(c, col, x);   // card Q10: the stored number, not the 6-decimal text
     if (orig != null && v != null && Math.abs(orig - v) <= 1e-12 * Math.max(1, Math.abs(orig))) delete E[x];
     else E[x] = { v, o: orig, at: new Date().toISOString() };
     if (!Object.keys(E).length) delete c.edits[col];
@@ -335,14 +346,14 @@ $('dBody').addEventListener('focusout', (e) => {
   } else if (n && !$('dsRestoreAll')) renderDataTable();
 });
 function renderDataCols() {
-  const cores = S.cores.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  const cores = S.cores.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
   $('dInfo').textContent = '';
   $('dBody').innerHTML = `<h3>${t('data.calcTitle')}</h3><p class="note">${t('data.calcHelp', { f: FUNCTIONS.join(', ') })}</p>
-    <div style="display:grid;gap:6px;max-width:1100px">${S.sheet.columns.map((col, i) => `<div class="colrow" data-i="${i}"><input type="text" data-k="name" value="${esc(col.name)}"><input type="text" data-k="formula" value="${esc(col.formula)}"><select data-k="core"><option value="all">${t('data.allCores')}</option>${S.cores.map((c) => `<option value="${c.id}" ${c.id === col.core ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select><button class="btn small ghost" data-del="${i}">✕</button>${col.error ? `<span class="note" style="grid-column:1/-1;color:var(--danger)">${esc(col.error)}</span>` : ''}</div>`).join('') || `<p class="note">—</p>`}
+    <div style="display:grid;gap:6px;max-width:1100px">${S.sheet.columns.map((col, i) => `<div class="colrow" data-i="${esc(i)}"><input type="text" data-k="name" value="${esc(col.name)}"><input type="text" data-k="formula" value="${esc(col.formula)}"><select data-k="core"><option value="all">${t('data.allCores')}</option>${S.cores.map((c) => `<option value="${esc(c.id)}" ${c.id === col.core ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select><button class="btn small ghost" data-del="${esc(i)}">✕</button>${col.error ? `<span class="note" style="grid-column:1/-1;color:var(--danger)">${esc(col.error)}</span>` : ''}</div>`).join('') || `<p class="note">—</p>`}
     <div class="colrow"><input type="text" id="ncName" placeholder="${t('data.newName')}"><input type="text" id="ncFormula" placeholder="[XRF Ba/Ti] / TOC_pct"><select id="ncCore"><option value="all">${t('data.allCores')}</option>${cores}</select><button class="btn small primary" id="ncAdd">${t('data.addCalc')}</button></div></div>
     <h3>${t('data.manTitle')}</h3><p class="note">${t('data.manHelp')}</p>
     <div class="row"><input type="text" id="nmName" placeholder="${t('data.newName')}"><select id="nmCore">${cores}</select><button class="btn small" id="nmAdd">${t('data.addMan')}</button></div>
-    <div style="display:grid;gap:4px">${S.cores.flatMap((c) => Object.keys(c.user || {}).map((k) => `<div class="row"><span>${esc(c.name)} · <b>${esc(k)}</b> (${c.user[k].v.filter((v) => v != null).length})</span><button class="btn small ghost" data-delman="${c.id}|${esc(k)}">✕</button></div>`)).join('')}</div>`;
+    <div style="display:grid;gap:4px">${S.cores.flatMap((c) => Object.keys(c.user || {}).map((k) => `<div class="row"><span>${esc(c.name)} · <b>${esc(k)}</b> (${c.user[k].v.filter((v) => v != null).length})</span><button class="btn small ghost" data-delman-core="${esc(c.id)}" data-delman-col="${esc(k)}">✕</button></div>`)).join('')}</div>`;
   $('ncAdd').onclick = () => {
     const name = $('ncName').value.trim(), formula = $('ncFormula').value.trim(); if (!name || !formula) return;
     S.sheet.columns.push({ name, formula, core: $('ncCore').value }); refreshAllCores(); geoRT.dirty = true; markDirty(); renderDataCols();
@@ -359,9 +370,9 @@ $('dBody').addEventListener('change', (e) => {
 });
 $('dBody').addEventListener('click', (e) => {
   const d = e.target.closest('button')?.dataset; if (!d) return;
-  if ((d.del != null || d.delman) && !armed(e.target, '?')) return;
+  if ((d.del != null || d.delmanCol != null) && !armed(e.target, '?')) return;
   if (d.del != null) { S.sheet.columns.splice(+d.del, 1); refreshAllCores(); geoRT.dirty = true; markDirty(); renderDataCols(); }
-  else if (d.delman) { const [id, k] = d.delman.split('|'), c = S.cores.find((x) => x.id === id); if (c) { delete c.user[k]; refreshCoreData(c); markDirty(); renderDataCols(); } }
+  else if (d.delmanCol != null) { if (deleteManualColumn(S.cores, d.delmanCore, d.delmanCol)) { refreshCoreData(S.cores.find((x) => x.id === d.delmanCore)); markDirty(); renderDataCols(); } }
 });
 const CELL_COLS = 10, CELL_ROWS = 40;
 function cellResults() {
@@ -379,7 +390,7 @@ function renderDataCells() {
   let h = `<table class="dtable cells"><thead><tr><th></th>${Array.from({ length: CELL_COLS }, (_, c) => `<th>${cellName(c, 0).replace(/\d+/, '')}</th>`).join('')}</tr></thead><tbody>`;
   for (let r = 0; r < CELL_ROWS; r++) {
     h += `<tr><th>${r + 1}</th>`;
-    for (let c = 0; c < CELL_COLS; c++) { const ref = cellName(c, r), raw = S.sheet.cells[ref] ?? '', v = R[ref]; h += `<td class="${v && v.error ? 'err' : ''}" title="${esc(v && v.error ? fxText(v.err || v) : raw)}"><input data-ref="${ref}" data-raw="${esc(raw)}" value="${esc(String(raw).startsWith('=') ? show(v) : raw)}"></td>`; }
+    for (let c = 0; c < CELL_COLS; c++) { const ref = cellName(c, r), raw = S.sheet.cells[ref] ?? '', v = R[ref]; h += `<td class="${v && v.error ? 'err' : ''}" title="${esc(v && v.error ? fxText(v.err || v) : raw)}"><input data-ref="${esc(ref)}" data-raw="${esc(raw)}" value="${esc(String(raw).startsWith('=') ? show(v) : raw)}"></td>`; }
     h += '</tr>';
   }
   $('dBody').innerHTML = h + `</tbody></table><p class="note">${t('data.cellsHelp')}</p>`;

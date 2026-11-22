@@ -10,6 +10,8 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { createTileIpc } = require('../../desktop/tile-ipc.js');
+/** The page announced these stores in its library listing and the user agrees to a deletion (card M8.4.34: the rules themselves are in tile-hardening.test.mjs). */
+function trustedIpc(options) { const ipc = createTileIpc({ confirm: async () => true, ...options }); void ipc.call(0, 'announceProjects', ['p1', 'p2', 'p3', 'p9']); return ipc; }
 const hex = (data) => createHash('sha256').update(data).digest('hex');
 
 function temporary(t) {
@@ -42,7 +44,7 @@ function projectFolder(projects, id, { copy = null } = {}) {
 }
 
 test('deleting a project removes its folder after the engine forgot it, and nothing else', async (t) => {
-  const projects = temporary(t), engine = recordingEngine(), ipc = createTileIpc({ engine, projectsRoot: projects });
+  const projects = temporary(t), engine = recordingEngine(), ipc = trustedIpc({ engine, projectsRoot: projects });
   const doomed = projectFolder(projects, 'p1'), kept = projectFolder(projects, 'p2');
   assert.deepEqual(await ipc.call(1, 'deleteProjectStore', 'p1'), { ok: { deleted: true } });
   assert.deepEqual(engine.calls, [{ op: 'mask.forget', payload: { project: 'p1' } }]);
@@ -58,10 +60,10 @@ test('deleting a project removes its folder after the engine forgot it, and noth
 
 test('a project whose masks are being sent is not deleted; an engine that is not running holds nothing', async (t) => {
   const projects = temporary(t), folder = projectFolder(projects, 'p1');
-  const busy = createTileIpc({ engine: recordingEngine({ failWith: { 'mask.forget': 'BUSY' } }), projectsRoot: projects });
+  const busy = trustedIpc({ engine: recordingEngine({ failWith: { 'mask.forget': 'BUSY' } }), projectsRoot: projects });
   assert.deepEqual(await busy.call(1, 'deleteProjectStore', 'p1'), { error: { code: 'BUSY' } });
   assert.ok(fs.existsSync(folder));
-  const stopped = createTileIpc({ engine: recordingEngine({ failWith: { 'mask.forget': 'ENGINE_UNAVAILABLE' } }), projectsRoot: projects });
+  const stopped = trustedIpc({ engine: recordingEngine({ failWith: { 'mask.forget': 'ENGINE_UNAVAILABLE' } }), projectsRoot: projects });
   assert.deepEqual(await stopped.call(1, 'deleteProjectStore', 'p1'), { ok: { deleted: true } });
   assert.ok(!fs.existsSync(folder));
 });
@@ -70,7 +72,7 @@ test('a delete stopped after the rename leaves a folder that the next start remo
   const projects = temporary(t);
   projectFolder(projects, 'p2');
   fs.renameSync(projectFolder(projects, 'p1'), path.join(projects, '.deleting-' + randomUUID()));
-  createTileIpc({ engine: recordingEngine(), projectsRoot: projects });
+  trustedIpc({ engine: recordingEngine(), projectsRoot: projects });
   assert.deepEqual(fs.readdirSync(projects), ['p2']);
 });
 
@@ -80,7 +82,7 @@ test('a project saved under a new identifier gets the named versions, its source
   fs.writeFileSync(path.join(projects, 'p1', 'sources.json'), JSON.stringify({ format: 'sedcoretool.sources', version: 1, sources: {
     [pyramid]: { path: path.join(projects, 'core.tif'), size: data.length, name: 'core.tif', copy: pyramid + '.tif' },
     [other]: { path: path.join(projects, 'other.tif'), size: 3 } } }));
-  const engine = recordingEngine(), ipc = createTileIpc({ engine, projectsRoot: projects }), progress = [];
+  const engine = recordingEngine(), ipc = trustedIpc({ engine, projectsRoot: projects }), progress = [];
   const [m1, m2] = ['1'.repeat(64), '2'.repeat(64)];
   const result = await ipc.call(1, 'copyProjectStore', 'p1', 'p9', [m1, m2, m1], [pyramid], randomUUID(), (event) => progress.push(event));
   assert.deepEqual(result, { ok: { copied: true } });
@@ -101,13 +103,13 @@ test('a project saved under a new identifier gets the named versions, its source
 test('a failed copy of the versions writes no sources record', async (t) => {
   const projects = temporary(t);
   projectFolder(projects, 'p1');
-  const ipc = createTileIpc({ engine: recordingEngine({ failWith: { 'mask.copy': 'INVALID_BUFFER' } }), projectsRoot: projects });
+  const ipc = trustedIpc({ engine: recordingEngine({ failWith: { 'mask.copy': 'INVALID_BUFFER' } }), projectsRoot: projects });
   assert.deepEqual(await ipc.call(1, 'copyProjectStore', 'p1', 'p9', ['1'.repeat(64)], ['d'.repeat(64)], randomUUID()), { error: { code: 'INVALID_BUFFER' } });
   assert.ok(!fs.existsSync(path.join(projects, 'p9', 'sources.json')));
 });
 
 test('a rename and a removal refused for a moment (a file still held on Windows) are tried again; a lasting refusal is reported', async (t) => {
-  const projects = temporary(t), engine = recordingEngine(), ipc = createTileIpc({ engine, projectsRoot: projects });
+  const projects = temporary(t), engine = recordingEngine(), ipc = trustedIpc({ engine, projectsRoot: projects });
   const doomed = projectFolder(projects, 'p1');
   const rename = fs.renameSync, remove = fs.rmSync;
   let renames = 0, removals = 0;

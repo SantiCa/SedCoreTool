@@ -142,6 +142,9 @@ export class MaskSync {
     this.stopped = false;
     /** Layers sent so far (both layers of a tile count two); tests use it to act while a round is on its way. */
     this.puts = 0;
+    /** Tests only (card M8.4.35): awaited after the last tile of a round is sent and before its commit, so a test can stop the engine there
+     *  without racing the round. Null in the program. @type {(() => Promise<void>) | null} */
+    this.beforeCommit = null;
   }
   /**
    * Something changed: send it (soon). `groups`: the groups of tables whose content may have changed (all by default; none when only mask
@@ -175,6 +178,7 @@ export class MaskSync {
         if (this.stopped) break;
         if (/** @type {any} */ (error)?.local) { this.onState({ state: 'limit', manifest: this.manifest, error }); break; }   // waits for the next change
         this.wanted = true;
+        this.lastError = { code: /** @type {any} */ (error)?.code ?? null, field: /** @type {any} */ (error)?.field ?? null, message: String(/** @type {any} */ (error)?.message ?? error).slice(0, 200) };   // for reports and tests
         this.onState({ state: 'failed', manifest: this.manifest, error });
         const pause = this.retryMs[Math.min(this.failures, this.retryMs.length - 1)];
         this.failures++;
@@ -227,6 +231,7 @@ export class MaskSync {
         this.puts++;
         sent.push([row, col, edit]);
       }
+      if (this.beforeCommit) await this.beforeCommit();
       const manifest = await this.api.commit(staged, tables);
       this.manifest = manifest;
       for (const group of groups) this.acked[group] = built[group];

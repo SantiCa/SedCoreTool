@@ -18,6 +18,7 @@ import math
 import os
 import re
 import sys
+import time
 import zlib
 from array import array
 from collections import OrderedDict
@@ -49,7 +50,11 @@ MAX_MANIFEST_BYTES = 64 * 2**20
 MAX_RETAINED = 1024                             # manifests one `mask.retain` may keep (card M8.4.18a)
 INFO_PAGE = 2048                                # tile positions per `mask.info` answer (the JSON of an answer stays far below 64 KiB)
 COPY_PAGE = 32                                  # tiles per `mask.copy` answer (card M8.4.27): at most 40 MiB read, verified and written
+DERIVED_KINDS = ('reopen',)                     # card M8.4.29: what the page derived from a stored version (decision G); a cache, never project data
+MAX_DERIVED_BYTES = 128 * 2**20                 # uncompressed; the page's limit is stated in the card before measuring, then recorded against the measurement
+DERIVED_NAME = re.compile(r'([0-9a-f]{64})\.([a-z]{1,16})')
 COMPRESSION_LEVEL = 1
+EXPORT_PAGE = 32                                # blobs per `mask.export` or `mask.import` (card M8.4.18c: folder backup and restore)
 BLOB_CACHE_BYTES = 64 * 2**20
 HEX64 = re.compile('[0-9a-f]{64}')
 PROJECT = re.compile('[a-z0-9_-]{1,64}')
@@ -57,7 +62,14 @@ SECTION = re.compile('[A-Za-z0-9_-]{1,64}')
 POSITION_KEY = re.compile(r'(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})')
 WINDOWS_DEVICES = {'con', 'prn', 'aux', 'nul', *(f'com{i}' for i in range(10)), *(f'lpt{i}' for i in range(10))}
 ZEROS = bytes(LAYER_BYTES['labels'])
+MAX_BLOB_BYTES = max(*LAYER_BYTES.values(), *TABLE_LIMITS.values())   # the largest uncompressed blob: a stack table of 16 MiB
 ZERO_LAYER = {layer: bytes(length) for layer, length in LAYER_BYTES.items()}
+# Card M8.4.40: Windows error numbers. A rename over a file another program holds for a moment fails with ERROR_ACCESS_DENIED (5),
+# ERROR_SHARING_VIOLATION (32) or ERROR_LOCK_VIOLATION (33) (Node reports them as EPERM and EBUSY); it is tried again 5 times, after 50, 100,
+# 200, 400 and 800 ms (1.55 s in all). A full disk is ERROR_HANDLE_DISK_FULL (39) or ERROR_DISK_FULL (112), whatever errno Python derives.
+WINDOWS_TRANSIENT_LOCKS = (5, 32, 33)
+REPLACE_RETRY_SECONDS = (0.05, 0.1, 0.2, 0.4, 0.8)
+WINDOWS_DISK_FULL = (39, 112)
 
 
 class MaskError(Exception):
@@ -131,6 +143,14 @@ def _column(name: str, data: bytes) -> array:
     if sys.byteorder == 'big':
         values.byteswap()
     return values
+
+
+def _to_le_bytes(values: array) -> bytes:
+    if sys.byteorder == 'big':
+        copy = array(values.typecode, values)
+        copy.byteswap()
+        return copy.tobytes()
+    return values.tobytes()
 
 
 def check_objects(columns: dict, classes: bytes) -> None:
@@ -258,6 +278,39 @@ class BlobCache:
             self.size -= len(dropped)
 
 
+def inflate_blob(raw: bytes, sha256: str, length: int | None, field: str) -> bytes:
+    """The uncompressed bytes of the zlib stream ``raw``: exactly ``length`` bytes (at most ``MAX_BLOB_BYTES`` when ``length`` is None), one whole
+    stream with nothing after it, hashing to ``sha256``; otherwise ``MaskError('INVALID_BUFFER', field)``."""
+    bound = MAX_BLOB_BYTES if length is None else length
+    try:
+        inflater = zlib.decompressobj()
+        data = inflater.decompress(raw, bound + 1)
+    except zlib.error:
+        raise MaskError('INVALID_BUFFER', field) from None
+    if (len(data) != length if length is not None else not 0 < len(data) <= bound) or not inflater.eof or inflater.unused_data \
+            or inflater.unconsumed_tail or hashlib.sha256(data).hexdigest() != sha256:
+        raise MaskError('INVALID_BUFFER', field)
+    return data
+
+
+def _is_transient_lock(error: OSError) -> bool:
+    """A Windows sharing violation: another program (an antivirus or the search indexer) holds the file for a moment."""
+    return getattr(error, 'winerror', None) in WINDOWS_TRANSIENT_LOCKS
+
+
+def _replace_retrying(source: Path, target: Path) -> None:
+    """``os.replace``, tried again after each delay of ``REPLACE_RETRY_SECONDS`` while it fails with a transient Windows lock (card M8.4.40);
+    any other error, or the last one, is raised."""
+    for delay in (*REPLACE_RETRY_SECONDS, None):
+        try:
+            os.replace(source, target)
+            return
+        except OSError as error:
+            if delay is None or not _is_transient_lock(error):
+                raise
+        time.sleep(delay)
+
+
 def _write_durably(path: Path, data: bytes) -> None:
     """Temporary file in the same folder, flushed to the disk, then renamed over ``path``: a reader sees the old file or the whole new one."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -267,7 +320,7 @@ def _write_durably(path: Path, data: bytes) -> None:
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        _replace_retrying(temporary, path)
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
@@ -293,20 +346,19 @@ class MaskStore:
         data = self.cache.get(key)
         if data is not None and len(data) == length:
             return data
+        data = inflate_blob(self._raw_blob(sha256, length, field), sha256, length, field)
+        self.cache.put(key, data)
+        return data
+
+    def _raw_blob(self, sha256: str, length: int, field: str) -> bytes:
+        """The file of a blob as it is on disk (not verified here)."""
         path = self.blob_path(sha256)
         try:
             if path.is_symlink() or path.stat().st_size > length + length // 100 + 1024:   # more than zlib can need: not ours
                 raise MaskError('INVALID_BUFFER', field)
-            raw = path.read_bytes()
-            inflater = zlib.decompressobj()
-            data = inflater.decompress(raw, length + 1)
-        except (OSError, zlib.error):
+            return path.read_bytes()
+        except OSError:
             raise MaskError('INVALID_BUFFER', field) from None
-        if len(data) != length or not inflater.eof or inflater.unused_data or inflater.unconsumed_tail \
-                or hashlib.sha256(data).hexdigest() != sha256:
-            raise MaskError('INVALID_BUFFER', field)
-        self.cache.put(key, data)
-        return data
 
     def write_blob(self, data: bytes, sha256: str, field: str) -> None:
         """Store ``data`` (whose SHA-256 the caller has checked) unless a valid blob with that name is already there."""
@@ -353,6 +405,101 @@ class MaskStore:
         _write_durably(path, data)
         return name
 
+    def derived_path(self, manifest: str, kind: str) -> Path:
+        return self.folder / 'derived' / f'{manifest}.{kind}'
+
+    def put_derived(self, manifest: str, kind: str, data: bytes) -> int:
+        """Store ``data`` as the derived file ``kind`` of a stored manifest (card M8.4.29), replacing one that is there. The bytes are not read.
+        Returns their length. An unknown kind or a manifest that is not stored is ``INVALID_REQUEST``, too many bytes ``LIMIT_EXCEEDED``."""
+        if kind not in DERIVED_KINDS:
+            raise MaskError('INVALID_REQUEST', 'kind')
+        if not 1 <= len(data) <= MAX_DERIVED_BYTES:
+            raise MaskError('LIMIT_EXCEEDED' if len(data) > MAX_DERIVED_BYTES else 'INVALID_BUFFER', 'derived')
+        self.read_manifest(manifest)                     # raises for a manifest that is not stored or is damaged
+        _write_durably(self.derived_path(manifest, kind), zlib.compress(data, COMPRESSION_LEVEL))
+        return len(data)
+
+    def get_derived(self, manifest: str, kind: str) -> bytes | None:
+        """The bytes of a derived file, or None when there is none. A file that does not decompress to a whole stream of at most
+        ``MAX_DERIVED_BYTES`` is ``MaskError('INVALID_BUFFER', 'derived')``. The manifest need not be readable: the file is a cache."""
+        if kind not in DERIVED_KINDS or not isinstance(manifest, str) or not HEX64.fullmatch(manifest):
+            raise MaskError('INVALID_REQUEST', 'kind' if kind not in DERIVED_KINDS else 'manifest')
+        path = self.derived_path(manifest, kind)
+        try:
+            if path.is_symlink():
+                raise MaskError('INVALID_BUFFER', 'derived')
+            if not path.is_file():
+                return None
+            if path.stat().st_size > MAX_DERIVED_BYTES + MAX_DERIVED_BYTES // 100 + 1024:
+                raise MaskError('INVALID_BUFFER', 'derived')
+            raw = path.read_bytes()
+            inflater = zlib.decompressobj()
+            data = inflater.decompress(raw, MAX_DERIVED_BYTES + 1)
+        except (OSError, zlib.error):
+            raise MaskError('INVALID_BUFFER', 'derived') from None
+        if not data or len(data) > MAX_DERIVED_BYTES or not inflater.eof or inflater.unused_data or inflater.unconsumed_tail:
+            raise MaskError('INVALID_BUFFER', 'derived')
+        return data
+
+    def blob_lengths(self, sha256: str) -> dict[str, tuple[int, str]]:
+        """Every blob a stored manifest names, with its uncompressed length and the field an error names (``tile`` or ``tables.<name>``)."""
+        manifest, tiles = self.read_manifest(sha256)
+        named = {name: (LAYER_BYTES[layer], 'tile') for entry in tiles.values() for layer in SAMPLE_BYTES if (name := entry[layer])}
+        named.update({table['sha256']: (table['byte_length'], f'tables.{key}') for key, table in manifest['tables'].items() if table})
+        return named
+
+    def export_manifest(self, sha256: str) -> bytes:
+        """The file of a stored manifest, checked (card M8.4.18c): its bytes are its canonical form and hash to its name."""
+        manifest, _ = self.read_manifest(sha256)
+        return canonical(manifest)
+
+    def export_blobs(self, sha256: str, names) -> list[bytes]:
+        """The files of 1 to ``EXPORT_PAGE`` blobs that the stored manifest ``sha256`` names, exactly as stored (zlib streams), each checked
+        to decompress to bytes with its name's hash before it is returned (card M8.4.18c). A name the manifest does not use is
+        ``INVALID_REQUEST`` (``blobs``); a damaged blob ``INVALID_BUFFER`` with its field."""
+        named = self.blob_lengths(sha256)
+        if not isinstance(names, list) or not 1 <= len(names) <= EXPORT_PAGE or not all(isinstance(name, str) and name in named for name in names):
+            raise MaskError('INVALID_REQUEST', 'blobs')
+        files = []
+        for name in names:
+            length, field = named[name]
+            raw = self._raw_blob(name, length, field)
+            inflate_blob(raw, name, length, field)
+            files.append(raw)
+        return files
+
+    def import_blobs(self, files) -> list[bool]:
+        """Store blobs given as ``(name, zlib stream)`` pairs, from a backup (card M8.4.18c). Each is accepted only if it decompresses, within
+        ``MAX_BLOB_BYTES``, to one whole stream whose SHA-256 is its name; returns, in order, whether each was accepted (a refused one is not
+        written, and does not stop the others)."""
+        accepted = []
+        for name, raw in files:
+            try:
+                if not (isinstance(name, str) and HEX64.fullmatch(name)) or len(raw) > MAX_BLOB_BYTES + MAX_BLOB_BYTES // 100 + 1024:
+                    raise MaskError('INVALID_BUFFER', 'blob')
+                data = inflate_blob(raw, name, None, 'blob')
+            except MaskError:
+                accepted.append(False)
+                continue
+            self.write_blob(data, name, 'blob')
+            accepted.append(True)
+        return accepted
+
+    def import_manifest(self, sha256: str, data: bytes) -> str:
+        """Store a manifest file from a backup (card M8.4.18c): it must pass every check of a stored one, and every blob it names must already be
+        in this store (else ``INVALID_REQUEST``, ``blobs``, and nothing is written). Written last, so a restore stopped half-way leaves only
+        blobs that no manifest names."""
+        if not isinstance(sha256, str) or not HEX64.fullmatch(sha256):
+            raise MaskError('INVALID_REQUEST', 'manifest')
+        manifest, tiles = parse_manifest(data, sha256)
+        names = {name for entry in tiles.values() for name in (entry['labels'], entry['exclude']) if name}
+        names.update(table['sha256'] for table in manifest['tables'].values() if table)
+        if not all(self.blob_path(name).is_file() and not self.blob_path(name).is_symlink() for name in names):
+            raise MaskError('INVALID_REQUEST', 'blobs')
+        if self.write_manifest(manifest) != sha256:
+            raise MaskError('INTERNAL', 'manifest')
+        return sha256
+
     def blobs_of(self, sha256: str) -> set[str]:
         """Every blob a stored manifest names: its tiles' layers and its tables."""
         manifest, tiles = self.read_manifest(sha256)
@@ -388,6 +535,12 @@ class MaskStore:
                 path.unlink(missing_ok=True)
                 self.manifests.pop(name, None)
                 removed['manifests'] += 1
+        for path in sorted((self.folder / 'derived').glob('*')):                    # card M8.4.29: a derived file goes with its manifest
+            match = DERIVED_NAME.fullmatch(path.name)
+            if path.is_symlink():
+                continue
+            if (match and match.group(2) in DERIVED_KINDS and match.group(1) not in kept) or path.name.endswith('.tmp'):
+                path.unlink(missing_ok=True)                                         # also a temporary file a stop left half-way
         for path in sorted((self.folder / 'blobs').glob('*/*')):
             name = path.name
             if HEX64.fullmatch(name) and path.parent.name == name[:2] and name not in used and not path.is_symlink():
@@ -450,6 +603,127 @@ class MaskStore:
         entry = tiles.get((row, col))
         sha256 = entry[layer] if entry else None
         return None if sha256 is None else self.read_blob(sha256, LAYER_BYTES[layer], 'tile')
+
+    def slice_rows(self, sha256: str, section: str, row0: int, row1: int) -> tuple[dict, bytes]:
+        """Write a new stored version from tile rows ``[row0, row1)`` of a stored version (card M8.4.43).
+
+        Every tile blob in the range is verified and reused directly by its SHA-256 (no re-encoding or rewriting), with its tile row shifted by
+        ``-row0``. The ``classes`` blob is reused; the four object columns keep only the objects present in those tiles (in their original order,
+        reusing the blobs when all objects remain); overlap stacks keep their original indices for the stacks present in those tiles (empty slots
+        for unused indices below the highest used stack, or ``[0, 0]`` with ``stack_members: None`` when none is used). The new manifest is
+        written last; the source manifest and its blobs are never touched. Returns ``(result, binary_payload)`` where ``binary_payload`` holds
+        the kept ``object_ids`` followed by the sorted used stack indices, both little-endian ``u32``."""
+        if not valid_section(section):
+            raise MaskError('INVALID_REQUEST', 'section')
+        manifest, tiles = self.read_manifest(sha256)
+        rows, _ = grid(manifest['width'], manifest['height'])
+        if type(row0) is not int or type(row1) is not int or not (0 <= row0 < row1 <= rows):
+            raise MaskError('INVALID_REQUEST', 'rows')
+        width = manifest['width']
+        height = min(manifest['height'], row1 * TILE) - row0 * TILE
+        grid(width, height)
+        tables = manifest['tables']
+        classes_bytes = self.read_blob(tables['classes']['sha256'], tables['classes']['byte_length'], 'tables.classes')
+        offsets_bytes = self.read_blob(tables['stack_offsets']['sha256'], tables['stack_offsets']['byte_length'], 'tables.stack_offsets')
+        members_bytes = (self.read_blob(tables['stack_members']['sha256'], tables['stack_members']['byte_length'], 'tables.stack_members')
+                         if tables['stack_members'] is not None else None)
+        offsets = _column('stack_offsets', offsets_bytes)
+        members = _column('stack_members', members_bytes) if members_bytes is not None else array('I')
+        if len(offsets) < 2 or offsets[0] != 0 or offsets[1] != 0 or any(offsets[i] > offsets[i + 1] for i in range(len(offsets) - 1)):
+            raise MaskError('INVALID_BUFFER', 'tables.stack_offsets')
+        if offsets[-1] != len(members):
+            raise MaskError('INVALID_BUFFER', 'tables.stack_members')
+        col_bytes = {name: (self.read_blob(tables[name]['sha256'], tables[name]['byte_length'], f'tables.{name}')
+                            if tables[name] is not None else None) for name in OBJECT_COLUMNS}
+        check_objects(col_bytes, classes_bytes)
+
+        sliced_tiles: dict[tuple[int, int], dict] = {}
+        present_ids: set[int] = set()
+        used_stacks: set[int] = set()
+        stack_limit = len(offsets) - 1
+        for (row, col), entry in sorted(tiles.items()):
+            if not (row0 <= row < row1):
+                continue
+            if entry['exclude']:
+                self.read_blob(entry['exclude'], LAYER_BYTES['exclude'], 'tile')
+            if entry['labels']:
+                labels_bytes = self.read_blob(entry['labels'], LAYER_BYTES['labels'], 'tile')
+                for value in set(_column('object_class', labels_bytes)):       # i32le labels
+                    if value > 0:
+                        present_ids.add(value)
+                    elif value < 0:
+                        index = -value
+                        if not 1 <= index < stack_limit:
+                            raise MaskError('INVALID_BUFFER', 'tile')
+                        used_stacks.add(index)
+            sliced_tiles[(row - row0, col)] = dict(entry)
+        for index in used_stacks:
+            present_ids.update(members[offsets[index]:offsets[index + 1]])
+
+        new_tables: dict = {'classes': tables['classes']}
+        if col_bytes['object_ids'] is not None:
+            src_ids = _column('object_ids', col_bytes['object_ids'])
+            kept = [i for i, oid in enumerate(src_ids) if oid in present_ids]
+            if len(kept) == len(src_ids):
+                for name in OBJECT_COLUMNS:
+                    new_tables[name] = tables[name]
+                out_ids = src_ids
+            elif not kept:
+                for name in OBJECT_COLUMNS:
+                    new_tables[name] = None
+                out_ids = array('I')
+            else:
+                out_ids = array('I', (src_ids[i] for i in kept))
+                for name in OBJECT_COLUMNS:
+                    if name == 'object_ids':
+                        col = out_ids
+                    else:
+                        src_col = _column(name, col_bytes[name])
+                        col = array(src_col.typecode, (src_col[i] for i in kept))
+                    data = _to_le_bytes(col)
+                    digest = hashlib.sha256(data).hexdigest()
+                    write_or_disk_error(self.write_blob, data, digest, f'tables.{name}')
+                    new_tables[name] = {'sha256': digest, 'byte_length': len(data)}
+        else:
+            for name in OBJECT_COLUMNS:
+                new_tables[name] = None
+            out_ids = array('I')
+
+        sorted_stacks = sorted(used_stacks)
+        if sorted_stacks and len(sorted_stacks) == len(offsets) - 2:
+            new_tables['stack_offsets'] = tables['stack_offsets']
+            new_tables['stack_members'] = tables['stack_members']
+        elif not sorted_stacks and tables['stack_members'] is None and len(offsets) == 2:
+            new_tables['stack_offsets'] = tables['stack_offsets']
+            new_tables['stack_members'] = None
+        else:
+            max_stack = sorted_stacks[-1] if sorted_stacks else 0
+            new_offsets = array('I', [0])
+            new_members = array('I')
+            for index in range(max_stack + 1):
+                if index in used_stacks:
+                    new_members.extend(members[offsets[index]:offsets[index + 1]])
+                new_offsets.append(len(new_members))
+            off_bytes = _to_le_bytes(new_offsets)
+            off_sha = hashlib.sha256(off_bytes).hexdigest()
+            write_or_disk_error(self.write_blob, off_bytes, off_sha, 'tables.stack_offsets')
+            new_tables['stack_offsets'] = {'sha256': off_sha, 'byte_length': len(off_bytes)}
+            if new_members:
+                mem_bytes = _to_le_bytes(new_members)
+                mem_sha = hashlib.sha256(mem_bytes).hexdigest()
+                write_or_disk_error(self.write_blob, mem_bytes, mem_sha, 'tables.stack_members')
+                new_tables['stack_members'] = {'sha256': mem_sha, 'byte_length': len(mem_bytes)}
+            else:
+                new_tables['stack_members'] = None
+
+        new_manifest = {'format': FORMAT, 'version': VERSION, 'section': section, 'width': width, 'height': height, 'tile': TILE,
+                        'tiles': {f'{row}.{col}': entry for (row, col), entry in sorted(sliced_tiles.items())},
+                        'tables': {name: new_tables[name] for name in TABLES}}
+        new_name = write_or_disk_error(self.write_manifest, new_manifest)
+        joined = _to_le_bytes(out_ids) + _to_le_bytes(array('I', sorted_stacks))
+        return ({'manifest': new_name, 'width': width, 'height': height, 'tile_count': len(sliced_tiles),
+                 'object_count': len(out_ids), 'stack_count': len(sorted_stacks),
+                 'sha256': hashlib.sha256(joined).hexdigest()}, joined)
 
 
 class Staging:
@@ -531,6 +805,6 @@ def write_or_disk_error(write, *arguments):
     try:
         return write(*arguments)
     except OSError as error:
-        if error.errno in (errno.ENOSPC, getattr(errno, 'EDQUOT', errno.ENOSPC)):
+        if error.errno in (errno.ENOSPC, getattr(errno, 'EDQUOT', errno.ENOSPC)) or getattr(error, 'winerror', None) in WINDOWS_DISK_FULL:
             raise MaskError('LIMIT_EXCEEDED', 'disk') from None
         raise

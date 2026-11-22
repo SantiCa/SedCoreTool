@@ -121,7 +121,7 @@ def test_small_buffers_cannot_bypass_the_live_handle_limit():
             store.begin(descriptor)
         store.release(next(iter(store.buffers)))
         store.begin(descriptor)
-        assert len(store.buffers) == MAX_HANDLES == 256
+        assert len(store.buffers) == MAX_HANDLES == 1024     # contract §9.7 (card M8.5.2); was 256
     finally:
         store.close()
 
@@ -562,5 +562,78 @@ def test_a_derived_buffer_works_through_the_coordinator_and_analyses_like_a_buff
         refused = send("buffer.derive", {"base": derived["result"]["handle"], "dtype": "i32le", "shape": [len(base) // 4], "byte_length": len(base),
                                          "sha256": "0" * 64})
         assert refused["status"] == "error" and refused["error"]["code"] == "INVALID_BUFFER"
+    finally:
+        coordinator.close()
+
+
+def test_a_session_answers_more_than_65536_requests(tmp_path):
+    """Decision V (card M8.4.40): the coordinator remembers a sliding window of request IDs instead of ending the session at 65,536."""
+    coordinator = Coordinator(io.BytesIO(), version='test', runtime_id='0' * 64, scratch_directory=str(tmp_path))
+    session = str(uuid4())
+    try:
+        coordinator.receive(request(session, 'hello', {'protocol': 1}))
+        for _ in range(65_600):
+            coordinator.output = io.BytesIO()               # keep memory flat: only the last answer is read
+            item = request(session, 'buffer.release', {'handles': []})
+            coordinator.receive(item)
+        assert responses(coordinator)[item['id']]['status'] == 'ok'
+        assert len(coordinator.seen) == 65_536
+    finally:
+        coordinator.close()
+
+
+def test_the_request_window_refuses_recent_duplicates_and_forgets_the_oldest(tmp_path):
+    coordinator = Coordinator(io.BytesIO(), version='test', runtime_id='0' * 64, scratch_directory=str(tmp_path))
+    coordinator.request_window = 4
+    session = str(uuid4())
+    try:
+        coordinator.receive(request(session, 'hello', {'protocol': 1}))
+        items = [request(session, 'buffer.release', {'handles': []}) for _ in range(5)]
+        for item in items:
+            coordinator.receive(item)
+        for item in items[2:]:                               # still in the window: refused without being run again
+            coordinator.output = io.BytesIO()
+            coordinator.receive(item)
+            assert responses(coordinator)[item['id']]['error']['code'] == 'INVALID_REQUEST'
+        coordinator.output = io.BytesIO()
+        coordinator.receive(items[0])                        # the oldest identifiers left the window
+        assert responses(coordinator)[items[0]['id']]['status'] == 'ok'
+        assert list(coordinator.seen) == [items[2]['id'], items[3]['id'], items[4]['id'], items[0]['id']]
+    finally:
+        coordinator.close()
+
+
+def test_the_operation_table_matches_the_client_allowlist_and_the_contract_kinds():
+    """Card M8.5.1 (contract §9.5): the coordinator's table and `desktop/engine.js` `OPERATIONS` name the same operations."""
+    import re
+
+    from sedcoretool.engine.server import HANDSHAKE, MASK_OPERATIONS, OPERATION_KINDS, OPERATIONS
+
+    client = (Path(__file__).resolve().parents[1] / 'desktop' / 'engine.js').read_text(encoding='utf-8')
+    allowlist = re.search(r'const OPERATIONS = new Set\(\[(.*?)\]\);', client, re.S)
+    assert allowlist, 'desktop/engine.js no longer declares OPERATIONS as a Set literal'
+    assert set(re.findall(r"'([a-z.]+)'", allowlist.group(1))) == set(OPERATIONS)
+    assert HANDSHAKE in OPERATIONS
+    assert all(entry.kind in OPERATION_KINDS and callable(entry.handler) for entry in OPERATIONS.values())
+    kinds = {kind: {name for name, entry in OPERATIONS.items() if entry.kind == kind} for kind in OPERATION_KINDS}
+    assert kinds['job'] == {'section.analyze', 'method.run', 'buffer.digest', 'pyramid.build'}
+    assert kinds['mask'] == set(MASK_OPERATIONS)
+
+
+def test_dispatch_refuses_before_the_handshake_and_unknown_or_unconfigured_operations(tmp_path):
+    coordinator = Coordinator(io.BytesIO(), version='test', runtime_id='0' * 64, scratch_directory=str(tmp_path))
+    session = str(uuid4())
+    try:
+        for operation in ('buffer.release', 'no.such.operation'):
+            with pytest.raises(ProtocolError, match='handshake required'):
+                coordinator.receive(request(session, operation, {'handles': []}))
+        coordinator.receive(request(session, 'hello', {'protocol': 1}))
+        with pytest.raises(ProtocolError, match='unsupported handshake'):
+            coordinator.receive(request(session, 'hello', {'protocol': 1}))
+        refused = [request(session, operation, {}) for operation in ('no.such.operation', '__init__', 'mask.info', 'tile.read')]
+        for item in refused:                                 # no projects or pyramid folder was given to this coordinator
+            coordinator.receive(item)
+        answers = responses(coordinator)
+        assert [answers[item['id']]['error']['code'] for item in refused] == ['UNSUPPORTED_METHOD'] * len(refused)
     finally:
         coordinator.close()

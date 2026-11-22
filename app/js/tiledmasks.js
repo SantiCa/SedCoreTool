@@ -109,6 +109,13 @@ export class MaskTiles {
     for (const [i, entry] of this.entries) if (entry.dirty) out.push([Math.floor(i / this.cols), i % this.cols]);
     return out;
   }
+  /** Card M8.4.41: number of tiles of the section that hold labels, in the page or (stored, not loaded) in the engine. */
+  labelledTileCount() {
+    let n = 0;
+    for (const entry of this.entries.values()) if (entry.labels) n++;
+    for (const i of this.stored) if (!this.entries.has(i)) n++;
+    return n;
+  }
   /** Whether any layer of the section is non-zero, in the page or in the engine. */
   hasContent() {
     if (this.stored.size) return true;

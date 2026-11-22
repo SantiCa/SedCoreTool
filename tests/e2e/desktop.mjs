@@ -58,7 +58,7 @@ async function close(run) {
   } finally { clearTimeout(timer); run.browser.disconnect(); }
 }
 
-const BRIDGE_OPERATIONS = ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'deriveBuffer', 'readBuffer', 'release', 'restart', 'status'];   // plus the boolean `enabled`
+const BRIDGE_OPERATIONS = ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'deriveBuffer', 'readBuffer', 'release', 'restart', 'runMethod', 'status'];   // plus the boolean `enabled`
 const fixture = JSON.parse(readFileSync(new URL('../fixtures/section-intervals/basic-four-intervals.json', import.meta.url), 'utf8'));
 
 /** Runs in the page: uploads a reference fixture through window.corantoolDesktop.engine, analyses it and reads one result column. */
@@ -134,7 +134,7 @@ try {
     const engine = await p.evaluate(() => window.corantoolDesktop.engine.status());
     assert.equal(engine.state, 'ready', 'experimental engine must start from the selected runtime');
     assert.equal(engine.protocol, 1);
-    assert.deepEqual(engine.methods, ['buffer.digest/1', 'section.intervals/1'], 'the engine advertises its diagnostic and the first scientific method; the interface does not call it yet');
+    assert.deepEqual(engine.methods, ['buffer.digest/1', 'section.intervals/1', 'core.ages/1'], 'the engine advertises its diagnostic and the first scientific method; the interface does not call it yet');
     assert.equal(engine.runtime, process.env.SEDCORETOOL_ENGINE_PYTHON ? 'unverified-development' : 'bundled-verified');
     const outcome = await p.evaluate(bridgeRoundTrip, fixture);
     assert.deepEqual(outcome.operations, BRIDGE_OPERATIONS, 'the page sees exactly the documented engine bridge');
@@ -166,6 +166,44 @@ try {
   assert.ok(desktop.ort, 'bundled ONNX runtime');
   assert.ok(desktop.csp, 'CSP present');
   assert.deepEqual(desktop.rejected, [403, 403, 403, 403, 403], 'desktop protocol rejects outside and malformed paths');
+  // Card M8.4.34: no script from a remote origin (the page's own policy names two CDNs for the browser build; the desktop adds one that does not), no
+  // navigation outside the app origin, and links that are not web or mail addresses open nothing.
+  const violation = await p.evaluate(() => new Promise((resolve) => {
+    document.addEventListener('securitypolicyviolation', (event) => resolve({ directive: event.effectiveDirective, uri: event.blockedURI }), { once: true });
+    const el = document.createElement('script'); el.src = 'https://cdn.jsdelivr.net/npm/is-odd@3.0.1/index.js'; document.head.append(el);
+    setTimeout(() => resolve(null), 10000);
+  }));
+  assert.ok(violation && /^script-src/.test(violation.directive) && violation.uri.startsWith('https://cdn.jsdelivr.net/'), 'a script from a CDN is blocked by the desktop policy: ' + JSON.stringify(violation));
+  const windowsBefore = run.browser.targets().filter((x) => x.type() === 'page').length;
+  await p.evaluate(() => { window.open('file:///C:/Windows/win.ini'); window.open('javascript:window.__injected = 1'); window.open('data:text/html,<p>x</p>'); window.open('app://other/app/index.html'); });
+  await p.evaluate(() => { try { location.href = 'https://example.org/'; } catch { /* refused */ } });
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.equal(await p.evaluate(() => location.origin), 'app://corantool', 'the page did not navigate away');
+  assert.equal(await p.evaluate(() => window.__injected ?? null), null, 'a javascript: link ran nothing');
+  assert.equal(run.browser.targets().filter((x) => x.type() === 'page').length, windowsBefore, 'no window opened for file:, javascript:, data: or another app host');
+  console.log('Desktop hardening: remote script blocked, navigation away refused, file/javascript/data links open nothing.');
+  // Card Q14: the top bar keeps its height when its hidden buttons and a long save state appear (on GitHub a "Retry save" button made a mode
+  // button wrap onto two lines, and the image under the pointer moved by 19 rows while a stroke was drawn).
+  for (const [width, height] of [[1600, 1000], [1200, 800]]) {
+    await p.setViewport({ width, height });
+    for (let language = 0; language < 2; language++) {
+      const heights = await p.evaluate(async () => {
+        const header = document.querySelector('header.top'), ids = ['saveRetry', 'diagIndicator', 'bkReactivateTop'], state = document.getElementById('saveState');
+        const measure = () => header.getBoundingClientRect().height, before = measure(), text = state.textContent;
+        for (const id of ids) document.getElementById(id).hidden = false;
+        state.textContent = 'W'.repeat(60);
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const crowded = measure();
+        for (const id of ids) document.getElementById(id).hidden = true;
+        state.textContent = text;
+        return { before, crowded, language: document.documentElement.lang };
+      });
+      assert.equal(heights.crowded, heights.before, `the top bar keeps its height at ${width} px with every button shown: ${JSON.stringify(heights)}`);
+      await p.click('#langBtn');
+    }
+  }
+  await p.setViewport(null);
+  console.log('Top bar: same height with every hidden button and a long save state, 1600 and 1200 px, both languages.');
   let backupWindow = 0;
   const backupBrowser = { newPage: async () => {
     const url = `app://corantool/app/index.html?backup-test=${++backupWindow}`;
@@ -220,6 +258,7 @@ try {
   await p.waitForFunction(() => window.ichantool.S.sections.length === 6 && window.ichantool.S.sections.every((s) => s.objects.size > 0), { timeout: 90000 });
   await p.waitForFunction(() => document.getElementById('saveState').dataset.state === 'saved', { timeout: 30000 });
   const before = await p.evaluate(signature);
+  assert.equal(await p.evaluate(() => 'left_out' in window.ichantool.exportedProject()), false, 'card M8.4.33: a project without tiled sections is packaged as before');
   const engineOn = process.env.SEDCORETOOL_ENGINE_EXPERIMENT === '1';
   const parity = await p.evaluate(compareWithReference);
   assert.deepEqual(parity.mismatches, [], 'the interface shows the JavaScript reference');

@@ -44,10 +44,43 @@ function resolveAppPath(rawUrl, webRoot = WEB, pathMod = path) {
   return file;
 }
 
+/**
+ * Card M8.4.34: the addresses the program opens outside itself: `https:`, `http:` and `mailto:` only (`file:`, `javascript:`, `data:`, `app:` of
+ * another host, custom schemes that name a program, ... are never handed to the operating system). Returns the address, or null.
+ * @param {unknown} rawUrl
+ */
+function safeExternalUrl(rawUrl) {
+  if (typeof rawUrl !== 'string' || rawUrl.length > 8192) return null;
+  let u;
+  try { u = new URL(rawUrl); } catch { return null; }
+  if (!['https:', 'http:', 'mailto:'].includes(u.protocol)) return null;
+  if (u.protocol !== 'mailto:' && (!u.hostname || u.username || u.password)) return null;
+  return u.href;
+}
+
+/** Card M8.4.34: whether a navigation stays inside the program (the app origin's own pages); anything else is refused, not opened. @param {unknown} rawUrl */
+const isAppNavigation = (rawUrl) => resolveAppPath(rawUrl) !== null;
+
+/**
+ * Card M8.4.38: whether an IPC call comes from the top frame of an app page (never from a frame inside it). The checks of `engine:`, `tiles:`
+ * and `trainer:`. @param {any} event an `IpcMainInvokeEvent`
+ */
+const fromTopAppFrame = (event) => Boolean(event?.senderFrame && resolveAppPath(event.senderFrame.url) && event.senderFrame === event.sender?.mainFrame);
+
+// Card M8.4.34: the desktop build carries every script it runs (app/vendor), so its pages may not load a script from anywhere else; the policy of
+// the page itself (a `<meta>` that also names the two CDNs for the browser build) is kept, and this one is added: both must allow a script.
+const DESKTOP_SCRIPT_POLICY = "script-src 'self' 'wasm-unsafe-eval'";
+
 function handleAppRequest(req, { webRoot = WEB, pathMod = path, fetchFile } = {}) {
   const file = resolveAppPath(req && req.url, webRoot, pathMod);
   if (!file) return new Response('forbidden', { status: 403 });
-  return fetchFile ? fetchFile(file) : require('electron').net.fetch(pathToFileURL(file).toString());
+  const answer = fetchFile ? fetchFile(file) : require('electron').net.fetch(pathToFileURL(file).toString());
+  if (!/\.html?$/i.test(file)) return answer;
+  return Promise.resolve(answer).then((response) => {
+    const headers = new Headers(response.headers);
+    headers.set('Content-Security-Policy', DESKTOP_SCRIPT_POLICY);
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  });
 }
 
 function setupSessionPermissions(ses) {
@@ -86,11 +119,21 @@ if (process.versions.electron) {
     win.removeMenu();
     win.loadURL('app://corantool/app/index.html');
     // external links open in the system browser; the app's own floating windows stay inside
-    win.webContents.setWindowOpenHandler(({ url }) => (resolveAppPath(url) ? { action: 'allow', overrideBrowserWindowOptions: { width: 1200, height: 850, autoHideMenuBar: true } } : (String(url || '').startsWith('app:') ? { action: 'deny' } : (shell.openExternal(url), { action: 'deny' }))));
+    win.webContents.setWindowOpenHandler(({ url }) => {
+      if (resolveAppPath(url)) return { action: 'allow', overrideBrowserWindowOptions: { width: 1200, height: 850, autoHideMenuBar: true } };
+      const external = safeExternalUrl(url);                          // card M8.4.34: only web and mail addresses leave the program
+      if (external) void shell.openExternal(external).catch(() => {});
+      return { action: 'deny' };
+    });
     return win;
   }
 
   app.whenReady().then(async () => {
+    // Card M8.4.34: no page of the program (its own windows included) may navigate to, or be redirected to, an address outside the app origin.
+    app.on('web-contents-created', (_event, contents) => {
+      const refuse = (event, url) => { if (!isAppNavigation(url)) event.preventDefault(); };
+      contents.on('will-navigate', refuse); contents.on('will-redirect', refuse); contents.on('will-frame-navigate', refuse);
+    });
     protocol.handle('app', (req) => handleAppRequest(req, { fetchFile: (file) => net.fetch(pathToFileURL(file).toString()) }));
     // keep the project library: ask Chromium to treat the storage as persistent
     setupSessionPermissions(session.defaultSession);
@@ -185,7 +228,7 @@ if (process.versions.electron) {
     const bridge = createEngineIpc({ engine });
     for (const name of bridge.OPERATIONS) {
       ipcMain.handle(`engine:${name}`, (event, ...args) => {
-        if (!fromApp(event) || event.senderFrame !== event.sender.mainFrame) throw new Error('forbidden');
+        if (!fromTopAppFrame(event)) throw new Error('forbidden');
         return bridge.call(event.sender.id, name, ...args);
       });
     }
@@ -205,11 +248,18 @@ if (process.versions.electron) {
     ipcMain.on('tiles:enabled', (event) => { event.returnValue = fromApp(event) && enabled; });
     if (!enabled) return;
     const bridge = createTileIpc({ engine, pyramidRoot: path.join(app.getPath('userData'), 'pyramids'), projectsRoot: path.join(app.getPath('userData'), 'projects'),
-      delivery: process.env.SEDCORETOOL_TILE_DELIVERY === 'direct' ? 'direct' : 'engine' });
+      delivery: process.env.SEDCORETOOL_TILE_DELIVERY === 'direct' ? 'direct' : 'engine',
+      confirm: async ({ project }) => {                               // cards M8.4.34, M8.4.38: a store this session did not create goes only if the user agrees
+        const es = String(app.getLocale()).startsWith('es');
+        const answer = await dialog.showMessageBox({ type: 'warning', buttons: es ? ['Eliminar', 'Cancelar'] : ['Delete', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true,
+          message: es ? `¿Eliminar de este equipo las máscaras guardadas del proyecto «${project}»?` : `Delete the stored masks of the project "${project}" from this computer?`,
+          detail: es ? 'Esta ventana la muestra el programa, no la página. Si no has pedido eliminar este proyecto, elige Cancelar.' : 'This window comes from the program, not from the page. If you did not ask to delete this project, choose Cancel.' });
+        return answer.response === 0;
+      } });
     const WITH_PROGRESS = { build: 1, reopen: 2, locate: 4, copySource: 2, copyProjectStore: 4 };   // operation -> index of its key among the page's arguments
     for (const name of bridge.OPERATIONS) {
       ipcMain.handle(`tiles:${name}`, (event, ...args) => {
-        if (!fromApp(event) || event.senderFrame !== event.sender.mainFrame) throw new Error('forbidden');
+        if (!fromTopAppFrame(event)) throw new Error('forbidden');
         if (Object.hasOwn(WITH_PROGRESS, name)) {
           const sender = event.sender, at = WITH_PROGRESS[name], key = args[at];
           return bridge.call(sender.id, name, ...args.slice(0, at + 1), (progress) => { if (!sender.isDestroyed()) sender.send('tiles:progress', key, progress); });
@@ -230,7 +280,8 @@ if (process.versions.electron) {
     const pySrc = app.isPackaged ? path.join(process.resourcesPath, 'python') : path.join(__dirname, 'python');
     const send = (type, data) => { for (const w of BrowserWindow.getAllWindows()) w.webContents.send('trainer:event', type, data); };
     const tr = new Trainer({ root: path.join(app.getPath('userData'), 'trainer'), pySrc, send });
-    const handle = (ch, fn) => ipcMain.handle(ch, (e, ...a) => { if (!fromApp(e)) throw new Error('forbidden'); return fn(...a); });
+    // Card M8.4.38: only the top frame of an app page may call, as for `engine:` and `tiles:`; `train` checks its options itself (trainer.js).
+    const handle = (ch, fn) => ipcMain.handle(ch, (e, ...a) => { if (!fromTopAppFrame(e)) throw new Error('forbidden'); return fn(...a); });
     handle('trainer:status', () => tr.status());
     handle('trainer:install', () => tr.install());
     handle('trainer:train', (opt) => tr.train(opt));
@@ -241,4 +292,4 @@ if (process.versions.electron) {
   }
 }
 
-module.exports = { APP_HOST, WEB, isWithinRoot, resolveAppPath, handleAppRequest, setupSessionPermissions };
+module.exports = { APP_HOST, WEB, isWithinRoot, resolveAppPath, handleAppRequest, setupSessionPermissions, safeExternalUrl, isAppNavigation, fromTopAppFrame, DESKTOP_SCRIPT_POLICY };

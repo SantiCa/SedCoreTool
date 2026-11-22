@@ -20,12 +20,23 @@ repository (code, comments, documents, commit messages) is written in English.
 3. **Run pending checks first** if the status says "checks pending" (§5.4).
 4. **Find the task card** for what the maintainer asked (§6). No card and the request is not trivial: write the
    card first, or ask.
-5. **Read only what the card lists** under "Read first". You rarely need whole documents.
+5. **Read only what the card lists** under "Read first". You rarely need whole documents. Find a card in
+   `docs/roadmap.md` by searching for its identifier and read only that card; do not open the whole roadmap.
 6. **Make the change** following §3 and §4. Run focused checks as you go.
 7. **Document in the same commit** (§5.2), **commit on the branch** with explicitly named files and **push the
    branch** when a card or a verified checkpoint is finished (§5.1).
-8. **Update the roadmap status** (commit, checks run, next step, open questions).
+8. **Update the roadmap status** (commit, checks run, next step, open questions). Rewrite the block rather than
+   append to it, and keep it to about 30 lines: branch, last verified commit, checks due, the GitHub result of
+   the last pushed commits, next card, decisions waiting and standing reminders. Check logs, audit findings and
+   progress narratives go into the cards' *As built* or `docs/roadmap-history.md`, never into the status.
 9. **Report to the maintainer in Spanish** (§7).
+10. **The session directs; a fresh sub-agent writes each card** (decided by the maintainer on 22 November 2026). The
+    main session acts as architect and director: it reads the state, chooses and briefs cards, reviews, checks,
+    commits, pushes and reports, and gives each card to a new sub-agent of the tier and effort the card's `Model:`
+    field asks for (§6 *Director mode*), so that the director's context grows only by briefs, reports and diffs. The
+    director does a task itself only when delegating it would cost more tokens than doing it (a handful of edits it
+    already understands, reading a CI result, recording the roadmap). The session continues with the next card
+    without starting a new conversation; the repository must still allow a new session to pick up at any point (§7).
 
 ## 2. The project and its documents
 
@@ -79,7 +90,7 @@ Never do any of these without an explicit request from the maintainer in the cur
 7. **Make a failing check pass by weakening it:** no relaxed tolerances, widened deadlines, skipped or deleted
    tests, or reduced integrity checks. Record the failure with its measurement and ask.
 8. **Start work that was not asked for:** unrelated refactors, audits, dependency upgrades, backlog items,
-   sub-agents or automations.
+   sub-agents (except delegating an authorised card under §6 *Director mode*) or automations.
 9. **Add a dependency** without stating the capability it adds, the smallest alternative considered and its cost
    for offline and desktop distribution.
 
@@ -137,10 +148,12 @@ Session work happens on a branch; a version is created only when the maintainer 
    - **Dependency upgrades proposed by Dependabot** are pull requests against `master`. They stay open until the
      maintainer asks for one; its change is then made on the work branch (item 9 of §3 applies), checked like any
      other change, and reaches `master` with the next version.
-2. **Documents in the same commit as the change:**
-   - `CHANGELOG.md`, under `## Unreleased`: a short bullet under **"For users"** when what a user sees, does or
-     gets changes (say what changed for them, not how the work was organised), or under **"Internal"** for tools,
-     tests, refactors and documents.
+2. **Documents in the same commit as the change.** Each fact is written once, in the one place it belongs, and
+   linked from the others:
+   - `CHANGELOG.md`, under `## Unreleased`: a short bullet (one or two sentences) under **"For users"** when what
+     a user sees, does or gets changes (say what changed for them, not how the work was organised), or under
+     **"Internal"** for tools, tests, refactors and documents, naming the card. Functions, limits, test names and
+     the checks run go in the card's *As built*, not in the changelog.
    - `docs/TECHNICAL_DOCUMENTATION.md` when an algorithm, formula, default, file format or validation result
      changes. Formulas there must match the code exactly. It describes current behaviour: no history, no notes to
      reviewers.
@@ -170,7 +183,8 @@ Session work happens on a branch; a version is created only when the maintainer 
 ```
 #### <ID> - <title>            state: Ready | In progress | Blocked | Done
 Goal:         one or two sentences: what will be true afterwards.
-Read first:   the few files and document sections needed. Nothing else is required reading.
+Read first:   the few files, functions and document sections needed, by name (line numbers go stale as soon as
+              another card edits the file). Nothing else is required reading.
 Change:       files to create or modify.
 Do not touch: files and behaviours that must stay as they are.
 Model:        most capable | fast, effort low | medium | high (one reason). See "Which model" below.
@@ -182,7 +196,12 @@ Done when:    observable acceptance criteria.
 - **Two roles.** *Designing* (deciding structure, contracts, acceptance criteria; writing or changing cards) and
   *implementing* (carrying out one card exactly). A design session is run with the most capable model available or
   by the maintainer. An implementing session, with any model, does not redesign: if the card is wrong, incomplete or
-  blocked, stop, write the problem under the card ("Blocked: …") and in the status, and report it.
+  blocked, stop, write the problem under the card ("Blocked: …") and in the status, and report it. A design session
+  that writes cards collects **every decision those cards will need** and asks them together, with a recommendation
+  each, so the maintainer answers once instead of in the middle of each card. **Broad audits** (several reviewers
+  reading the whole code, as in the council audits of November 2026) are among the most expensive work and always add
+  cards: they are held at the milestone gate that closes a milestone (for example M8.4.19), not between its cards,
+  unless the maintainer asks for one.
 - **Which model** (decided by the maintainer on 16 November 2026; the same rule for every assistant: Claude,
   ChatGPT/Codex, Gemini or another). Before starting a card, tell the maintainer in one line which tier and which
   effort the card's `Model:` field asks for and why; if the session runs on another tier or effort, say so and wait
@@ -200,8 +219,60 @@ Done when:    observable acceptance criteria.
     or a measurement that is already scripted.
   - A card without a `Model:` field defaults to the most capable tier with high effort for design work, and to the
     fast tier with medium effort for an implementing card that only measures or documents.
+- **Director mode and sub-agent delegation** (decided by the maintainer on 21 November 2026). This rule is the same for
+  every assistant and client (Claude Code, ChatGPT/Codex, Gemini/Antigravity, Cursor, Copilot or any other) and is
+  written in terms of tiers, not products. When the main session runs on the **most capable tier** and its client can
+  start sub-agents, the session acts as **director** and **prefers delegating to smaller, faster sub-agents whenever the
+  task allows it, to save tokens and quota** on the most capable model. Without asking again, it delegates any authorised
+  `fast`-tier card, and the bounded sub-tasks of a larger card, to a sub-agent pinned to the smallest tier **and the
+  lowest effort** that fit (effort levels as defined under *Which model*):
+  - **Smallest tier, effort low** (for example Claude Haiku, Gemini Flash-Lite, the smallest GPT model): read-only
+    search and inventories that only locate code, trivial edits, high-volume or repetitive lookups, running scripted
+    checks and reporting their result.
+  - **Fast tier, effort low:** documentation, running a scripted measurement or gate.
+  - **Fast tier, effort medium:** bounded implementation following an exact brief, mechanical edits across many
+    sites, writing repetitive tests, read-only inventories that must classify what they find (for example whether a
+    value can come from an imported file).
+  - **Most capable tier** as a sub-agent: only when a delegated sub-task needs it, at the effort the card's `Model:`
+    field asks for.
+  - **Setting the model and effort.** State both in every delegation and set them with the client's own mechanism
+    (for example the `model` and `effort` of Claude Code's sub-agent tool, `Model` of Antigravity's `invoke_subagent`,
+    the model and reasoning effort of a Codex sub-agent). If the client cannot pin a sub-agent's model or effort, say
+    so once and use the closest option it offers (a smaller model rather than a larger one with less effort). If it
+    cannot start sub-agents at all, the session does the work itself; nothing else in these rules changes.
+  - **Delegate only when it pays.** A sub-agent needs a complete brief and its result needs a review. Delegate when
+    the brief and the review clearly cost less than doing the work (as a guide: ten or more similar edits, a long
+    read-only search, a long scripted run); a handful of edits the director already understands are done directly.
+  - **Critical cards** (`most capable` in the `Model:` field: security, saving, formats, packaging, dependencies): the
+    decisions and the review stay with the director, who reviews every changed line before committing. The work
+    itself goes either to the director, delegating only read-only exploration and mechanical edits that follow an
+    exact list, or whole to a fresh sub-agent of the **most capable tier at the card's effort**, which meets the card's
+    `Model:` field; the director's brief then states the policy and the acceptance tests the sub-agent must write.
+  - **Review in proportion to the risk** (decided by the maintainer on 21 November 2026). On a critical card the
+    director reviews every changed line. On a `fast`-tier card the director checks which files changed, that each new
+    test failed before the fix and passes after, the check results, and samples the diff; a fresh sub-agent of the
+    fast tier may first review the diff against the card and list only what looks wrong, so the director reads those
+    parts closely. A finding in a sampled review sends the whole diff to a line-by-line review.
+  - **One fresh sub-agent per card in a run.** In an authorised run (below), the director gives each card to a new
+    sub-agent of the card's tier and effort, with a self-contained brief made from the card and the decisions that
+    apply. The sub-agent starts without the conversation's history, as a new session would, and the director's own
+    context grows only by the briefs, reports and diffs. This is the default way of working (§1 step 10).
+  - **Prepare the next card while one is being written.** While a sub-agent writes card N, the director reads what
+    card N+1 needs and writes its brief, without editing the checkout; card N+1 starts as soon as card N is committed.
+  - **Limits and fallback.** If the session's tier or effort is lower than what a critical card asks for and cannot be
+    raised through a sub-agent, state the gap in one line and wait for the maintainer to switch or say "continue".
+    **One editor at a time** holds strictly: never run two sub-agents that write on the shared checkout at the same
+    time (read-only sub-agents may run in parallel; one writer runs while the director waits). A sub-agent gets a
+    self-contained brief (it does not see the conversation), never redesigns a card, obeys every §3 hard limit and
+    does not commit or push. The director owns the brief, the diff review, the checks, committing and pushing on the
+    work branch, the roadmap and changelog, and the report to the maintainer in Spanish.
 - **One card at a time,** in roadmap order, and only the card the maintainer authorised. Finish or hand over
   before starting another. If a request combines independent workstreams, split it into cards and do the first.
+- **Authorised runs** (decided by the maintainer on 21 November 2026). The maintainer may authorise several cards at
+  once ("do order U: M8.4.39, M8.4.40, M8.4.37"). The session then does them one after another, each committed,
+  pushed and reported in the short form of §7, without asking between cards. It stops only for *Stop and ask* below,
+  a §3 hard limit, or a decision the maintainer has not taken. The run (its cards, and which are done) is written in
+  the roadmap status, so another session can continue it.
 - **Interpret a broad request by intent:** choose the smallest concrete scope that satisfies it, state the
   assumption, continue. Ask only when the goal or a consequential choice cannot be inferred.
 - **Stop and ask when:** an acceptance criterion cannot be met; a hard limit (§3) is in the way; the change would
@@ -221,6 +292,11 @@ Done when:    observable acceptance criteria.
 - **One editor at a time** on the shared checkout, even for different files. All assistants work in this same
   local folder, so handoffs are commits on the work branch (pushed, §5.1) plus the roadmap status; `master` is
   not touched unless asked.
+  - **Exception: two cards in parallel, only with the maintainer's explicit permission for that pair.** The two cards
+    must touch disjoint files (for example an interface card and an engine card). Each runs in its own `git worktree`
+    on its own branch made from the work branch; the sub-agents do not edit `CHANGELOG.md` or the roadmap. The director
+    merges each branch into the work branch with a normal merge, writes the documents, and runs the full checks one
+    after another on the merged state (the engine tests have timing deadlines). Then the worktrees and branches are removed.
 
 ## 7. Handoff and reporting
 
@@ -228,9 +304,10 @@ Done when:    observable acceptance criteria.
   checks run and the next step. A new session must be able to continue from the repository alone, without any
   chat history.
 - When a card is done: mark it, link its changelog entry, move its long record to `docs/roadmap-history.md` and
-  leave one line in the roadmap.
-- **Report to the maintainer in Spanish, briefly:** the result; how it was checked; branch and commit (or version
-  number when one was created); how the change fits into SedCoreTool (which components it touches and how data or
-  control passes between them); and what is genuinely pending, including checks not run and things not measured.
+  leave one line in the roadmap. Then the director continues with the next card (§1 step 10).
+- **Report to the maintainer in Spanish, briefly, in a fixed form of about 8 lines:** the result; how it was checked
+  (which checks, on which platform); branch and commit (or version number when one was created); which components it
+  touches; what is genuinely pending, including checks not run and things not measured; the next card and the tier
+  and effort it asks for. More detail only when the maintainer asks for it.
 - **Be exact about evidence.** Say what was tested, on which platform, and what was not. A configured CI job is not
   a job that ran. A planned part is never described as available.

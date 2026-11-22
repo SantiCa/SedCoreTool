@@ -6,6 +6,8 @@ import io
 import json
 import subprocess
 import sys
+import threading
+import zlib
 from pathlib import Path
 from uuid import uuid4
 
@@ -15,6 +17,7 @@ import pytest
 from sedcoretool.engine.protocol import BINARY_FRAME, MAX_CHUNK, read_frame, strict_json, write_binary, write_json
 from sedcoretool.engine.server import Coordinator
 from sedcoretool.store import masks
+from test_store_tiles import hand_made_pyramid
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVER = ROOT / 'src' / 'sedcoretool' / 'engine' / 'server.py'
@@ -35,11 +38,12 @@ def frames(output):
 class Engine:
     """One coordinator in this process, driven like the main process drives it."""
 
-    def __init__(self, tmp_path, projects=True):
+    def __init__(self, tmp_path, projects=True, pyramids=False):
         (tmp_path / 'scratch').mkdir(exist_ok=True)
         self.output = io.BytesIO()
         self.coordinator = Coordinator(self.output, version='test', runtime_id='0' * 64, scratch_directory=str(tmp_path / 'scratch'),
-                                       projects_directory=str(tmp_path / 'projects') if projects else None)
+                                       projects_directory=str(tmp_path / 'projects') if projects else None,
+                                       pyramid_directory=str(tmp_path / 'pyramids') if pyramids else None, pyramid_budget=2**30)
         self.session = str(uuid4())
         self.call('hello', {'protocol': 1})
 
@@ -48,6 +52,7 @@ class Engine:
         item = request(self.session, operation, payload)
         before = len(frames(self.output))
         self.coordinator.receive(item, data)
+        self.coordinator.answer_masks(wait=True)           # card M8.4.40: mask requests are answered from the MaskIO thread
         found = frames(self.output)[before:]
         assert found[0][0] == 'json' and found[0][1]['id'] == item['id']
         return found[0][1], [value for kind, value in found[1:] if kind == 'binary']
@@ -86,8 +91,8 @@ class Engine:
 def engine(tmp_path):
     made = []
 
-    def make(projects=True):
-        made.append(Engine(tmp_path, projects))
+    def make(projects=True, pyramids=False):
+        made.append(Engine(tmp_path, projects, pyramids))
         return made[-1]
     yield make
     for value in made:
@@ -495,3 +500,378 @@ def test_a_forgotten_project_starts_without_a_session_record(engine):
     assert value.coordinator.session_commits == {}
     value.ok('mask.retain', {'project': 'p1', 'keep': [first]})
     assert stored_names(value)[0] == {first}
+
+
+# ---- Card M8.4.29: derived files (contract §8.7, decision G) ----
+
+def committed_version(value, project='p1', section='s1'):
+    staged = begin(value, project=project, section=section)['staged']
+    data, sha = labels_tile(5)
+    put(value, staged, data, sha)
+    return value.ok('mask.commit', {'staged': staged, 'tables': value.tables()})[0]['manifest']
+
+
+def upload(value, data):
+    """A committed u8 buffer, sent in chunks of at most MAX_CHUNK."""
+    handle = value.ok('buffer.begin', {'dtype': 'u8', 'shape': [len(data)], 'byte_length': len(data), 'sha256': hashlib.sha256(data).hexdigest()})[0]['handle']
+    for offset in range(0, len(data), MAX_CHUNK):
+        part = data[offset:offset + MAX_CHUNK]
+        value.ok('buffer.chunk', {'handle': handle, 'offset': offset, 'byte_length': len(part)}, part)
+    value.ok('buffer.commit', {'handle': handle})
+    return handle
+
+
+def put_derived(value, manifest, data, project='p1', kind='reopen'):
+    return value.ok('mask.derived.put', {'project': project, 'manifest': manifest, 'kind': kind, 'handle': upload(value, data)})[0]
+
+
+def get_derived(value, manifest, project='p1', kind='reopen'):
+    result, binary = value.ok('mask.derived.get', {'project': project, 'manifest': manifest, 'kind': kind})
+    return result, b''.join(binary)
+
+
+def test_a_derived_file_is_stored_with_its_manifest_and_read_back_in_frames(engine):
+    value = engine()
+    manifest = committed_version(value)
+    assert get_derived(value, manifest) == ({'found': False}, b'')
+    body = (b'reopen cache ' + bytes(range(256))) * 9000                       # about 2.4 MB: more than one frame
+    assert put_derived(value, manifest, body) == {'byte_length': len(body)}
+    result, joined = get_derived(value, manifest)
+    assert joined == body and result['found'] is True and result['byte_length'] == len(body)
+    assert result['sha256'] == hashlib.sha256(body).hexdigest() and sum(result['frames']) == len(body) and len(result['frames']) == 3
+    assert all(size <= MAX_CHUNK for size in result['frames'])
+    path = Path(value.coordinator.projects_root) / 'p1' / 'tiles' / 'derived' / f'{manifest}.reopen'
+    assert path.is_file() and path.stat().st_size < len(body)                  # stored compressed
+    assert put_derived(value, manifest, b'second') == {'byte_length': 6} and get_derived(value, manifest)[1] == b'second'   # replaced
+
+
+def test_derived_requests_are_validated(engine):
+    value = engine()
+    manifest = committed_version(value)
+    handle = value.buffer(b'x' * 10, 'u8')
+    base = {'project': 'p1', 'manifest': manifest, 'kind': 'reopen', 'handle': handle}
+    assert value.error('mask.derived.put', {**base, 'kind': 'other'}) == ('INVALID_REQUEST', 'kind')
+    assert value.error('mask.derived.put', {**base, 'manifest': '1' * 64}) == ('INVALID_REQUEST', 'manifest')    # not stored
+    assert value.error('mask.derived.put', {**base, 'manifest': 'xyz'}) == ('INVALID_REQUEST', 'manifest')
+    assert value.error('mask.derived.put', {**base, 'project': 'Bad Name'}) == ('INVALID_REQUEST', 'project')
+    assert value.error('mask.derived.put', {**base, 'handle': 'nope'})[0] == 'INVALID_BUFFER'   # an unknown handle, as for the tables of mask.commit
+    wrong = value.buffer(np.array([1, 2], dtype='<u4').tobytes(), 'u32le')
+    assert value.error('mask.derived.put', {**base, 'handle': wrong}) == ('INVALID_BUFFER', 'derived')            # not u8
+    assert value.error('mask.derived.get', {'project': 'p1', 'manifest': manifest, 'kind': 'other'}) == ('INVALID_REQUEST', 'kind')
+    assert value.error('mask.derived.get', {'project': 'p1', 'manifest': 'abc', 'kind': 'reopen'}) == ('INVALID_REQUEST', 'manifest')
+    assert value.error('mask.derived.get', {'project': 'p1', 'manifest': manifest}) [0] == 'INVALID_REQUEST'
+
+
+def test_the_size_limit_of_a_derived_file(engine, monkeypatch):
+    value = engine()
+    manifest = committed_version(value)
+    monkeypatch.setattr(masks, 'MAX_DERIVED_BYTES', 100)
+    assert put_derived(value, manifest, b'a' * 100) == {'byte_length': 100}
+    handle = value.buffer(b'a' * 101, 'u8')
+    assert value.error('mask.derived.put', {'project': 'p1', 'manifest': manifest, 'kind': 'reopen', 'handle': handle}) == ('LIMIT_EXCEEDED', 'derived')
+    assert get_derived(value, manifest)[1] == b'a' * 100                        # the refused put left the old file
+
+
+def test_a_damaged_derived_file_is_refused_and_replaced_by_the_next_put(engine):
+    value = engine()
+    manifest = committed_version(value)
+    put_derived(value, manifest, b'good data' * 100)
+    path = Path(value.coordinator.projects_root) / 'p1' / 'tiles' / 'derived' / f'{manifest}.reopen'
+    for damaged in (b'not zlib', path.read_bytes()[:-6], path.read_bytes() + b'extra', b''):
+        path.write_bytes(damaged)
+        assert value.error('mask.derived.get', {'project': 'p1', 'manifest': manifest, 'kind': 'reopen'}) == ('INVALID_BUFFER', 'derived')
+    put_derived(value, manifest, b'fresh')
+    assert get_derived(value, manifest)[1] == b'fresh'
+
+
+def test_retain_removes_the_derived_files_of_the_manifests_it_removes_and_leaves_other_files(engine):
+    value = engine()
+    keep, drop = committed_version(value), committed_version(value, section='s2')
+    put_derived(value, keep, b'keep me')
+    put_derived(value, drop, b'drop me')
+    value.close()
+    value = engine()                                                           # a new process has committed nothing: retain removes what it does not name
+    folder = Path(value.coordinator.projects_root) / 'p1' / 'tiles' / 'derived'
+    (folder / 'notes.txt').write_bytes(b'not ours')
+    (folder / f'{keep}.future').write_bytes(b'a kind this version does not know')
+    (folder / f'{drop}.reopen.0123abcd.tmp').write_bytes(b'half written')
+    value.ok('mask.retain', {'project': 'p1', 'keep': [keep]})
+    assert get_derived(value, keep)[1] == b'keep me'
+    assert sorted(path.name for path in folder.iterdir()) == sorted([f'{keep}.reopen', f'{keep}.future', 'notes.txt'])
+    assert value.error('mask.derived.put', {'project': 'p1', 'manifest': drop, 'kind': 'reopen', 'handle': upload(value, b'x')}) == ('INVALID_REQUEST', 'manifest')
+
+
+def test_copy_does_not_carry_derived_files(engine):
+    value = engine()
+    manifest = committed_version(value)
+    put_derived(value, manifest, b'cache')
+    page = value.ok('mask.copy', {'from': 'p1', 'to': 'p2', 'manifest': manifest, 'start': 0})[0]
+    assert page['next'] is None
+    assert get_derived(value, manifest, project='p2') == ({'found': False}, b'')
+
+
+# ---- Card M8.4.18c: export and import of a stored version (folder backup and restore, contract §8.7) ----
+
+def export(value, manifest, blobs=None, project='p1'):
+    """``{name: bytes}`` of a ``mask.export``; each file's bytes are checked against its announced SHA-256."""
+    result, binary = value.ok('mask.export', {'project': project, 'manifest': manifest, 'blobs': blobs})
+    joined, offset, out = b''.join(binary), 0, {}
+    assert result['frames'] == [len(part) for part in binary] and all(len(part) <= MAX_CHUNK for part in binary)
+    for item in result['files']:
+        data = joined[offset:offset + item['byte_length']]
+        assert hashlib.sha256(data).hexdigest() == item['sha256']
+        out[item['name']] = data
+        offset += item['byte_length']
+    assert offset == len(joined)
+    return out
+
+
+def import_files(value, kind, files, project='p1'):
+    joined = b''.join(data for _, data in files)
+    return value.call('mask.import', {'project': project, 'kind': kind, 'handle': upload(value, joined),
+                                      'files': [{'name': name, 'byte_length': len(data)} for name, data in files]})[0]
+
+
+def backup_of(value, manifest, project='p1'):
+    """Every file of a stored version as a backup folder holds them: ``(manifest bytes, {blob name: zlib stream})``."""
+    text = export(value, manifest, project=project)[manifest]
+    names = sorted(masks.MaskStore(Path(value.coordinator.projects_root) / project / 'tiles').blob_lengths(manifest))
+    blobs = {}
+    for start in range(0, len(names), masks.EXPORT_PAGE):
+        blobs.update(export(value, manifest, names[start:start + masks.EXPORT_PAGE], project=project))
+    return text, blobs
+
+
+def test_a_version_exported_from_one_store_is_imported_into_another_and_reads_identically(engine):
+    value = engine()
+    manifest = committed_version(value)
+    text, blobs = backup_of(value, manifest)
+    assert hashlib.sha256(text).hexdigest() == manifest and len(blobs) == 7    # one tile and six tables
+    for name, raw in blobs.items():                                            # the files as stored: zlib streams of the named bytes
+        assert hashlib.sha256(zlib.decompress(raw)).hexdigest() == name
+    assert import_files(value, 'manifest', [(manifest, text)], project='p2')['error']['details']['field'] == 'blobs'   # blobs first
+    response = import_files(value, 'blobs', sorted(blobs.items()), project='p2')
+    assert response['status'] == 'ok' and response['result'] == {'accepted': [True] * 7}
+    assert import_files(value, 'manifest', [(manifest, text)], project='p2')['result'] == {'manifest': manifest}
+    for project in ('p1', 'p2'):
+        _, binary = value.ok('mask.read', {'project': project, 'manifest': manifest, 'layer': 'labels', 'positions': [[0, 0]]})
+        assert b''.join(binary) == labels_tile(5)[0]
+    assert import_files(value, 'blobs', sorted(blobs.items()), project='p2')['result'] == {'accepted': [True] * 7}   # again: nothing changes
+
+
+def test_an_import_refuses_a_corrupt_or_misnamed_blob_and_keeps_the_others(engine):
+    value = engine()
+    manifest = committed_version(value)
+    text, blobs = backup_of(value, manifest)
+    names = sorted(blobs)
+    damaged = bytearray(blobs[names[0]])
+    damaged[len(damaged) // 2] ^= 0xFF
+    trailing = blobs[names[1]] + b'x'
+    swapped = (names[2], blobs[names[3]])
+    bomb = zlib.compress(bytes(masks.MAX_BLOB_BYTES + 1))                     # decompresses beyond the largest blob
+    files = [(names[0], bytes(damaged)), (names[1], trailing), swapped, (names[4], blobs[names[4]]), (hashlib.sha256(b'b').hexdigest(), bomb)]
+    assert import_files(value, 'blobs', files, project='p2')['result'] == {'accepted': [False, False, False, True, False]}
+    store = Path(value.coordinator.projects_root) / 'p2' / 'tiles' / 'blobs'
+    assert sorted(path.name for path in store.glob('*/*')) == [names[4]]      # only the good one was written
+    assert import_files(value, 'manifest', [(manifest, text)], project='p2')['error']['details']['field'] == 'blobs'
+    assert not (Path(value.coordinator.projects_root) / 'p2' / 'tiles' / 'manifests').exists()
+
+
+def test_an_import_refuses_a_manifest_that_is_not_one(engine):
+    value = engine()
+    manifest = committed_version(value)
+    text, blobs = backup_of(value, manifest)
+    assert import_files(value, 'blobs', sorted(blobs.items()), project='p2')['status'] == 'ok'
+    for name, data in ((manifest, text + b' '), ('1' * 64, text), (manifest, text.replace(b'"tile":512', b'"tile":513'))):
+        response = import_files(value, 'manifest', [(name, data)], project='p2')
+        assert (response['error']['code'], response['error']['details']['field']) == ('INVALID_BUFFER', 'manifest')
+    assert not (Path(value.coordinator.projects_root) / 'p2' / 'tiles' / 'manifests').exists()
+
+
+def test_export_and_import_requests_are_validated(engine):
+    value = engine()
+    manifest = committed_version(value)
+    _, blobs = backup_of(value, manifest)
+    name = sorted(blobs)[0]
+    assert value.error('mask.export', {'project': 'p1', 'manifest': '1' * 64, 'blobs': None}) == ('INVALID_REQUEST', 'manifest')
+    assert value.error('mask.export', {'project': 'p1', 'manifest': manifest, 'blobs': ['2' * 64]}) == ('INVALID_REQUEST', 'blobs')   # not named by it
+    assert value.error('mask.export', {'project': 'p1', 'manifest': manifest, 'blobs': []}) == ('INVALID_REQUEST', 'blobs')
+    assert value.error('mask.export', {'project': 'p1', 'manifest': manifest, 'blobs': [name] * (masks.EXPORT_PAGE + 1)}) == ('INVALID_REQUEST', 'blobs')
+    assert value.error('mask.export', {'project': 'Bad', 'manifest': manifest, 'blobs': None}) == ('INVALID_REQUEST', 'project')
+    handle = upload(value, blobs[name])
+    base = {'project': 'p2', 'kind': 'blobs', 'handle': handle, 'files': [{'name': name, 'byte_length': len(blobs[name])}]}
+    assert value.error('mask.import', {**base, 'kind': 'other'}) == ('INVALID_REQUEST', 'kind')
+    assert value.error('mask.import', {**base, 'files': []}) == ('INVALID_REQUEST', 'files')
+    assert value.error('mask.import', {**base, 'files': [{'name': 'x', 'byte_length': 1}]}) == ('INVALID_REQUEST', 'files')
+    assert value.error('mask.import', {**base, 'files': [{'name': name, 'byte_length': len(blobs[name]) + 1}]}) == ('INVALID_BUFFER', 'files')
+    assert value.error('mask.import', {**base, 'kind': 'manifest', 'files': base['files'] * 2}) == ('INVALID_REQUEST', 'files')
+
+
+def test_export_refuses_a_damaged_blob(engine):
+    value = engine()
+    manifest = committed_version(value)
+    tile = labels_tile(5)[1]
+    path = Path(value.coordinator.projects_root) / 'p1' / 'tiles' / 'blobs' / tile[:2] / tile
+    path.write_bytes(path.read_bytes()[:-3])
+    value.coordinator.mask_cache.items.clear()
+    assert value.error('mask.export', {'project': 'p1', 'manifest': manifest, 'blobs': [tile]}) == ('INVALID_BUFFER', 'tile')
+
+
+# ---- Card M8.4.40: mask requests run on their own thread, in order; an open staged version is protected by its folder ----
+
+def slow_disk(monkeypatch, name='retain'):
+    """Make ``MaskStore.<name>`` wait until the test lets it go, as on a slow disk: ``(started, release)`` events."""
+    started, release = threading.Event(), threading.Event()
+    original = getattr(masks.MaskStore, name)
+
+    def slow(self, *args):
+        started.set()
+        assert release.wait(5), 'the test did not let the mask request finish'
+        return original(self, *args)
+    monkeypatch.setattr(masks.MaskStore, name, slow)
+    return started, release
+
+
+def answered(value):
+    return [item['id'] for kind, item in frames(value.output) if kind == 'json']
+
+
+def test_tile_reads_and_cancellations_are_answered_while_a_mask_request_runs(engine, monkeypatch):
+    value = engine(pyramids=True)
+    pyramid, tile = hand_made_pyramid(Path(value.coordinator.pyramid_root), 7)
+    version = committed_version(value)
+    started, release = slow_disk(monkeypatch)
+    retain = request(value.session, 'mask.retain', {'project': 'p1', 'keep': [version]})
+    value.coordinator.receive(retain)                                      # returns at once: the store works on the MaskIO thread
+    assert started.wait(5)
+    read = request(value.session, 'tile.read', {'pyramid': pyramid, 'level': 0, 'positions': [[0, 0]]})
+    cancel = request(value.session, 'job.cancel', {'request_id': str(uuid4())})
+    value.coordinator.receive(read)
+    value.coordinator.receive(cancel)
+    value.coordinator.poll()
+    assert answered(value)[-2:] == [read['id'], cancel['id']] and retain['id'] not in answered(value)
+    found = frames(value.output)
+    at = next(k for k, (kind, item) in enumerate(found) if kind == 'json' and item['id'] == read['id'])
+    assert found[at][1]['status'] == 'ok' and found[at + 1] == ('binary', tile)
+    release.set()
+    value.coordinator.answer_masks(wait=True)
+    response = frames(value.output)[-1][1]
+    assert response['id'] == retain['id'] and response['status'] == 'ok', response
+
+
+def test_mask_requests_run_in_the_order_they_arrived(engine):
+    value = engine()
+    staged = begin(value)['staged']
+    tiles = [labels_tile(k + 1) for k in range(3)]
+    tables = value.tables()
+    sent = []
+    for col, (data, sha) in enumerate(tiles):                             # sent one after another, without waiting for an answer
+        sent.append(request(value.session, 'mask.put', {'staged': staged, 'layer': 'labels', 'row': col // 2, 'col': col % 2, 'sha256': sha}))
+        value.coordinator.receive(sent[-1], data)
+    sent.append(request(value.session, 'mask.commit', {'staged': staged, 'tables': tables}))
+    value.coordinator.receive(sent[-1])
+    value.coordinator.answer_masks(wait=True)
+    responses = {item['id']: item for kind, item in frames(value.output) if kind == 'json'}
+    assert [responses[item['id']]['status'] for item in sent] == ['ok'] * 4
+    manifest = responses[sent[-1]['id']]['result']['manifest']
+    read = value.ok('mask.read', {'project': 'p1', 'manifest': manifest, 'layer': 'labels', 'positions': [[0, 0], [0, 1], [1, 0]]})[1]
+    assert b''.join(read) == b''.join(data for data, _ in tiles)
+
+
+def test_a_buffer_released_after_a_mask_request_arrived_is_still_read_by_it(engine, monkeypatch):
+    value = engine()
+    manifest = committed_version(value)
+    _, blobs = backup_of(value, manifest)
+    files = sorted(blobs.items())
+    handle = upload(value, b''.join(data for _, data in files))
+    started, release = slow_disk(monkeypatch)
+    value.coordinator.receive(request(value.session, 'mask.retain', {'project': 'p9', 'keep': []}))
+    assert started.wait(5)
+    item = request(value.session, 'mask.import', {'project': 'p2', 'kind': 'blobs', 'handle': handle,
+                                                  'files': [{'name': name, 'byte_length': len(data)} for name, data in files]})
+    value.coordinator.receive(item)
+    value.coordinator.receive(request(value.session, 'buffer.release', {'handles': [handle]}))    # answered at once
+    assert frames(value.output)[-1][1]['result'] == {'released': [handle]}
+    release.set()
+    value.coordinator.answer_masks(wait=True)
+    response = next(found for kind, found in frames(value.output) if kind == 'json' and found['id'] == item['id'])
+    assert response['result'] == {'accepted': [True] * len(files)}
+    assert handle not in value.coordinator.store.buffers, 'unpinned and removed once answered'
+
+
+def test_shutdown_answers_the_mask_requests_received_before_it(engine, monkeypatch):
+    value = engine()
+    started, release = slow_disk(monkeypatch)
+    retain = request(value.session, 'mask.retain', {'project': 'p1', 'keep': []})
+    value.coordinator.receive(retain)
+    assert started.wait(5)
+    threading.Timer(0.2, release.set).start()
+    shutdown = request(value.session, 'shutdown', {})
+    value.coordinator.receive(shutdown)
+    assert answered(value)[-2:] == [retain['id'], shutdown['id']]
+
+
+def test_an_unexpected_error_on_the_mask_thread_still_ends_the_session(engine, monkeypatch):
+    value = engine()
+    manifest = committed_version(value)
+
+    def broken(*_arguments):
+        raise RuntimeError('a bug')
+    monkeypatch.setattr(masks.MaskStore, 'info', broken)
+    with pytest.raises(RuntimeError):
+        value.call('mask.info', {'project': 'p1', 'manifest': manifest, 'start': 0})
+
+
+def test_an_open_staged_version_keeps_its_blobs_after_its_store_left_the_open_stores(engine):
+    """At most 64 stores stay open; a staged version still holds its own. Retain and forget recognise it by folder, not by object."""
+    value = engine()
+    staged = begin(value)['staged']
+    pending = labels_tile(42)
+    put(value, staged, *pending)
+    for k in range(64):                                                    # 64 other projects push the store of p1 out
+        value.ok('mask.retain', {'project': f'q{k}', 'keep': []})
+    assert 'p1' not in value.coordinator.mask_stores
+    assert value.error('mask.forget', {'project': 'p1'}) == ('BUSY', None)
+    value.ok('mask.retain', {'project': 'p1', 'keep': []})
+    assert pending[1] in stored_names(value)[1], 'the open staged version kept its tile'
+    manifest = value.ok('mask.commit', {'staged': staged, 'tables': value.tables()})[0]['manifest']
+    assert b''.join(value.ok('mask.read', {'project': 'p1', 'manifest': manifest, 'layer': 'labels', 'positions': [[0, 0]]})[1]) == pending[0]
+
+
+def test_mask_slice_through_the_engine_reuses_blobs_and_returns_present_objects(engine, tmp_path):
+    """Card M8.4.43: mask.slice writes a new version for tile rows [row0, row1), returns kept object IDs and stack indices in binary frames,
+    reuses tile blobs, and refuses damaged blobs and bad arguments."""
+    value = engine()
+    staged = begin(value)['staged']                                         # W=600, H=1100 -> 3 tile rows, 2 cols
+    t0 = labels_tile(10, rows=512, cols=512)
+    t2 = labels_tile(20, rows=76, cols=512)                                 # row 2: 1100 - 1024 = 76 rows inside
+    put(value, staged, *t0, row=0, col=0)
+    put(value, staged, *t2, row=2, col=0)
+    tables = {'object_ids': value.buffer(np.array([10, 20, 30], dtype='<u4').tobytes(), 'u32le'),
+              'object_class': value.buffer(np.array([0, 0, -1], dtype='<i4').tobytes(), 'i32le'),
+              'object_predicted': value.buffer(np.array([-1, -1, -1], dtype='<i4').tobytes(), 'i32le'),
+              'object_confidence': value.buffer(np.array([0.0, 0.5, 0.0], dtype='<f8').tobytes(), 'f64le'),
+              'classes': value.buffer(json.dumps([{'id': 'a', 'name': 'Burrow', 'counts': True}]).encode(), 'utf8json'),
+              'stack_offsets': value.buffer(np.array([0, 0], dtype='<u4').tobytes(), 'u32le')}
+    src = value.ok('mask.commit', {'staged': staged, 'tables': tables})[0]['manifest']
+
+    res0, bin0 = value.ok('mask.slice', {'project': 'p1', 'manifest': src, 'section': 'p_top', 'row0': 0, 'row1': 2})
+    res1, bin1 = value.ok('mask.slice', {'project': 'p1', 'manifest': src, 'section': 'p_bot', 'row0': 2, 'row1': 3})
+    raw0, raw1 = b''.join(bin0), b''.join(bin1)
+    assert res0['height'] == 1024 and res0['object_count'] == 1 and res0['stack_count'] == 0 and res0['sha256'] == hashlib.sha256(raw0).hexdigest()
+    assert res1['height'] == 76 and res1['object_count'] == 1 and res1['stack_count'] == 0 and res1['sha256'] == hashlib.sha256(raw1).hexdigest()
+    assert np.frombuffer(raw0, dtype='<u4').tolist() == [10]
+    assert np.frombuffer(raw1, dtype='<u4').tolist() == [20]
+    assert b''.join(value.ok('mask.read', {'project': 'p1', 'manifest': res0['manifest'], 'layer': 'labels', 'positions': [[0, 0]]})[1]) == t0[0]
+    assert b''.join(value.ok('mask.read', {'project': 'p1', 'manifest': res1['manifest'], 'layer': 'labels', 'positions': [[0, 0]]})[1]) == t2[0]
+    assert value.error('mask.slice', {'project': 'p1', 'manifest': src, 'section': 'p_bad', 'row0': 2, 'row1': 2}) == ('INVALID_REQUEST', 'rows')
+
+    # Session commit tracking keeps the newly sliced manifest when retain runs before the page names it.
+    value.ok('mask.retain', {'project': 'p1', 'keep': [src]})
+    assert res0['manifest'] in stored_names(value)[0] and res1['manifest'] in stored_names(value)[0]
+
+    # Damaged blob is refused cleanly.
+    blob_path = tmp_path / 'projects' / 'p1' / 'tiles' / 'blobs' / t2[1][:2] / t2[1]
+    blob_path.write_bytes(b'damaged')
+    value.ok('mask.forget', {'project': 'p1'})
+    assert value.error('mask.slice', {'project': 'p1', 'manifest': src, 'section': 'p_fail', 'row0': 2, 'row1': 3}) == ('INVALID_BUFFER', 'tile')

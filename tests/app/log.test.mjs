@@ -169,7 +169,7 @@ test('V0.38: quoted fields, thousands separators, dropped cells and Latin-1', as
   const a = parseTable('depth,name,val\n1,"a, b",2\n2,"say ""hi""",3');
   assert.deepEqual(a.text[0], ['1', 'a, b', '2']); assert.equal(a.text[1][1], 'say "hi"'); assert.deepEqual(a.rows.map((r) => r[2]), [2, 3]);
   const b = parseTable('depth;Ba\n1;1.234,5\n2;12,5\n3;n.d.');
-  assert.deepEqual(b.rows.map((r) => r[1]), [1234.5, 12.5, null]); assert.equal(b.dropped, 1); assert.deepEqual(b.droppedCols, ['Ba']);
+  assert.deepEqual(b.rows.map((r) => r[1]), [1234.5, 12.5, null]); assert.equal(b.dropped, 0); assert.equal(b.censored, 1, 'card Q2: n.d. is a value below the detection limit, empty and counted');
   const c = parseTable('depth\tBa\n1\t1,234.5\n2\t3');
   assert.deepEqual(c.rows.map((r) => r[1]), [1234.5, 3]);
   assert.equal(decodeText(new Uint8Array([0x50, 0x72, 0x6f, 0x66, 0x2e, 0x20, 0xb5, 0x6d])), 'Prof. µm');
@@ -407,4 +407,39 @@ test('card Q4: the core-column CSV averages records per interval, never interpol
   const csv = windowCSV({ rows: aged, from: 0, to: 30, classes, records: [], units: 'cm', ageUnits: 'ka', model });
   assert.deepEqual(lines(csv.split('#')[0]).map((cells) => cells.at(-1)), ['', 'age reversal', '']);
   assert.match(csv, /# 1 intervals lie outside the age model and are not listed\n$/);
+});
+
+test('card Q2: missing-value codes, censored values, decimals per column, preamble, repeated names, UTF-16', async () => {
+  const { parseTable, decodeText } = await import('../../app/js/log.js');
+  // -999, -999.25 and -9999 are empty and counted; other negative values stay
+  const codes = parseTable('depth,MS\n1,-999\n2,-999.25\n3,-9999\n4,-5.5');
+  assert.deepEqual(codes.rows.map((r) => r[1]), [null, null, null, -5.5]);
+  assert.equal(codes.missingCodes, 3);
+  assert.equal(parseTable('d,v\n1,-999', { missing: [] }).rows[0][1], -999, 'the list of codes is an option');
+  // below a detection limit: empty by default (decision M), or half the limit, or the limit
+  const cens = 'depth\tCu\n1\t<0.02\n2\tbdl\n3\t0.5';
+  assert.deepEqual(parseTable(cens).rows.map((r) => r[1]), [null, null, 0.5]);
+  assert.equal(parseTable(cens).censored, 2);
+  assert.deepEqual(parseTable(cens, { censored: 'half' }).rows.map((r) => r[1]), [0.01, null, 0.5]);
+  assert.deepEqual(parseTable(cens, { censored: 'limit' }).rows.map((r) => r[1]), [0.02, null, 0.5]);
+  // decimal separator per column: "0.500" is not 500 beside a decimal-comma column; "1,250" alone is ambiguous and reported
+  const mixed = parseTable('depth;a;b\n1;0,5;0.500\n2;1,25;1.5');
+  assert.deepEqual(mixed.rows.map((r) => [r[1], r[2]]), [[0.5, 0.5], [1.25, 1.5]]);
+  const amb = parseTable('depth\tcount\n1\t1,250\n2\t2,500');
+  assert.deepEqual(amb.ambiguousCols, ['count']);
+  // a preamble before the table is skipped and counted
+  const pre = parseTable('Avaatech XRF export\nOperator: X\ndepth,Fe,Ti\n1,10,2\n2,11,3');
+  assert.deepEqual(pre.headers, ['depth', 'Fe', 'Ti']);
+  assert.equal(pre.preamble, 2);
+  assert.deepEqual(pre.rows, [[1, 10, 2], [2, 11, 3]]);
+  // repeated names get a suffix and are listed; longer rows are counted
+  const rep = parseTable('depth,Fe,Fe\n1,2,3,4\n2,5,6');
+  assert.deepEqual(rep.headers, ['depth', 'Fe', 'Fe (2)']);
+  assert.deepEqual(rep.renamed, ['Fe']);
+  assert.equal(rep.long, 1);
+  // UTF-16 with its byte-order mark (Excel's "Unicode text")
+  const text = 'depth\tµ\n1\t2';
+  const le = new Uint8Array(2 + text.length * 2); le[0] = 0xff; le[1] = 0xfe;
+  for (let i = 0; i < text.length; i++) { le[2 + 2 * i] = text.charCodeAt(i) & 255; le[3 + 2 * i] = text.charCodeAt(i) >> 8; }
+  assert.equal(decodeText(le), text);
 });

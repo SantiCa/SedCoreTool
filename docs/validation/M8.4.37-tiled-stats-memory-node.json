@@ -1,0 +1,51 @@
+{
+  "card": "M8.4.37",
+  "measured": "2026-11-21T18:30:38.644Z",
+  "runtime": {
+    "node": "22.23.4",
+    "v8": "12.4.254.21-node.57",
+    "electron": null
+  },
+  "host": {
+    "os": "Windows_NT 10.0.26300",
+    "cpu": "AMD Ryzen 7 7700X 8-Core Processor             ",
+    "cpus": 16,
+    "memory_gib": 31
+  },
+  "input": {
+    "rows": 6,
+    "cols": 6,
+    "tile": 512,
+    "objects": 65535,
+    "per_tile": null,
+    "labels": "uniform random over every object, as tools/make_large_mask_version.py",
+    "pixels": "uniform random RGB"
+  },
+  "unbounded": {
+    "tiles": 36,
+    "entries": 2315991,
+    "entries_per_tile": 64333,
+    "heap_bytes": 674491032,
+    "heap_bytes_per_entry": 291,
+    "estimate_bytes": 376854528,
+    "estimate_bytes_per_entry": 163,
+    "seconds_per_tile": 0.097,
+    "synthetic_section_extrapolated": {
+      "tiles": 7168,
+      "entries": 461139541,
+      "gib": 125.1
+    }
+  },
+  "bounded": {
+    "budget_bytes": 268435456,
+    "tiles_computed": 26,
+    "exceeded_after_tiles": 26,
+    "exceeded_reported": 1,
+    "updates_reported": 25,
+    "peak_estimate_bytes": 263601760,
+    "peak_heap_bytes": 472321872,
+    "kept_heap_bytes_after": 131832,
+    "kept_entries": 0,
+    "runner_idle": true
+  }
+}

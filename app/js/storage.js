@@ -88,6 +88,9 @@ export function putProject(meta, data) {
     old.onsuccess = () => { for (const k of old.result) if (!keep.has(k)) st.delete(k); };
   }).then(() => { for (const w of [...writes, ...checks]) lastSec.set(w.key, w.sig); return { written: writes.length, kept: checks.length }; });
 }
+/** Card M8.4.39: what this session remembers of the sections of project `id` (to skip writing unchanged ones) is dropped: the project was closed or
+ *  deleted. Its next save writes every section again. @param {string} id */
+export function forgetSections(id) { for (const k of [...lastSec.keys()]) if (k.startsWith(id + '|')) lastSec.delete(k); }
 export const putMeta = (meta) => run(['meta'], 'readwrite', (tx) => tx.objectStore('meta').put(meta));
 /** Image keys referenced by a stored project (format v4: file.key). */
 export function imageKeys(data) {
@@ -139,7 +142,7 @@ export async function deleteProject(id) {
     tx.objectStore('lite').delete(id);
     tx.objectStore('secs').delete(IDBKeyRange.bound(id + '|', id + '|\uffff'));
   });
-  for (const k of [...lastSec.keys()]) if (k.startsWith(id + '|')) lastSec.delete(k);
+  forgetSections(id);
   await removeImageFiles(files);
 }
 

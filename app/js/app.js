@@ -1,5 +1,5 @@
 // SedCoreTool web (antes CorAnTool e IchAnTool) — application (UI, state, tools, rendering, files).
-import { rleValid, baconToAgeText, BI, II, UNIT_TO_CM, idsAt, topAt, hasId, stackIndex, codeFor, withoutId, renameId, compactStacks, parseAgeModel, parseAgeModelDetailed, interpAge, toCSV, rleEncode, rleDecode } from './core.js';
+import { rleValid, safeImageURL, sanitizeThumbs, baconToAgeText, BI, II, UNIT_TO_CM, idsAt, topAt, hasId, stackIndex, codeFor, withoutId, renameId, compactStacks, parseAgeModel, parseAgeModelDetailed, interpAge, toCSV, rleEncode, rleDecode, unitFactor, minOf, maxOf } from './core.js';
 import { pxPerCm, depthAtRow, rowAtDepth } from './sectiondepth.js';
 import { effectiveClassId, effectiveClassIndex, computeSectionBins, binsFromRowCounts, binRowsOfSection } from './sectionanalysis.js';
 import { createEngineClient } from './engineclient.js';
@@ -10,7 +10,7 @@ import { withProvenance, ageModelText, bioturbationTable, objectsTable } from '.
 
 import { DEFAULT_FILTERS, FILTER_PRESETS, DEFAULT_DETECT, traceSeparation, localSeparability, applyFilters, detectMask, components, regionGrow, polygonPixels, objectStats, features, rotate90, downsampleRGBA, autoLevels, gammaForMedian, factorThatFits, workingBytes, WORKING_MEMORY_LIMIT } from './imageproc.js';
 import { parseTable, decodeText, invertModel, toAxis, compositeRows, abbrevs, traceSymbolPath, validHexColor } from './log.js';
-import { storageAvailable, listProjects, getProject, putProject, putMeta, deleteProject, getPref, setPref, putLite, listLite, getMeta, putImage, getImage, gcImages } from './storage.js';
+import { storageAvailable, listProjects, getProject, putProject, putMeta, deleteProject, getPref, setPref, putLite, listLite, getMeta, putImage, getImage, gcImages, forgetSections } from './storage.js';
 import { INTERP_DEFAULT } from './interp.js';
 
 import { evalColumn, formulaRefs, fillLinear } from './sheet.js';
@@ -24,24 +24,32 @@ import { IGNORE, doubtful, trainingMask, cropRGBA } from './unet.js';
 import { createUnetController } from './unetmodel.js';
 import { VISION_MODEL, visionFeatureId, traceWindow, traceInput, pickEmbedding } from './vision.js';
 import { coresFromLongTable, applyCatalogue, coreAges, intervalsOnAxis, intervalsFromTable, fitModel, buildMapSVG, mapBBox, predictProba, MAP_STYLE, MAP_SYMBOLS, fitBBoxAspect, validMapCoords } from './geo.js';
-import { $, APP, APP_NAMES, CLF_SCOPES, ML_DEFAULT, S, VERSION, clsById, defaultClasses, fetchAsset, fmt, hex, hideMissingExamples, keyOf, sec, uid } from './state.js';
-import { figTabsData, loadFigTabs, renderFigPanel, renderFigure, resetFigTabs, scheduleFigure, traceCanvas } from './figures.js';
+import { $, APP, APP_NAMES, CLF_SCOPES, ML_DEFAULT, S, VERSION, clsById, defaultClasses, fetchAsset, fmt, hex, hideMissingExamples, keyOf, projectHasData, sec, uid } from './state.js';
+import { figTabsData, forgetMapBackgrounds, loadFigTabs, renderFigPanel, renderFigure, resetFigTabs, scheduleFigure, traceCanvas } from './figures.js';
 import { assembleLevel, imageDimensions, levelPositions, proxyLevel, tileRgba, TILE } from './tiledsection.js';
 import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlacement, tileRange, tilesByDistance } from './tilecache.js';
 import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks.js';
-import { singleFlight } from './singleflight.js';
+import { nestedIndicator, singleFlight } from './singleflight.js';
+import { joinCoreTables } from './coremerge.js';
+import { createTiledProject } from './tiledproject.js';
+import { FORMAT_VERSION_WINDOW, opensReadOnly, projectFormatVersion, serTiledSection } from './tiledrecord.js';
+import { createTiledSplitController } from './tiledsplitui.js';
+import { createTiledState } from './tiledstate.js';
+import { createTiledTools } from './tiledtools.js';
+import { createTiledView } from './tiledview.js';
 import { classUse, deleteClass, restoreClass, repairOrphanLabels } from './taxa.js';
 import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, tilesUnder, windowRange, planWindows, pinRanges, toWindowRect, windowRgba } from './tiledit.js';
 import { MaskLoader, MaskSync, buildMaskTables, classesText } from './tiledsync.js';
 import { TiledRowCounts, TiledCountsRunner, tileHistogram } from './tiledcounts.js';
 import { TileChanges, trimTileHistory } from './tiledundo.js';
 import { createTiledSourcePanel } from './tiledsource.js';
+import { chooseFolderVersion } from './folderversion.js';
 import { renderData } from './datatab.js';
-import { frameRatio, panelPrefs, savePanels } from './panels.js';
-import { addRecordFromTable, defaultLogView, lastLog, mode, renderLog, renderLogPanel, renderRecList, scheduleLog, sectionCanvas, navigationPreviewCanvas, clearNavigationPreviews, setMode } from './columns.js';
+import { frameRatio, onPointerEnd, panelPrefs, savePanels } from './panels.js';
+import { addRecordFromTable, defaultLogView, forgetLastImport, lastLog, mode, renderLog, renderLogPanel, renderRecList, scheduleLog, sectionCanvas, navigationPreviewCanvas, clearNavigationPreviews, setMode } from './columns.js';
 import { GROUP_COLORS, addImported, addNamedIntervals, attachMapZoom, coreListUI, defaultGeo, exportMapPNG, geoComputeSamples, geoLand, geoLayer, geoMarkDirty, geoRT, geoReset, geoTrain, interpUI, loadGeoDemo, loadLand, mapBackground, mapStyleUI, mapTip, normalizeGeo, renderGeo, renderGeoMap, scheduleGeo, valueLayer, initMultiproxy } from './multiproxy.js';
 /** Delivery number (V27…): shown in the header, the start screen, the help, the window title, project files and the name of the offline file. */
-export const DELIVERY = 'V0.152';
+export const DELIVERY = 'V0.153';
 /* V0.17: input of the ichnotaxon classifier — 12 shape/colour descriptors ('shape') or the vector of a pre-trained
    vision model ('vision', DINOv2). Vectors of the two sets are never mixed. */
 const visionOn = () => (S.settings.ml?.features || 'shape') === 'vision';
@@ -118,7 +126,7 @@ function pxTouch(s) {
   for (let i = 0; i < MEM.px.length && MEM.px.length > 1 && bytes() > MEM.pxBudget;) {
     const x = MEM.px[i];
     if (x === s || keepLoaded(x)) { i++; continue; }
-    x.orig = null; x.orig16 = null; x.enh = null; x._unet = null; x._fc = null; MEM.px.splice(i, 1);
+    x.orig = null; x.orig16 = null; x.enh = null; x._unet = null; x._fc = null; x._lc = null; x._lb = null; MEM.px.splice(i, 1);   // card M8.4.39: _lc, _lb too (counted above)
   }
 }
 /** The original file of a section as a Blob (from memory if not yet stored, else from the image store on disk). */
@@ -141,7 +149,7 @@ function ensurePixels(s) {
   if (s.orig) { pxTouch(s); return Promise.resolve(s); }
   if (s._loading) return s._loading;
   s._loading = (async () => {
-    const r = s.tiled ? await tiledWorkingImage(s.tiled) : await decodeWorking(s, s.ds);
+    const r = s.tiled?.missing ? { w: s.w, h: s.h, rgba: greyRgba(s.w, s.h), rgba16: null } : s.tiled ? await tiledWorkingImage(s.tiled) : await decodeWorking(s, s.ds);   // M8.4.39: no pyramid, grey
     if (r.w !== s.w || r.h !== s.h) console.warn('image size differs from the stored masks', s.name, r.w, r.h, s.w, s.h);
     // V0.44: the enhancement of a section being opened is computed in the worker; orig and enh are set together
     const input = r.rgba16 || r.rgba;
@@ -360,7 +368,7 @@ function b64decode(str) { const s = atob(str), out = new Uint8Array(s.length); f
 function pickCore(n) {
   return new Promise((resolve) => {
     const dlg = document.createElement('dialog');
-    const opts = S.cores.map((c) => `<option value="${c.id}" ${c.id === S.curCore ? 'selected' : ''}>${esc(c.name)} (${t('home.nImg', { n: c.sections.length })})</option>`).join('');
+    const opts = S.cores.map((c) => `<option value="${esc(c.id)}" ${c.id === S.curCore ? 'selected' : ''}>${esc(c.name)} (${t('home.nImg', { n: c.sections.length })})</option>`).join('');
     dlg.innerHTML = `<form method="dialog" style="display:grid;gap:10px;min-width:320px"><h3 style="margin:0">${esc(t('sec.pickCoreTitle', { n }))}</h3>
       <label class="f"><span>${esc(t('sec.pickCore'))}</span><select id="pcSel">${opts}<option value="__new">${esc(t('sec.newCore'))}</option></select></label>
       <label class="f" id="pcNewBox" hidden><span>${esc(t('sec.newCoreName'))}</span><input type="text" id="pcNew"></label>
@@ -379,10 +387,7 @@ function pickCore(n) {
     dlg.showModal();
   });
 }
-/* ───────────── M8.4.15: tiled sections (behind SEDCORETOOL_TILED_SECTIONS=1 and the engine experiment) ─────────────
-   An image larger than the maximum size when adding images gets a pixel pyramid in the engine's tile store. The section keeps a small working
-   image from one level of it (so the rest of the program works as on a reduced section) and the viewer draws full-resolution tiles over it.
-   Not saved yet and not editable yet (cards M8.4.16 and M8.4.18): the interface says so. */
+/* M8.4.15+: tiled sections (behind SEDCORETOOL_TILED_SECTIONS=1 and the engine experiment). */
 const TILES = /** @type {any} */ (window).corantoolDesktop?.tiles?.enabled === true ? /** @type {any} */ (window).corantoolDesktop.tiles : null;
 
 /* Tools that a tiled section does not have yet (ARCHITECTURE §3.4 decision 8). Each refusal shows the one message `tiles.unavailable`.
@@ -391,58 +396,10 @@ const TILES = /** @type {any} */ (window).corantoolDesktop?.tiles?.enabled === t
 const TILED_BLOCKED_TOOLS = new Set();
 function tiledRefused(s) { if (!s?.tiled && !s?.frozen) return false; toast(t(s.frozen ? 'tiles.frozen.' + s.frozen : 'tiles.unavailable')); return true; }
 
-/** The working image of a tiled section: its proxy level of the pyramid, read through the engine in batches of 16 verified tiles. */
-async function tiledWorkingImage(tiled) {
-  const level = tiled.levels[tiled.level], positions = levelPositions(level), tiles = [];
-  for (let i = 0; i < positions.length; i += 16) {
-    const batch = positions.slice(i, i + 16), read = await TILES.read(tiled.pyramid, tiled.level, batch);
-    if (read.error) throw new Error(t('tiles.err', { code: read.error.code }));
-    const bytes = new Uint8Array(read.ok.bytes.buffer || read.ok.bytes, read.ok.bytes.byteOffset || 0, read.ok.bytes.byteLength);
-    let offset = 0;
-    read.ok.tiles.forEach((tile, k) => { tiles.push({ row: batch[k][0], col: batch[k][1], bytes: bytes.subarray(offset, offset + tile.byte_length) }); offset += tile.byte_length; });
-  }
-  return assembleLevel(tiles, level, tiled.channels, tiled.bits);
-}
-
-/* The viewer's full-resolution tiles (card M8.4.15 step 4): one page cache with one budget, one scheduler per pyramid. A tile becomes an
-   ImageBitmap (16-bit shown by its high byte, as the working image); evicted bitmaps are closed. */
-const tileCache = new TileCache();
-const tileSchedulers = new Map();
-
-/** @returns {TileScheduler} */
-function tileScheduler(s) {
-  const tiled = s.tiled;
-  let scheduler = tileSchedulers.get(tiled.pyramid);
-  if (scheduler) return scheduler;
-  const fetch = async (k, positions) => {
-    const read = await TILES.read(tiled.pyramid, k, positions);
-    if (read.error) throw new Error(t('tiles.err', { code: read.error.code, field: read.error.field || '' }));
-    const bytes = new Uint8Array(read.ok.bytes.buffer || read.ok.bytes, read.ok.bytes.byteOffset || 0, read.ok.bytes.byteLength);
-    const out = [];
-    let offset = 0;
-    for (let i = 0; i < read.ok.tiles.length; i++) {
-      const length = read.ok.tiles[i].byte_length, rgba = tileRgba(bytes.subarray(offset, offset + length), tiled.channels, tiled.bits);
-      offset += length;
-      out.push({ row: positions[i][0], col: positions[i][1], value: await createImageBitmap(new ImageData(rgba, TILE, TILE)), bytes: rgba.byteLength });
-    }
-    return out;
-  };
-  scheduler = new TileScheduler({ fetch, cache: tileCache, prefix: tiled.pyramid + '/',
-    onLoaded: () => { if (sec()?.tiled === tiled) requestRender(); },
-    onRetry: () => { if (sec()?.tiled === tiled) requestRender(); },     // the view asks again for the tiles it still wants
-    onError: (error) => {
-      tiled.lastError = error.message || String(error);
-      if (!tiled.errorShown) { tiled.errorShown = true; toast(tiled.lastError, 9000); }
-      void recoverEngine().catch(() => {});                // the retry then reads from the restarted engine
-    } });
-  tileSchedulers.set(tiled.pyramid, scheduler);
-  return scheduler;
-}
-
-/** Tiles show the source's pixels: drawn only while the working image under them shows them too (no filter). Masks are drawn over them. */
-function tilesShowSource(s) {
-  return S.showOrig || !Object.keys(DEFAULT_FILTERS).some((key) => s.filters[key] !== DEFAULT_FILTERS[key]);
-}
+/** Card M8.4.30 step 4: the viewer of tiled sections (working image, pixel tiles, mask overlay, build dialog) lives in tiledview.js. */
+const { tiledWorkingImage, tileCache, tileSchedulers, resetTiles, tilesShowSource, drawTiles, tileBuildDialog } = createTiledView({
+  TILES, get view() { return view; }, get vctx() { return vctx; }, toast, requestRender, esc: (text) => esc(text), maskLoader: (q) => maskLoader(q), recoverEngine: () => recoverEngine(),
+});
 
 /** Put one mask tile of a tiled section in the page (card M8.4.16): the tile cache, and the reduced copy in the working image (decision D). */
 function putMaskTile(s, row, col, labels, exclude) {
@@ -454,576 +411,26 @@ function putMaskTile(s, row, col, labels, exclude) {
   requestRender();
 }
 
-/* Strokes on a tiled section (card M8.4.16 step 3). Brush, erase, exclude and include run today's code (paintAt, addPx, setLabel, setEx) on an
-   edit window (decision A: the visible level-0 mask tiles plus a margin of the brush radius, as flat arrays), seen through `windowSection`;
-   what each pointer move wrote is copied back into the tiles and into the working image's reduced masks. The window refuses beyond
-   WINDOW_TILES tiles with "zoom in to edit" (decision B). Object statistics are recomputed per tile afterwards from the level-0 pixels
-   (`tiledStatsRunner`). Tiled strokes keep no pixel log: their undo step keeps a copy of each tile before its first write (step 5,
-   `tiledundo.js`). */
-const NO_PIXEL_LOG = /** @type {any} */ ({ push() { return 0; }, length: 0 });
-const canvasSize = () => { const c = /** @type {HTMLCanvasElement} */ (view); return { w: c.width, h: c.height }; };
-let editWindow = null;                                   // one window for the page (up to 120 MiB), kept while it stays current
-
-function tiledEditWindow(s, rect, ring) {
-  const range = windowRange(s.maskTiles, rect, ring);
-  if (range.count > WINDOW_TILES) { toast(t('tiles.zoomIn')); return null; }
-  const missing = [];
-  for (let row = range.row0; row <= range.row1; row++) for (let col = range.col0; col <= range.col1; col++) if (s.maskTiles.state(row, col) === 'missing') missing.push([row, col]);
-  if (missing.length) { void maskLoader(s).want(missing).catch(() => {}); toast(t('tiles.loadingMasks')); return null; }
-  if (!editWindow?.matches(s.maskTiles, range)) {
-    editWindow?.release();
-    editWindow = null;
-    try { editWindow = new EditWindow(s.maskTiles, range); } catch (error) { toast(t('tiles.err', { code: 'MASKS', field: error.message })); return null; }
-  }
-  return editWindow;
-}
-
-/** The section with the window's masks in place of its own: today's editing code writes through it (the stack index stays the section's). */
-function windowSection(s, win) {
-  const shared = (key) => ({ get: () => s[key], set: (value) => { s[key] = value; } });
-  return Object.create(s, { labels: { value: win.labels }, exclude: { value: win.exclude }, w: { value: win.w }, h: { value: win.h },
-    _six: shared('_six'), nextId: shared('nextId'), nextTraceOrder: shared('nextTraceOrder') });
-}
-
-/** The visible part of a tiled section in source pixels (half-open), or null. */
-function visibleSource(s) {
-  const ds = s.ds, { x: vx, y: vy, zoom: z } = S.view;
-  const r = { x0: Math.max(0, vx) * ds, y0: Math.max(0, vy) * ds, x1: Math.min(s.w, vx + canvasSize().w / z) * ds, y1: Math.min(s.h, vy + canvasSize().h / z) * ds };
-  return r.x1 > r.x0 && r.y1 > r.y0 ? r : null;
-}
-
-function startTiledStroke(s, p, e, tool) {
-  const ds = s.ds, radius = S.brushSize * ds, visible = visibleSource(s);
-  if (!visible) return;
-  const win = tiledEditWindow(s, visible, Math.max(1, Math.ceil(radius / TILE)));
-  if (!win) return;
-  const op = beginOp(s); op.mode = tool; op.lm = NO_PIXEL_LOG; op.ex = NO_PIXEL_LOG; op.win = win; op.section = s; op.radius = radius;
-  op.tiles = new TileChanges(s.maskTiles);
-  const at = { x: p.x * ds - win.ox, y: p.y * ds - win.oy };
-  if (tool === 'brush') {
-    const under = topAt(win.labelAt(p.x * ds, p.y * ds) ?? 0, s.stacks);
-    op.target = e.shiftKey && S.selected ? S.selected : ((!S.overlap || s.objects.get(under)?.cls === S.active) && under) || newObject(op, S.active, 'brush').id;
-    rebuildLUT(s);
-  }
-  if (tool === 'erase' && e.shiftKey && S.selected) op.only = S.selected;
-  op.s = windowSection(s, win);
-  paintAt(op, at.x, at.y, radius);
-  tiledWriteBack(op, at, at);
-  drag = { type: 'tpaint', op, last: at };
-}
-
-function moveTiledStroke(p) {
-  const op = drag.op, at = { x: p.x * op.section.ds - op.win.ox, y: p.y * op.section.ds - op.win.oy };
-  paintSeg(op, drag.last, at, op.radius);
-  tiledWriteBack(op, drag.last, at);
-  drag.last = at;
-}
-
-/** Copy what a stroke segment from a to b (window pixels) may have written back into the tiles and the reduced masks. */
-function tiledWriteBack(op, a, b) {
-  const s = op.section, r = op.radius + 1, capture = (row, col) => op.tiles.capture(row, col);
-  for (const [row, col] of op.win.writeBack({ x0: Math.min(a.x, b.x) - r, y0: Math.min(a.y, b.y) - r, x1: Math.max(a.x, b.x) + r, y1: Math.max(a.y, b.y) + r }, capture)) {
-    const entry = s.maskTiles.get(row, col);
-    reduceTile(s, s.ds, row, col, entry?.labels || null, entry?.exclude || null);
-  }
-  s._mv = (s._mv || 0) + 1;
-  requestRender();
-}
-
-/** The exclusion rectangle on a tiled section: the source pixels covered by working pixels x0..x1, y0..y1 (inclusive). */
-function tiledExcludeRect(s, r, mode) {
-  const ds = s.ds, rect = { x0: r.x0 * ds, y0: r.y0 * ds, x1: Math.min((r.x1 + 1) * ds, s.maskTiles.width), y1: Math.min((r.y1 + 1) * ds, s.maskTiles.height) };
-  const win = tiledEditWindow(s, rect, 0);
-  if (!win) { requestRender(); return; }
-  const value = mode === 'exclude' ? 1 : 0;
-  for (let y = rect.y0 - win.oy; y < rect.y1 - win.oy; y++) win.exclude.fill(value, y * win.w + rect.x0 - win.ox, y * win.w + rect.x1 - win.ox);
-  const op = beginOp(s); op.section = s; op.win = win; op.radius = 0; op.tiles = new TileChanges(s.maskTiles);
-  tiledWriteBack(op, { x: rect.x0 - win.ox, y: rect.y0 - win.oy }, { x: rect.x1 - 1 - win.ox, y: rect.y1 - 1 - win.oy });
-  commitTiledOp(op);
-  afterChange(s, TILES_ONLY);
-}
-
-function finishTiledStroke(op) {
-  const s = op.section, e = op.ext;
-  if (op.replaced && !ovHint) { ovHint = true; toast(t('ov.hint')); }
-  if (op.target) op.touched.add(op.target);
-  if (op.mode === 'brush' || op.mode === 'erase') {
-    const changed = e.x1 >= e.x0 ? affectedTiles(s.maskTiles, { x0: e.x0 + op.win.ox, y0: e.y0 + op.win.oy, x1: e.x1 + op.win.ox, y1: e.y1 + op.win.oy }) : [];
-    void tiledStatsRunner(s).queue(changed, op.touched);
-    prioritiseObjects(s, op.touched);
-  }
-  commitTiledOp(op);
-  afterChange(s, TILES_ONLY);
-}
-
-/* Undo and redo of tiled edits (card M8.4.16 step 5, decision C): a step keeps the tiles the edit changed as they were before it
-   (`TileChanges`), and undo or redo swaps them with the page's tiles; the copies of all steps share UNDO_TILE_BYTES, beyond which the oldest
-   steps are dropped. The objects' records are kept as for other edits (`objs`); their statistics are recomputed from the swapped tiles. */
-function commitTiledOp(op) {
-  const s = op.section, step = { s, group: '', lm: [], ex: [], objs: op.objs, nextId: op.nextId, sel: op.sel, tiles: op.tiles.seal() };
-  queueTileCounts(s, op.tiles.positions());
-  for (const id of op.touched) rememberTrace(step, id);
-  for (const [id, previous] of step.objs) if (!previous && !s.objects.has(id)) step.objs.delete(id);
-  if (step.tiles.empty && !step.objs.size) return;
-  S.redo.length = 0;
-  S.undo.push(step);
-  trimEditHistory(S.undo);
-  if (trimTileHistory(S.undo) && !s._undoTrimShown) { s._undoTrimShown = true; toast(t('tiles.undoTrimmed'), 9000); }
-  updateHistoryButtons();
-}
-
-function swapTiledStep(op) {
-  const s = op.s, around = new Map();
-  for (const [row, col] of op.tiles.swap()) {
-    const entry = s.maskTiles.get(row, col);
-    reduceTile(s, s.ds, row, col, entry?.labels || null, entry?.exclude || null);
-    for (const [r, c] of affectedTiles(s.maskTiles, { x0: col * TILE, y0: row * TILE, x1: (col + 1) * TILE - 1, y1: (row + 1) * TILE - 1 })) around.set(r * s.maskTiles.cols + c, [r, c]);
-  }
-  void tiledStatsRunner(s).queue([...around.values()], op.objs.keys());
-  queueTileCounts(s, op.tiles.positions());
-}
-
-/* Wand, lasso, scissors and object operations on a tiled section (card M8.4.16 step 6, decisions A-B): today's code runs on edit windows, one
-   per object box (`o.sbox`), the lasso's box or the visible area for the wand, seen through `windowSection`; what it wrote is copied back into
-   the tiles (copied first for undo) and the statistics of the tiles around it are recomputed. Every window of an operation is checked before
-   anything is written: a box of more than WINDOW_TILES tiles refuses, tiles the page dropped are read back first, and an operation that reads
-   objects' boxes needs their statistics current: it waits for their tiles (`objectsReady`, card M8.4.28) and refuses ("try again in a moment")
-   only when one of them could not be computed. */
 const sourceBox = (o) => (o?.sbox ? { x0: o.sbox[0], y0: o.sbox[1], x1: o.sbox[2] + 1, y1: o.sbox[3] + 1 } : null);
-
-/** The windows of an operation on these source rectangles, or null after telling the user why it cannot run now. */
-function tiledPlan(s, rects, { boxes = true, tooLarge = 'tiles.boxTooLarge' } = {}) {
-  if (s.frozen) { toast(t('tiles.frozen.' + s.frozen)); return null; }   // card M8.4.18a: a section without its pixels is not edited
-  const runner = s._statsRunner, waiting = (r) => { const under = tilesUnder(s.maskTiles, r); return runner.pendingIn(under) || runner.failedIn(under); };
-  if (boxes && (rects.some((r) => !r) || (runner && rects.some(waiting)))) { void runner?.retry(); toast(t('tiles.busy')); return null; }
-  const plan = planWindows(s.maskTiles, rects);
-  if (plan.tooLarge) { toast(t(tooLarge, { n: WINDOW_TILES })); return null; }
-  if (plan.missing.length) { void maskLoader(s).want(plan.missing).catch(() => {}); toast(t('tiles.loadingMasks')); return null; }
-  return plan;
-}
-
-/* Card M8.4.28: after a reopening every stored tile waits for its statistics (about 0.1 s each). An operation on some objects does not wait
-   for all of them: their tiles go first, the busy indicator shows, and the operation runs again once they are done (Escape cancels). The
-   mask tiles under their boxes that the page dropped are read back in the same wait, instead of asking to try again. */
-let statsWait = null;
-/** True when the objects' statistics are current and their mask tiles are in the page; otherwise false, and `again` runs once they are
- *  (unless a tile failed, a read failed or Escape was pressed). */
-function objectsReady(s, objs, again) {
-  if (s.frozen) return true;                                               // tiledPlan says why a locked section is not edited
-  const runner = s._statsRunner;
-  if (!runner || objs.every((o) => runner.isCurrent(o.id))) {
-    runner?.publish();                                                     // their totals, if still in the runner's batch
-    const plan = planWindows(s.maskTiles, objs.map(sourceBox).filter(Boolean));
-    return plan.tooLarge || !plan.missing.length || waitThenRun(s, () => maskLoader(s).want(plan.missing), again);   // tiledPlan says "too large"
-  }
-  const all = tilesUnder(s.maskTiles, { x0: 0, y0: 0, x1: s.maskTiles.width, y1: s.maskTiles.height });
-  const positions = objs.flatMap((o) => runner.tilesFor(o.id) || all);
-  if (runner.failedIn(positions)) { void runner.retry(); toast(t('tiles.busy')); return false; }
-  return waitThenRun(s, () => runner.prioritise(positions), again);
-}
-/** Show the busy indicator while `work()` runs, then run `again` if the same section is open and Escape was not pressed; always false. */
-function waitThenRun(s, work, again) {
-  if (statsWait) return false;                                             // one wait at a time
-  const wait = statsWait = { done: false }, indicator = $('busy');
-  const end = () => {
-    if (wait.done) return;
-    wait.done = true; statsWait = null;
-    indicator.hidden = true; indicator.textContent = t('busy');
-    document.removeEventListener('keydown', onKey, true);
-  };
-  const onKey = (e) => { if (e.key === 'Escape') end(); };
-  indicator.textContent = t('tiles.waiting'); indicator.hidden = false;
-  document.addEventListener('keydown', onKey, true);
-  work().then(() => { if (wait.done) return; end(); if (sec() === s) again(); },
-    (error) => { if (wait.done) return; end(); toast(error?.message || String(error), 9000); });
-  return false;
-}
-/** The tiles of the objects an edit touched go first, so that their statistics are current soon even while a reopening's tiles wait. */
-function prioritiseObjects(s, ids) {
-  const runner = tiledStatsRunner(s), positions = [...ids].flatMap((id) => runner.tilesFor(id) || []);
-  if (positions.length) void runner.prioritise(positions);
-}
-
-function tiledOp(s, group = '') {
-  const op = beginOp(s, group);
-  Object.assign(op, { section: s, lm: NO_PIXEL_LOG, ex: NO_PIXEL_LOG, tiles: new TileChanges(s.maskTiles), boxes: [] });
-  return op;
-}
-
-/** Open an edit window of `range` for `op`: today's code then writes through `op.s`. */
-function openEditWindow(op, range) {
-  const win = new EditWindow(op.section.maskTiles, range);
-  op.s = windowSection(op.section, win);
-  return win;
-}
-
-/** Copy what the window may have written inside `rect` (source, half-open) back into the tiles and the reduced copy; close the window. */
-function closeEditWindow(op, win, rect) {
-  const s = op.section, r = toWindowRect(win, rect);
-  if (r.x1 > r.x0 && r.y1 > r.y0) {
-    for (const [row, col] of win.writeBack({ x0: r.x0, y0: r.y0, x1: r.x1 - 1, y1: r.y1 - 1 }, (row, col) => op.tiles.capture(row, col))) {
-      const entry = s.maskTiles.get(row, col);
-      reduceTile(s, s.ds, row, col, entry?.labels || null, entry?.exclude || null);
-    }
-    op.boxes.push({ x0: r.x0 + win.ox, y0: r.y0 + win.oy, x1: r.x1 + win.ox, y1: r.y1 + win.oy });
-  }
-  win.release();
-  op.s = s;
-}
-
-/** Statistics of the tiles around what the operation wrote, one undo step, and the usual refresh. */
-function finishTiledOp(op, target = 0) {
-  const s = op.section, around = new Map();
-  if (target) op.touched.add(target);
-  for (const r of op.boxes) for (const [row, col] of affectedTiles(s.maskTiles, { x0: r.x0, y0: r.y0, x1: r.x1 - 1, y1: r.y1 - 1 })) around.set(row * s.maskTiles.cols + col, [row, col]);
-  if (around.size) { void tiledStatsRunner(s).queue([...around.values()], op.touched); prioritiseObjects(s, op.touched); }
-  commitTiledOp(op);
-  afterChange(s);
-}
-
-/** Run `edit(op, o, win, box)` for each object on the window of its box (box in window coordinates, half-open), as one operation. */
-function eachObjectWindow(s, objs, group, edit) {
-  const rects = objs.map(sourceBox), plan = tiledPlan(s, rects);
-  if (!plan) return null;
-  const op = tiledOp(s, group), release = pinRanges(s.maskTiles, plan.ranges);
-  try {
-    objs.forEach((o, k) => { const win = openEditWindow(op, plan.ranges[k]); edit(op, o, win, toWindowRect(win, rects[k])); closeEditWindow(op, win, rects[k]); });
-  } finally { release(); op.s = s; }
-  return op;
-}
-
-/** Remove objects from a tiled section (Delete, clearing candidates). */
-function deleteTiledObjects(s, objs) {
-  const op = eachObjectWindow(s, objs, '', (step, o, win, b) => {
-    for (let y = b.y0; y < b.y1; y++) for (let i = y * win.w + b.x0, e = y * win.w + b.x1; i < e; i++) if (hasId(win.labels[i], o.id, s.stacks)) subPx(step, i, o.id);
-  });
-  if (!op) return false;
-  for (const o of objs) removeTrace(op, o.id);
-  if (objs.some((o) => o.id === S.selected)) S.selected = 0;
-  S.multi.clear();
-  finishTiledOp(op);
-  return true;
-}
-
-/** Merge on a tiled section: every pixel of the other objects (all inside their boxes) takes the keeper's id. */
-function mergeTiledObjects(s, objs, keep, group) {
-  const others = objs.filter((o) => o !== keep);
-  const op = eachObjectWindow(s, others, group, (step, o, win, b) => {
-    for (let y = b.y0; y < b.y1; y++) for (let i = y * win.w + b.x0, e = y * win.w + b.x1; i < e; i++) {
-      if (hasId(win.labels[i], o.id, s.stacks)) setLabel(step, i, renameId(win.labels[i], o.id, keep.id, s.stacks, six(s)));
-    }
-  });
-  if (!op) return;
-  for (const o of others) removeTrace(op, o.id);
-  S.multi.clear();
-  finishTiledOp(op, keep.id);
-  select(keep.id);
-}
-
-/** V0.30 on a tiled section: overlapping objects of the same ichnotaxon, found in each object's window. */
-function tiledSameTaxonGroups(s, ids) {
-  const objs = ids.map((id) => s.objects.get(id)).filter(Boolean), rects = objs.map(sourceBox), plan = tiledPlan(s, rects);
-  if (!plan) return [];
-  const groups = [], release = pinRanges(s.maskTiles, plan.ranges);
-  try {
-    objs.forEach((o, k) => {
-      const win = new EditWindow(s.maskTiles, plan.ranges[k]), b = toWindowRect(win, rects[k]);
-      const view = { get: (id) => (id === o.id ? { ...o, bbox: [b.x0, b.y0, b.x1 - 1, b.y1 - 1] } : s.objects.get(id)) };
-      groups.push(...sameTaxonGroups(win.labels, win.w, s.stacks, view, [o.id]));
-      win.release();
-    });
-  } finally { release(); }
-  return groups;
-}
-
-/** Scissors on a tiled section: the line is 3 source pixels wide; the object is split on the window of its box. */
-function splitTiled(s, pts) {
-  const tiles = s.maskTiles, W = tiles.width, st = s.stacks, ds = s.ds;
-  const cut = linePixels({ w: W, h: tiles.height }, pts.map(([x, y]) => [x * ds, y * ds])), at = (i) => tiles.labelAt(i % W, Math.floor(i / W)) ?? 0;
-  let id = 0;
-  if (S.selected && [...cut].some((i) => hasId(at(i), S.selected, st))) id = S.selected;
-  else for (const i of cut) { const v = topAt(at(i), st); if (v) { id = v; break; } }
-  const o = id && s.objects.get(id);
-  if (!o) { toast(t('cut.none')); return; }
-  if (!objectsReady(s, [o], () => splitTiled(s, pts))) return;
-  const rect = sourceBox(o), plan = tiledPlan(s, [rect]);
-  if (!plan) return;
-  const op = tiledOp(s), win = openEditWindow(op, plan.ranges[0]), b = toWindowRect(win, rect), inWindow = new Set();
-  for (const i of cut) { const x = i % W - win.ox, y = Math.floor(i / W) - win.oy; if (x >= 0 && y >= 0 && x < win.w && y < win.h) inWindow.add(y * win.w + x); }
-  const { comp, bw, n, main } = splitPieces(win.labels, win.w, st, [b.x0, b.y0, b.x1 - 1, b.y1 - 1], id, inWindow);
-  if (n < 2) { win.release(); op.s = s; toast(t('cut.noSplit')); return; }
-  const ids = [0];
-  for (let k = 1; k <= n; k++) ids.push(k === main ? id : newObject(op, o.cls, o.src).id);
-  for (let k = 1; k <= n; k++) if (k !== main) { const c = s.objects.get(ids[k]); c.pred = o.pred; c.conf = o.conf; c.nt = o.nt; op.touched.add(ids[k]); }
-  for (let j = 0; j < comp.length; j++) {
-    const k = comp[j]; if (k <= 0 || k === main) continue;
-    const i = (b.y0 + ((j / bw) | 0)) * win.w + b.x0 + (j % bw);
-    setLabel(op, i, renameId(win.labels[i], id, ids[k], st, six(s)));
-  }
-  closeEditWindow(op, win, rect);
-  finishTiledOp(op, id);
-  toast(t('cut.done', { n }));
-}
-
-/** Wand and lasso on a tiled section: `pixelsIn(win)` gives the window's pixels to add or remove; `rect` is the area they may lie in. */
-function tiledPixels(s, rect, mode, pixelsIn) {
-  const plan = tiledPlan(s, [rect], { boxes: false, tooLarge: 'tiles.zoomIn' });
-  if (!plan) return;
-  const op = tiledOp(s), win = openEditWindow(op, plan.ranges[0]), pixels = pixelsIn(win);
-  if (!pixels.length) { win.release(); op.s = s; return; }
-  const target = pixelTarget(op, s, mode);
-  paintPixels(op, pixels, mode, target);
-  const e = op.ext;
-  closeEditWindow(op, win, { x0: e.x0 + win.ox, y0: e.y0 + win.oy, x1: e.x1 + 1 + win.ox, y1: e.y1 + 1 + win.oy });
-  finishTiledOp(op, target);
-  if (target && s.objects.has(target)) select(target);
-}
-
 /** The analysis area of a tiled section in source pixels (half-open). */
 const sourceRoi = (s) => ({ x0: s.roi.x0 * s.ds, y0: s.roi.y0 * s.ds, x1: Math.min(s.roi.x1 * s.ds, s.maskTiles.width), y1: Math.min(s.roi.y1 * s.ds, s.maskTiles.height) });
 
-function tiledLasso(s, pts, mode) {
-  if (!pts || pts.length < 3) return;
-  const src = pts.map(([x, y]) => [x * s.ds, y * s.ds]), roi = sourceRoi(s);
-  const xs = src.map((p) => p[0]), ys = src.map((p) => p[1]);
-  const rect = { x0: Math.max(roi.x0, Math.floor(Math.min(...xs))), y0: Math.max(roi.y0, Math.floor(Math.min(...ys))),
-    x1: Math.min(roi.x1, Math.ceil(Math.max(...xs)) + 1), y1: Math.min(roi.y1, Math.ceil(Math.max(...ys)) + 1) };
-  if (rect.x1 <= rect.x0 || rect.y1 <= rect.y0) return;
-  tiledPixels(s, rect, mode, (win) => polygonPixels(src.map(([x, y]) => [x - win.ox, y - win.oy]), win.w, toWindowRect(win, roi)));
-}
-
-let wandBusy = false;
-/** The wand on a tiled section grows over the level-0 pixels of the visible area (plus nothing beyond it). */
-async function tiledWand(s, p, mode) {
-  const visible = visibleSource(s), x = Math.floor(p.x * s.ds), y = Math.floor(p.y * s.ds);
-  if (!visible || wandBusy || !tiledPlan(s, [visible], { boxes: false, tooLarge: 'tiles.zoomIn' })) return;
-  const range = windowRange(s.maskTiles, visible, 0), positions = [];
-  for (let row = range.row0; row <= range.row1; row++) for (let col = range.col0; col <= range.col1; col++) positions.push([row, col]);
-  wandBusy = true;
-  let rgba;
-  try { rgba = await level0Rgba(s, positions); } catch (error) { toast(error.message || String(error), 9000); return; } finally { wandBusy = false; }
-  if (sec() !== s) return;
-  const byTile = new Map(positions.map(([row, col], k) => [row * s.maskTiles.cols + col, rgba[k]]));
-  tiledPixels(s, visible, mode, (win) => {
-    const roi = toWindowRect(win, sourceRoi(s)), wx = x - win.ox, wy = y - win.oy;
-    if (wx < roi.x0 || wy < roi.y0 || wx >= roi.x1 || wy >= roi.y1) return [];
-    const pixels = windowRgba(win, (row, col) => /** @type {Uint8ClampedArray} */ (byTile.get(row * s.maskTiles.cols + col)));
-    return regionGrow(pixels, win.w, win.h, wy * win.w + wx, S.wandTol, roi, win.exclude);
-  });
-}
-
-/** Object statistics of a tiled section, per tile and from the level-0 pixels (card M8.4.16 step 3); bounding boxes also in working pixels. */
-/** RGBA level-0 pixel tiles of a tiled section, read through the engine in batches of 16. */
-async function level0Rgba(s, positions) {
-  const tiled = s.tiled, out = [];
-  for (let i = 0; i < positions.length; i += 16) {
-    const batch = positions.slice(i, i + 16), read = await TILES.read(tiled.pyramid, 0, batch);
-    if (read.error) throw new Error(t('tiles.err', { code: read.error.code, field: read.error.field || '' }));
-    const bytes = new Uint8Array(read.ok.bytes.buffer || read.ok.bytes, read.ok.bytes.byteOffset || 0, read.ok.bytes.byteLength);
-    let offset = 0;
-    for (const tile of read.ok.tiles) { out.push(tileRgba(bytes.subarray(offset, offset + tile.byte_length), tiled.channels, tiled.bits)); offset += tile.byte_length; }
-  }
-  return out;
-}
-
-function tiledStatsRunner(s) {
-  if (s._statsRunner) return s._statsRunner;
-  const stats = new TiledObjectStats(), fetchRgba = (positions) => level0Rgba(s, positions);
-  const onUpdate = (ids) => {
-    const ppu = pxPerCm(s) * s.ds;                       // source pixels per centimetre
-    for (const id of ids) {
-      const o = s.objects.get(id);
-      if (!o) continue;
-      const a = stats.total(id);
-      if (!a) { s.objects.delete(id); if (S.selected === id) S.selected = 0; continue; }
-      const box = [Math.floor(a.x0 / s.ds), Math.floor(a.y0 / s.ds), Math.floor(a.x1 / s.ds), Math.floor(a.y1 / s.ds)];
-      if (o.emb && (a.n !== o.area || String(box) !== String(o.bbox))) o.emb = null;   // V0.17: the trace changed
-      o.area = a.n; o.bbox = box; o.sbox = [a.x0, a.y0, a.x1, a.y1]; o.stats = a; o.feat = features(a, ppu);
-    }
-    afterChange(s, TILES_ONLY);
-  };
-  const tilesOf = (id) => { const o = s.objects.get(id), box = sourceBox(o); return !o ? [] : box ? tilesUnder(s.maskTiles, box) : null; };
-  s._statsRunner = new TiledStatsRunner({ tiles: s.maskTiles, stats, stacks: () => s.stacks, fetchRgba, onUpdate, tilesOf,
-    loadMasks: (positions) => maskLoader(s).want(positions), onError: (error) => toast(error.message || String(error), 9000) });
-  return s._statsRunner;
-}
-
-/* The interval table of a tiled section (card M8.4.17, decision F of ARCHITECTURE §3.4): the page counts each tile it holds into a row histogram
-   (`tiledcounts.js`) when an edit, an undo or a redo changes it, and the table is the aggregation of the histograms under the current classes and
-   settings, binned as for any section (`binsFromRowCounts`). A change of classes, predictions or settings reads no tile; a change of the analysis
-   area's columns reads back the tiles the page dropped. Until every tile is counted the table is empty, never partial. */
-function tiledCounts(s) {
-  if (s._counts) return s._counts;
-  const tiles = s.maskTiles;
-  const counts = new TiledRowCounts({ width: tiles.width, height: tiles.height, rows: tiles.rows, cols: tiles.cols }, { nonEmpty: () => {
-    const out = new Set(tiles.stored);
-    for (const [i, entry] of tiles.entries) if (entry.labels || entry.exclude) out.add(i);
-    return out;
-  } });
-  const runner = new TiledCountsRunner({ tiles, counts, loadMasks: (positions) => maskLoader(s).want(positions),
-    onReady: () => { if (S.sections.includes(s)) { analyze(s); if (sec() === s) { renderResults(); requestRender(); } } },
-    onError: (error) => toast(t('tiles.countErr', { m: error.message || String(error) }), 9000) });
-  s._counts = { counts, runner, limitShown: false };
-  return s._counts;
-}
-/** The tiles at these positions changed: count them again with the next analysis. @param {any} s @param {[number, number][]} positions */
-function queueTileCounts(s, positions) { if (s?.maskTiles) tiledCounts(s).counts.markChanged(positions); }
-
-function analyzeTiled(s) {
-  const { counts, runner } = tiledCounts(s), area = sourceRoi(s);
-  s.bins = [];
-  if (!(area.x1 > area.x0 && area.y1 > area.y0)) return;
-  counts.setArea(area);
-  if (runner.flush().length) { void runner.start(); return; }         // tiles to read back: the table appears when they are counted
-  if (counts.overBudget) {
-    if (!s._counts.limitShown) { s._counts.limitShown = true; toast(t('tiles.countLimit'), 12000); }
-    return;
-  }
-  s._counts.limitShown = false;
-  const rowCounts = counts.rowCounts({ effClass: effClassArray(s), nClasses: S.classes.length, stacks: s.stacks, area });
-  const counted = { top: s.top, bottom: s.bottom, units: s.units, roi: { y0: area.y0, y1: area.y1 } };   // rows per cm of the source rows that were counted
-  s.bins = binsFromRowCounts(s, rowCounts, analysisProject(), binRowsOfSection(counted, S.settings));
-}
-
-/** After a failed engine request: ask for the one automatic restart of the engine (card M8.4.7) when it is not ready. Used by the mask sends
- *  and, since card M8.4.24, by the tile reads of the viewer, which before never asked for it and failed until another part of the program did. */
-async function recoverEngine() {
-  const desktopEngine = /** @type {any} */ (window).corantoolDesktop?.engine;
-  if (desktopEngine && (await desktopEngine.status()).state !== 'ready') await desktopEngine.restart({ automatic: true });
-}
-
-/* Sending the masks of a tiled section to the engine's store (card M8.4.16 step 4): `MaskSync` sends the dirty tiles and the tables after
-   each change and acknowledges them only after `mask.commit`; after a failure it keeps them and tries again, first asking for the one
-   automatic restart of the engine (card M8.4.7). `MaskLoader` reads back the tiles the page dropped. */
-const hexDigest = async (bytes) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
-/** The project's identifier as the store accepts it (contract §8.7: lower case, never a Windows device name). */
-const storeProject = (id) => { const key = String(id || 'project').toLowerCase().replace(/[^a-z0-9_-]/g, '_').slice(0, 60) || 'project'; return /^(con|prn|aux|nul|com\d|lpt\d)$/.test(key) ? 'p-' + key : key; };
-async function bridgeResult(promise) {
-  const result = await promise;
-  if (result.error) throw Object.assign(new Error(result.error.code), result.error);
-  return result.ok;
-}
-
-function maskLoader(s) {
-  if (s._maskLoader) return s._maskLoader;
-  const project = storeProject(S.id);
-  const read = async (manifest, layer, positions) => {
-    const result = await bridgeResult(TILES.maskRead(project, manifest, layer, positions));
-    const bytes = new Uint8Array(result.bytes.buffer || result.bytes, result.bytes.byteOffset || 0, result.bytes.byteLength);
-    let offset = 0;
-    return result.tiles.map((tile) => { const part = tile.byte_length ? bytes.subarray(offset, offset + tile.byte_length) : null; offset += tile.byte_length; return part; });
-  };
-  s._maskLoader = new MaskLoader({ tiles: s.maskTiles, manifest: () => s._maskSync?.manifest ?? null, read,
-    onLoaded: () => { if (sec() === s) requestRender(); }, onError: (error) => toast(t('tiles.err', { code: error.code || 'MASKS', field: error.field || '' }), 9000) });
-  return s._maskLoader;
-}
-
-function maskSync(s) {
-  if (s._maskSync) return s._maskSync;
-  const project = storeProject(S.id), section = s.id, { width, height } = s.maskTiles;
-  const api = {
-    begin: async (base) => (await bridgeResult(TILES.maskBegin(project, section, width, height, base))).staged,
-    put: (staged, layer, row, col, sha256, bytes) => bridgeResult(TILES.maskPut(staged, layer, row, col, sha256, bytes)),
-    commit: async (staged, tables) => (await bridgeResult(TILES.maskCommit(staged, tables))).manifest,
-    discard: (staged) => bridgeResult(TILES.maskDiscard(staged)),
-  };
-  let failing = false, limited = false;
-  const recover = recoverEngine;
-  // Card M8.4.25: cheap checks for table changes that an edit marked "tiles only" may still carry (a new or removed object, a new overlap
-  // stack) and for class edits, which do not always ask for a round: a group found changed is sent with the next round.
-  let seen = null;
-  /** @returns {('objects' | 'stacks')[]} */
-  const changed = () => {
-    const now = { classes: classesText(S.classes), objects: s.objects.size, nextId: s.nextId, stacks: s.stacks, stackCount: s.stacks?.length ?? 0 };
-    const groups = /** @type {('objects' | 'stacks')[]} */ ([]);
-    if (!seen || now.classes !== seen.classes || now.objects !== seen.objects || now.nextId !== seen.nextId) groups.push('objects');
-    if (!seen || now.stacks !== seen.stacks || now.stackCount !== seen.stackCount) groups.push('stacks');
-    seen = now;
-    return groups;
-  };
-  s._maskSync = new MaskSync({ tiles: s.maskTiles, api, tables: (groups, pause) => buildMaskTables(s, S.classes, groups, pause), changed, sha256: hexDigest, recover,
-    onState: ({ state, error }) => {
-      if (state === 'limit' && !limited) { limited = true; toast(t('tiles.storeLimit', { field: error.field, n: error.limit }), 12000); }
-      if (state === 'failed' && !failing) { failing = true; toast(t('tiles.masksUnsent'), 9000); }
-      if (state === 'stored') limited = false;
-      if (state === 'stored' && failing) { failing = false; toast(t('tiles.masksSent')); void s._statsRunner?.retry(); }
-    } });
-  return s._maskSync;
-}
-
-/* The masks of a tiled section over its pixel tiles (card M8.4.16 step 2): one RGBA layer (`overlayLayout`, `paintOverlay`) drawn over them. */
-const maskLayer = { canvas: /** @type {HTMLCanvasElement | null} */ (null), data: /** @type {ImageData | null} */ (null) };
-
-function drawMaskOverlay(s, k, rect, viewWidth, viewHeight) {
-  if (k === 0 && s.maskTiles.stored.size) {
-    const range = windowRange(s.maskTiles, { x0: rect.x0 * s.ds, y0: rect.y0 * s.ds, x1: rect.x1 * s.ds, y1: rect.y1 * s.ds }, 1), missing = [];
-    for (let row = range.row0; row <= range.row1; row++) for (let col = range.col0; col <= range.col1; col++) if (s.maskTiles.state(row, col) === 'missing') missing.push([row, col]);
-    if (missing.length && TILES) void maskLoader(s).want(missing).catch(() => {});   // drawn as empty until they arrive
-  }
-  const layout = overlayLayout(s, S.view, k, rect, viewWidth, viewHeight);
-  if (!layout) return;
-  const { sx0, sy0, cw, ch } = layout, canvas = maskLayer.canvas ||= document.createElement('canvas');
-  if (canvas.width < cw || canvas.height < ch) { canvas.width = Math.max(cw, canvas.width); canvas.height = Math.max(ch, canvas.height); }
-  const context = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
-  if (maskLayer.data?.width !== cw || maskLayer.data.height !== ch) maskLayer.data = context.createImageData(cw, ch);
-  const inSel = new Uint8Array(s.nextId + 1); for (const id of S.multi) if (id <= s.nextId) inSel[id] = 1;
-  paintOverlay({ ...layout, out: maskLayer.data.data, px0: sx0, py0: sy0, style: { fill: s.lutFill, line: s.lutLine, sty: s.lutStyle, stacks: s.stacks, selected: S.selected, inSel } });
-  context.putImageData(maskLayer.data, 0, 0);
-  vctx.drawImage(canvas, 0, 0, cw, ch, sx0, sy0, cw, ch);
-}
-
-/**
- * Draw the full-resolution tiles of a tiled section over its working image, inside the analysis area, when the zoom needs a level finer than
- * the working image. A tile not loaded yet is drawn from the nearest finer-than-working level already cached, else the working image shows.
- */
-function drawTiles(s, cw, ch) {
-  if (s.tiled.missing) return;                               // card M8.4.18a: no pyramid and no source; the grey working image stays
-  const tiled = s.tiled, levels = tiled.levels, { x: vx, y: vy, zoom: z } = S.view, ds = s.ds, roi = s.roi, scheduler = tileScheduler(s);
-  const k = levelForZoom(levels, z / ds);
-  if (k >= tiled.level || !tilesShowSource(s)) { scheduler.want(k, []); return; }
-  const x0 = Math.max(vx, roi.x0), y0 = Math.max(vy, roi.y0), x1 = Math.min(vx + cw / z, roi.x1), y1 = Math.min(vy + ch / z, roi.y1);
-  if (x1 <= x0 || y1 <= y0) { scheduler.want(k, []); return; }
-  const rect = { x0: x0 * ds, y0: y0 * ds, x1: x1 * ds, y1: y1 * ds }, visible = tileRange(levels, k, rect, 0), prefix = tiled.pyramid + '/';
-  const protect = new Set();
-  for (let row = visible.row0; row <= visible.row1; row++) for (let col = visible.col0; col <= visible.col1; col++) protect.add(prefix + tileKey(k, row, col));
-  scheduler.want(k, tilesByDistance(tileRange(levels, k, rect, 1), { x: (rect.x0 + rect.x1) / 2, y: (rect.y0 + rect.y1) / 2 }), protect);
-  const placement = { vx, vy, zoom: z, workingLevel: tiled.level };
-  vctx.save();
-  vctx.beginPath(); vctx.rect((x0 - vx) * z, (y0 - vy) * z, (x1 - x0) * z, (y1 - y0) * z); vctx.clip();
-  vctx.imageSmoothingEnabled = false;                    // nearest pixel, as the working image is drawn
-  for (let row = visible.row0; row <= visible.row1; row++) {
-    for (let col = visible.col0; col <= visible.col1; col++) {
-      const at = tilePlacement(levels, k, row, col, placement);
-      const dx = Math.round(at.dx), dy = Math.round(at.dy), dw = Math.round(at.dx + at.dw) - dx, dh = Math.round(at.dy + at.dh) - dy;   // no seams
-      const bitmap = tileCache.get(prefix + tileKey(k, row, col));
-      if (bitmap) { vctx.drawImage(bitmap, 0, 0, at.w, at.h, dx, dy, dw, dh); continue; }
-      const cover = coarserCover(levels, k, row, col, (key) => tileCache.has(prefix + key));
-      if (cover && cover.k < tiled.level) vctx.drawImage(tileCache.get(prefix + cover.key), cover.sx, cover.sy, cover.sw * at.w / TILE, cover.sh * at.h / TILE, dx, dy, dw, dh);
-    }
-  }
-  drawMaskOverlay(s, k, { x0, y0, x1, y1 }, cw, ch);
-  vctx.restore();
-}
-
-/** A small modal with the pyramid's progress and a Cancel button. */
-function tileBuildDialog(name, onCancel, title = t('tiles.building', { n: name })) {
-  const dlg = document.createElement('dialog');
-  dlg.innerHTML = `<div style="display:grid;gap:10px;min-width:340px"><h3 style="margin:0">${esc(title)}</h3>
-    <progress id="tbProgress" max="1" value="0" style="width:100%"></progress><span class="note" id="tbStage"></span>
-    <div class="row" style="justify-content:flex-end"><button class="btn" id="tbCancel">${esc(t('cl.cancel'))}</button></div></div>`;
-  document.body.appendChild(dlg);
-  dlg.addEventListener('cancel', (e) => { e.preventDefault(); onCancel(); });
-  dlg.querySelector('#tbCancel').addEventListener('click', () => { /** @type {HTMLButtonElement} */ (dlg.querySelector('#tbCancel')).disabled = true; onCancel(); });
-  dlg.showModal();
-  return {
-    update({ stage, completed, total }) {
-      const bar = /** @type {HTMLProgressElement} */ (dlg.querySelector('#tbProgress'));
-      bar.value = total ? completed / total : 0;
-      dlg.querySelector('#tbStage').textContent = t('tiles.stage.' + stage);
-    },
-    close() { dlg.close(); dlg.remove(); },
-  };
-}
+/** Card M8.4.30 step 2: statistics, row counts, mask sends and reads of one tiled section live in tiledstate.js. */
+const { level0Rgba, tiledStatsRunner, tiledCounts, queueTileCounts, analyzeTiled, recoverEngine, hexDigest, storeProject, bridgeResult, maskLoader,
+  maskSync } = createTiledState({
+  TILES, get TILES_ONLY() { return TILES_ONLY; }, toast, afterChange, analysisProject: () => analysisProject(), analyze, effClassArray, renderResults, requestRender,
+  sourceBox, sourceRoi, onStatsExceeded: (s) => { if (s === sec()) tiledSplit.render(s); },
+});
+/** Card M8.4.39: the busy sign stays while any busy operation runs (they overlap: a log redraw during a load, a wait for statistics). */
+const busyShown = nestedIndicator(() => { $('busy').hidden = false; }, () => { $('busy').hidden = true; });
+/** Card M8.4.30 step 3: strokes, wand, lasso, scissors and object operations on tiled sections live in tiledtools.js. */
+const { resetTiledTools, startTiledStroke, moveTiledStroke, finishTiledStroke, tiledExcludeRect, swapTiledStep, tiledPlan, objectsReady, objectsWaiting, deleteTiledObjects,
+  mergeTiledObjects, tiledSameTaxonGroups, splitTiled, tiledLasso, tiledWand, windowSection } = createTiledTools({
+  get TILES_ONLY() { return TILES_ONLY; }, get drag() { return drag; }, set drag(value) { drag = value; }, get ovHint() { return ovHint; },
+  set ovHint(value) { ovHint = value; }, get view() { return view; }, toast, afterChange, beginOp, busy, level0Rgba, linePixels, maskLoader, newObject,
+  paintAt, paintPixels, paintSeg, pixelTarget, queueTileCounts, rebuildLUT, rememberTrace, removeTrace, requestRender, select, setLabel,
+  six: (s) => six(s), subPx: (op, i, id) => subPx(op, i, id), tiledStatsRunner, updateHistoryButtons, sourceBox, sourceRoi, busyShown,
+});
 
 /* Card M8.4.18b: the original image of a tiled section (locate it when it moved, copy it into the project); see tiledsource.js. A section
    locked because its image was missing is opened again from its saved record once the image is found (it cannot have changed meanwhile). */
@@ -1602,18 +1009,18 @@ function renderTrain() {
   if (!st) h += `<p class="note">${t('busy')}</p>`;
   else if (!st.installed) {
     h += st.python && st.error ? `<p class="note">${esc(st.error)}</p>` : '';
-    h += st.system || st.python ? `<p>${t('tr.noModule', { v: st.system?.version || '' })}</p><button class="btn primary" id="trInstall" ${TR.running ? 'disabled' : ''}>${t('tr.install')}</button>`
+    h += st.system || st.python ? `<p>${t('tr.noModule', { v: esc(st.system?.version || '') })}</p><button class="btn primary" id="trInstall" ${TR.running ? 'disabled' : ''}>${t('tr.install')}</button>`
       : `<p>${t('tr.noPython')}</p>`;
-  } else h += `<p>${t('tr.device', { n: esc(st.device?.name || '?'), d: st.device?.device || '?' })}</p>${st.device?.device === 'cpu' ? `<p class="note">${t('tr.cpu')}</p>` : ''}`;
+  } else h += `<p>${t('tr.device', { n: esc(st.device?.name || '?'), d: esc(st.device?.device || '?') })}</p>${st.device?.device === 'cpu' ? `<p class="note">${t('tr.cpu')}</p>` : ''}`;
   h += `<h3>2. ${t('tr.data')}</h3>`;
   if (!cores.length) h += `<p class="note">${t('u.noReviewed')}</p>`;
-  else h += `<p class="note">${t('tr.roles')}</p><table class="dtable mtab"><thead><tr><th>${t('tr.core')}</th><th>${t('tr.imgs')}</th><th>${t('tr.traces')}</th><th>${t('tr.role')}</th></tr></thead><tbody>${cores.map(({ c, imgs, traces }) => `<tr><td class="txt">${esc(c.name)}</td><td>${imgs}</td><td>${traces}</td><td><select data-trrole="${esc(c.name)}">${['auto', 'val', 'test'].map((r) => `<option value="${r}" ${(roles[c.name] || 'auto') === r ? 'selected' : ''}>${t('tr.r.' + r)}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table>`;
+  else h += `<p class="note">${t('tr.roles')}</p><table class="dtable mtab"><thead><tr><th>${t('tr.core')}</th><th>${t('tr.imgs')}</th><th>${t('tr.traces')}</th><th>${t('tr.role')}</th></tr></thead><tbody>${cores.map(({ c, imgs, traces }) => `<tr><td class="txt">${esc(c.name)}</td><td>${imgs}</td><td>${traces}</td><td><select data-trrole="${esc(c.name)}">${['auto', 'val', 'test'].map((r) => `<option value="${esc(r)}" ${(roles[c.name] || 'auto') === r ? 'selected' : ''}>${t('tr.r.' + r)}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table>`;
   const o = (S.settings.trainOpt ||= { name: safe(S.name || 'modelo'), epochs: 60, pretrained: true });
   h += `<h3>3. ${t('tr.train')}</h3><div class="row" style="align-items:end;gap:12px"><label class="f"><span>${t('tr.name')}</span><input type="text" data-tropt="name" value="${esc(o.name)}"></label>
-    <label class="f"><span>${t('tr.epochs')}</span><input type="number" data-tropt="epochs" min="1" max="500" value="${o.epochs}" style="width:80px"></label>
+    <label class="f"><span>${t('tr.epochs')}</span><input type="number" data-tropt="epochs" min="1" max="500" value="${esc(o.epochs)}" style="width:80px"></label>
     <label class="chk"><input type="checkbox" data-tropt="pretrained" ${o.pretrained ? 'checked' : ''}><span>${t('tr.pretrained')}</span></label></div>
     <div class="row">${TR.running ? `<button class="btn" id="trCancel">${t('tr.cancel')}</button>` : `<button class="btn primary" id="trGo" ${st?.installed && cores.length ? '' : 'disabled'}>${t('tr.go')}</button><button class="btn" id="trResume" ${st?.installed ? '' : 'disabled'}>${t('tr.resume')}</button>`}</div>`;
-  if (TR.prog) { const p = TR.prog; h += `<p><progress max="${p.epochs}" value="${p.epoch}" style="width:100%"></progress><br>${t('tr.prog', { e: p.epoch, n: p.epochs, d: fmt(p.val_dice, 3), b: fmt(p.best, 3), be: p.best_epoch, dev: p.device })}</p>`; }
+  if (TR.prog) { const p = TR.prog; h += `<p><progress max="${esc(p.epochs)}" value="${esc(p.epoch)}" style="width:100%"></progress><br>${t('tr.prog', { e: p.epoch, n: p.epochs, d: fmt(p.val_dice, 3), b: fmt(p.best, 3), be: p.best_epoch, dev: p.device })}</p>`; }
   if (TR.last?.evaluation) { const q = TR.last.evaluation.pooled; h += `<p><b>${t('tr.test', { c: TR.last.evaluation.cores.join(', '), d: fmt(q.dice, 3), i: fmt(q.iou, 3) })}</b></p>`; }
   if (TR.log.length) h += `<details ${TR.running ? 'open' : ''}><summary>${t('tr.log')}</summary><pre class="trlog">${esc(TR.log.slice(-60).join('\n'))}</pre></details>`;
   const ms = st?.models || [];
@@ -1756,7 +1163,7 @@ export function runFinalGeo(c) {
 export function finalTestsHTML(kind) {
   const list = (S.finalTests || []).filter((q) => q.kind === kind).slice(-8).reverse();
   if (!list.length) return `<p class="note">${t('ft.none')}</p>`;
-  return `<table class="tbl"><tr><th>${t('ft.when')}</th><th>${t('ft.what')}</th><th>${t('geo.bacc')}</th><th>${t('geo.acc')}</th><th>n</th></tr>${list.map((q) => `<tr><td>${esc(q.at.slice(0, 16).replace('T', ' '))}${q.repeat ? ` <span class="warn" title="${esc(t('ft.repeatTip'))}">(${q.repeat + 1}.ª)</span>` : ''}</td><td>${esc(q.target)} · ${esc(q.method)}${q.scope ? ' · ' + esc(q.scope) : ''}${q.classifier ? ' · ' + esc(q.classifier) : ''}<br><span class="note">${esc(q.cores.join(', '))}</span></td><td><b>${fmt(q.balanced * 100, 1)} %</b></td><td>${fmt(q.accuracy * 100, 1)} %</td><td>${q.n}</td></tr>`).join('')}</table>`;
+  return `<table class="tbl"><tr><th>${t('ft.when')}</th><th>${t('ft.what')}</th><th>${t('geo.bacc')}</th><th>${t('geo.acc')}</th><th>n</th></tr>${list.map((q) => `<tr><td>${esc(q.at.slice(0, 16).replace('T', ' '))}${q.repeat ? ` <span class="warn" title="${esc(t('ft.repeatTip'))}">(${esc(q.repeat + 1)}.ª)</span>` : ''}</td><td>${esc(q.target)} · ${esc(q.method)}${q.scope ? ' · ' + esc(q.scope) : ''}${q.classifier ? ' · ' + esc(q.classifier) : ''}<br><span class="note">${esc(q.cores.join(', '))}</span></td><td><b>${fmt(q.balanced * 100, 1)} %</b></td><td>${fmt(q.accuracy * 100, 1)} %</td><td>${esc(q.n)}</td></tr>`).join('')}</table>`;
 }
 export function holdoutHTML() {
   if (S.cores.some((c) => c.holdout)) mlSets();   // updates the count of external examples left out
@@ -1841,7 +1248,7 @@ let engineRefresh = 0;
 const engineBridge = /** @type {any} */ (window).corantoolDesktop?.engine;
 const engineAnalysis = engineBridge?.enabled === true ? createEngineAnalysis({ client: createEngineClient(engineBridge), project: analysisProject, maskChanges, onNotice: (key) => toast(t(key), 6000), onChange: () => {
   clearTimeout(engineRefresh);
-  engineRefresh = setTimeout(() => { renderResults(); requestRender(); if (mode === 'log') scheduleLog(0); else if (mode !== 'section') setMode(mode); }, 50);
+  engineRefresh = setTimeout(() => { renderResults(); requestRender(); if (mode === 'log') scheduleLog(0); else if (mode !== 'section' && !(['data', 'fig', 'geo'].includes(mode) && document.activeElement?.closest('input, textarea, select, [contenteditable]'))) setMode(mode); }, 50);   // card Q10: never rebuild a tab while a cell or field is being edited
 } }) : null;
 /** Brings the bins of the sections up to date. Resolves when every section has a final state (always, without the engine). */
 export function analyzeSections(sections) {
@@ -2021,11 +1428,11 @@ function renderComments() {
   const s = sec(), f = $('cmtFilter')?.value || 'all', fmtD = (d) => new Date(d).toLocaleString();
   const list = (S.comments || []).map((c, i) => ({ c, n: i + 1 })).filter(({ c }) => f === 'all' || (f === 'open' && !c.done) || (f === 'sec' && s && c.sec === s.id));
   const where = (c) => { const q = c.sec && S.cores.flatMap((k) => k.sections.map((x) => ({ k, x }))).find((o) => o.x.id === c.sec); return q ? `${esc(q.k.name)} · ${esc(q.x.name)}${c.depth != null ? ` · ${fmt(c.depth, 4)} ${esc(q.x.units)}` : ''}` : esc(t('cmt.general')); };
-  box.innerHTML = list.length ? list.map(({ c, n }) => `<div class="cmt ${c.done ? 'done' : ''}" data-id="${c.id}" style="border:1px solid var(--line,#d7ddda);border-radius:8px;padding:8px;margin:6px 0;${c.done ? 'opacity:.6' : ''}">
+  box.innerHTML = list.length ? list.map(({ c, n }) => `<div class="cmt ${c.done ? 'done' : ''}" data-id="${esc(c.id)}" style="border:1px solid var(--line,#d7ddda);border-radius:8px;padding:8px;margin:6px 0;${c.done ? 'opacity:.6' : ''}">
       <div class="row" style="justify-content:space-between;gap:6px"><b>#${n} ${esc(c.author || '—')}</b><span class="note">${fmtD(c.date)}</span></div>
       <div class="note">${where(c)} ${c.sec ? `<button class="btn small" data-act="go">${t('cmt.go')}</button>` : ''}</div>
       <div style="white-space:pre-wrap;margin:4px 0">${esc(c.text)}</div>
-      ${(c.replies || []).map((r) => `<div data-rid="${r.id}" style="margin-left:14px;border-left:3px solid var(--line,#d7ddda);padding-left:8px;margin-top:4px"><div class="row" style="justify-content:space-between"><b>${esc(r.author || '—')}</b><span class="note">${fmtD(r.date)} <button class="btn small ghost" data-act="delr" title="${esc(t('cmt.del'))}">✕</button></span></div><div style="white-space:pre-wrap">${esc(r.text)}</div></div>`).join('')}
+      ${(c.replies || []).map((r) => `<div data-rid="${esc(r.id)}" style="margin-left:14px;border-left:3px solid var(--line,#d7ddda);padding-left:8px;margin-top:4px"><div class="row" style="justify-content:space-between"><b>${esc(r.author || '—')}</b><span class="note">${fmtD(r.date)} <button class="btn small ghost" data-act="delr" title="${esc(t('cmt.del'))}">✕</button></span></div><div style="white-space:pre-wrap">${esc(r.text)}</div></div>`).join('')}
       <div class="row" style="gap:6px;margin-top:6px"><input type="text" data-reply placeholder="${esc(t('cmt.replyPh'))}" style="flex:1"><button class="btn small" data-act="reply">${t('cmt.reply')}</button>
       <button class="btn small" data-act="done">${t(c.done ? 'cmt.reopen' : 'cmt.resolve')}</button><button class="btn small danger" data-act="del">${t('cmt.del')}</button></div></div>`).join('')
     : `<p class="note">${t('cmt.none')}</p>`;
@@ -2246,7 +1653,7 @@ view.addEventListener('pointerdown', (e) => {
   if (px < navBox.x || px > navBox.x + navBox.w || py < navBox.y - 3 || py > navBox.y + navBox.h + 3) return;
   e.stopImmediatePropagation(); e.preventDefault(); view.setPointerCapture(e.pointerId); navTo(py);
   const move = (ev) => navTo(ev.clientY - r.top), up = () => view.removeEventListener('pointermove', move, true);
-  view.addEventListener('pointermove', move, true); view.addEventListener('pointerup', up, { once: true, capture: true });
+  view.addEventListener('pointermove', move, true); onPointerEnd(view, up, true);
 }, true);
 /** Whole analysis area in view (height fits). */
 function fitAll() {
@@ -2396,7 +1803,7 @@ prof.addEventListener('pointerdown', (e) => {   // V0.24: drag the right edge of
   const r = prof.getBoundingClientRect();
   const move = (ev) => { (S.settings.sideW ||= {})[L.id] = Math.round(Math.max(16, ev.clientX - r.left - L.x0)); requestRender(); };
   const up = () => { prof._drag = false; prof.removeEventListener('pointermove', move); markDirty(); if ($('profMenu').open) renderProfMenu(); };
-  prof.addEventListener('pointermove', move); prof.addEventListener('pointerup', up, { once: true });
+  prof.addEventListener('pointermove', move); onPointerEnd(prof, up);
 });
 prof.addEventListener('pointerdown', (e) => {
   if (e.offsetX > PROF_EDGE) return;
@@ -2404,14 +1811,14 @@ prof.addEventListener('pointerdown', (e) => {
   const vp = prof.parentElement, r = vp.getBoundingClientRect();
   const move = (ev) => { const w = Math.round(Math.max(140, Math.min(r.width - 200, r.right - ev.clientX))); panelPrefs.profW = w; vp.style.setProperty('--pw', w + 'px'); resizeCanvases(); };
   const up = () => { prof._drag = false; prof.removeEventListener('pointermove', move); savePanels(); };
-  prof.addEventListener('pointermove', move); prof.addEventListener('pointerup', up, { once: true });
+  prof.addEventListener('pointermove', move); onPointerEnd(prof, up);
 });
 prof.addEventListener('dblclick', (e) => { if (e.offsetX <= PROF_EDGE) { delete panelPrefs.profW; savePanels(); applyProfWidth(); } });
 /** Menu of the side column: each track shown or hidden, its width, and records from Data. */
 function renderProfMenu() {
   const box = $('profRecs'); if (!box) return;
   const names = [...new Set((S.records || []).flatMap((r) => r.series.map((x) => x.name)))], on = new Set(S.settings.sideRecs || []), hid = new Set(S.settings.sideHide || []), SW = S.settings.sideW || {};
-  const row = (id, label, checked, attr) => `<div class="row" style="gap:6px;flex-wrap:nowrap"><label class="chk" style="flex:1;min-width:0"><input type="checkbox" ${attr} ${checked ? 'checked' : ''}><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(label)}</span></label><input type="number" data-sw="${esc(id)}" min="16" max="800" step="5" value="${SW[id] ?? ''}" placeholder="${t('fig.auto2')}" title="${esc(t('p.width'))}" style="width:62px"></div>`;
+  const row = (id, label, checked, attr) => `<div class="row" style="gap:6px;flex-wrap:nowrap"><label class="chk" style="flex:1;min-width:0"><input type="checkbox" ${attr} ${checked ? 'checked' : ''}><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(label)}</span></label><input type="number" data-sw="${esc(id)}" min="16" max="800" step="5" value="${esc(SW[id] ?? '')}" placeholder="${t('fig.auto2')}" title="${esc(t('p.width'))}" style="width:62px"></div>`;
   box.innerHTML = `<b style="font-size:11px">${t('p.tracks')}</b>${row('pct', t('p.pct'), !hid.has('pct'), 'data-sh="pct"')}${row('BI', 'BI', !hid.has('BI'), 'data-sh="BI"')}${row('ii', 'ii', !hid.has('ii'), 'data-sh="ii"')}
     <b style="font-size:11px;margin-top:4px">${t('log.records')}</b>${names.length ? names.map((n) => row('rec:' + n, n, on.has(n), `data-rec="${esc(n)}"`)).join('') : `<p class="note">${t('p.noRecs')}</p>`}
     <p class="note">${t('p.widthNote')}</p>`;
@@ -2835,7 +2242,7 @@ function renderObjectList(s) {
   items.innerHTML = objs.map((o) => {
     const name = clsById(o.cls || o.pred)?.name || t('obj.unassigned');
     const depth = `${fmt(depthAtRow(s, o.bbox[1]), 3)}–${fmt(depthAtRow(s, o.bbox[3] + 1), 3)} ${s.units}`;
-    return `<button class="btn small" data-obj-id="${o.id}" title="${esc(t(selected ? 'obj.listFocus' : 'obj.listSelect'))}">#${o.id} · ${esc(name)} · ${esc(depth)}</button>`;
+    return `<button class="btn small" data-obj-id="${esc(o.id)}" title="${esc(t(selected ? 'obj.listFocus' : 'obj.listSelect'))}">#${esc(o.id)} · ${esc(name)} · ${esc(depth)}</button>`;
   }).join('') || `<p class="note">${t('obj.listEmpty')}</p>`;
 }
 $('objList').addEventListener('toggle', () => renderObjectList(sec()));
@@ -2853,20 +2260,20 @@ function renderObject() {
   renderObjectList(s);
   if (s && S.multi.size > 1) { renderMulti(s, box); return; }
   if (!o) { box.innerHTML = `<p class="note">${t('obj.none')}</p>`; return; }
-  const st = status(o), ppu = pxPerCm(s), f = o.feat || {}, [, y0, , y1] = o.bbox || [];   // no box yet: a tiled object whose statistics are on their way
+  const st = status(o), ppu = pxPerCm(s), f = /** @type {Partial<ReturnType<typeof features>>} */ (o.feat || {}), [, y0, , y1] = o.bbox || [], na = !o.stats && s._statsRunner?.stats.exceeded ? t('obj.statsNA') : '';   // no box yet: a tiled object whose statistics are on their way (or dropped, card M8.4.37)
   const opts = [`<option value="">${t('obj.unassigned')}</option>`].concat(S.classes.map((c) => `<option value="${esc(c.id)}" ${c.id === o.cls ? 'selected' : ''}>${keyOf(c) ? esc(keyOf(c)) + ' · ' : ''}${esc(c.name)}</option>`)).join('');
   const sugg = o.pred ? `<span class="swatch" style="background:${validHexColor(clsById(o.pred)?.color, '#777777')}"></span>${esc(clsById(o.pred)?.name || '')} · ${Math.round(o.conf * 100)}%` : 'novel' in o && o.novel ? t('obj.novel') : '—';
-  const u = s.units, toU = (cm) => cm / UNIT_TO_CM[u];
+  const u = esc(s.units), toU = (cm) => cm / UNIT_TO_CM[u];   // card Q9: u is shown as markup below
   box.innerHTML = `
     <dl class="kv">
       <dt>${t('obj.class')}</dt><dd><select id="objCls">${opts}</select></dd>
-      <dt>${t('obj.status')}</dt><dd><span class="pill ${st}">${t('obj.' + st)}</span></dd>
+      <dt>${t('obj.status')}</dt><dd><span class="pill ${esc(st)}">${t('obj.' + st)}</span></dd>
       ${o.cls ? '' : `<dt>${t('obj.suggest')}</dt><dd>${sugg}</dd>`}
       ${o.cls || !xOf(o) ? '' : `<dt>${t('obj.probs')}</dt><dd>${probTable(o)}</dd>`}
-      <dt>${t('obj.depth')}</dt><dd>${o.bbox ? `${fmt(depthAtRow(s, y0), 3)}–${fmt(depthAtRow(s, y1 + 1), 3)} ${u}` : '—'}</dd>
-      <dt>${t('obj.size')}</dt><dd>${fmt(toU(f.majorCm), 3)} × ${fmt(toU(f.minorCm), 3)} ${u}</dd>
-      <dt>${t('obj.area')}</dt><dd>${fmt(o.area / (ppu * ppu) / UNIT_TO_CM[u] ** 2, 4)} ${u}² · ${o.area} px</dd>
-      <dt>${t('obj.shape')}</dt><dd>${t('obj.elong')} ${fmt(f.elong, 1)} · ${t('obj.vert')} ${fmt(f.vert, 2)}</dd>
+      <dt>${t('obj.depth')}</dt><dd>${o.bbox ? `${fmt(depthAtRow(s, y0), 3)}–${fmt(depthAtRow(s, y1 + 1), 3)} ${u}` : na || '—'}</dd>
+      <dt>${t('obj.size')}</dt><dd>${na || `${fmt(toU(f.majorCm), 3)} × ${fmt(toU(f.minorCm), 3)} ${u}`}</dd>
+      <dt>${t('obj.area')}</dt><dd>${na || `${fmt(o.area / (ppu * ppu) / UNIT_TO_CM[u] ** 2, 4)} ${u}² · ${esc(o.area)} px`}</dd>
+      <dt>${t('obj.shape')}</dt><dd>${na || `${t('obj.elong')} ${fmt(f.elong, 1)} · ${t('obj.vert')} ${fmt(f.vert, 2)}`}</dd>
     </dl>
     <div class="row">${o.pred && !o.cls ? `<button class="btn small primary" id="objAccept">${t('obj.accept')}</button>` : ''}<button class="btn small" id="objDel">${t('obj.delete')}</button></div>
     <p class="note">${t('obj.multiHint')}</p>`;
@@ -2890,14 +2297,14 @@ function probTable(o) {
   if (!names.length) return '—';
   const sc = S.settings.clfScope || 'project', col = (n) => validHexColor(S.classes.find((c) => c.name === n)?.color, '#999999');
   return `<table class="dtable mtab"><thead><tr><th></th>${CLF_SCOPES.map((k) => `<th${k === sc ? ' class="on"' : ''}>${t('l.scope.' + k)}</th>`).join('')}</tr></thead><tbody>${
-    names.map((n) => `<tr><td class="txt"><span class="swatch" style="background:${col(n)}"></span>${esc(n)}</td>${CLF_SCOPES.map((k) => `<td${k === sc ? ' class="on"' : ''}>${P[k] ? Math.round((P[k].probs[n] || 0) * 100) + '%' : '—'}</td>`).join('')}</tr>`).join('')}${
+    names.map((n) => `<tr><td class="txt"><span class="swatch" style="background:${esc(col(n))}"></span>${esc(n)}</td>${CLF_SCOPES.map((k) => `<td${k === sc ? ' class="on"' : ''}>${P[k] ? Math.round((P[k].probs[n] || 0) * 100) + '%' : '—'}</td>`).join('')}</tr>`).join('')}${
     CLF_SCOPES.some((k) => P[k]?.novel) ? `<tr><td class="txt" colspan="4">${t('obj.novelBy', { m: CLF_SCOPES.filter((k) => P[k]?.novel).map((k) => t('l.scope.' + k)).join(', ') })}</td></tr>` : ''}</tbody></table>`;
 }
 
 function renderLearn() {
   const counts = clf.counts || {}, total = clf.n || 0, s = sec();
   const sc = S.settings.clfScope || 'project';
-  $('clfScopeBox').innerHTML = `<p class="note" style="margin:0">${t('ml.p.method')}: <b>${t('ml.m.' + (S.settings.ml?.method || 'knn'))}</b></p><label class="f"><span>${t('l.scope')}</span><select id="clfScope">${CLF_SCOPES.map((k) => `<option value="${k}" ${k === sc ? 'selected' : ''}>${t('l.scope.' + k)}</option>`).join('')}</select></label>
+  $('clfScopeBox').innerHTML = `<p class="note" style="margin:0">${t('ml.p.method')}: <b>${esc(t('ml.m.' + (S.settings.ml?.method || 'knn')))}</b></p><label class="f"><span>${t('l.scope')}</span><select id="clfScope">${CLF_SCOPES.map((k) => `<option value="${esc(k)}" ${k === sc ? 'selected' : ''}>${t('l.scope.' + k)}</option>`).join('')}</select></label>
     <table class="dtable mtab"><thead><tr><th></th>${CLF_SCOPES.map((k) => `<th>${t('l.scope.' + k)}</th>`).join('')}</tr></thead><tbody>
     <tr><td class="txt">${t('l.examples')}</td>${CLF_SCOPES.map((k) => `<td>${clfs[k].n || 0}</td>`).join('')}</tr>
     <tr><td class="txt">${t('l.accuracy')}</td>${CLF_SCOPES.map((k) => `<td>${clfs[k].accuracy == null ? '—' : Math.round(clfs[k].accuracy * 100) + '%'}</td>`).join('')}</tr></tbody></table>`;
@@ -2930,15 +2337,15 @@ function renderResults() {
     .map(({ c, p }) => `<div><span>${esc(c.name)}<i style="width:${Math.max(2, p)}%;background:${validHexColor(c.color, '#777777')}"></i></span><em>${fmt(p, 2)}%</em></div>`).join('');
   sum.innerHTML = `
     <div class="stat"><div><b>${fmt(v ? (b / v) * 100 : null, 1)}%</b><span>${t('r.mean')}</span></div>
-      <div><b>${fmt(area, area < 10 ? 2 : 0)}</b><span>${t('r.area')} (${s.units}²)</span></div>
+      <div><b>${fmt(area, area < 10 ? 2 : 0)}</b><span>${t('r.area')} (${esc(s.units)}²)</span></div>
       <div><b>${nObj}</b><span>${t('r.objects')}</span></div></div>
     ${bars ? `<div class="lbl">${t('r.byClass')}</div><div class="bars">${bars}</div>` : ''}`;
   const MAX = 600, hasAge = !!S.age.model;
   const opt = (lo, val) => `<option value=""></option>` + Array.from({ length: 7 - lo }, (_, k) => k + lo).map((n) => `<option ${val === n ? 'selected' : ''}>${n}</option>`).join('');
-  const rows = s.bins.slice(0, MAX).map((x) => `<tr data-i="${x.index}"><td>${fmt(x.depth, 3)}</td>${hasAge ? `<td>${fmt(x.age, 3)}</td>` : ''}<td>${fmt(x.pct, 2)}</td>
+  const rows = s.bins.slice(0, MAX).map((x) => `<tr data-i="${esc(x.index)}"><td>${fmt(x.depth, 3)}</td>${hasAge ? `<td>${fmt(x.age, 3)}</td>` : ''}<td>${fmt(x.pct, 2)}</td>
     <td>${x.BI ?? '—'}</td><td><select data-k="BI" aria-label="BI ${t('r.manual')}">${opt(0, x.BIm)}</select></td>
     <td>${x.ii ?? '—'}</td><td><select data-k="ii" aria-label="ii ${t('r.manual')}">${opt(1, x.iim)}</select></td></tr>`).join('');
-  tab.innerHTML = `<div class="tablewrap"><table><thead><tr><th>${t('r.depth')} (${s.units})</th>${hasAge ? `<th>${t('r.age')} (${esc(S.age.units)})</th>` : ''}<th>%</th><th>BI</th><th>BI ${t('r.manual')}</th><th>ii</th><th>ii ${t('r.manual')}</th></tr></thead><tbody>${rows}</tbody></table></div>
+  tab.innerHTML = `<div class="tablewrap"><table><thead><tr><th>${t('r.depth')} (${esc(s.units)})</th>${hasAge ? `<th>${t('r.age')} (${esc(S.age.units)})</th>` : ''}<th>%</th><th>BI</th><th>BI ${t('r.manual')}</th><th>ii</th><th>ii ${t('r.manual')}</th></tr></thead><tbody>${rows}</tbody></table></div>
     ${s.bins.length > MAX ? `<p class="note">${t('r.tooMany', { n: MAX })}</p>` : ''}`;
 }
 $('resTable').addEventListener('change', (e) => {
@@ -2954,12 +2361,12 @@ function renderSectionForm() {
   $('secMaskWarning').hidden = !s?.loadWarnings?.mask;
   $('secDepthWarning').hidden = !s || (Number.isFinite(s.top) && Number.isFinite(s.bottom)
     && s.bottom > s.top && Object.hasOwn(UNIT_TO_CM, s.units));
-  $('secSel').innerHTML = S.sections.map((x, k) => `<option value="${k}" ${k === S.cur ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+  $('secSel').innerHTML = S.sections.map((x, k) => `<option value="${esc(k)}" ${k === S.cur ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
   for (const id of ['secName', 'secTop', 'secBottom', 'secUnits', 'secDel', 'roiBtn', 'roiReset', 'rotL', 'rotR', 'detectBtn', 'clearCand', 'secRes', 'resAll']) $(id).disabled = !s;
-  if (!s) { void tiledSource.render(null); return; }
+  if (!s) { void tiledSource.render(null); tiledSplit.render(null); return; }
   // kept byte for byte (D2), or locked until its image is located (card M8.4.18a-b): its saved record is what a save writes
   if (s.frozen) for (const id of ['secName', 'secTop', 'secBottom', 'secUnits', 'roiBtn', 'roiReset', 'rotL', 'rotR', 'detectBtn', 'clearCand', 'secRes', 'resAll']) /** @type {HTMLInputElement} */ ($(id)).disabled = true;
-  void tiledSource.render(s);
+  void tiledSource.render(s); tiledSplit.render(s);
   if (s.tiled && TILED_BLOCKED_TOOLS.has(S.tool)) setTool('pan');   // a tool chosen on another section does not follow into a tiled one
   $('secName').value = s.name; $('secTop').value = s.top; $('secBottom').value = s.bottom; $('secUnits').value = s.units;
   const ppu = pxPerCm(s);
@@ -2973,11 +2380,11 @@ function renderResForm(s) {
   const sel = $('secRes'); sel.disabled = $('resAll').disabled = !s; if (!s) return;
   const span = s.crop ? { w: s.crop.x1 - s.crop.x0, h: s.crop.y1 - s.crop.y0 } : s.full;
   const ppcFull = pxPerCm(s) * s.ds;   // px/cm of the original file
-  if (!span) { sel.innerHTML = `<option>${t('sec.resUnknown', { k: s.ds })}</option>`; $('resNote').textContent = ''; return; }
+  if (!span) { sel.innerHTML = `<option>${t('sec.resUnknown', { k: esc(s.ds) })}</option>`; $('resNote').textContent = ''; return; }
   const ks = RES_FACTORS.filter((k) => k === s.ds || Math.min(span.w, span.h) / k >= 20);
   sel.innerHTML = ks.map((k) => {
     const W = Math.floor(span.w / k), H = Math.floor(span.h / k), tooBig = k !== s.ds && workingBytes(W, H, !!s.orig16) > WORKING_MEMORY_LIMIT;
-    return `<option value="${k}" ${k === s.ds ? 'selected' : ''} ${tooBig ? 'disabled' : ''}>${k === 1 ? t('sec.resFull') : '1/' + k} · ${fmt(ppcFull / k, 3)} px/cm · ${fmt((W * H) / 1e6, 2)} MP${tooBig ? ' · ' + t('sec.resTooBig') : ''}</option>`;
+    return `<option value="${esc(k)}" ${k === s.ds ? 'selected' : ''} ${tooBig ? 'disabled' : ''}>${k === 1 ? t('sec.resFull') : '1/' + k} · ${fmt(ppcFull / k, 3)} px/cm · ${fmt((W * H) / 1e6, 2)} MP${tooBig ? ' · ' + t('sec.resTooBig') : ''}</option>`;
   }).join('');
   $('resNote').textContent = t('sec.resNote', { mb: Math.round((13 * s.w * s.h) / 2 ** 20) });
 }
@@ -3033,7 +2440,7 @@ $('resAll').addEventListener('click', () => {
 
 function selectSection(k, fresh = false) {
   if (cropState) endCrop();
-  const prev = sec(); if (prev) prev.view = { ...S.view };
+  const prev = sec(); if (prev) { prev.view = { ...S.view }; if (k !== S.cur) prev._statsRunner?.releasePixels(); }   // card M8.4.39: its level-0 pixels
   S.cur = k; S.selected = 0;
   const s = sec();
   if (s && !s.orig) ensurePixels(s).then(() => { if (sec() === s) { renderSectionForm(); requestRender(); } }).catch(() => requestRender());   // V0.1
@@ -3047,13 +2454,13 @@ const FILTER_SLIDERS = [['blackPoint', 0, 254, 1], ['whitePoint', 1, 255, 1], ['
 const BUILTIN_PRESETS = ['none', 'dorador2014', 'clahe2019', 'levels', 'local', 'strong'];
 const DETECT_SLIDERS = [['offset', 1, 80, 1, 'adaptive'], ['radius', 3, 200, 1, 'adaptive'], ['threshold', 0, 255, 1, 'global'], ['pThr', 0.05, 0.95, 0.05, 'unet'], ['minArea', 1, 2000, 1], ['smooth', 0, 4, 1]];
 let userPresets = [];
-const slider = (prefix, [k, min, max, step]) => `<div class="slider" data-only="${''}"><span data-i18n="${prefix}.${k}" id="${prefix}l-${k}">${t(prefix + '.' + k)}</span><output id="${prefix}o-${k}" for="${prefix}-${k}"></output><input type="range" id="${prefix}-${k}" data-k="${k}" min="${min}" max="${max}" step="${step}" aria-labelledby="${prefix}l-${k}"></div>`;   // V0.39: accessible name
+const slider = (prefix, [k, min, max, step]) => `<div class="slider" data-only="${''}"><span data-i18n="${esc(prefix)}.${esc(k)}" id="${esc(prefix)}l-${esc(k)}">${t(prefix + '.' + k)}</span><output id="${esc(prefix)}o-${esc(k)}" for="${esc(prefix)}-${esc(k)}"></output><input type="range" id="${esc(prefix)}-${esc(k)}" data-k="${esc(k)}" min="${esc(min)}" max="${esc(max)}" step="${esc(step)}" aria-labelledby="${esc(prefix)}l-${esc(k)}"></div>`;   // V0.39: accessible name
 
 function buildForms() {
   $('filterCtl').innerHTML = FILTER_SLIDERS.map((d) => slider('f', d)).join('');
   $('detectCtl').innerHTML = DETECT_SLIDERS.map((d) => slider('d', d).replace('data-only=""', `data-only="${d[4] || ''}"`)).join('');
   renderPresetOptions();
-  $('fChannel').innerHTML = ['rgb', 'gray', 'r', 'g', 'b'].map((c) => `<option value="${c}">${t('ch.' + c)}</option>`).join('');
+  $('fChannel').innerHTML = ['rgb', 'gray', 'r', 'g', 'b'].map((c) => `<option value="${esc(c)}">${t('ch.' + c)}</option>`).join('');
 }
 
 function renderFilterForm() {
@@ -3149,7 +2556,7 @@ function rankPresets(s) {
   return out;
 }
 $('presetBest').addEventListener('click', () => busy(() => {
-  const s = sec(); if (!s?.orig) return;
+  const s = sec(); if (!s?.orig || tiledRefused(s)) return;   // card M8.4.39: the tiles show the source's pixels (no filters)
   const r = rankPresets(s), best = r[0];
   s.preset = best.id; s.filters = { ...best.filters }; if (best.detect) s.detect = { ...DEFAULT_DETECT, ...best.detect };
   renderFilterForm(); renderDetectForm(); refilter();
@@ -3162,8 +2569,8 @@ $('dFill').addEventListener('change', (e) => { const s = sec(); if (s) s.detect.
 /* user presets: enhancement + detection settings saved by the user, shared by all projects */
 function renderPresetOptions() {
   const cur = $('fPreset').value;
-  $('fPreset').innerHTML = `<optgroup label="${t('f.builtin')}">${BUILTIN_PRESETS.map((p) => `<option value="${p}">${t('f.p.' + p)}</option>`).join('')}</optgroup>`
-    + (userPresets.length ? `<optgroup label="${t('f.mine')}">${userPresets.map((u) => `<option value="u:${u.id}">${esc(u.name)}</option>`).join('')}</optgroup>` : '')
+  $('fPreset').innerHTML = `<optgroup label="${t('f.builtin')}">${BUILTIN_PRESETS.map((p) => `<option value="${esc(p)}">${t('f.p.' + p)}</option>`).join('')}</optgroup>`
+    + (userPresets.length ? `<optgroup label="${t('f.mine')}">${userPresets.map((u) => `<option value="u:${esc(u.id)}">${esc(u.name)}</option>`).join('')}</optgroup>` : '')
     + `<option value="custom">${t('f.p.custom')}</option>`;
   if (cur) $('fPreset').value = cur;
 }
@@ -3199,10 +2606,10 @@ $('presetDel').addEventListener('click', (e) => {
   storePresets(); renderFilterForm();
 });
 $('presetAll').addEventListener('click', () => {
-  const s = sec(); if (!s) return;
-  busy(() => {
-    for (const o of S.sections) if (o !== s) { o.filters = { ...s.filters }; o.preset = s.preset; o.detect = { ...s.detect }; enhance(o); o.logVer++; }
-    markDirty(); scheduleLog(); toast(t('f.appliedAll', { n: S.sections.length }));
+  const s = sec(); if (!s || tiledRefused(s)) return;
+  busy(() => {   // card M8.4.39: never to a tiled or locked section (its tiles show the source's pixels, with no filter)
+    for (const o of S.sections) if (o !== s && !o.tiled && !o.frozen) { o.filters = { ...s.filters }; o.preset = s.preset; o.detect = { ...s.detect }; enhance(o); o.logVer++; }
+    markDirty(); scheduleLog(); toast(t('f.appliedAll', { n: S.sections.filter((o) => !o.tiled && !o.frozen).length }));
   });
 });
 
@@ -3253,16 +2660,22 @@ $('secSel').addEventListener('change', (e) => selectSection(+e.target.value));
 $('secName').addEventListener('input', (e) => { const s = sec(); if (!s) return; s.name = e.target.value; $('secSel').options[S.cur].textContent = s.name; });
 for (const id of ['secTop', 'secBottom', 'secUnits']) $(id).addEventListener('change', () => {
   const s = sec(); if (!s) return;
-  const top = parseFloat($('secTop').value), bottom = parseFloat($('secBottom').value);
+  const field = (id) => /** @type {any} */ ($(id)).value;
+  let top = parseFloat(field('secTop')), bottom = parseFloat(field('secBottom'));
+  const unit = field('secUnits');
+  if (unit !== s.units && Number.isFinite(top) && Number.isFinite(bottom)) {   // card Q3: convert the depths, or only correct the label
+    const f = unitFactor(s.units, unit, 'depth'), r = (v) => +(v * f).toPrecision(12);
+    if (confirm(t('sec.unitAsk', { a: top, b: bottom, u: s.units, c: r(top), d: r(bottom), v: unit }))) { top = r(top); bottom = r(bottom); }
+  }
   if (Number.isFinite(top) && Number.isFinite(bottom) && bottom > top) { s.top = top; s.bottom = bottom; }
-  s.units = $('secUnits').value;
+  s.units = unit;
   recomputeFeatures(s); renderSectionForm(); scheduleLearn(); scheduleAnalysis(); requestRender();
 });
 $('secDel').addEventListener('click', (e) => {
   if (!sec()) return;
   if (!armed(e.currentTarget, t('confirm.secDel', { n: [...sec().objects.values()].filter((o) => o.cls).length }))) return;
-  const [removed] = S.sections.splice(S.cur, 1); discardEditHistory(removed); removed._maskSync?.stop();
-  selectSection(Math.min(S.cur, S.sections.length - 1)); scheduleLearn();
+  const [removed] = S.sections.splice(S.cur, 1); discardEditHistory(removed); stopTiledWork(removed); if (removed.tiled) resetTiledTools();   // card M8.4.39
+  selectSection(Math.min(S.cur, S.sections.length - 1)); scheduleLearn(); markDirty();
 });
 $('roiBtn').addEventListener('click', () => setTool('roi'));
 $('roiReset').addEventListener('click', () => { const s = sec(); if (s) setRoi(s, { x0: 0, y0: 0, x1: s.w, y1: s.h }); });
@@ -3283,7 +2696,7 @@ function setAge() {
   S.age.text = $('ageText').value; S.age.units = $('ageUnits').value;
   const parsed = parseAgeModelDetailed(S.age.text); S.age.model = parsed.model;
   const m = S.age.model;
-  $('ageStatus').textContent = m ? t('age.ok', { n: m.depth.length, a: fmt(Math.min(...m.age), 3), b: fmt(Math.max(...m.age), 3), u: S.age.units }) + (m.reversals ? ' ' + t('age.reversal', { n: m.reversals }) : '') + (m.bacon ? ' ' + t('age.baconPasted') : '') + (m.rangeIgnored ? ' ' + t('age.rangeIgnored', { n: m.rangeIgnored }) : '')
+  $('ageStatus').textContent = m ? t('age.ok', { n: m.depth.length, a: fmt(minOf(m.age), 3), b: fmt(maxOf(m.age), 3), u: S.age.units }) + (m.reversals ? ' ' + t('age.reversal', { n: m.reversals }) : '') + (m.bacon ? ' ' + t('age.baconPasted') : '') + (m.rangeIgnored ? ' ' + t('age.rangeIgnored', { n: m.rangeIgnored }) : '')
     : parsed.issue?.kind === 'dupDepth' ? t('age.dupDepth', { d: fmt(parsed.issue.depth, 4) }) : t('age.none');
   $('ageStatus').classList.toggle('warn', !!(m?.reversals || m?.bacon || m?.rangeIgnored || parsed.issue));
   const c = curCore(); if (c) c.ageText = S.age.text;
@@ -3360,7 +2773,7 @@ $('expObjects').addEventListener('click', () => {
   const items = [];
   for (const s of S.sections) {
     const eff = effClassArray(s);
-    for (const o of s.objects.values()) items.push({ section: s.name, units: s.units, o, cls: clsById(o.cls)?.name, status: status(o), pred: clsById(o.pred)?.name, counted: eff[o.id] >= 0, depth: (row) => depthAtRow(s, row) });
+    for (const o of s.objects.values()) items.push({ section: s.name, units: s.units, o, cls: clsById(o.cls)?.name, status: status(o), pred: clsById(o.pred)?.name, counted: eff[o.id] >= 0, depth: (row) => depthAtRow(s, row), unavailable: !!s._statsRunner?.stats.exceeded });
   }
   saveFile(`${safe(S.name)}_objects.csv`, withProv(toCSV(objectsTable(items))), 'text/csv');   // V0.44: exportio.js
 });
@@ -3571,7 +2984,7 @@ function liteSnapshot() {
     examples: S.cores.flatMap((c) => c.sections.flatMap((s) => [...s.objects.values()].filter((o) => o.cls && !o.nt && clsById(o.cls) && (o.feat || o.emb)).map((o) => ({   // V0.17: both vector sets
       key: `${S.id}|${c.id}|${s.id}|${o.id}`, name: clsById(o.cls).name, x: o.feat ? vec(o.feat).map((v) => +v.toFixed(4)) : null, ...(o.emb ? { xv: o.emb } : {}), core: c.name, thumb: thumbOf(s, o) })))),
     layers: S.geo.layers, intervals: S.geo.intervals, geo: (({ cores: _c, ...g }) => g)(S.geo),
-    cores: S.cores.map((c) => ({ id: c.id, name: c.name, lat: c.lat, lon: c.lon, units: c.units, ageText: c.ageText, depth: c.depth, age: c.age, proxies: c.proxies, src: c.src, nImages: c.sections.length })),
+    cores: S.cores.map((c) => ({ id: c.id, name: c.name, lat: c.lat, lon: c.lon, units: c.units, ageUnits: S.age.units, ageText: c.ageText, depth: c.depth, age: c.age, proxies: c.proxies, src: c.src, nImages: c.sections.length })),
   };
 }
 
@@ -3581,7 +2994,7 @@ function broadcast(msg) { try { bc?.postMessage(msg); } catch { /* channel unava
 /* core bar in the header */
 export function renderCoreBar() {
   const sel = $('coreSel'); if (!sel) return;
-  sel.innerHTML = S.cores.map((c) => `<option value="${c.id}" ${c.id === S.curCore ? 'selected' : ''}>${esc(c.name)}${c.sections.length ? ` · ${c.sections.length} img` : ''}</option>`).join('');
+  sel.innerHTML = S.cores.map((c) => `<option value="${esc(c.id)}" ${c.id === S.curCore ? 'selected' : ''}>${esc(c.name)}${c.sections.length ? ` · ${c.sections.length} img` : ''}</option>`).join('');
 }
 $('coreSel').addEventListener('change', (e) => { activateCore(e.target.value); });
 $('coreAdd').addEventListener('click', () => openCoreDlg(null));
@@ -3631,21 +3044,6 @@ function serSection(s) {
   };
 }
 
-/**
- * The record of a tiled section (card M8.4.18a): like any section, without the mask arrays, which are in the engine's store under `manifest`, and
- * with the overlap stacks as they are (a tiled section never renumbers them, card M8.4.17). `manifest` must hold every edit of the section.
- */
-function serTiledSection(s, manifest) {
-  const o2 = (o) => ({ id: o.id, cls: o.cls, src: o.src, ...(o.nt ? { nt: 1 } : {}), ...(o.stats ? { st: o.stats } : {}), ...(o.cls && o._thumb ? { th: o._thumb } : {}), ...(o.emb ? { em: o.emb } : {}) });
-  return {
-    id: s.id, name: s.name, ds: s.ds, rot: 0, w: s.w, h: s.h, crop: null, full: s.full || null,
-    file: { name: s.file.name, type: s.file.type, tiled: true },
-    top: s.top, bottom: s.bottom, units: s.units, roi: s.roi, filters: s.filters, preset: s.preset, detect: s.detect, manual: s.manual,
-    nextId: s.nextId, objects: [...s.objects.values()].map(o2), stacks: s.stacks, marks: s.marks || [],
-    tiled: { version: 1, store: 2, manifest, width: s.maskTiles.width, height: s.maskTiles.height, level: s.tiled.level,
-      source: { sha256: s.tiled.pyramid, size: s.tiled.source?.size ?? null, name: s.tiled.source?.name ?? s.file.name } },
-  };
-}
 /** What a save writes for a section: today's record, a tiled section's prepared record, or a placeholder's record unchanged (D2). */
 function sectionRecord(q) {
   if (q.frozen === 'engine') return q.placeholder;
@@ -3658,15 +3056,16 @@ function serialize() {
   if (projectPreview) return projectPreview;
   const { cores: _c, ...geo } = S.geo;
   const tiledInside = S.cores.some((c) => c.sections.some((q) => q.tiled || q.frozen === 'engine'));
+  const records = new Map(S.cores.map((c) => [c, c.sections.map(sectionRecord).filter(Boolean)]));
   return {
-    app: APP, kind: 'project', version: tiledInside ? FORMAT_VERSION_TILED : FORMAT_VERSION, appVersion: VERSION, delivery: DELIVERY, saved: new Date().toISOString(),
+    app: APP, kind: 'project', version: projectFormatVersion([...records.values()].flat(), tiledInside, FORMAT_VERSION, FORMAT_VERSION_TILED), appVersion: VERSION, delivery: DELIVERY, saved: new Date().toISOString(),
     id: S.id, name: S.name, notes: S.notes, comments: S.comments || [], classes: S.classes, active: S.active, settings: S.settings, library: S.library,
     projectKind: S.kind || 'normal', multiSource: S.multiSource || null, models: projectModels(), finalTests: S.finalTests || [],
     geo, sheet: S.sheet, fig: S.fig, ...figTabsData(), curCore: S.curCore, plots: S.plots || [], plotCur: S.plotCur || 0,
     cores: S.cores.map((c) => ({
       id: c.id, name: c.name, lat: c.lat, lon: c.lon, waterDepth: c.waterDepth ?? null, units: c.units, source: c.source || null, notes: c.notes || '', holdout: c.holdout || undefined,
       imp: c.imp, user: c.user || {}, edits: c.edits && Object.keys(c.edits).length ? c.edits : undefined, records: c.records, logView: c.logView, age: { text: c.ageModel.text, units: c.ageModel.units, bacon: c.ageModel.bacon || undefined, center: c.ageModel.center || undefined },
-      sections: c.sections.map(sectionRecord).filter(Boolean),
+      sections: records.get(c),
     })),
   };
 }
@@ -3712,10 +3111,20 @@ async function loadSection(q) {
 let loadMigrated = false;
 
 const greyRgba = (w, h) => { const out = new Uint8ClampedArray(w * h * 4).fill(128); for (let i = 3; i < out.length; i += 4) out[i] = 255; return out; };
-const validTiledRecord = (r) => r && r.version === 1 && r.store === 2 && /^[0-9a-f]{64}$/.test(r.manifest || '') && /^[0-9a-f]{64}$/.test(r.source?.sha256 || '')
-  && Number.isSafeInteger(r.width) && r.width > 0 && Number.isSafeInteger(r.height) && r.height > 0 && Number.isSafeInteger(r.level) && r.level >= 0;
+
 const sectionFields = (q) => ({ id: q.id, rot: 0, crop: null, top: q.top, bottom: q.bottom, units: q.units, roi: q.roi, filters: q.filters, preset: q.preset,
   detect: q.detect, manual: q.manual || [], nextId: q.nextId, marks: q.marks || [] });
+let tiledUnsavedShown = false, settleDeadlineMs = 15000;
+/** Card M8.4.30 step 1: the project side of tiled sections lives in tiledproject.js. */
+const { loadTiledSection, deleteStoreOf, copyTiledStore, storeLocked, settleTiledSections, markTiledSaved, stopTiledWork, retainStore, announceStoreProjects, backupTiledOf, restoreTiledOf, packageTiledPlan } = createTiledProject({
+  TILES, get settleDeadlineMs() { return settleDeadlineMs; }, toast, storeProject, maskSync, maskLoader, newSection, sectionFields, greyRgba, sourceRoi,
+  tileBuildDialog, tiledCounts, tiledStatsRunner, tiledWorkingImage, serTiledSection, hexDigest,
+});
+/** Card M8.4.43: splitting a tiled section into parts lives in tiledsplitui.js (pure geometry in tiledsplit.js). */
+const tiledSplit = createTiledSplitController({
+  TILES, get settleDeadlineMs() { return settleDeadlineMs; }, readOnlyProject: () => readOnlyProject, storeProject, maskSync, loadTiledSection,
+  stopTiledWork, discardEditHistory, resetTiledTools, tileBuildDialog, analyze, selectSection, scheduleLearn, scheduleLog, markDirty, toast, esc: (text) => esc(text),
+});
 
 /** D2 of card M8.4.18: without the engine a tiled section is a grey placeholder, never edited, and its record is saved back unchanged. */
 function placeholderSection(q) {
@@ -3726,116 +3135,9 @@ function placeholderSection(q) {
   return s;
 }
 
-/**
- * A saved tiled section (card M8.4.18a): its pyramid from the engine's cache or built again from the remembered source (a grey image and no edits when
- * neither is there), its masks from the stored version, every stored tile read back once for the reduced copy and the row counts, and the statistics
- * of its objects computed again from the tiles in the background (saved ones are shown meanwhile).
- */
-async function loadTiledSection(q) {
-  const rec = q.tiled, project = storeProject(S.id);
-  if (!validTiledRecord(rec)) throw new Error(t('load.badMask', { s: q.name || '?', k: 'tiled' }));
-  const key = crypto.randomUUID(), dialog = tileBuildDialog(q.file.name, () => { void TILES.cancel(key); });
-  const stop = TILES.onProgress((k, progress) => { if (k === key) dialog.update(progress); });
-  try {
-    const opened = await TILES.reopen(project, rec.source.sha256, key);
-    if (opened.error) throw new Error(t('tiles.err', { code: opened.error.code, field: opened.error.field || '' }));
-    let tiled, working;
-    if (opened.ok.available) {
-      const info = (await TILES.info(rec.source.sha256)).ok;
-      if (!info || info.width !== rec.width || info.height !== rec.height) throw new Error(t('load.badMask', { s: q.name || '?', k: 'tiled' }));
-      tiled = { pyramid: rec.source.sha256, level: rec.level, levels: info.levels, channels: info.channels, bits: info.bits, source: { name: rec.source.name, size: rec.source.size } };
-      working = await tiledWorkingImage(tiled);
-    } else {
-      tiled = { pyramid: rec.source.sha256, level: rec.level, levels: null, channels: 3, bits: 8, source: { name: rec.source.name, size: rec.source.size }, missing: true };
-      working = { w: q.w, h: q.h, rgba: greyRgba(q.w, q.h), rgba16: null };
-    }
-    const s = newSection({ name: q.name, file: { name: q.file.name, type: q.file.type, tiled: true }, w: working.w, h: working.h, orig: working.rgba,
-      orig16: working.rgba16, ds: q.ds || 1, full: q.full || { w: rec.width, h: rec.height } });
-    Object.assign(s, sectionFields(q));
-    s.tiled = tiled;
-    s.maskTiles = new MaskTiles({ width: rec.width, height: rec.height });
-    s.stacks = Array.isArray(q.stacks) ? q.stacks : [null]; s._six = null;
-    if (tiled.missing) s.frozen = 'source';
-    const ppu = pxPerCm(s) * s.ds;
-    for (const o of q.objects || []) {
-      const st = o.st || null, order = s.nextTraceOrder++;
-      s.objects.set(o.id, { id: o.id, order, cls: o.cls, src: o.src, nt: !!o.nt, pred: null, conf: 0, area: st?.n || 0, bbox: st ? [Math.floor(st.x0 / s.ds), Math.floor(st.y0 / s.ds), Math.floor(st.x1 / s.ds), Math.floor(st.y1 / s.ds)] : null,
-        sbox: st ? [st.x0, st.y0, st.x1, st.y1] : null, stats: st, feat: st ? features(st, ppu) : null, ...(o.th ? { _thumb: o.th } : {}), ...(o.em ? { emb: o.em } : {}) });
-    }
-    // The tiles of the stored version, then every one read back once: the reduced copy for the overview and the row counts (card M8.4.17).
-    // Card M8.4.27: a stored version that is missing or damaged locks the section (no masks, no table, record saved back as read).
-    const positions = /** @type {[number, number][]} */ ([]);
-    try {
-    for (let start = 0; start !== null;) {
-      const page = await TILES.maskInfo(project, rec.manifest, start);
-      if (page.error) throw Object.assign(new Error(t('tiles.err', { code: page.error.code, field: page.error.field || '' })), page.error);
-      if (page.ok.section !== q.id || page.ok.width !== rec.width || page.ok.height !== rec.height) throw new Error(t('load.badMask', { s: q.name || '?', k: 'tiled' }));
-      for (let k = 0; k < page.ok.positions.length; k += 3) { const [row, col] = page.ok.positions.slice(k, k + 2); positions.push([row, col]); s.maskTiles.stored.add(s.maskTiles.index(row, col)); }
-      start = page.ok.next;
-    }
-    maskSync(s).manifest = rec.manifest;
-    s._savedRecord = q;
-    const { counts } = tiledCounts(s), area = sourceRoi(s);
-    counts.setArea(area);
-    for (let i = 0; i < positions.length; i += 16) {
-      dialog.update({ stage: 'masks', completed: i, total: positions.length });
-      const batch = positions.slice(i, i + 16);
-      await maskLoader(s).want(batch);
-      for (const [row, col] of batch) {
-        const entry = s.maskTiles.get(row, col);
-        reduceTile(s, s.ds, row, col, entry?.labels || null, entry?.exclude || null);
-        counts.commit(s.maskTiles.index(row, col), tileHistogram(entry, row, col, rec.width, rec.height, area.x0, area.x1));
-      }
-    }
-    } catch (error) {
-      if (!['INVALID_REQUEST', 'INVALID_BUFFER'].includes(/** @type {any} */ (error)?.code)) throw error;
-      return storeLocked(s, q);
-    }
-    if (!tiled.missing && positions.length) void tiledStatsRunner(s).queue(positions);   // only the tiles: an object without pixels is kept, as saved
-    return s;
-  } finally { stop(); dialog.close(); }
-}
-
-/** Card M8.4.27: the store folder of a deleted project goes too, once the sends of its sections that were open have stopped. */
-async function deleteStoreOf(id, sections) {
-  if (!TILES) return;
-  for (const q of sections) q._maskSync?.stop();
-  await Promise.race([Promise.all(sections.map((q) => q._maskSync?.running?.catch(() => {}))), new Promise((r) => setTimeout(r, 3000))]);
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const result = await TILES.deleteProjectStore(storeProject(id));
-    if (!result.error) return;
-    if (result.error.code !== 'BUSY') break;
-    await new Promise((r) => setTimeout(r, 1000));                   // a version still being sent: the engine closes it shortly
-  }
-  toast(t('tiles.deleteFailed'), 9000);
-}
-/** Card M8.4.27: before a project is kept under a new identifier, its tiled sections' stored versions and sources are copied to it; throws
- *  (and nothing is kept) when that is not possible. */
-async function copyTiledStore(record, to) {
-  const tiled = (record.cores || []).flatMap((c) => c.sections || []).filter((q) => q.tiled?.manifest);
-  if (!tiled.length) return;
-  if (!TILES) throw new Error(t('tiles.copyNeedsEngine'));
-  const key = crypto.randomUUID(), dialog = tileBuildDialog('', () => { void TILES.cancel(key); }, t('tiles.copyingProject', { n: record.name || APP }));
-  const stop = TILES.onProgress((k, progress) => { if (k === key) dialog.update(progress); });
-  try {
-    const result = await TILES.copyProjectStore(storeProject(record.id), storeProject(to), tiled.map((q) => q.tiled.manifest), tiled.map((q) => q.tiled.source.sha256), key);
-    if (result.error) throw new Error(t('tiles.err', { code: result.error.code, field: result.error.field || '' }));
-    if (result.ok.cancelled) throw new Error(t('tiles.cancelled'));
-  } finally { stop(); dialog.close(); }
-}
-
-/** Card M8.4.27: the section without its masks, locked; its saved record is what a save writes, and the store keeps everything (`retainStore`). */
-function storeLocked(s, q) {
-  s._maskSync?.stop(); s._maskSync = null; s._maskLoader = null; s._counts = null;
-  s.maskTiles = new MaskTiles({ width: q.tiled.width, height: q.tiled.height });
-  s.labels?.fill(0); s.exclude?.fill(0);                   // the reduced copy of tiles read before the failure
-  s.frozen = 'store'; s._savedRecord = q; s.bins = [];
-  toast(t('tiles.storeMissing', { s: q.name || '?' }), 12000);
-  return s;
-}
-
 /* V0.36: version 5 = trace overlaps (stacks, V0.20), cell edits (V0.35). A newer file opens read-only. Card M8.4.18a: version 6 = a project with tiled
-   sections, written only when it has one, so every other project stays version 5 byte for byte. */
+   sections, written only when it has one, so every other project stays version 5 byte for byte. Card M8.4.42: version 7 (FORMAT_VERSION_WINDOW,
+   tiledrecord.js) = a project with a section that covers a row window of its stored image. */
 const FORMAT_VERSION = 5, FORMAT_VERSION_TILED = 6;
 let readOnlyProject = false;
 let projectPreview = null;
@@ -3845,10 +3147,9 @@ async function loadProject(p) {
   const source = p;
   blankStart = false;
   resetState(); loading = true; loadMigrated = false; clearTimeout(saveTimer);
-  engineAnalysis?.releaseAll();   // the engine keeps the masks of the sections it analysed; the old project's are no longer needed
-  readOnlyProject = (p?.version || 0) > FORMAT_VERSION_TILED;   // V0.36: written by a newer SedCoreTool
+  readOnlyProject = opensReadOnly(p?.version, FORMAT_VERSION_WINDOW);   // V0.36: written by a newer SedCoreTool
   try {
-    p = upgradeProject(p);
+    p = sanitizeThumbs(upgradeProject(p));   // card Q9: thumbnails of older stored projects too
     S.id = p.id || uid(); S.name = p.name || APP; S.notes = p.notes || ''; S.comments = p.comments || [];
     S.classes = p.classes || defaultClasses(); S.active = p.active || 'undet';
     Object.assign(S.settings, p.settings || {}); S.library = p.library || []; S.kind = p.projectKind || 'normal'; S.multiSource = p.multiSource || null; S.plots = p.plots || []; S.plotCur = p.plotCur || 0; S.coreModels = p.models?.cores || {};
@@ -3902,13 +3203,14 @@ async function loadProject(p) {
 }
 
 function resetState() {
-  blankStart = false; clearTimeout(saveTimer);   // V0.36: a pending save of the previous project must not run afterwards
+  blankStart = false; clearTimeout(saveTimer); projectGeneration++;   // V0.36: a pending save of the previous project must not run afterwards (M8.4.35: nor one already waiting)
   deletedClasses.length = 0;                     // card Q1: a deletion is undone only in its own project
   readOnlyProject = false; projectPreview = null; $('projectValidation').hidden = true;
   const maxMP = S.settings.maxMP || 8;
-  S.id = uid(); S.name = t('proj.untitled'); S.notes = ''; S.comments = []; S.finalTests = [];
+  const closedId = S.id; S.id = uid(); S.name = t('proj.untitled'); S.notes = ''; S.comments = []; S.finalTests = [];
   clearNavigationPreviews();
   MEM.px.length = 0; MEM.mask.length = 0; pxWanted.clear();   // V0.1: pictures of the previous project can be freed
+  for (const q of S.cores.flatMap((c) => c.sections)) stopTiledWork(q); resetTiles(); resetTiledTools(); engineAnalysis?.releaseAll(); forgetSections(closedId); forgetLastImport(); forgetMapBackgrounds();   // card M8.4.39: saved (canLeaveProject) or deleted
   S.selected = 0; S.multi.clear(); S.library = []; S.sheet = { columns: [], cells: {} }; resetFigTabs(); S.kind = 'normal'; S.multiSource = null; S.plots = []; S.plotCur = 0; S.coreModels = {};
   S.geo = defaultGeo(); geoReset();
   S.classes = defaultClasses(); S.active = 'undet';
@@ -3960,12 +3262,11 @@ async function saveToDB() {
 async function saveOnce() {
   const finishDiagnostic = diagnosticOperation('save');
   try {
-    setSaveState('saving'); dirty = false;
-    await storePendingImages();
-    const unsaved = await settleTiledSections();
+    setSaveState('saving'); dirty = false; const generation = projectGeneration; await storePendingImages();
+    const unsaved = await settleTiledSections(); if (generation !== projectGeneration || loading) { finishDiagnostic(); return; }   // card M8.4.35: S was replaced while this save waited: never write a half-loaded project
     await putProject(projectMeta(), serialize());
-    for (const q of S.sections.length ? S.cores.flatMap((c) => c.sections) : []) if (q.tiled && q._tiledRecord) q._savedRecord = q._tiledRecord;
-    void retainStore();
+    if (generation !== projectGeneration) { finishDiagnostic(); return; }   // nor clean up the store of a project that is only partly loaded
+    markTiledSaved(); void retainStore();   // card M8.4.39: the saved versions of every core, also when the one on screen is empty
     if (unsaved) { dirty = true; if (!tiledUnsavedShown) { tiledUnsavedShown = true; toast(t('tiles.unsaved'), 12000); } }
     else tiledUnsavedShown = false;
     try { await putLite(S.id, liteSnapshot()); } catch { /* lite index is optional */ }
@@ -3980,41 +3281,6 @@ async function saveOnce() {
     finishDiagnostic(e);
     if (e?.name === 'QuotaExceededError') toast(t('save.quota'));
   }
-}
-/*
- * Card M8.4.18a, D1: before a save, every tiled section's store must hold all of its edits. The record is built in the same moment the sync is found
- * settled, so masks, objects and stacks are one state. A section that does not settle within the deadline keeps its last saved record and the save
- * of everything else goes on; the project stays "unsaved" and the next save tries again. Returns how many sections did not settle.
- */
-let tiledUnsavedShown = false, settleDeadlineMs = 15000;
-async function settleTiledSections(deadlineMs = settleDeadlineMs) {
-  const sections = S.cores.flatMap((c) => c.sections).filter((q) => q.tiled && q.maskTiles && !q.frozen);
-  let unsaved = 0;
-  await Promise.all(sections.map(async (q) => {
-    const sync = maskSync(q), until = performance.now() + deadlineMs;
-    q._tiledRecord = null;
-    if (!sync.settled) void sync.request([]);
-    for (;;) {
-      if (sync.settled) { q._tiledRecord = serTiledSection(q, sync.manifest); return; }
-      if (performance.now() > until) { unsaved++; return; }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }));
-  for (const q of S.cores.flatMap((c) => c.sections)) if (q.frozen === 'source' || q.frozen === 'store') q._tiledRecord = q._savedRecord;   // locked: saved back as it was read
-  return unsaved;
-}
-/** After a save: the store keeps only the versions the saved records name and the current ones (rule 4: the last good save stays until a newer one). */
-async function retainStore() {
-  if (!TILES) return;
-  const sections = S.cores.flatMap((c) => c.sections).filter((q) => q.tiled && q.maskTiles);
-  if (!sections.length || sections.some((q) => q.frozen === 'store')) return;   // card M8.4.27: nothing is deleted while a stored version is missing
-  const keep = new Set();
-  for (const q of sections) {
-    if (q._savedRecord?.tiled?.manifest) keep.add(q._savedRecord.tiled.manifest);
-    if (q._maskSync?.manifest) keep.add(q._maskSync.manifest);
-  }
-  const result = await TILES.maskRetain(storeProject(S.id), [...keep]).catch((error) => ({ error }));
-  if (result?.error) console.warn('retain', result.error);
 }
 /** V0.36: the daily copies are kept for 30 days; older ones only the first of each month, for 12 months. */
 async function rotateHistory(hist) {
@@ -4034,7 +3300,7 @@ async function checkQuota() {
     if (f > 0.8 && !quotaWarned) { quotaWarned = true; toast(t('quota.high', { p: (f * 100).toFixed(0) }), 10000); }
   } catch { /* not available */ }
 }
-let saveCount = 0;
+let saveCount = 0, projectGeneration = 0;   // card M8.4.35: incremented when S is replaced (resetState)
 async function flushSave() {
   if (saves.running) await saves.running;
   if (dirty) await saveToDB();
@@ -4100,7 +3366,7 @@ function renderAnalyses(list, q = '') {
   const box = $('mpList'); if (!box) return;
   const shown = list.filter((p) => !q || coreKey(p.name).includes(q) || (p.coreNames || []).some((n) => coreKey(n).includes(q)));
   $('mpSaved').hidden = !list.length;
-  box.innerHTML = shown.map((p) => `<article class="pcard ${p.id === S.id ? 'current' : ''}" data-id="${p.id}" tabindex="0" aria-label="${esc(p.name)}">
+  box.innerHTML = shown.map((p) => `<article class="pcard ${p.id === S.id ? 'current' : ''}" data-id="${esc(p.id)}" tabindex="0" aria-label="${esc(p.name)}">
     <h3>${esc(p.name)}</h3>
     <p class="facts"><span>${t('home.cores', { n: p.cores ?? (p.coreNames || []).length })}</span><span class="note">${esc((p.coreNames || []).slice(0, 8).join(', '))}${(p.coreNames || []).length > 8 ? '…' : ''}</span>${p.id === S.id ? `<span>${t('proj.current')}</span>` : ''}</p>
     <div class="pacts"><button class="btn small primary" data-act="open">${t('proj.open')}</button><button class="btn small" data-act="mpupdate">${t('mp.update')}</button><button class="btn small" data-act="rename">${t('proj.rename')}</button><button class="btn small" data-act="del">${t('proj.del')}</button></div>
@@ -4109,7 +3375,7 @@ function renderAnalyses(list, q = '') {
 async function renderProjects() {
   const box = $('projList');
   if (!storageOK) { box.innerHTML = `<p class="note">${t('save.off')}</p>`; return; }
-  let [list, lites] = await Promise.all([listProjects().catch(() => []), listLite().catch(() => [])]);
+  let [list, lites] = await Promise.all([listProjects().then(announceStoreProjects).catch(() => []), listLite().catch(() => [])]);
   list.sort((a, b) => b.updated - a.updated);
   const L = new Map(lites.map((l) => [l.id, l])), shared = sharedCores(lites), q = coreKey($('homeSearch').value);
   renderAnalyses(list.filter((p) => p.kind === 'multi'), q);   // V24: cross-project analyses are not projects
@@ -4126,17 +3392,17 @@ async function renderProjects() {
   const shown = list.filter((p) => !q || coreKey(p.name).includes(q) || (p.coreNames || []).some((n) => coreKey(n).includes(q)));
   box.innerHTML = shown.map((p) => {
     const lite = L.get(p.id), cores = lite?.cores || (p.coreNames || []).map((n) => ({ name: n }));
-    const len = (c) => { const d = (c.depth || []).filter((v) => v != null); return d.length ? Math.max(...d) - Math.min(...d) : 0; };
-    const maxLen = Math.max(1, ...cores.map(len)), ivCores = new Set((lite?.intervals || []).map((iv) => iv.core));
+    const len = (c) => { const d = (c.depth || []).filter((v) => v != null); return d.length ? maxOf(d) - minOf(d) : 0; };
+    const maxLen = Math.max(1, maxOf(cores.map(len))), ivCores = new Set((lite?.intervals || []).map((iv) => iv.core));
     const nShared = cores.filter((c) => (shared.get(coreKey(c.name))?.size || 0) > 1).length;
     const liners = cores.slice(0, 22).map((c) => {
       const others = [...(shared.get(coreKey(c.name)) || new Map()).entries()].filter(([id]) => id !== p.id).map(([, n]) => n);
       const h = len(c) ? Math.max(16, Math.round((len(c) / maxLen) * 60)) : 30;
       const tip = `${c.name}${len(c) ? ` — ${fmt(len(c), 3)} ${c.units || ''}` : ''}${c.nImages ? `, ${t('home.nImg', { n: c.nImages })}` : ''}${Object.keys(c.proxies || {}).length ? `, ${t('home.nVar', { n: Object.keys(c.proxies).length })}` : ''}${others.length && p.kind !== 'multi' ? `. ${t('home.alsoIn', { p: others.join(', ') })}` : ''}`;
-      return `<span class="liner ${c.nImages ? 'img' : ''} ${ivCores.has(c.id) ? 'iv' : ''} ${others.length && p.kind !== 'multi' ? 'shared' : ''}" style="height:${h}px" title="${esc(tip)}"></span>`;
+      return `<span class="liner ${c.nImages ? 'img' : ''} ${ivCores.has(c.id) ? 'iv' : ''} ${others.length && p.kind !== 'multi' ? 'shared' : ''}" style="height:${esc(h)}px" title="${esc(tip)}"></span>`;
     }).join('') + (cores.length > 22 ? `<span class="more">+${cores.length - 22}</span>` : '') || `<span class="emptytray">${t('home.noCores')}</span>`;
     const kind = p.kind === 'multi' ? t('mp.badge') : p.kind === 'tutorial' ? t('home.kindTutorial') : '';
-    return `<article class="pcard ${p.id === S.id ? 'current' : ''}" data-id="${p.id}" tabindex="0" aria-label="${esc(p.name)}">
+    return `<article class="pcard ${p.id === S.id ? 'current' : ''}" data-id="${esc(p.id)}" tabindex="0" aria-label="${esc(p.name)}">
       <div class="tray" aria-hidden="true">${liners}</div>
       <h3>${esc(p.name)}</h3>
       <p class="facts"><span>${t('home.cores', { n: p.cores ?? cores.length })}</span><span>${t('home.nImg', { n: p.sections ?? 0 })}</span>${nShared && p.kind !== 'multi' ? `<span class="warnshare">${t('home.shared', { n: nShared })}</span>` : ''}<span>${p.id === S.id ? t('proj.current') : rel(p.updated)}</span></p>
@@ -4339,7 +3605,8 @@ function renderBackupState() {
  */
 async function writeProjectFolder(root, d) {
   const dir = await root.getDirectoryHandle(`${safe(d.name)}__${d.id}`, { create: true }), imgs = await dir.getDirectoryHandle('images', { create: true });
-  const e = projectForExport(d, '', true);
+  const e = projectForExport(d, '', true, true);                    // card M8.4.18c: tiled sections kept; their masks go first, project.json last
+  tellLeftOut('folder', d.name, await backupTiledOf(dir, d.id, e.json));   // the automatic copy runs often: said once per session
   for (const im of e.images) {
     diagnosticEvent('operation.start', { operation: 'backup.image' });
     const name = im.path.slice('images/'.length);
@@ -4372,11 +3639,8 @@ async function openProjectFolder() {
     }
   }
   if (!dirs.length) { toast(t('bk.noFolderProject')); return; }
-  const files = [];
-  for (const d of dirs) {
-    const p = await (await (await d.getFileHandle('project.json')).getFile()).text();
-    files.push({ folder: d, text: p });
-  }
+  const files = [];   // card M8.4.18c: one project folder may be opened at a day of its history
+  for (const d of dirs) { const text = dirs.length === 1 ? await chooseFolderVersion(d) : await (await (await d.getFileHandle('project.json')).getFile()).text(); if (text === null) return; files.push({ folder: d, text }); }
   await busy(() => restoreFolders(files));
 }
 async function writeText(dir, name, text) {
@@ -4406,7 +3670,7 @@ function backupNow() {
   backupPromise = (async () => {
     try {
       // Capture live state before yielding; switching projects must not change this run's source or destination.
-      const current = !projectPreview && (S.sections.length || S.records.length) ? serialize() : null;
+      const current = !projectPreview && projectHasData(S) ? serialize() : null;   // card M8.4.39: every core, not only the one on screen
       const settings = JSON.stringify(settingsBundle(), null, 1);
       if (current) await writeProjectFolder(root, current);
       if (storageOK) for (const m of await listProjects()) {
@@ -4438,7 +3702,7 @@ function backupNow() {
 /** V0.38: warning when the automatic copy is set but has not run for a week (or needs reactivating) and there are changes. */
 async function checkBackupAge() {
   if (!backupDir || !storageOK) return;
-  const newest = Math.max(0, ...(await listProjects().catch(() => [])).map((m) => m.updated || 0));
+  const newest = Math.max(0, maxOf((await listProjects().catch(() => [])).map((m) => m.updated || 0)));
   if (newest > lastBackup && (backupState === 'needs' || Date.now() - lastBackup > 7 * 864e5)) toast(t('bk.old', { d: lastBackup ? Math.floor((Date.now() - lastBackup) / 864e5) : '?' }), 9000);
 }
 
@@ -4486,25 +3750,36 @@ async function projectImageSource(file, ranged = false) {
   throw new Error(t('err.missingImage', { name: file.name || file.key || '?' }));
 }
 /** Folder copies use immutable image names so a failed manifest write cannot change the previous save's images. */
-function projectForExport(d, prefix = '', immutableImages = false) {
+function projectForExport(d, prefix = '', immutableImages = false, keepTiled = false) {
   const p = JSON.parse(JSON.stringify(d, (k, v) => (v instanceof Blob ? undefined : v))), images = [];
-  for (const c of p.cores || [p]) if (Array.isArray(c.sections)) c.sections = c.sections.filter((q) => !q.tiled);   // their masks are in the store: cards M8.4.18c-d
+  // Tiled sections stay out of packages (card M8.4.18d); card M8.4.33: named in `left_out` and reported. The folder backup keeps them (M8.4.18c).
+  const leftOut = keepTiled ? [] : (p.cores || [p]).flatMap((c) => (Array.isArray(c.sections) ? c.sections.filter((q) => q.tiled).map((q) => ({ core: c.name ?? null, section: q.name ?? q.id })) : []));
+  for (const c of p.cores || [p]) if (Array.isArray(c.sections) && !keepTiled) c.sections = c.sections.filter((q) => !q.tiled);
+  if (leftOut.length) p.left_out = leftOut;
   const src = new Map(); for (const c of d.cores || [{ sections: d.sections }]) for (const q of c.sections || []) src.set(q.id, q.file);
   for (const c of p.cores || [{ sections: p.sections }]) for (const q of c.sections || []) {
-    const f = src.get(q.id) || q.file;
+    if (q.tiled) continue; const f = src.get(q.id) || q.file;          // a tiled section's source is not an image of the project
     const imageId = immutableImages ? `${q.id}__${f.key || uid()}` : q.id;
     const path = `images/${imageId}${imgExt(f)}`;
     images.push({ path: prefix + path, get: (ranged = false) => projectImageSource(f, ranged) });
     q.file = { name: f.name, type: f.type, path };
   }
-  return { json: p, images };
+  return { json: p, images, leftOut };
+}
+/** Card M8.4.33: the user is told which large tiled sections a backup or a package leaves out (once per project and kind in a session). */
+const leftOutTold = new Set();
+function tellLeftOut(kind, projectName, leftOut, always = false) {
+  if (!leftOut.length || (!always && leftOutTold.has(kind + '|' + projectName))) return;
+  leftOutTold.add(kind + '|' + projectName);
+  toast(t('bk.leftOut', { p: projectName || APP, n: leftOut.length, s: leftOut.slice(0, 4).map((q) => q.section).join(', ') }), 12000);
 }
 async function packageProjects(list) {
-  const files = [];
-  if (list.length === 1) { const e = projectForExport(list[0]); files.push({ name: 'project.json', data: JSON.stringify(e.json) }); for (const im of e.images) files.push({ name: im.path, data: await im.get() }); }
-  else list.forEach((d, i) => { const e = projectForExport(d, `p${i + 1}/`); files.push({ name: `p${i + 1}/project.json`, data: JSON.stringify(e.json) }, ...e.images.map((im) => ({ name: im.path, lazy: im.get }))); });
-  for (const f of files) if (f.lazy) { f.data = await f.lazy(); delete f.lazy; }
-  files.push({ name: 'settings.json', data: JSON.stringify(settingsBundle()) });
+  const files = [], tiled = await packageTiledPlan(list);              // card M8.4.18d: tiled sections in the package (with the engine), sources if the user agrees
+  for (const [i, d] of list.entries()) {
+    const prefix = list.length === 1 ? '' : `p${i + 1}/`, e = projectForExport(d, prefix, false, !!tiled), more = tiled ? await tiled(e.json, d.id, prefix) : { files: [], leftOut: [] };
+    tellLeftOut('package', d.name, [...e.leftOut, ...more.leftOut], true); files.push({ name: prefix + 'project.json', data: JSON.stringify(e.json) }, ...e.images.map((im) => ({ name: im.path, lazy: im.get })), ...more.files);   // card M8.4.33: told before the package is saved
+  }
+  for (const f of files) if (f.lazy) { f.data = await f.lazy(); delete f.lazy; } files.push({ name: 'settings.json', data: JSON.stringify(settingsBundle()) });
   return zipFiles(files);
 }
 /** One file with every project of the library plus the user settings. */
@@ -4526,7 +3801,7 @@ async function restoreFiles(files) {
   /** @type {any} Last project accepted by the asynchronous import callback. */
   let lastLoaded = null;
   const existing = storageOK ? new Set((await listProjects()).map((m) => m.id)) : new Set();
-  const addProject = async (p, getBlob = null) => {
+  const addProject = async (p, getBlob = null) => { sanitizeThumbs(p);   // card Q9: no hostile image URL is stored
     for (const c of p.cores || [{ sections: p.sections }]) for (const q of c.sections || [])   // V0.36: a damaged file is not stored
       for (const k of ['labels', 'exclude']) if (q.w && q.h && q[k] != null && !rleValid(q[k], q.w * q.h)) { rejected++; toast(t('load.failed', { e: t('load.badMask', { s: q.name || '?', k }) }), 9000); return; }
     // Verify and ingest the images before changing any existing project or its pending save.
@@ -4546,7 +3821,7 @@ async function restoreFiles(files) {
       }
       else { p.id = uid(); p.name = `${p.name || APP} (${t('bk.restored')})`; }
     } else if (!p.id) p.id = uid();
-    existing.add(p.id);
+    existing.add(p.id); await restoreTiledOf(p, getBlob);          // card M8.4.18c: masks of tiled sections into the store of its final identifier
     const nSec = p.cores ? p.cores.reduce((n, c) => n + (c.sections || []).length, 0) : (p.sections || []).length;
     if (storageOK) await putProject({ id: p.id, name: p.name, updated: Date.now(), sections: nSec, cores: p.cores?.length || 1, coreNames: p.cores?.map((c) => c.name) }, p);
     if (p.id === S.id) dirty = false;   // Clear pending edits only after the replacement succeeds.
@@ -4681,7 +3956,7 @@ async function renderAllProjects() {
   const rows = allLite.flatMap((l) => l.cores.map((c) => ({ l, c }))).filter(({ l, c }) => !q || coreKey(c.name).includes(q) || coreKey(l.name).includes(q))
     .sort((a, b) => coreKey(a.c.name).localeCompare(coreKey(b.c.name)) || a.l.name.localeCompare(b.l.name));
   $('allTable').innerHTML = `<thead><tr><th></th><th>${t('geo.core')}</th><th>${t('home.project')}</th><th>Lat</th><th>Lon</th><th>${t('home.nVars')}</th><th>${t('geo.ivs')}</th><th>${t('home.images')}</th></tr></thead><tbody>${
-    rows.map(({ l, c }) => { const n = shared.get(coreKey(c.name))?.size || 1; return `<tr data-p="${l.id}" data-c="${c.id}" style="cursor:pointer"><td><input type="checkbox" class="mpchk" ${mpSel.has(`${l.id}|${c.id}`) ? 'checked' : ''}></td><td class="txt">${esc(c.name)}${n > 1 ? ` <span class="sharedtag" title="${esc(t('home.alsoIn', { p: [...shared.get(coreKey(c.name)).values()].filter((x) => x !== l.name).join(', ') }))}">${t('home.inN', { n })}</span>` : ''}</td><td class="txt">${esc(l.name)}</td><td>${fmt(c.lat, 3)}</td><td>${fmt(c.lon, 3)}</td><td>${Object.keys(c.proxies || {}).length}</td><td>${(l.intervals || []).filter((iv) => iv.core === c.id).length}</td><td>${c.nImages || 0}</td></tr>`; }).join('')}</tbody>`;
+    rows.map(({ l, c }) => { const n = shared.get(coreKey(c.name))?.size || 1; return `<tr data-p="${esc(l.id)}" data-c="${esc(c.id)}" style="cursor:pointer"><td><input type="checkbox" class="mpchk" ${mpSel.has(`${l.id}|${c.id}`) ? 'checked' : ''}></td><td class="txt">${esc(c.name)}${n > 1 ? ` <span class="sharedtag" title="${esc(t('home.alsoIn', { p: [...shared.get(coreKey(c.name)).values()].filter((x) => x !== l.name).join(', ') }))}">${t('home.inN', { n })}</span>` : ''}</td><td class="txt">${esc(l.name)}</td><td>${fmt(c.lat, 3)}</td><td>${fmt(c.lon, 3)}</td><td>${Object.keys(c.proxies || {}).length}</td><td>${(l.intervals || []).filter((iv) => iv.core === c.id).length}</td><td>${c.nImages || 0}</td></tr>`; }).join('')}</tbody>`;
   redrawAllMap();
 }
 
@@ -4769,7 +4044,7 @@ function syncAllMarkerFields() {
   const project = isProject ? null : allMarkers.get('project:' + projectId);
   const i = allLite.findIndex((l) => l.id === projectId);
   $('amMarkerColor').value = own?.color || project?.color || GROUP_COLORS[Math.max(0, i) % GROUP_COLORS.length];
-  $('amMarkerSymbol').innerHTML = `<option value="">${t('mp.markerDefault')}</option>` + MAP_SYMBOLS.map((k) => `<option value="${k}">${t('ms.sym.' + k)}</option>`).join('');
+  $('amMarkerSymbol').innerHTML = `<option value="">${t('mp.markerDefault')}</option>` + MAP_SYMBOLS.map((k) => `<option value="${esc(k)}">${t('ms.sym.' + k)}</option>`).join('');
   $('amMarkerSymbol').value = own?.symbol || '';
   $('amMarkerReset').disabled = !own;
 }
@@ -4974,8 +4249,8 @@ function mlRecommendation() {
 }
 
 function mlTrainHTML() {
-  const m = { ...ML_DEFAULT, ...(S.settings.ml || {}) }, num = (k, a, b, st) => `<input type="number" data-ml="${k}" min="${a}" max="${b}" step="${st}" value="${m[k]}" style="width:80px">`;
-  const methods = ['knn', 'rf', 'nb'].map((k) => `<label class="mlm ${m.method === k ? 'on' : ''}"><input type="radio" name="mlMethod" data-ml="method" value="${k}" ${m.method === k ? 'checked' : ''}><b>${t('ml.m.' + k)}</b><span class="note">${t('ml.d.' + k)}</span></label>`).join('');
+  const m = { ...ML_DEFAULT, ...(S.settings.ml || {}) }, num = (k, a, b, st) => `<input type="number" data-ml="${esc(k)}" min="${esc(a)}" max="${esc(b)}" step="${esc(st)}" value="${esc(m[k])}" style="width:80px">`;
+  const methods = ['knn', 'rf', 'nb'].map((k) => `<label class="mlm ${m.method === k ? 'on' : ''}"><input type="radio" name="mlMethod" data-ml="method" value="${esc(k)}" ${m.method === k ? 'checked' : ''}><b>${t('ml.m.' + k)}</b><span class="note">${t('ml.d.' + k)}</span></label>`).join('');
   const params = m.method === 'knn' ? `<label class="f"><span>${t('ml.p.k')}</span>${num('k', 1, 25, 1)}</label><label class="f"><span>${t('ml.p.weights')}</span><select data-ml="weights"><option value="distance" ${m.weights === 'distance' ? 'selected' : ''}>${t('ml.p.wDist')}</option><option value="uniform" ${m.weights === 'uniform' ? 'selected' : ''}>${t('ml.p.wUni')}</option></select></label>`
     : m.method === 'rf' ? `<label class="f"><span>${t('ml.p.trees')}</span>${num('trees', 10, 500, 10)}</label><label class="f"><span>${t('ml.p.depth')}</span>${num('maxDepth', 2, 30, 1)}</label><label class="f"><span>${t('ml.p.leaf')}</span>${num('minLeaf', 1, 20, 1)}</label><label class="chk"><input type="checkbox" data-ml="balanced" ${m.balanced ? 'checked' : ''}><span>${t('ml.p.balanced')}</span></label>`
       : `<label class="f"><span>${t('ml.p.priors')}</span><select data-ml="priors"><option value="uniform" ${m.priors === 'uniform' ? 'selected' : ''}>${t('ml.p.pUni')}</option><option value="empirical" ${m.priors === 'empirical' ? 'selected' : ''}>${t('ml.p.pEmp')}</option></select></label>`;
@@ -4991,10 +4266,10 @@ function mlTrainHTML() {
       <details><summary>${t('ml.cm')}</summary><p class="note">${t('ml.cmNote')}</p><div class="tablewrap"><table class="dtable mtab"><thead><tr><th>${t('ml.real')} \\ ${t('ml.pred')}</th>${cm.classes.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${cm.classes.map((c, i) => `<tr><td class="txt">${esc(c)}</td>${cm.cm[i].map((v, j) => `<td class="${i === j ? 'on' : ''}">${v}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>` : ''}`;
   }
   const fset = m.features || 'shape', pend = fset === 'vision' ? pendingEmb() : 0;   // V0.17: input vectors
-  const feats = `<h3>${t('vis.title')}</h3><div class="mlmethods">${['shape', 'vision'].map((k) => `<label class="mlm ${fset === k ? 'on' : ''}"><input type="radio" name="mlFeat" data-ml="features" value="${k}" ${fset === k ? 'checked' : ''}><b>${t('vis.f.' + k)}</b><span class="note">${t('vis.d.' + k)}</span></label>`).join('')}</div>`
-    + (fset === 'vision' ? `<p class="note">${VIS ? t('vis.ready', { n: esc(VIS.src) }) + (VIS.sha256 ? ` <span class="note" title="SHA-256 ${VIS.sha256}">(${VIS.sha256.slice(0, 12)}…)</span>` : '') : t('vis.none', { mb: VISION_MODEL.mb })} ${t('vis.pending', { n: pend })}</p><div class="row">${VIS ? '' : `<button class="btn small primary" id="visDl">${t('vis.dl', { mb: VISION_MODEL.mb })}</button><label class="btn small file"><span>${t('vis.file')}</span><input type="file" id="visFile" accept=".onnx"></label>`}<button class="btn small" id="visCalc" ${VIS && pend ? '' : 'disabled'}>${t('vis.calc', { n: pend })}</button></div>` : '');
+  const feats = `<h3>${t('vis.title')}</h3><div class="mlmethods">${['shape', 'vision'].map((k) => `<label class="mlm ${fset === k ? 'on' : ''}"><input type="radio" name="mlFeat" data-ml="features" value="${esc(k)}" ${fset === k ? 'checked' : ''}><b>${t('vis.f.' + k)}</b><span class="note">${t('vis.d.' + k)}</span></label>`).join('')}</div>`
+    + (fset === 'vision' ? `<p class="note">${VIS ? t('vis.ready', { n: esc(VIS.src) }) + (VIS.sha256 ? ` <span class="note" title="SHA-256 ${esc(VIS.sha256)}">(${VIS.sha256.slice(0, 12)}…)</span>` : '') : t('vis.none', { mb: VISION_MODEL.mb })} ${t('vis.pending', { n: pend })}</p><div class="row">${VIS ? '' : `<button class="btn small primary" id="visDl">${t('vis.dl', { mb: VISION_MODEL.mb })}</button><label class="btn small file"><span>${t('vis.file')}</span><input type="file" id="visFile" accept=".onnx"></label>`}<button class="btn small" id="visCalc" ${VIS && pend ? '' : 'disabled'}>${t('vis.calc', { n: pend })}</button></div>` : '');
   return `${feats}<h3>${t('ml.tab.train')}</h3><p class="note">${t('ml.trainIntro')}</p><div class="mlmethods">${methods}</div><div class="row" style="align-items:end;gap:12px">${params}
-    <label class="f"><span>${t('l.novelty')}</span><input type="number" data-ml="novelty" min="1" max="8" step="0.5" value="${S.settings.novelty}" style="width:80px"></label></div>
+    <label class="f"><span>${t('l.novelty')}</span><input type="number" data-ml="novelty" min="1" max="8" step="0.5" value="${esc(S.settings.novelty)}" style="width:80px"></label></div>
     <p class="note">${t('ml.paramHelp.' + m.method)} ${t('ml.noveltyHelp')}</p>
     <div class="row"><button class="btn primary" id="mlEvalBtn">${t('ml.eval')}</button><label class="f"><span>${t('ml.cvGroup')}</span><select data-ml="cvGroup">${['section', 'core'].map((g) => `<option value="${g}" ${(m.cvGroup || 'section') === g ? 'selected' : ''}>${t('ml.cvGroup.' + g)}</option>`).join('')}</select></label><span class="note">${t('ml.evalHint')}</span></div>${ev}
     <h3>${t('ft.title')}</h3><p class="note">${t('ft.intro')}</p>${holdoutHTML()}
@@ -5026,10 +4301,10 @@ function mlExamplesHTML() {
   if (sc === 'all') list = list.concat(otherExamples.filter((e) => !list.some((q) => q.key === e.key)).map((e) => ({ ...e, other: true, excluded: mlExcluded.has(e.key) })));
   const by = {}; for (const e of list) (by[e.y] ||= []).push(e);
   const used = sets[sc].length;
-  const card = (e) => `<figure class="mlx ${e.excluded ? 'off' : ''}" data-key="${esc(e.key)}">${e.thumb ? `<img src="${e.thumb}" alt="" ${e.o ? 'data-go="1"' : ''}>` : `<div class="noimg">${t('ml.noImg')}</div>`}
+  const card = (e) => `<figure class="mlx ${e.excluded ? 'off' : ''}" data-key="${esc(e.key)}">${safeImageURL(e.thumb) ? `<img src="${safeImageURL(e.thumb)}" alt="" ${e.o ? 'data-go="1"' : ''}>` : `<div class="noimg">${t('ml.noImg')}</div>`}
     <figcaption title="${esc(e.where)}">${esc(e.where)}</figcaption>
     <div class="row">${e.lib ? `<button class="btn small ghost" data-act="libdel">${t('ml.remove')}</button>` : `<label class="chk"><input type="checkbox" data-act="use" ${e.excluded ? '' : 'checked'}><span>${t('ml.use')}</span></label>`}</div></figure>`;
-  return `<div class="row" style="align-items:end"><label class="f"><span>${t('ml.exScope')}</span><select id="mlScopeSel">${CLF_SCOPES.map((k) => `<option value="${k}" ${k === sc ? 'selected' : ''}>${t('l.scope.' + k)}</option>`).join('')}</select></label>
+  return `<div class="row" style="align-items:end"><label class="f"><span>${t('ml.exScope')}</span><select id="mlScopeSel">${CLF_SCOPES.map((k) => `<option value="${esc(k)}" ${k === sc ? 'selected' : ''}>${t('l.scope.' + k)}</option>`).join('')}</select></label>
     <span class="note">${t('ml.exCount', { n: used, t: list.length })}</span></div><p class="note">${t('ml.exHelp')}</p>
     ${Object.keys(by).sort().map((y) => `<h3>${esc(y)} <span class="note">${by[y].filter((e) => !e.excluded).length}/${by[y].length}${by[y].filter((e) => !e.excluded).length < 10 ? ' · ' + t('ml.fewWarn') : ''}</span></h3><div class="mlgrid">${by[y].map(card).join('')}</div>`).join('') || `<p class="note">${t('l.none')}</p>`}`;
 }
@@ -5040,9 +4315,9 @@ function mlOthersHTML() {
   if (!projs.some(([id]) => id === mlOtherProj)) mlOtherProj = projs[0][0];
   const inLib = new Set(S.library.map((e) => e.key)), list = otherExamples.filter((e) => e.project === mlOtherProj);
   const by = {}; for (const e of list) (by[e.y] ||= []).push(e);
-  return `<p class="note">${t('ml.othersIntro')}</p><div class="row" style="align-items:end"><label class="f"><span>${t('home.project')}</span><select id="mlOtherSel">${projs.map(([id, n]) => `<option value="${id}" ${id === mlOtherProj ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
+  return `<p class="note">${t('ml.othersIntro')}</p><div class="row" style="align-items:end"><label class="f"><span>${t('home.project')}</span><select id="mlOtherSel">${projs.map(([id, n]) => `<option value="${esc(id)}" ${id === mlOtherProj ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
     <button class="btn small" id="mlPickAll">${t('mp.all')}</button><button class="btn small" id="mlPickNone">${t('mp.none')}</button><button class="btn small primary" id="mlAddLib">${t('ml.addLib', { n: mlPicked.size })}</button></div>
-    ${Object.keys(by).sort().map((y) => `<h3>${esc(y)} <span class="note">${by[y].length}</span></h3><div class="mlgrid">${by[y].map((e) => `<figure class="mlx ${inLib.has(e.key) ? 'off' : ''}" data-key="${esc(e.key)}">${e.thumb ? `<img src="${e.thumb}" alt="">` : `<div class="noimg">${t('ml.noImg')}</div>`}<figcaption>${esc(e.where)}</figcaption>
+    ${Object.keys(by).sort().map((y) => `<h3>${esc(y)} <span class="note">${by[y].length}</span></h3><div class="mlgrid">${by[y].map((e) => `<figure class="mlx ${inLib.has(e.key) ? 'off' : ''}" data-key="${esc(e.key)}">${safeImageURL(e.thumb) ? `<img src="${safeImageURL(e.thumb)}" alt="">` : `<div class="noimg">${t('ml.noImg')}</div>`}<figcaption>${esc(e.where)}</figcaption>
       <div class="row">${inLib.has(e.key) ? `<span class="note">${t('ml.inLib')}</span>` : `<label class="chk"><input type="checkbox" data-act="pick" ${mlPicked.has(e.key) ? 'checked' : ''}><span>${t('ml.pick')}</span></label>`}</div></figure>`).join('')}</div>`).join('')}`;
 }
 
@@ -5098,22 +4373,6 @@ $('mlBody').addEventListener('click', (e) => {
 /* ───────────── multiproject analysis (V17): cores of several projects in one analysis project ───────────── */
 const mpSel = new Set(); // keys 'projectId|coreId'
 /** Same core found in two projects (V23): one series on a common axis; rows at the same depth/age are fused (first non-empty value wins). */
-function mergeImp(a, b) {
-  const rows = [], add = (t0) => (t0.depth || t0.age || []).forEach((_, i) => rows.push({ d: t0.depth?.[i] ?? null, a: t0.age?.[i] ?? null, t: t0, i }));
-  add(a); add(b);
-  const names = [...new Set([...Object.keys(a.proxies || {}), ...Object.keys(b.proxies || {})])];
-  // sort on depth only if every row has one, else on age if every row has one; otherwise keep the two series one after the other
-  const key = rows.every((r) => r.d != null) ? 'd' : rows.every((r) => r.a != null) ? 'a' : null;
-  if (key) rows.sort((x, y) => x[key] - y[key]);
-  const out = [];
-  for (const r of rows) {
-    const v = Object.fromEntries(names.map((n) => [n, r.t.proxies?.[n]?.[r.i] ?? null])), last = out[out.length - 1];
-    if (key && last && Math.abs(last[key] - r[key]) < 1e-6) { for (const n of names) if (last.v[n] == null) last.v[n] = v[n]; if (last.d == null) last.d = r.d; if (last.a == null) last.a = r.a; }
-    else out.push({ d: r.d, a: r.a, v });
-  }
-  const P = Object.fromEntries(names.map((n) => [n, out.map((r) => r.v[n])]));
-  return { depth: out.some((r) => r.d != null) ? out.map((r) => r.d) : null, age: out.some((r) => r.a != null) ? out.map((r) => r.a) : null, proxies: P };
-}
 /** Build (or refresh) a project of kind 'multi' from the light copies of the chosen cores; layers and categories are merged by name. */
 async function buildMultiProject(name, keys, keepId = null) {
   const lites = (await listLite().catch(() => [])).filter((l) => l.kind !== 'multi');
@@ -5136,12 +4395,14 @@ async function buildMultiProject(name, keys, keepId = null) {
   for (const m of layers.values()) { m.parent = m.parentName ? layers.get(m.parentName)?.id || null : null; delete m.parentName; }
   // cores: the same core chosen from several projects (same name, coreKey) becomes ONE core whose table joins the
   // rows of every project (no duplicated core, no double weight in models or maps)
-  const coreId = new Map(), byKey = new Map();
+  const coreId = new Map(), byKey = new Map(), mergeNotes = [];
   for (const { l, c } of chosen) { const k = coreKey(c.name) || `${l.id}|${c.id}`; if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push({ l, c }); }
   S.cores = [...byKey.values()].map((grp) => {
     const { c } = grp[0], projects = grp.map((q) => q.l.name);
-    let imp = { depth: c.depth, age: c.age, proxies: c.proxies || {} };
-    for (const { c: o } of grp.slice(1)) imp = mergeImp(imp, { depth: o.depth, age: o.age, proxies: o.proxies || {} });
+    // card Q3: the tables of the other projects in the units of the first one; disagreeing values counted (coremerge.js)
+    const joined = joinCoreTables(grp.map(({ c: o }) => ({ depth: o.depth, age: o.age, proxies: o.proxies || {}, units: o.units, ageUnits: o.ageUnits })));
+    const imp = joined.table;
+    if (joined.converted || joined.conflicts) mergeNotes.push(t('mp.joined', { c: c.name, v: joined.converted, n: joined.conflicts }));
     const core = makeCore({ name: c.name, lat: c.lat ?? grp.find((q) => q.c.lat != null)?.c.lat, lon: c.lon ?? grp.find((q) => q.c.lon != null)?.c.lon, units: c.units, source: 'multi',
       notes: t('mp.from', { p: projects.join(', ') }), imp, age: { text: c.ageText || grp.find((q) => q.c.ageText)?.c.ageText || '' } });
     core.origin = grp.map((q) => ({ project: q.l.id, core: q.c.id }));
@@ -5165,6 +4426,7 @@ async function buildMultiProject(name, keys, keepId = null) {
   S.curCore = S.cores[0].id; activateCore(S.curCore, true); renderCoreBar();
   geoReset(); geoMarkDirty();
   await saveToDB(); updateProjHeader();
+  if (mergeNotes.length) toast(mergeNotes.join(' '), 12000);   // card Q3
   return true;
 }
 async function updateMultiProject(id) {
@@ -5239,7 +4501,7 @@ function updateFloat() {
   let d = null;
   $('floatHead').addEventListener('pointerdown', (e) => { if (e.target.closest('button')) return; const r = $('float').getBoundingClientRect(); d = { x: e.clientX - r.left, y: e.clientY - r.top }; $('floatHead').setPointerCapture(e.pointerId); });
   $('floatHead').addEventListener('pointermove', (e) => { if (!d) return; const f = $('float'); f.style.left = e.clientX - d.x + 'px'; f.style.top = e.clientY - d.y + 'px'; f.style.right = 'auto'; f.style.bottom = 'auto'; });
-  $('floatHead').addEventListener('pointerup', () => { d = null; });
+  for (const ev of ['pointerup', 'pointercancel']) $('floatHead').addEventListener(ev, () => { d = null; });
 }
 
 /** A second window: read-only view of one project that follows the changes saved by the main window. */
@@ -5288,11 +4550,11 @@ export function toast(msg, ms = 3200) { const el = $('toast'); el.textContent = 
 
 export async function busy(fn, operation = 'work') {
   const finishDiagnostic = diagnosticOperation(operation);
-  $('busy').hidden = false;
+  busyShown.enter();                                   // card M8.4.39: hidden only when the last of overlapping busy operations ends
   await new Promise((r) => setTimeout(r, 30));
   try { await fn(); }
   catch (err) { finishDiagnostic(err); console.error(err); toast(t('err.generic', { e: err?.message || String(err) }), 8000); }   // V0.36: errors are shown
-  finally { finishDiagnostic(); $('busy').hidden = true; }
+  finally { finishDiagnostic(); busyShown.leave(); }
 }
 /* V0.36: errors nobody caught are shown instead of being lost (once every 5 s at most) */
 let lastErrToast = 0;
@@ -5369,15 +4631,17 @@ initializeDiagnostics({
 const startupReady = startup();
 
 // Exposed for automated tests.
-window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, ready: startupReady, needPixels, requestRender, setTool, renderSectionForm, t, tilesIdle: () => [...tileSchedulers.values()].every((q) => q.idle),
+window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, enginePixels: (s) => engineAnalysis?.ensurePixels(s) ?? Promise.resolve(null), ready: startupReady, needPixels, requestRender, setTool, renderSectionForm, t, tilesIdle: () => [...tileSchedulers.values()].every((q) => q.idle),
   putMaskTile: (row, col, labels, exclude) => putMaskTile(sec(), row, col, labels, exclude),   // end-to-end tests of tiled masks (card M8.4.16)
   clearTiles: () => { for (const bitmap of tileCache.clear()) bitmap?.close?.(); requestRender(); },   // repeated viewer probes (card M8.4.24)
   tileState: (k, row, col) => { const s = sec(), scheduler = s?.tiled && tileSchedulers.get(s.tiled.pyramid), key = s?.tiled ? s.tiled.pyramid + '/' + tileKey(k, row, col) : '';   // evidence when a probe fails (card M8.4.24)
     return { cached: tileCache.has(key), inFlight: !!scheduler?.inFlight.has(key), idle: !!scheduler?.idle, failures: scheduler?.failures ?? 0, lastError: s?.tiled?.lastError ?? null }; },
+  objectsWaiting, saveBlockers: () => ({ blankStart, loading, readOnlyProject, storageOK, id: !!S.id, cores: S.cores.length, running: !!saves.running }),   // tests: why a save would not run   // card M8.4.28: an object operation waits for its objects' tiles (tests)
+  exportedProject: () => projectForExport(serialize()).json, packageNow: async () => (await packageProjects([serialize()])).size, projectFolderTo: (dir) => writeProjectFolder(dir, serialize()), restoreFolders, chooseFolderVersion, packageBlob: (record = null) => packageProjects([record ?? serialize()]), restoreFiles,   // cards M8.4.33 and M8.4.18c tests
   saveNow: () => saveToDB(), storeProject: (id = null) => storeProject(id ?? S.id), settleDeadline: (ms) => { settleDeadlineMs = ms; },   // card M8.4.18a tests
   stopMaskSync: () => sec()?._maskSync?.stop(), tiledSaved: () => S.cores.flatMap((c) => c.sections).filter((q) => q.tiled).map((q) => q._savedRecord?.tiled?.manifest ?? null),
   tiledCountsIdle: () => S.sections.every((q) => !q._counts || (!q._counts.runner.running && q._counts.counts.ready)),
-  tiledCountsStats: () => { const q = sec()?._counts; return q ? { tiles: q.counts.hists.size, bytes: q.counts.bytes } : null; },
+  tiledCountsStats: () => { const q = sec()?._counts; return q ? { tiles: q.counts.hists.size, bytes: q.counts.bytes } : null; }, tiledMasksLoad: (index) => { const q = S.sections[index], m = q.maskTiles; return maskLoader(q).want([...m.stored].map((i) => [Math.floor(i / m.cols), i % m.cols])); },   // card M8.4.29 tests: a reopened section's stored tiles into the page
   tiledStatsIdle: () => S.sections.every((q) => !q._statsRunner || q._statsRunner.idle),
-  masksSettled: () => S.sections.every((q) => !q.maskTiles || !q._maskSync || q._maskSync.settled), mergeObjects, deleteObjects, selectSection, forceTiledSections: (on) => { forceTiled = !!on; },
+  masksSettled: () => S.sections.every((q) => !q.maskTiles || !q._maskSync || q._maskSync.settled), splitTiledSection: (s, count, opts) => tiledSplit.splitSection(s ?? sec(), count, opts), mergeObjects, deleteObjects, selectSection, forceTiledSections: (on) => { forceTiled = !!on; },
   saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };

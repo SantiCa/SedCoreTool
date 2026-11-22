@@ -601,6 +601,7 @@ Object.assign(D.en, {
 Object.assign(D.es, {
   'mode.fig': 'Figuras', 'fig.type': 'Figura', 'fig.t.traces': 'Trazas representativas por icnotaxón', 'fig.t.core': 'Sondeo entero interpretado',
   'fig.t.log': 'Registro del sondeo (ventana actual)', 'fig.t.geolog': 'Registro multiproxy de un sondeo', 'fig.t.map': 'Mapa multiproxy',
+  'fig.pngRes': 'Resolución del PNG', 'fig.pngRes0': '×2 (pantalla)', 'fig.pngTooBig': 'A {dpi} dpi la imagen tendría {w} × {h} px, más de lo que el navegador puede dibujar; elige una resolución menor.',
   'fig.title': 'Título', 'fig.caption': 'Pie de figura', 'fig.note': 'SVG para editar en Inkscape o Illustrator; PNG a doble resolución.',
   'fig.n': 'Ejemplos por icnotaxón', 'fig.pick': 'Elección automática', 'fig.pick.largest': 'Los más grandes', 'fig.pick.typical': 'Los más típicos', 'fig.pick.spread': 'Repartidos en profundidad',
   'fig.tile': 'Tamaño de cada ejemplo (px)', 'fig.outline': 'Dibujar el contorno de la traza', 'fig.auto': 'Elegir automáticamente',
@@ -613,6 +614,7 @@ Object.assign(D.es, {
 Object.assign(D.en, {
   'mode.fig': 'Figures', 'fig.type': 'Figure', 'fig.t.traces': 'Representative traces per ichnotaxon', 'fig.t.core': 'Whole interpreted core',
   'fig.t.log': 'Core log (current window)', 'fig.t.geolog': 'Multiproxy log of a core', 'fig.t.map': 'Multiproxy map',
+  'fig.pngRes': 'PNG resolution', 'fig.pngRes0': '×2 (screen)', 'fig.pngTooBig': 'At {dpi} dpi the image would be {w} × {h} px, more than the browser can draw; choose a lower resolution.',
   'fig.title': 'Title', 'fig.caption': 'Caption', 'fig.note': 'SVG to edit in Inkscape or Illustrator; PNG at double resolution.',
   'fig.n': 'Examples per ichnotaxon', 'fig.pick': 'Automatic choice', 'fig.pick.largest': 'Largest', 'fig.pick.typical': 'Most typical', 'fig.pick.spread': 'Spread in depth',
   'fig.tile': 'Size of each example (px)', 'fig.outline': 'Draw the trace outline', 'fig.auto': 'Choose automatically',
@@ -1300,6 +1302,19 @@ Object.assign(D.es, {
   'tiles.source.copyAsk': 'Se copiará la imagen original ({s}) dentro del proyecto, en este ordenador. Espacio libre: {f}. ¿Continuar?',
   'tiles.source.copyDone': 'La imagen original está copiada en el proyecto.',
   'tiles.countLimit': 'Esta sección grande tiene tantas trazas que su tabla de intervalos no cabe en la memoria reservada para contarla; se muestra vacía.',
+  'tiles.statsLimit': 'Esta sección grande es demasiado densa para las medidas de los objetos (tamaño, área, forma, profundidad): no caben en la memoria reservada para ellas, por lo que no están disponibles y no se pueden borrar, unir ni cortar objetos en ella. Dividida en {n} partes, cada parte cabría.',
+  'tiles.statsLimitTooDense': 'Esta sección grande es demasiado densa para las medidas de los objetos (tamaño, área, forma, profundidad): no caben en la memoria reservada para ellas, por lo que no están disponibles y no se pueden borrar, unir ni cortar objetos en ella. Ni dividida en 8 partes cabría: máscaras tan densas suelen venir de una detección que marcó ruido; revisa la detección.',
+  'tiles.stage.split': 'Dividiendo las máscaras por partes…',
+  'tiles.split.btn': 'Dividir sección…', 'tiles.split.action': 'Dividir en {n} partes…',
+  'tiles.split.title': 'Dividir «{name}» en partes', 'tiles.split.partsLabel': 'Número de partes',
+  'tiles.split.partName': '{name} ({i}/{n})', 'tiles.split.partLine': '{name}: {top}–{bottom} {u} ({h} px)',
+  'tiles.split.note': 'La sección original se sustituirá por estas partes sin copiar la imagen. Las máscaras guardadas de la original se conservan en el almacén hasta el siguiente guardado y en el historial de la copia en carpeta.',
+  'tiles.split.confirm': 'Dividir', 'tiles.split.working': 'Dividiendo «{name}»',
+  'tiles.split.done': 'Sección dividida en {n} partes.',
+  'tiles.split.unsent': 'No se pudo dividir la sección porque sus últimas ediciones aún no han llegado al almacén del motor. La sección original se conserva intacta.',
+  'tiles.split.diskFull': 'No se pudo dividir la sección: no hay espacio suficiente en el disco. La sección original se conserva intacta.',
+  'tiles.split.failed': 'No se pudo dividir la sección ({code} {field}). La sección original se conserva intacta.',
+  'obj.statsNA': 'no disponible',
   'tiles.countErr': 'No se pudo contar una pieza de la sección grande ({m}). La tabla de intervalos se completará al reintentarlo.',
   'tiles.unavailable': 'Esta herramienta todavía no funciona con secciones grandes por piezas.', 'tiles.zoomIn': 'Acércate más para editar esta sección grande: a esta distancia habría que cargar demasiadas piezas de máscara.', 'tiles.loadingMasks': 'Cargando las máscaras de esta zona; vuelve a intentarlo en un momento.', 'tiles.masksUnsent': 'Las últimas máscaras de la sección grande no han llegado al almacén del motor. Se conservan en esta ventana y se enviarán de nuevo en cuanto el motor responda.', 'tiles.masksSent': 'Las máscaras de la sección grande ya están en el almacén del motor.', 'tiles.undoTrimmed': 'Se han descartado los pasos más antiguos de «Deshacer»: las copias de las máscaras de la sección grande superaban 64 MiB.', 'tiles.busy': 'Se están calculando los objetos de esta sección grande; vuelve a intentarlo en un momento.', 'tiles.storeLimit': 'Esta sección grande supera un límite del almacén del motor ({field}: {n}). Sus máscaras se conservan en esta ventana pero no se guardan en el almacén hasta que baje de ese límite.', 'tiles.boxTooLarge': 'Este objeto es demasiado grande para editarlo de una vez en una sección grande (su recuadro ocupa más de {n} piezas de máscara).', 'tiles.err': 'No se pudo preparar la imagen grande ({code} {field}).',
   'sec.res': 'Resolución de esta sección', 'sec.resFull': 'Completa', 'sec.resTooBig': 'no cabe en memoria',
@@ -1339,6 +1354,19 @@ Object.assign(D.en, {
   'tiles.source.copyAsk': 'The original image ({s}) will be copied inside the project, on this computer. Free space: {f}. Continue?',
   'tiles.source.copyDone': 'The original image is copied into the project.',
   'tiles.countLimit': 'This large section has so many traces that its interval table does not fit in the memory set aside for counting it; it is shown empty.',
+  'tiles.statsLimit': 'This large section is too dense for the object measurements (size, area, shape, depth): they do not fit in the memory set aside for them, so they are not available, and deleting, merging or cutting objects cannot be done in it. Split into {n} parts, each part would fit.',
+  'tiles.statsLimitTooDense': 'This large section is too dense for the object measurements (size, area, shape, depth): they do not fit in the memory set aside for them, so they are not available, and deleting, merging or cutting objects cannot be done in it. Even split into 8 parts it would not fit: masks this dense usually come from a detection that marked noise; review the detection.',
+  'tiles.stage.split': 'Splitting masks into parts…',
+  'tiles.split.btn': 'Split section…', 'tiles.split.action': 'Split into {n} parts…',
+  'tiles.split.title': 'Split “{name}” into parts', 'tiles.split.partsLabel': 'Number of parts',
+  'tiles.split.partName': '{name} ({i}/{n})', 'tiles.split.partLine': '{name}: {top}–{bottom} {u} ({h} px)',
+  'tiles.split.note': 'The original section will be replaced by these parts without copying the image. The original stored masks stay in the store until the next save and in the folder backup history.',
+  'tiles.split.confirm': 'Split', 'tiles.split.working': 'Splitting “{name}”',
+  'tiles.split.done': 'Section split into {n} parts.',
+  'tiles.split.unsent': 'The section could not be split because its latest edits have not reached the engine store yet. The original section is intact.',
+  'tiles.split.diskFull': 'The section could not be split: not enough disk space. The original section is intact.',
+  'tiles.split.failed': 'The section could not be split ({code} {field}). The original section is intact.',
+  'obj.statsNA': 'not available',
   'tiles.countErr': 'A tile of the large section could not be counted ({m}). The interval table will complete when it is tried again.',
   'tiles.unavailable': 'This tool does not work with large tiled sections yet.', 'tiles.zoomIn': 'Zoom in to edit this large section: at this distance too many mask tiles would have to be loaded.', 'tiles.loadingMasks': 'Loading the masks of this area; try again in a moment.', 'tiles.masksUnsent': 'The latest masks of the large section did not reach the engine\'s store. They are kept in this window and will be sent again as soon as the engine answers.', 'tiles.masksSent': 'The masks of the large section are now in the engine\'s store.', 'tiles.undoTrimmed': 'The oldest Undo steps were dropped: the copies of the large section\'s masks exceeded 64 MiB.', 'tiles.busy': 'The objects of this large section are being computed; try again in a moment.', 'tiles.storeLimit': 'This large section exceeds a limit of the engine\'s store ({field}: {n}). Its masks are kept in this window but are not stored until it is below that limit.', 'tiles.boxTooLarge': 'This object is too large to edit at once in a large section (its box covers more than {n} mask tiles).', 'tiles.err': 'The large image could not be prepared ({code} {field}).',
   'sec.res': 'Resolution of this section', 'sec.resFull': 'Full', 'sec.resTooBig': 'does not fit in memory',
@@ -1501,7 +1529,7 @@ Object.assign(D.es, {
   'h.fig.type': 'Tipo de figura que se compone.',
   'h.fig.title': 'Título que aparece en la figura.',
   'h.#figSvg': 'Exporta la figura como SVG (vectorial, editable).',
-  'h.#figPng': 'Exporta la figura como imagen PNG.',
+  'h.#figPng': 'Exporta la figura como imagen PNG. Con 300 o 600 dpi el archivo declara esa resolución, calculada sobre el tamaño de la figura en pantalla (96 px por pulgada).',
   'h.data.core': 'Sondeo cuyos datos se muestran.',
   'h.data.showLayers': 'Muestra también las capas de intervalos en la tabla.',
   'h.data.csv': 'Descarga la tabla en CSV.',
@@ -1686,7 +1714,7 @@ Object.assign(D.en, {
   'h.fig.type': 'Type of figure being composed.',
   'h.fig.title': 'Title shown on the figure.',
   'h.#figSvg': 'Exports the figure as SVG (vector, editable).',
-  'h.#figPng': 'Exports the figure as a PNG image.',
+  'h.#figPng': 'Exports the figure as a PNG image. At 300 or 600 dpi the file declares that resolution, computed on the figure\'s size on screen (96 px per inch).',
   'h.data.core': 'Core whose data are shown.',
   'h.data.showLayers': 'Also shows the interval layers in the table.',
   'h.data.csv': 'Downloads the table as CSV.',
@@ -1989,6 +2017,18 @@ Object.assign(D.en, {
 Object.assign(D.es, { 'f.rankNoGain': 'Ningún realce supera con claridad a la imagen sin realce: se deja sin realce.' });
 Object.assign(D.en, { 'f.rankNoGain': 'No enhancement clearly beats the image without enhancement: none is applied.' });
 // V0.38
+Object.assign(D.es, { 'bk.leftOut': 'La copia o el paquete de «{p}» no incluye sus {n} secciones grandes por piezas ({s}): sus máscaras están solo en este ordenador. Se nombran en el archivo («left_out»).' });
+Object.assign(D.en, { 'bk.leftOut': 'The copy or package of «{p}» does not include its {n} large tiled sections ({s}): their masks are only on this computer. They are named in the file ("left_out").' });
+Object.assign(D.es, { 'mp.joined': '«{c}»: {v} tablas convertidas a las unidades del primer proyecto; {n} valores distintos en la misma profundidad (se conserva el del primero).' });
+Object.assign(D.en, { 'mp.joined': '«{c}»: {v} tables converted to the units of the first project; {n} different values at the same depth (the first one is kept).' });
+Object.assign(D.es, { 'sec.unitAsk': '¿Convertir las profundidades de la sección? Aceptar: {a}–{b} {u} pasan a ser {c}–{d} {v} (la misma posición). Cancelar: solo se corrige la unidad, y la sección queda en {a}–{b} {v}.' });
+Object.assign(D.en, { 'sec.unitAsk': 'Convert the section\'s depths? OK: {a}–{b} {u} become {c}–{d} {v} (the same position). Cancel: only the unit is corrected, and the section is at {a}–{b} {v}.' });
+Object.assign(D.es, { 'rec.unit': 'Unidad de esa columna', 'rec.outside': 'El registro, leído en {u} y convertido a {t}, queda fuera de las profundidades o edades del sondeo: comprueba la unidad.' });
+Object.assign(D.en, { 'rec.unit': 'Unit of that column', 'rec.outside': 'The record, read in {u} and converted to {t}, lies outside the core\'s depths or ages: check the unit.' });
+Object.assign(D.es, { 'imp.justAdded': 'Recién importado.', 'imp.undo': 'Deshacer importación', 'imp.report': 'Cómo se ha leído el archivo', 'imp.clean': 'Se ha leído sin cambiar nada.', 'imp.sheet': 'Hoja', 'imp.sheetOf': 'se lee la hoja «{s}» de {n}', 'imp.censoredRule': 'Valores bajo el límite de detección', 'imp.rule.empty': 'vacíos', 'imp.rule.half': 'la mitad del límite', 'imp.rule.limit': 'el límite', 'imp.censored.empty': '{n} valores por debajo del límite de detección («<0,01», «bdl», «n.d.») se leen como vacíos', 'imp.censored.half': '{n} valores por debajo del límite de detección se leen como la mitad del límite indicado (los que no indican límite, vacíos)', 'imp.censored.limit': '{n} valores por debajo del límite de detección se leen como el límite indicado (los que no lo indican, vacíos)', 'imp.previewNote': 'Primeras {n} de {m} filas tal como se han leído; — es una celda con texto leída como vacía.' });
+Object.assign(D.en, { 'imp.justAdded': 'Just imported.', 'imp.undo': 'Undo import', 'imp.report': 'How the file was read', 'imp.clean': 'Read without changing anything.', 'imp.sheet': 'Sheet', 'imp.sheetOf': 'sheet «{s}» of {n} is read', 'imp.censoredRule': 'Values below the detection limit', 'imp.rule.empty': 'empty', 'imp.rule.half': 'half the limit', 'imp.rule.limit': 'the limit', 'imp.censored.empty': '{n} values below the detection limit ("<0.01", "bdl", "n.d.") are read as empty', 'imp.censored.half': '{n} values below the detection limit are read as half the stated limit (those without a limit, empty)', 'imp.censored.limit': '{n} values below the detection limit are read as the stated limit (those without one, empty)', 'imp.previewNote': 'First {n} of {m} rows as read; — is a cell with text read as empty.' });
+Object.assign(D.es, { 'imp.sheets': 'el libro tiene {n} hojas y se ha leído la primera', 'imp.preamble': 'se han saltado {n} líneas antes de la tabla', 'imp.missing': '{n} celdas con un código de valor ausente (-999, -999.25 o -9999) se leen como vacías', 'imp.censored': '{n} valores por debajo del límite de detección («<0,01», «bdl», «n.d.») se leen como vacíos', 'imp.ambiguous': 'en {c} no se sabe si «1,250» es 1,25 o 1250: se ha leído como 1,25; compruébalo', 'imp.renamed': 'columnas con el mismo nombre renombradas: {c}', 'imp.long': '{r} filas tienen más columnas que la cabecera; las de más se ignoran' });
+Object.assign(D.en, { 'imp.sheets': 'the workbook has {n} sheets and the first was read', 'imp.preamble': '{n} lines before the table were skipped', 'imp.missing': '{n} cells with a missing-value code (-999, -999.25 or -9999) are read as empty', 'imp.censored': '{n} values below the detection limit ("<0.01", "bdl", "n.d.") are read as empty', 'imp.ambiguous': 'in {c} it is unclear whether "1,250" means 1.25 or 1250: read as 1.25; please check', 'imp.renamed': 'columns with the same name renamed: {c}', 'imp.long': '{r} rows have more columns than the header; the extra ones are ignored' });
 Object.assign(D.es, { 'imp.dropped': '{n} celdas con texto en columnas numéricas se leen como vacías ({c})', 'imp.short': '{r} filas tienen menos columnas que la cabecera' });
 Object.assign(D.en, { 'imp.dropped': '{n} text cells in numeric columns are read as empty ({c})', 'imp.short': '{r} rows have fewer columns than the header' });
 Object.assign(D.es, {
@@ -2198,3 +2238,21 @@ Object.assign(D.en, {
   'engine.retry': 'Retry', 'engine.restarted': 'The scientific engine stopped and was restarted. The sections are being recalculated.', 'engine.restartFailed': 'The scientific engine could not be restarted. The sections keep their error.',
 });
 Object.assign(D.en, { 'nav.preview': 'Optimised navigation preview', 'nav.previewTip': 'Enabled at startup. Disable it to use the previous renderer for this session; figures and data are unchanged.' });
+Object.assign(D.es, {
+  'bk.tiledRefused': 'Las máscaras de la sección grande «{s}» de «{p}» no se han restaurado: en la copia falta o está dañado «{w}». Se abrirá bloqueada; restaura desde otra copia o abre la carpeta del proyecto.',
+  'bk.tiledNeedsEngine': 'Las máscaras de {n} secciones grandes de «{p}» no se han restaurado: hace falta el programa de escritorio con el motor activado. Vuelve a restaurar con él.' });
+Object.assign(D.en, {
+  'bk.tiledRefused': 'The masks of the large section «{s}» of «{p}» were not restored: «{w}» is missing or damaged in the copy. It will open locked; restore from another copy or open the project folder.',
+  'bk.tiledNeedsEngine': 'The masks of {n} large sections of «{p}» were not restored: this needs the desktop program with the engine on. Restore again with it.' });
+Object.assign(D.es, {
+  'bk.sourceCopy': 'La copia automática guarda en la carpeta de copia la imagen original «{n}» ({s}), que el proyecto conserva. Se copia una sola vez.',
+  'bk.sourceDamaged': 'La copia de la imagen original «{n}» en la carpeta no se ha podido restaurar (falta un trozo o no es esa imagen). Las máscaras sí; localiza la imagen desde la sección.',
+  'bk.versionTitle': 'Qué estado del proyecto abrir', 'bk.versionCurrent': 'El último guardado', 'bk.versionDay': 'Último estado del día {d}',
+  'bk.versionNote': 'El historial guarda el último estado de cada día. Las secciones grandes se restauran con las máscaras de ese día.', 'bk.versionOpen': 'Abrir' });
+Object.assign(D.en, {
+  'bk.sourceCopy': 'The automatic copy is saving the original image «{n}» ({s}), which the project keeps, in the backup folder. It is copied only once.',
+  'bk.sourceDamaged': 'The copy of the original image «{n}» in the folder could not be restored (a piece is missing or it is not that image). The masks were; locate the image from the section.',
+  'bk.versionTitle': 'Which state of the project to open', 'bk.versionCurrent': 'The last save', 'bk.versionDay': 'Last state of {d}',
+  'bk.versionNote': 'The history keeps the last state of each day. Large sections are restored with the masks of that day.', 'bk.versionOpen': 'Open' });
+Object.assign(D.es, { 'pkg.withSources': 'El paquete lleva las máscaras de las secciones grandes. ¿Incluir también las imágenes originales que el proyecto conserva ({s})?\n\nAceptar: incluirlas (el paquete se abre con sus imágenes en otro ordenador).\nCancelar: solo las máscaras (las imágenes se localizan allí).' });
+Object.assign(D.en, { 'pkg.withSources': 'The package carries the masks of the large sections. Also include the original images the project keeps ({s})?\n\nOK: include them (the package opens with its images on another computer).\nCancel: masks only (the images are located there).' });

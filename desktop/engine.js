@@ -7,10 +7,10 @@ const os = require('node:os');
 const { controlFrame, frame, ControlReader } = require('./engine-protocol');
 
 // Methods the engine may advertise in its handshake; anything else makes the engine unavailable.
-const ADVERTISED_METHODS = new Set(['buffer.digest/1', 'section.intervals/1']);
+const ADVERTISED_METHODS = new Set(['buffer.digest/1', 'section.intervals/1', 'core.ages/1']);
 // The tile-store operations (contract §8) are main-process only: engine-ipc.js never forwards them, and `pyramid.build` carries a path.
-const OPERATIONS = new Set(['hello', 'buffer.begin', 'buffer.derive', 'buffer.chunk', 'buffer.commit', 'buffer.release', 'buffer.read', 'buffer.digest', 'section.analyze', 'job.cancel', 'shutdown',
-  'pyramid.build', 'pyramid.info', 'tile.read', 'mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.forget']);
+const OPERATIONS = new Set(['hello', 'buffer.begin', 'buffer.derive', 'buffer.chunk', 'buffer.commit', 'buffer.release', 'buffer.read', 'buffer.digest', 'section.analyze', 'method.run', 'job.cancel', 'shutdown',
+  'pyramid.build', 'pyramid.info', 'tile.read', 'mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.slice', 'mask.forget', 'mask.derived.put', 'mask.derived.get', 'mask.export', 'mask.import']);
 // Requests followed by one binary frame (a descriptor/binary pair of contract §3); at most two of them wait for an answer at a time.
 const WITH_BINARY = new Set(['buffer.chunk', 'mask.put']);
 // A pyramid build has no fixed length: the engine stops a build whose progress stalls for 60 s. The client fails the session only
@@ -21,6 +21,18 @@ const PYRAMID_BUDGET_BYTES = 50 * 2 ** 30;   // contract §8.4; the maintainer's
 // The engine ends every analysis within its own 120 s deadline; up to four more wait in its queue. This is only the backstop
 // against a coordinator that stops answering, and it ends the whole session (see `request`).
 const ANALYSIS_TIMEOUT_MS = 10 * 60 * 1000;
+// `method.run` (contract §9.4), the same backstop by priority. An interactive job waits at most behind the running job and four interactive
+// ones, as an analysis does. A batch job may also wait behind four batch jobs, and today every method job, batch included, ends within its
+// 120 s deadline: 9 x 120 s = 18 min. Card M8.5.14 (the first batch method, with progress events) revisits the batch value.
+const RUN_TIMEOUTS_MS = Object.freeze({ interactive: ANALYSIS_TIMEOUT_MS, batch: 20 * 60 * 1000 });
+
+// Card M8.4.34: the operations of the mask store have their own deadlines (contract §8.7) instead of the 5 s of an ordinary request, after which the
+// engine is stopped, which could be in the middle of a commit on a slow disk. Chosen with a wide margin over the times seen (a retain, commit or copy
+// of a 10 % `rgb8g` section took well under 2 s on an SSD); not derived from a worst-case measurement.
+const STORE_DEADLINES_MS = Object.freeze({ 'mask.begin': 30000, 'mask.put': 60000, 'mask.commit': 120000, 'mask.discard': 30000, 'mask.read': 60000,
+  'mask.retain': 300000, 'mask.info': 30000, 'mask.copy': 120000, 'mask.slice': 300000, 'mask.forget': 60000, 'mask.derived.put': 120000, 'mask.derived.get': 120000,
+  'mask.export': 120000, 'mask.import': 120000 });
+const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 
 const MAX_AUTOMATIC_RESTARTS = 1;
 // Card M8.4.26 (decided by the maintainer, 18 Nov 2026): the handshake has its own deadline. Starting Python took up to 4.7 s on a
@@ -53,12 +65,12 @@ function terminateTree(child) {
 }
 
 class EngineClient {
-  constructor({ executable, script, version, runtimeId, timeoutMs = 5000, startTimeoutMs = START_TIMEOUT_MS, captureDiagnostics = false, pyramidDirectory = null, pyramidBudgetBytes = PYRAMID_BUDGET_BYTES,
+  constructor({ executable, script, version, runtimeId, timeoutMs = 5000, deadlines = STORE_DEADLINES_MS, startTimeoutMs = START_TIMEOUT_MS, captureDiagnostics = false, pyramidDirectory = null, pyramidBudgetBytes = PYRAMID_BUDGET_BYTES,
     projectsDirectory = null }) {
     if (!path.isAbsolute(executable || '') || !path.isAbsolute(script || '') || !/^[0-9a-f]{64}$/.test(runtimeId || '')) throw unavailable();
     if (pyramidDirectory !== null && !path.isAbsolute(pyramidDirectory)) throw unavailable();
     if (projectsDirectory !== null && !path.isAbsolute(projectsDirectory)) throw unavailable();
-    this.options = { executable, script, version, runtimeId, timeoutMs, startTimeoutMs, captureDiagnostics, pyramidDirectory, pyramidBudgetBytes, projectsDirectory };
+    this.options = { executable, script, version, runtimeId, timeoutMs, deadlines, startTimeoutMs, captureDiagnostics, pyramidDirectory, pyramidBudgetBytes, projectsDirectory };
     this.child = null; this.state = 'stopped'; this.pending = new Map(); this.queue = []; this.writing = false;
     this.stderr = Buffer.alloc(0); this.handshake = null; this.session = null; this.partial = null;
   }
@@ -109,7 +121,8 @@ class EngineClient {
     return this.starting;
   }
   /** `onEvent(payload)` receives the progress events of a `pyramid.build`; each event also restarts its idle timeout. */
-  request(op, payload, binary = null, { timeoutMs = op === 'section.analyze' ? ANALYSIS_TIMEOUT_MS : op === 'pyramid.build' ? PYRAMID_IDLE_TIMEOUT_MS : this.options.timeoutMs, onEvent = null } = {}) {
+  request(op, payload, binary = null, { timeoutMs = op === 'section.analyze' ? ANALYSIS_TIMEOUT_MS : op === 'method.run' ? RUN_TIMEOUTS_MS[payload?.priority] ?? ANALYSIS_TIMEOUT_MS
+    : op === 'pyramid.build' ? PYRAMID_IDLE_TIMEOUT_MS : this.options.deadlines[op] ?? this.options.timeoutMs, onEvent = null } = {}) {
     if (!OPERATIONS.has(op) || !this.child || !['starting', 'ready', 'stopping'].includes(this.state)) return Promise.reject(unavailable());
     if (this.pending.size >= 32) return Promise.reject(Object.assign(new Error('BUSY'), { code: 'BUSY' }));
     if (WITH_BINARY.has(op) && [...this.pending.values()].filter((item) => WITH_BINARY.has(item.op)).length >= 2) return Promise.reject(Object.assign(new Error('BUSY'), { code: 'BUSY' }));
@@ -188,6 +201,47 @@ class EngineClient {
       pending.resolve({ ...read, bytes: Buffer.alloc(0) });
       return undefined;
     }
+    if (value.status === 'ok' && pending.op === 'mask.export') {
+      // Card M8.4.18c: the files of a stored version follow as binary frames of at most 1 MiB (contract §8.7); each one's SHA-256 is checked on arrival.
+      const read = value.result, frames = read?.frames, files = read?.files, asked = pending.payload;
+      const names = asked.blobs === null ? [asked.manifest] : asked.blobs;
+      if (!read || Object.keys(read).sort().join() !== 'files,frames' || !Array.isArray(files) || files.length !== names.length
+          || files.some((file, index) => !file || Object.keys(file).sort().join() !== 'byte_length,name,sha256' || file.name !== names[index]
+            || !/^[0-9a-f]{64}$/.test(file.sha256) || !Number.isSafeInteger(file.byte_length) || file.byte_length < 1 || file.byte_length > 67108864)
+          || !Array.isArray(frames) || !frames.length || frames.length > 256 || frames.some((size) => !Number.isSafeInteger(size) || size < 1 || size > 1048576)
+          || frames.reduce((sum, size) => sum + size, 0) !== files.reduce((sum, file) => sum + file.byte_length, 0)) throw unavailable();
+      this.partial = { pending, id: value.id, result: read, parts: [], remaining: frames.length };
+      return { binaryFrames: frames };
+    }
+    if (value.status === 'ok' && pending.op === 'mask.derived.get' && value.result?.found === true) {
+      // Card M8.4.29: the derived file follows as binary frames of at most 1 MiB that add up to its length (contract §8.7); a missing one is `{found: false}`.
+      const read = value.result, frames = read.frames;
+      if (Object.keys(read).sort().join() !== 'byte_length,found,frames,sha256' || !Number.isSafeInteger(read.byte_length) || read.byte_length < 1 || read.byte_length > 134217728
+          || !/^[0-9a-f]{64}$/.test(read.sha256) || !Array.isArray(frames) || !frames.length || frames.length > 128
+          || frames.some((size) => !Number.isSafeInteger(size) || size < 1 || size > 1048576) || frames.reduce((sum, size) => sum + size, 0) !== read.byte_length) throw unavailable();
+      this.partial = { pending, id: value.id, result: read, parts: [], remaining: frames.length };
+      return { binaryFrames: frames };
+    }
+    if (value.status === 'ok' && pending.op === 'mask.slice') {
+      // Card M8.4.43: kept object IDs and used stack indices follow as u32le binary frames of at most 1 MiB (empty when neither is present).
+      const read = value.result, frames = read?.frames, total = (read?.object_count + read?.stack_count) * 4;
+      if (!read || Object.keys(read).sort().join() !== 'frames,height,manifest,object_count,sha256,stack_count,tile_count,width'
+          || !/^[0-9a-f]{64}$/.test(read.manifest) || !/^[0-9a-f]{64}$/.test(read.sha256)
+          || !Number.isSafeInteger(read.width) || read.width < 1 || !Number.isSafeInteger(read.height) || read.height < 1
+          || !Number.isSafeInteger(read.tile_count) || read.tile_count < 0
+          || !Number.isSafeInteger(read.object_count) || read.object_count < 0 || read.object_count > 1048576
+          || !Number.isSafeInteger(read.stack_count) || read.stack_count < 0 || read.stack_count > 4194304
+          || !Array.isArray(frames) || frames.length > 32 || frames.some((size) => !Number.isSafeInteger(size) || size < 1 || size > 1048576)
+          || frames.reduce((sum, size) => sum + size, 0) !== total) throw unavailable();
+      if (frames.length) {
+        this.partial = { pending, id: value.id, result: read, parts: [], remaining: frames.length };
+        return { binaryFrames: frames };
+      }
+      if (read.sha256 !== EMPTY_SHA256) throw unavailable();
+      clearTimeout(pending.timer); this.pending.delete(value.id);
+      pending.resolve({ ...read, bytes: Buffer.alloc(0) });
+      return undefined;
+    }
     clearTimeout(pending.timer); this.pending.delete(value.id);
     if (value.status === 'ok') pending.resolve(value.result);
     else if (value.status === 'cancelled') pending.resolve({ cancelled: true });
@@ -205,7 +259,8 @@ class EngineClient {
       if (--partial.remaining) return;
       const joined = Buffer.concat(partial.parts);
       let offset = 0;
-      for (const tile of partial.result.tiles) {          // the engine verified every tile; this checks the transport kept them apart
+      if (!partial.result.tiles && !partial.result.files && createHash('sha256').update(joined).digest('hex') !== partial.result.sha256) throw unavailable();   // mask.derived.get
+      for (const tile of partial.result.tiles || partial.result.files || []) {   // mask.export: each file as sent          // the engine verified every tile; this checks the transport kept them apart
         if (!tile.byte_length) continue;                   // an empty mask layer (mask.read) has no bytes
         if (createHash('sha256').update(joined.subarray(offset, offset + tile.byte_length)).digest('hex') !== tile.sha256) throw unavailable();
         offset += tile.byte_length;
@@ -313,4 +368,4 @@ function createEngineService({ enabled, packaged, executable, sourceDirectory, r
   return service;
 }
 
-module.exports = { EngineClient, terminateTree, createEngineService, ADVERTISED_METHODS };
+module.exports = { EngineClient, terminateTree, createEngineService, ADVERTISED_METHODS, STORE_DEADLINES_MS, RUN_TIMEOUTS_MS };

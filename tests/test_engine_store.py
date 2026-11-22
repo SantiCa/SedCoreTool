@@ -14,7 +14,9 @@ import numpy as np
 import pytest
 from PIL import Image
 
-pytest.importorskip("pyvips")
+from conftest import require_pyvips
+
+require_pyvips()
 
 from sedcoretool.engine import worker as engine_worker  # noqa: E402
 from sedcoretool.engine.protocol import BINARY_FRAME, MAX_CHUNK, read_frame, strict_json  # noqa: E402

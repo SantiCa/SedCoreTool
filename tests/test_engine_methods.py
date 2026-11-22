@@ -185,11 +185,11 @@ def test_buffer_read_answers_with_one_binary_frame_and_rejects_bad_ranges():
         coordinator.close()
 
 
-def test_hello_advertises_both_methods():
+def test_hello_advertises_the_diagnostic_and_the_scientific_methods():
     coordinator, session = new_coordinator()
     try:
         hello = next(iter(frames(coordinator)[0].values()))
-        assert hello["result"]["methods"] == ["buffer.digest/1", METHOD]
+        assert hello["result"]["methods"] == ["buffer.digest/1", METHOD, "core.ages/1"]
     finally:
         coordinator.close()
 
