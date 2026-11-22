@@ -1,24 +1,23 @@
-## SedCoreTool V0.152
+## SedCoreTool V0.153
 
 SedCoreTool quantifies bioturbation and ichnotaxa in sediment-core images and combines them with other down-core
 records and described intervals. Version 0.x, in active development. The downloads contain no sample data: the
 program starts empty and you open your own images and tables.
 
 ### Highlights
-- **Exported data keep their values.** CSV files keep 15 significant digits (small values such as a mass susceptibility of
-  1e-8 were written as 0) and leave a value that is not a number empty. The CSV of the core column writes each external
-  record as the mean of its samples in each interval, with their number, or its value at the interval centre without
-  bridging gaps; age reversals are marked and intervals outside the age model are counted.
-- **Deleting an ichnotaxon** asks first, says how many traces and predictions in how many cores are concerned, acts on
-  every core of the project and can be undone with «Restore» while the project is open. Projects that kept traces of a
-  deleted class are repaired when they open.
-- **Saving:** two saves can no longer run at the same time.
-- **Fixed:** a 16-bit TIFF larger than about 28 megapixels made the window stop answering when it was decoded; choosing
-  a resolution too large for memory could make the window go blank (such sizes are now disabled, with a message).
-- The Multiproxy log of a long core opens much faster (100,000 rows: from 3 min 15 s to about 0.6 s).
-- **Experimental, off by default** (desktop program, engine experiment): images of several gigabytes opened as "tiled"
-  sections with full-resolution masks, interval table, saving and reopening, locating a moved image and keeping a copy
-  of it in the project.
+- **Tables of records read more of what laboratories write:** -999 and similar codes, values below a detection limit,
+  titles before the table, decimal commas and repeated column names; the import dialog shows how the file was read, and
+  an import can be undone. Adding a record asks the unit of its depth or age column and converts it.
+- **Data tab:** small values are edited without rounding, long tables scroll to the end without «Show more», plots of
+  very long series draw quickly, and very long series no longer stop a chart, map or figure.
+- **Figures:** PNG export at 300 or 600 dpi.
+- **Safer files:** opening a project or a table from someone else can no longer add elements to the program's pages or
+  run code.
+- **Fixed:** opening a project while a save was still waiting could overwrite the saved project; several save, backup
+  and project-switching problems with several cores are corrected.
+- **Experimental, off by default** (desktop program, engine experiment): large "tiled" sections can be split into parts,
+  are included in exports, backups and project-folder copies, reopen faster, and stay within memory when their masks
+  hold extreme numbers of objects.
 
 The full list of changes is in [CHANGELOG.md](https://github.com/SantiCa/SedCoreTool/blob/master/CHANGELOG.md).
 
@@ -26,10 +25,10 @@ The full list of changes is in [CHANGELOG.md](https://github.com/SantiCa/SedCore
 
 | System | File |
 |---|---|
-| Windows 10/11, x64 | `SedCoreTool-V0.152-windows-setup.exe` or `SedCoreTool-V0.152-windows-portable.zip` |
-| macOS 13 or later, Intel and Apple Silicon | `SedCoreTool-V0.152-mac-universal.dmg` |
-| Linux, x64 | `SedCoreTool-V0.152-linux-x86_64.AppImage` or `SedCoreTool-V0.152-linux-amd64.deb` |
-| Any system, in a browser | `SedCoreTool_V0.152.html` (single file, works offline) |
+| Windows 10/11, x64 | `SedCoreTool-V0.153-windows-setup.exe` or `SedCoreTool-V0.153-windows-portable.zip` |
+| macOS 13 or later, Intel and Apple Silicon | `SedCoreTool-V0.153-mac-universal.dmg` |
+| Linux, x64 | `SedCoreTool-V0.153-linux-x86_64.AppImage` or `SedCoreTool-V0.153-linux-amd64.deb` |
+| Any system, in a browser | `SedCoreTool_V0.153.html` (single file, works offline) |
 | Verification | `SHA256SUMS.txt` and `RELEASE_MANIFEST.json` |
 
 Windows: run the installer or open the portable version. macOS: drag the application to Applications. Linux: make
