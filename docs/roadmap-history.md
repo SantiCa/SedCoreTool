@@ -3697,3 +3697,18 @@ Updated 21 November 2026.
   analysis's budget-full fallback does not drop tables; no method takes a table yet; memory and timing with tables resident not measured.
   **Checks (Windows):** `check_all --desktop --tiled` all passed after refreshing the bundled runtime (`npm run prepare-runtime -- --offline`):
   pytest 973 / 9 skipped, npm 646 / 0, typecheck, sync, ruff, `desktop.mjs` engine off and on, `tiled-sections.mjs`.
+
+### M8.4.11 - Milestone gate of part B — state: Done (22 Nov 2026, milestone gate)
+
+- **GitHub, commit `1d166e7`:** `tests` green; *Desktop builds* green on Windows, macOS and Linux (run `44977813249`). The first macOS
+  attempt failed in `tiled-sections.mjs` at "window: labels" (the windowed section lacked one overlap run `2+5` that the cut section had);
+  the re-run of the failed job passed unchanged. The intermittent failure is card Q19; it is not hidden by the re-run.
+- **Memory and timing of M8.4.9 repeated on `1d166e7`** (Windows 11, Ryzen 7 7700X, 31.1 GiB, Node 22.23.4, Electron 45.2.2, Python 3.12.16),
+  with the same command and an identical fixture (`synthetic-m0.1.sedcoretool`, 12,039,629 bytes, same SHA-256):
+  `node tools/measure_engine_analysis.mjs --only pixels --pixel-pairs 2`. Result: `docs/validation/M8.4.11-pixels-windows.json`.
+  - Peak memory, median of 2 runs (engine on): public example 1,006.7 MiB (M8.4.9: 1,094.7; limit 1,161.6) pass; generated 8 sections
+    1,917.0 MiB (M8.4.9: 1,840.9; limit 2,038.6) pass; highest single run 2,000.9 MiB, below the interactive target of 2,048.
+  - Engine charge unchanged (public 156.2 / 168.7 MiB, generated 442 / 463.6 MiB; 512 MiB session budget), no budget-full events.
+  - Timings: interval change unchanged (185 / 249 ms); the generated full analysis with the engine on took 1,544 / 1,442 ms against 1,359 /
+    1,361 ms in M8.4.9 (7-13 % slower, cause not diagnosed; the script sets no timing limit for this scenario; 2 runs only).
+  - Not measured: tables resident (M8.4.10 has no measurement script), macOS, Linux, a clean machine, 16-bit sections, cold cache.

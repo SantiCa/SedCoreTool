@@ -18,20 +18,20 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.152, `8ee9776`) is contained in it.
 - **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153; Q10 must be done before it.
-- **Last verified code commit:** Q14, `647b480`. Full checks on Windows (`tools/check_all.py --desktop --tiled`): all passed (pytest 932 /
-  9 skipped, npm 633 / 0, typecheck, sync, ruff, `desktop.mjs` engine off and on, `tiled-sections.mjs`).
-- **GitHub:** `647b480`: `tests` green; *Desktop builds* green on Windows and Linux, failed on macOS only at "reopened, no redraw by hand"
-  (Q15). This is the first green Windows/Linux desktop run since `f896132`.
-- **Checks due:** none on this state.
-- **Q15 in progress:** test race fixed; waits for the GitHub run on macOS.
-- **Found, not done:** **Q18** ("go to the trace" undone by the first fit; fast, medium), **Q16** (canvas taller than its pane; fast, medium), **Q17** (spurious BUSY notices and "Retry save" seen on GitHub
-  after a reopening; most capable, medium), **Q11** (hostile ML settings stop the classifier), **Q12** (an evicted placeholder section cannot
-  rebuild its grey image).
+- **Last verified code commit:** M8.4.10, `1d166e7`. Full checks on Windows passed for Q15 (`check_all --desktop --tiled`); M8.4.11
+  repeated the M8.4.9 memory and timing measurement on `1d166e7` (limits held; record in history).
+- **GitHub:** `1d166e7`: `tests` green; *Desktop builds* green on Windows, macOS and Linux (run `44977813249`), macOS only after a re-run of
+  a failure at "window: labels" (card Q19).
+- **Checks due:** none on this state (the last commit only records documents).
+- **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete. M8.5 needs design card **A1** first.
+- **Found, not done:** **Q19** (intermittent macOS "window: labels"; most capable, medium), **Q18** ("go to the trace" undone by the first
+  fit; fast, medium), **Q16** (canvas taller than its pane; fast, medium), **Q17** (spurious BUSY notices and "Retry save" after a reopening;
+  most capable, medium), **Q11** (hostile ML settings stop the classifier), **Q12** (an evicted placeholder section cannot rebuild its grey image).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
-  the release gate. Decisions X1-X4 (splitting a too-dense section) approved as recommended and delivered (M8.4.41–M8.4.43).
-- **Next (order decided by the maintainer, 22 Nov 2026):** Q15 waits for GitHub; M8.4.10 done; next **M8.4.11** (gate of part B; fast, effort low), then M8.5 (needs A1). `Q10` before V0.153; `A4` open.
-- **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) done, milestone gate met (M8.4.19); part B: M8.4.9 and M8.4.10 done
-  (22 Nov 2026); M8.5 must not start. The engine path fails the timing gate of
+  the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
+- **Next:** **A1** (design of engine methods of core or project scope; most capable, effort high), then the M8.5 slice cards it produces.
+  `Q10` before V0.153; `A4` open.
+- **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). The engine path fails the timing gate of
   [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates) for whole sections; the tile store is the
   answer for large images.
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags);
@@ -487,11 +487,7 @@ be decoded by the interface at all, and that card will carry the parity evidence
 
 - [x] **M8.4.10 - Record tables resident in the engine** (done 22 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased); record: [history](roadmap-history.md#m8410---record-tables-resident-in-the-engine)).
 
-#### M8.4.11 - Milestone gate of part B — state: after M8.4.10
-
-- **Goal:** the milestone gate (Windows, macOS, Linux on one commit) for part B, and the memory and timing evidence of M8.4.9 (or of its
-  replacement) repeated on the final commit. M8.5 may start only after this card and the milestone gate of part C (M8.4.19).
-- **Model:** fast, effort low (running and recording the gate).
+- [x] **M8.4.11 - Milestone gate of part B** (done 22 Nov 2026, milestone gate on `1d166e7`; [CHANGELOG](../CHANGELOG.md#unreleased); record: [history](roadmap-history.md#m8411---milestone-gate-of-part-b)).
 
 ### M8.5 and M8.6 - summaries
 
@@ -730,7 +726,7 @@ web/frontend security, UI correctness and architecture cards sit here.
   *Change:* queue binary requests (or let the page limit its concurrent sends) instead of refusing them, and clear `lastError` on success;
   *Done when:* a test with four tiled sections saving at once shows no refusal and no notice.
 
-- [ ] **Q15 - `tiled-sections.mjs` failures that occur only on macOS and Linux** (asked by the maintainer, 22 Nov 2026; after Q14; most
+- [x] **Q15 - `tiled-sections.mjs` failures that occur only on macOS and Linux** (asked by the maintainer, 22 Nov 2026; after Q14; most
   capable, effort medium: diagnosis across systems, through GitHub logs). From `89d080b` to `4676908` *Desktop builds* passed on Windows and
   failed in `tiled-sections.mjs` on macOS at "reopened, no redraw by hand: drawn pixel = source pixel" and on Linux (run `44951549785`, not
   diagnosed). *Read first:* the failing logs (`gh run view <id> --log-failed`), the reopened-viewer step of `tests/e2e/tiled-sections.mjs`,
@@ -743,7 +739,13 @@ web/frontend security, UI correctness and architecture cards sit here.
   so the fitted view (232 %, screenshot of run `44969532221`) replaced the probe's (200 %) and the probes read black objects. Reproduced on
   Windows by forcing the pending fit. Fix in `tests/e2e/tiled-sections.mjs`: two animation frames after `selectSection`; `checkProbe` asserts
   the probe's view is still on screen when the pixels are read. Checks (Windows): `check_all --desktop --tiled` all passed. Q16 is unrelated.
-  Open: the GitHub run.
+  *Result:* run `44977813249` on `1d166e7`: the macOS step now passes; Windows, macOS and Linux green (macOS after a re-run, see Q19).
+- [ ] **Q19 - `tiled-sections.mjs` "window: labels" fails intermittently on macOS** (found by M8.4.11, 22 Nov 2026; most capable, effort
+  medium: it may be a lost edit, not only a test race). First attempt of run `44977813249` on `1d166e7`: the section reopened with a window
+  lacked one overlap run (`2+5`, row 3165, columns 58-70) that the cut section had after the same script; the re-run passed. *Read first:*
+  the log (`gh run view 44977813249 --attempt 1 --log-failed`), the window step of `tests/e2e/tiled-sections.mjs` (assert "window: labels").
+  *Change:* find whether the program loses or misplaces a stroke, or the script races; fix the cause (AGENTS §3.7). *Done when:* the cause
+  is stated with evidence and the step passes on macOS.
 
 - [ ] **Q18 - "Go to the trace" can land elsewhere in a section not yet shown** (found by Q15, 22 Nov 2026; fast tier, effort medium). The
   examples dialog calls `selectSection(i); centerOn(o)`; a section without a remembered view gets `fitView` one animation frame later, which

@@ -38,6 +38,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.4.11: milestone gate of part B of M8.4 met on GitHub (Windows, macOS, Linux); the memory and timing of resident section pixels repeated on the final commit and stored in `docs/validation/M8.4.11-pixels-windows.json`.
 - Card M8.4.10: record tables (named numeric columns with missing values) can be kept in the engine in one columnar format, built by the new pure module `tablesnapshot.js`, sent with `engineclient.js::ensureTable` under a table budget of their own and checked by `methods/validation.py::table`; no scientific method changes. Details in the card's *As built*.
 - Card Q15: the tiled-sections desktop test waits for a section's first view before probing it and checks that the view was kept, which removes a timing failure seen on macOS.
 - Card Q14: `tiled-sections.mjs` no longer waits forever after reopening the split parts (it saves first, as closing the project would) and now reports a view that moves during a scripted stroke; a Node test pins down when a reopened tiled section counts as sent.
