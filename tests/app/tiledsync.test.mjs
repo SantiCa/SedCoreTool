@@ -182,6 +182,25 @@ test('the first round sends every table; a round with only tile changes sends no
   assert.deepEqual(sentTables(store, sync.manifest), []);
 });
 
+test('card Q14: a section reopened on a stored version is settled only after one round, which only a request starts; that round sends the tables and no tile', async () => {
+  const s = pageSection(), tiles = new MaskTiles({ width: 512, height: 512 }), store = fakeStore(), first = pageSync(s, CLASSES, tiles, store);
+  tiles.set(0, 0, labelsWith(1), null);
+  await first.request();
+  const saved = first.manifest, calls = store.calls.length;
+  const reopened = new MaskTiles({ width: 512, height: 512 }), sync = pageSync(s, CLASSES, reopened, store);
+  reopened.stored.add(reopened.index(0, 0));
+  sync.manifest = saved;                                                  // as loadTiledSection does
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(sync.settled, false, 'its tables are not acknowledged yet (the page rebuilt them from the record)');
+  assert.equal(sync.running, null, 'and nothing sends them by itself: a save or an edit asks for the round');
+  assert.equal(store.calls.length, calls);
+  await sync.request([]);
+  assert.ok(sync.settled);
+  assert.deepEqual(store.calls.slice(calls), ['begin', 'commit'], 'no tile is sent again');
+  assert.deepEqual(sentTables(store, sync.manifest), [...OBJECT_TABLES, 'stack_members', 'stack_offsets'].sort());
+  assert.deepEqual([...store.manifests.get(sync.manifest).tiles.keys()], ['0.0'], 'on the stored version as its base');
+});
+
 test('a class change sends the object columns and the classes; a new object and a new stack are found though the edit said "tiles only"', async () => {
   const s = pageSection(), classes = CLASSES.map((c) => ({ ...c })), tiles = new MaskTiles({ width: 512, height: 512 }), store = fakeStore();
   const sync = pageSync(s, classes, tiles, store);

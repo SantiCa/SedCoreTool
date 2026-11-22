@@ -24,8 +24,10 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **GitHub:** `f896132` (code of M8.4.37): all green on three systems (milestone gate of part C). `956f3e3` (M8.4.43): `tests` green;
   *Desktop builds* failed in `tiled-sections.mjs` on Windows, macOS and Linux (run `44957994403`). The *As built* of M8.4.43 said it passed
   on Windows; it does not.
-- **Checks due:** the GitHub result of this commit (expected: `tiled-sections.mjs` still failing until Q14).
-- **Found, not done:** **Q14** (the failure above; most capable, effort high), **Q15** (the macOS/Linux-only failures of
+- **Checks due:** the GitHub result of this commit (Q14 part b).
+- **Q14 in progress:** part (a) fixed (test defect; see the card); part (b), `window: labels` on GitHub Windows and macOS, waits for the
+  GitHub run of this commit, whose new assertion names what moved under the pointer.
+- **Found, not done:** **Q16** (canvas taller than its pane; fast, medium), **Q17** (spurious BUSY notices; most capable, medium), **Q15** (the macOS/Linux-only failures of
   `tiled-sections.mjs`; most capable, effort medium), **Q11** (hostile ML settings stop the classifier), **Q12**
   (an evicted placeholder section cannot rebuild its grey image).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
@@ -739,6 +741,29 @@ web/frontend security, UI correctness and architecture cards sit here.
   (`89d080b` onwards) failed on macOS and Linux in another step ("reopened, no redraw by hand"). *Change:* diagnose and fix the cause (the
   window block logs `BUSY` as `lastError` on two sections); never widen the wait. *Done when:* `tiled-sections.mjs` passes on Windows locally
   and on the three systems on GitHub on one commit.
+  *Progress (22 Nov 2026; Opus sub-agent, high, reviewed line by line):* two causes. (a) The timeout at line 1464 was a test defect: after
+  the reopening in step (d), sections whose statistics came from their reopening cache keep `MaskSync` unsettled (tables not yet
+  acknowledged) until a round, and only a save or an edit asks for one; the test now calls `saveNow()` before the unchanged wait (it passed
+  before only when `writeReopenCaches` had not finished, a race). New Node test in `tests/app/tiledsync.test.mjs` pins that behaviour. The
+  `BUSY` in the "Window block" log is a stale `lastError` of a retried round, not a stuck sync. (b) `window: labels` (line 1285, M8.4.42 block,
+  GitHub Windows and macOS, also on `4676908`): in the cut section, one brush stroke landed 19 rows higher; the window section is correct.
+  Not reproduced locally (4 runs, one at 4x CPU throttling). `draw` now asserts that the view, the canvas box and the layout above it do not
+  move during a stroke, so the next CI run names what moved. Checks (Windows): `tiled-sections.mjs` passed twice in a row;
+  `check_all --desktop --tiled` all passed (pytest 932 / 9 skipped, npm 633 / 0). Open: (b) on GitHub.
+
+- [ ] **Q16 - The view canvas is taller than its visible pane and depends on the window's first size** (found by Q14, 22 Nov 2026; fast tier,
+  effort medium). At 1600 x 1000 `#view` is 1754 px tall while about 860 px are visible (clipped by `.viewport`): the implicit grid row of
+  `.viewport` is sized by the content and `resizeCanvases` copies `clientHeight` back into the canvas, so the height keeps the previous aspect
+  ratio; the headless window opens at 884 x 561 before `setViewport`, which differs per system. `visibleSource` (tiles read) and `centerOn`
+  (may centre off-screen) follow that height. Probable lead for Q15. *Change:* size the canvas from the visible pane; *Tests:* an e2e or DOM
+  check that the canvas height equals the visible pane after resizes; *Done when:* the height follows the pane on every resize.
+
+- [ ] **Q17 - Spurious "masks unsent" notices when three or more tiled sections send at once** (found by Q14, 22 Nov 2026; most capable,
+  effort medium: concurrency of the engine bridge). `desktop/engine.js` refuses a third concurrent binary request (`mask.put`,
+  `buffer.chunk`) with `BUSY`, for example at the first save after opening a project with several tiled sections; the round is retried and
+  succeeds, but the user sees "masks unsent" then "masks sent" and the retry backs off. `lastError` is never cleared after a success.
+  *Change:* queue binary requests (or let the page limit its concurrent sends) instead of refusing them, and clear `lastError` on success;
+  *Done when:* a test with four tiled sections saving at once shows no refusal and no notice.
 
 - [ ] **Q15 - `tiled-sections.mjs` failures that occur only on macOS and Linux** (asked by the maintainer, 22 Nov 2026; after Q14; most
   capable, effort medium: diagnosis across systems, through GitHub logs). From `89d080b` to `4676908` *Desktop builds* passed on Windows and

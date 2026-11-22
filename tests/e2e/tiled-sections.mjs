@@ -647,7 +647,13 @@ try {
       window.ichantool.requestRender();
     }, index);
     // Measured before every stroke, as in the editing steps above (the pane may scroll; card M8.4.32).
-    const viewBox = () => page.evaluate(() => { const r = document.getElementById('view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
+    // Card Q14: with where the view shows the image and what lies above it, so that a stroke placed elsewhere than aimed is reported as such.
+    const viewBox = () => page.evaluate(() => {
+      const r = document.getElementById('view').getBoundingClientRect(), height = (selector) => document.querySelector(selector)?.getBoundingClientRect().height ?? null;
+      const { x, y, zoom } = window.ichantool.S.view;
+      return { left: r.left, top: r.top, view: [x, y, zoom], header: height('header.top'), tools: height('#tools'), validation: height('#projectValidation'),
+        scrolled: ['html', '.app', '.work', '.stage', '.viewport'].map((selector) => document.querySelector(selector)?.scrollTop ?? null) };
+    });
     let box = await viewBox();
     const idle = () => page.waitForFunction(() => window.ichantool.tiledStatsIdle() && window.ichantool.masksSettled() && !window.ichantool.objectsWaiting(), { polling: 50, timeout: 60000 })
       .catch(async (error) => {                                          // card M8.4.42: what was still waiting, for the failure message
@@ -664,7 +670,12 @@ try {
         const [ax, ay] = points[k - 1], [bx, by] = points[k];
         for (let q = 1; q <= 5; q++) await page.mouse.move(box.left + ax + ((bx - ax) * q) / 5, box.top + ay + ((by - ay) * q) / 5);
       }
-      await page.mouse.up(); await idle();
+      await page.mouse.up();
+      // Card Q14: on GitHub (Windows and macOS) one stroke of the first section scripted after a reopening landed 19 rows above the others' place,
+      // never seen on the maintainer's computer; if the view moves under the pointer again, say so here rather than in the comparison of the masks.
+      const after = await viewBox();
+      assert.deepEqual(after, box, `the view stayed where it was measured during the ${tool} stroke`);
+      await idle();
     };
     const objects = () => page.evaluate(() => [...window.ichantool.S.sections[window.ichantool.S.cur].objects.keys()]);
     await draw('brush', [[100, 200], [300, 200]]);
@@ -1461,6 +1472,10 @@ try {
       for (const q of splitBkSections) {
         assert.ok(q.tiled?.window && splitBackup[`${splitBkName}/manifests/${q.tiled.manifest}.json`], 'backup holds manifest and window of ' + q.id);
       }
+      // Card Q14: every send has finished before the steps below. After the reopening above, a section's send is settled only after its first round
+      // (`MaskSync.settled`: the tables of a reopened section count as not yet acknowledged), and only a save or an edit asks for that round; the
+      // sections whose statistics came from their reopening cache are neither edited nor saved here, so without this save the wait never ended.
+      await on.page.evaluate(() => window.ichantool.saveNow());
       await on.page.waitForFunction(() => window.ichantool.S.cores.flatMap((c) => c.sections).every((q) => !q._maskSync || (q._maskSync.settled && !q._maskSync.running)),
         { polling: 100, timeout: 120000 });
       console.log('Split tiled section (M8.4.43): half-way failure kept original intact; UI split produced 2 parts with identical masks, object pixels/classes, summed interval tables and continuous depths; saved (format 7), reopened and folder-backed up');
