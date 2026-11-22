@@ -246,7 +246,7 @@ client, page bridge, framing and bundled-runtime verification; §26.2–§26.3),
 §26.3), `trainer.js` and `model-store.js` (U-Net training and model generations; §9.3), `diagnostics.js` (§26.1)
 and `scripts/` (preparation, build and package checks).
 
-Tools (`tools/`): `check_all.py` runs the end-of-session checks of the development guide §3 one after another and prints one line per check; the full output of each goes to a log file, and the exit code is non-zero if a check failed or a tool is missing (tests: `tests/test_check_all.py`).
+Tools (`tools/`): `check_all.py` runs the end-of-session checks of the development guide §3 one after another and prints one line per check; the full output of each goes to a log file, and the exit code is non-zero if a check failed or a tool is missing (tests: `tests/test_check_all.py`). `make_core_ages_fixtures.mjs` writes the reference fixtures of `core.ages/1` to `tests/fixtures/core_ages/` from `core.js` (§31.1).
 
 ### 1.5 Names and compatibility
 
@@ -3697,6 +3697,13 @@ byte-identical to a regeneration by `tools/make_interval_fixtures.mjs`, checks e
 result contracts (shapes, contiguous intervals, counts consistent with percentages, no-data rules), and compares
 the 20 fractional-boundary cases with `tests/fixtures/fractional-boundaries.json`. They are the target of the Python
 implementation; they say nothing about the engine, which does not calculate sections yet.
+
+**Age-model reference fixtures.** `tests/fixtures/core_ages/` holds 8 synthetic cases (2.9 MB; format in its README) with the inputs of the
+planned engine method `core.ages/1` ([contract §9.8](roadmap-engine-contract.md)) and the result of `core.js::interpAge` and `interpAgeRange`:
+models of 2 and 1,000 rows, with and without age reversals and range, and queries at every knot, at both ends, just outside, missing and
+100,000 random depths. `tests/app/core-ages-fixtures.test.mjs` requires every committed file to be byte-identical to a regeneration by
+`tools/make_core_ages_fixtures.mjs` (also through its command line) and re-checks each row against `core.js`. The engine does not compute
+`core.ages/1` yet.
 
 **Temporary diagnostics.** Node tests cover default-off activation, persisted expiry, redaction, two-file
 rotation, queue overflow, independent write failure, bounded reads and atomic export failure. The real

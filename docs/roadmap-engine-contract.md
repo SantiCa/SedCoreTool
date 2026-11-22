@@ -739,3 +739,27 @@ each method module agrees with its entry; the main process mirrors the entries a
 - Tables kept resident by a client: at most 128 (was 16); the 16 MiB bound, as charged, is unchanged. A request whose tables do not all fit
   sends the others for that request only and releases them afterwards. Whether 16 MiB is enough for real multiproxy projects is measured
   by card M8.5.12 (decision Y8).
+
+### 9.8 Method `core.ages/1`
+
+**State: specified on 22 November 2026 (card M8.5.4); not implemented (card M8.5.5).** It applies a core's age model to the depths of a
+core's rows, as `core.js::interpAge` and `interpAgeRange` do today. Reference fixtures made by that JavaScript:
+`tests/fixtures/core_ages/` (generator `tools/make_core_ages_fixtures.mjs`).
+
+| Item | Rule |
+|---|---|
+| Name, scope, priority | `core.ages/1`; scope `core` (§9.1); priority `interactive` only (`batch` is refused, §9.2). |
+| `settings` | `utf8json` `{"version": 1}`, nothing else. |
+| `age_model` (table, §4 "Tables") | Columns `depth` and `age`, and either both `age_min` and `age_max` or neither, in that order of names; no other column. At least 2 rows, nothing missing (every `age_model_valid` slot is 1), `depth` strictly increasing, and `age_min ≤ age ≤ age_max` in every row when the range is present. This is what `parseAgeModelDetailed` leaves: it has sorted the rows, merged identical ones, refused a depth with two ages and dropped an inconsistent range, and the client sends that model. Ages may decrease downwards (a reversal): they are interpolated as given. Units are metadata of the columns and are not converted. |
+| `query` (table) | One column `depth`, 1 or more rows; a missing depth (`query_valid` 0) is allowed. |
+| Output table `ages` | One row per `query` row, in the same order. Columns `age`, and `age_min`, `age_max` when the model has a range. Linear interpolation between the two model depths around the query depth; the first and the last model depth belong to the model. A slot is missing where the query depth is missing or lies outside `[first depth, last depth]`: there is no extrapolation (the Python kernel's `extrapolate=True` is not used). `age_min` and `age_max` are missing exactly where `age` is. |
+| `summary` | `{"rows": <query rows>, "outside": <query depths present and outside the model>}`; a missing depth is not counted in `outside`. |
+| Dimensions | `rows` = the number of query rows (at least 1). |
+| Tolerance (§7) | `age`, `age_min`, `age_max`: absolute error ≤ 1e-9 in declared age units; the missing pattern and `summary` exactly. |
+| Refusals | As §9.2 and §4 "Tables": the field is named (`age_model.depth` not increasing, a missing value of `age_model`, one range column without the other, fewer than 2 rows, `query.depth` absent). |
+
+Behaviour of `core.js` that the fixtures record, so that the contract and the program agree: `interpAge` returns `null` outside the model
+and for a missing depth; `interpAgeRange` interpolates the minimum and the maximum like the age and returns `null` when the model has no
+range or the depth is outside it; with age reversals both still interpolate linearly between neighbouring rows. The program leaves a
+non-finite depth to the caller (`interpAge(model, NaN)` is `NaN`, not `null`): the client sends a missing depth as missing, and no fixture
+asks for `NaN`.

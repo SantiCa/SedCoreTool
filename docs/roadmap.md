@@ -18,7 +18,7 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.152, `8ee9776`) is contained in it.
 - **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153; Q10 must be done before it.
-- **Last verified code commit:** M8.5.3 (this commit): `check_all --desktop` passed on Windows (pytest 994/9 skipped, `npm test` 660/660,
+- **Last verified code commit:** M8.5.3 `1fc0a54`: `check_all --desktop` passed on Windows (pytest 994/9 skipped, `npm test` 660/660,
   typecheck, ruff, desktop e2e engine off and on).
 - **GitHub:** M8.5.1 `904cbcf` and M8.5.2 `8074285`: `tests` and *Desktop builds* green (Windows, macOS, Linux). M8.5.3: read its result
   at the start of the next card.
@@ -30,7 +30,8 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
 - **Next:** A1 designed (contract §9, cards M8.5.1-M8.5.15); Y1-Y11 and the limits of §9.7 approved as recommended (22 Nov 2026).
-  Run in progress: M8.5.1-M8.5.3 done (`method.run` in the engine and from the page); next **M8.5.4**, then the M8.5 cards in order. `Q10` before V0.153; `A4` open.
+  Run in progress: M8.5.1-M8.5.4 done (`method.run` in the engine and from the page; `core.ages/1` specified with fixtures); next
+  **M8.5.5**, then the M8.5 cards in order. `Q10` before V0.153; `A4` open.
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). The engine path fails the timing gate of
   [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates) for whole sections; the tile store is the
   answer for large images.
@@ -654,7 +655,7 @@ after. The order is the order of this list; cards written later take the next fr
     resident tables. The M8.5.2 `engine_only` exception is removed. Tests: `engine-run.test.mjs` (14, including `section.intervals/1`
     through the real engine; 6 seeded faults caught). Checks (Windows): `check_all --desktop` passed (pytest 994/9 skipped, `npm test`
     660/660, typecheck, ruff, desktop e2e engine off and on); standalone build. `app.js` 4,647 lines before and after.
-- [ ] **M8.5.4 - Contract and reference fixtures of `core.ages/1`** (slice a; waits for Y1, Y2, Y4).
+- [x] **M8.5.4 - Contract and reference fixtures of `core.ages/1`** (done 22 Nov 2026, development gate).
   - *Goal:* the contract describes `core.ages/1`, and fixtures made by today's JavaScript fix its expected results.
   - *Read first:* contract §4 "Tables", §7 (numerical parity), §9; TECHNICAL_DOCUMENTATION §5; `app/js/core.js` (`parseAgeModelDetailed`,
     `interpAge`, `interpAgeRange`); `src/sedcoretool/kernels/ages.py`; ARCHITECTURE §5.1 steps 1-2.
@@ -669,6 +670,12 @@ after. The order is the order of this list; cards written later take the next fr
     rows, age reversals, with and without range) and queries at every knot, at both ends, just outside, missing and 100,000 random depths.
   - *Tests:* the generator gives the same bytes twice; a Node test re-checks the fixtures against `core.js`.
   - *Done when:* contract entry and fixtures committed; development gate.
+  - *As built:* contract §9.8 specifies `core.ages/1` (Y1, Y2, Y4 applied). `tools/make_core_ages_fixtures.mjs` (seeded, `--check`, `--out`)
+    writes 8 cases (2.9 MB; the 100,000-depth case as binary `f64le`/`u8` files, marked `binary` in `.gitattributes`) to
+    `tests/fixtures/core_ages/` from `core.js`: models of 2 and 1,000 rows, with and without reversals and range; queries at knots, ends,
+    just outside, missing and random. `core.js` returns `null` outside the model (no extrapolation) and `NaN` for a `NaN` depth (never sent).
+    `tests/app/core-ages-fixtures.test.mjs` (4): byte-identical regeneration, rows recomputed with `interpAge`/`interpAgeRange`. Checks
+    (Windows): pytest 994/9 skipped, `npm test` 664/664, typecheck, ruff. `app.js` unchanged.
 - [ ] **M8.5.5 - Method `core.ages/1`** (after M8.5.3 and M8.5.4).
   - *Goal:* the engine computes `core.ages/1` equal to the fixtures within §9.8, through `method.run`.
   - *Read first:* contract §9.8; ARCHITECTURE §5.1 steps 3-5; `methods/section_intervals.py` (shape of `parse` and `run`),
