@@ -23,7 +23,8 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **GitHub:** `647b480`: `tests` green; *Desktop builds* green on Windows and Linux, failed on macOS only at "reopened, no redraw by hand"
   (Q15). This is the first green Windows/Linux desktop run since `f896132`.
 - **Checks due:** none on this state.
-- **Found, not done:** **Q16** (canvas taller than its pane; fast, medium), **Q17** (spurious BUSY notices and "Retry save" seen on GitHub
+- **Q15 in progress:** test race fixed; waits for the GitHub run on macOS.
+- **Found, not done:** **Q18** ("go to the trace" undone by the first fit; fast, medium), **Q16** (canvas taller than its pane; fast, medium), **Q17** (spurious BUSY notices and "Retry save" seen on GitHub
   after a reopening; most capable, medium), **Q11** (hostile ML settings stop the classifier), **Q12** (an evicted placeholder section cannot
   rebuild its grey image).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
@@ -753,6 +754,17 @@ web/frontend security, UI correctness and architecture cards sit here.
   test if it depends on Windows-only timing or colour handling, stating which and why (never widen a tolerance or a wait, AGENTS §3.7).
   *Done when:* after Q14, *Desktop builds* is green on Windows, macOS and Linux on one commit, or each remaining failure is recorded with its
   message and a decision of the maintainer.
+  *Progress (22 Nov 2026; Opus sub-agent, medium, reviewed):* cause found, a race in the test: `selectSection` gives a section with no
+  remembered view its first view (`fitView`) one animation frame later; on GitHub's macOS machine no frame ran before the probe set its view,
+  so the fitted view (232 %, screenshot of run `44969532221`) replaced the probe's (200 %) and the probes read black objects. Reproduced on
+  Windows by forcing the pending fit. Fix in `tests/e2e/tiled-sections.mjs`: two animation frames after `selectSection`; `checkProbe` asserts
+  the probe's view is still on screen when the pixels are read. Checks (Windows): `check_all --desktop --tiled` all passed. Q16 is unrelated.
+  Open: the GitHub run.
+
+- [ ] **Q18 - "Go to the trace" can land elsewhere in a section not yet shown** (found by Q15, 22 Nov 2026; fast tier, effort medium). The
+  examples dialog calls `selectSection(i); centerOn(o)`; a section without a remembered view gets `fitView` one animation frame later, which
+  undoes the centring. *Change:* the delayed first fit is skipped when the view changed meanwhile; *Tests:* an e2e step that selects an unseen
+  section and centres on an object at once, and checks the view a few frames later; *Done when:* the object is centred.
 
 - [ ] **Q10 - Data-tab edit precision, virtualized table cap, engine-refresh/CSV races & SVG PNG Blob export.**
   - *Goal:* fix verified runtime, UX and data-accuracy defects across the Data tab, Core log, Figures and pointer interactions.

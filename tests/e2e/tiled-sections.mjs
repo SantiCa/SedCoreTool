@@ -196,7 +196,8 @@ try {
     }
     const bad = probes.find((p) => p.screen.some((v, i) => v !== p.source[i]));
     const evidence = bad ? window.ichantool.tileState(0, Math.floor((bad.sy + vy * s.ds) / 512), Math.floor((bad.sx + vx * s.ds) / 512)) : null;
-    return { probes, level: s.tiled.level, canvas: [canvas.width, canvas.height], view: S.view, roi: s.roi, w: s.w, waitedMs, completed, evidence };
+    // Card Q15: the view on screen when the pixels were read, against the one the probe set (the probe maps screen to source with the latter).
+    return { probes, level: s.tiled.level, canvas: [canvas.width, canvas.height], asked: { x: vx, y: vy, zoom: s.ds }, view: { ...S.view }, roi: s.roi, w: s.w, waitedMs, completed, evidence };
   }, fraction, redraw);
   const checkProbe = async (drawn, label) => {
     assert.ok(drawn.completed, `${label}: the visible tiles were loaded within 30 s (waited ${drawn.waitedMs} ms): ` + JSON.stringify(drawn.evidence));
@@ -206,6 +207,9 @@ try {
       await on.page.screenshot({ path: shot });
       console.log(`${label}: probe failed; screenshot ${shot}; tile state ${JSON.stringify(drawn.evidence)}; waited ${drawn.waitedMs} ms`);
     }
+    // Card Q15: a view replaced while the probe waited (on GitHub's macOS machine, the first view of a section just selected, fitted one
+    // animation frame later) puts other pixels under the probes; this names that cause instead of a pixel mismatch.
+    assert.deepEqual(drawn.view, drawn.asked, `${label}: the view the probe set is still the view when the pixels are read`);
     for (const p of drawn.probes) assert.deepEqual(p.screen, p.source, `${label}: drawn pixel = source pixel at ` + JSON.stringify({ ...p, evidence: drawn.evidence }));
   };
   // Card M8.4.32: the probe and the strokes read the last section; it must be the one on screen.
@@ -836,6 +840,10 @@ try {
     if (!s) return { index };
     await window.ichantool.tiledMasksLoad(index);
     window.ichantool.selectSection(index);
+    // Card Q15: a section without a remembered view gets its first view (`fitView`) one animation frame after it is selected; the probe sets its
+    // own view, so that frame must have run first. Without it, on GitHub's macOS machine no frame ran before the probe and the fitted view
+    // (232 %) replaced the probe's (200 %): the probes read other pixels of the image (black objects where the source is white).
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     for (let i = 0; i < 400 && !s.orig; i++) await new Promise((r) => setTimeout(r, 25));
     const height = /** @type {HTMLCanvasElement} */ (document.getElementById('view')).height, m = s.maskTiles;
     const empty = (row) => { for (let col = 0; col < m.cols; col++) { const e = m.get(row, col); if (m.stored.has(row * m.cols + col) || e?.labels || e?.exclude) return false; } return true; };

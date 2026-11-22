@@ -38,6 +38,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card Q15: the tiled-sections desktop test waits for a section's first view before probing it and checks that the view was kept, which removes a timing failure seen on macOS.
 - Card Q14: `tiled-sections.mjs` no longer waits forever after reopening the split parts (it saves first, as closing the project would) and now reports a view that moves during a scripted stroke; a Node test pins down when a reopened tiled section counts as sent.
 - Card M8.4.9: the engine can keep the working pixels of small sections (8-bit, and 16-bit through the new `u16le` buffer type) under a pixel identity, with a 192 MiB budget of its own, through a shared registry of resident buffers (`residentstore.js`, `sectionpixels.js`); no method uses them yet. The 512 MiB session budget stays, by measurement. Details in the card's *As built*.
 - Card M8.4.43: splitting a tiled section into row-windowed parts (`MaskStore.slice_rows`, `mask.slice`, `tiledsplit.js`, `tiledsplitui.js`), reusing tile blobs without re-encoding, filtering object and stack tables, and replacing the section atomically after confirmation (X1–X4); new Python, Node and desktop E2E tests. Details in the card's *As built*.
