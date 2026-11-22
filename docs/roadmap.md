@@ -18,21 +18,17 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.152, `8ee9776`) is contained in it.
 - **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153; Q10 must be done before it.
-- **Last verified code commit:** M8.4.9 (this commit; see `git log`). Full checks on Windows (`tools/check_all.py --desktop --tiled`):
-  `pytest` 932 passed / 9 skipped; `npm test` 632 / 0; typecheck; sync; ruff; `desktop.mjs` engine off and on passed;
-  **`tiled-sections.mjs` failed** (line 1464, M8.4.43 split block), as it does on unmodified `956f3e3`: see **Q14**.
-- **GitHub:** `f896132` (code of M8.4.37): all green on three systems (milestone gate of part C). `956f3e3` (M8.4.43): `tests` green;
-  *Desktop builds* failed in `tiled-sections.mjs` on Windows, macOS and Linux (run `44957994403`). The *As built* of M8.4.43 said it passed
-  on Windows; it does not.
-- **Checks due:** the GitHub result of this commit (Q14 part b).
-- **Q14 in progress:** part (a) fixed (test defect; see the card); part (b), `window: labels` on GitHub Windows and macOS, waits for the
-  GitHub run of this commit: cause found (a mode button wrapping when the save state is long) and fixed in `app/index.html`.
-- **Found, not done:** **Q16** (canvas taller than its pane; fast, medium), **Q17** (spurious BUSY notices; most capable, medium), **Q15** (the macOS/Linux-only failures of
-  `tiled-sections.mjs`; most capable, effort medium), **Q11** (hostile ML settings stop the classifier), **Q12**
-  (an evicted placeholder section cannot rebuild its grey image).
+- **Last verified code commit:** Q14, `647b480`. Full checks on Windows (`tools/check_all.py --desktop --tiled`): all passed (pytest 932 /
+  9 skipped, npm 633 / 0, typecheck, sync, ruff, `desktop.mjs` engine off and on, `tiled-sections.mjs`).
+- **GitHub:** `647b480`: `tests` green; *Desktop builds* green on Windows and Linux, failed on macOS only at "reopened, no redraw by hand"
+  (Q15). This is the first green Windows/Linux desktop run since `f896132`.
+- **Checks due:** none on this state.
+- **Found, not done:** **Q16** (canvas taller than its pane; fast, medium), **Q17** (spurious BUSY notices and "Retry save" seen on GitHub
+  after a reopening; most capable, medium), **Q11** (hostile ML settings stop the classifier), **Q12** (an evicted placeholder section cannot
+  rebuild its grey image).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 (splitting a too-dense section) approved as recommended and delivered (M8.4.41–M8.4.43).
-- **Next (order decided by the maintainer, 22 Nov 2026):** **Q14**, then **Q15**, then **M8.4.10** (record tables resident in the
+- **Next (order decided by the maintainer, 22 Nov 2026):** **Q15** (Q14 done), then **M8.4.10** (record tables resident in the
   engine; most capable, effort medium), **M8.4.11** (gate of part B; fast, effort low), then M8.5 (needs A1). `Q10` before V0.153; `A4` open.
 - **Where M8 stands:** M8.1-M8.3 done; M8.4 part A done; part C (tile store) done, milestone gate met (M8.4.19); part B: M8.4.9 done
   (22 Nov 2026); M8.5 must not start. The engine path fails the timing gate of
@@ -733,32 +729,7 @@ web/frontend security, UI correctness and architecture cards sit here.
   *Tests:* a desktop e2e step (or a Node test if the branch moves to a module) that evicts a placeholder and reopens it; *Do not touch:* the
   placeholder's saved record. *Done when:* the evicted placeholder reopens grey without an error.
 
-- [ ] **Q14 - `tiled-sections.mjs` fails in the M8.4.43 split block on all three systems** (found by M8.4.9, 22 Nov 2026; most capable,
-  effort high: mask syncing of split parts, where a mistake could lose user work). On `956f3e3` (M8.4.43) GitHub *Desktop builds* fails in
-  `tiled-sections.mjs` on Windows and macOS (`AssertionError: window: labels`) and on Linux (run `44957994403`: `TimeoutError` waiting 120 s);
-  on the maintainer's Windows workstation it times out at line 1464, the wait for every section's `_maskSync` to be settled after the split
-  and folder-backup steps, on unmodified `956f3e3` too. The *As built* of M8.4.43 recorded the test as passing on Windows. Earlier commits
-  (`89d080b` onwards) failed on macOS and Linux in another step ("reopened, no redraw by hand"). *Change:* diagnose and fix the cause (the
-  window block logs `BUSY` as `lastError` on two sections); never widen the wait. *Done when:* `tiled-sections.mjs` passes on Windows locally
-  and on the three systems on GitHub on one commit.
-  *Progress (22 Nov 2026; Opus sub-agent, high, reviewed line by line):* two causes. (a) The timeout at line 1464 was a test defect: after
-  the reopening in step (d), sections whose statistics came from their reopening cache keep `MaskSync` unsettled (tables not yet
-  acknowledged) until a round, and only a save or an edit asks for one; the test now calls `saveNow()` before the unchanged wait (it passed
-  before only when `writeReopenCaches` had not finished, a race). New Node test in `tests/app/tiledsync.test.mjs` pins that behaviour. The
-  `BUSY` in the "Window block" log is a stale `lastError` of a retried round, not a stuck sync. (b) `window: labels` (line 1285, M8.4.42 block,
-  GitHub Windows and macOS, also on `4676908`): in the cut section, one brush stroke landed 19 rows higher; the window section is correct.
-  Not reproduced locally (4 runs, one at 4x CPU throttling). `draw` now asserts that the view, the canvas box and the layout above it do not
-  move during a stroke, so the next CI run names what moved. Checks (Windows): `tiled-sections.mjs` passed twice in a row;
-  `check_all --desktop --tiled` all passed (pytest 932 / 9 skipped, npm 633 / 0).
-  GitHub run `44966181021` (`f7c1bb9`): on Windows and Linux the new check failed because the **top bar shrank from 66.7 to 48 px during
-  the stroke** (canvas top 139.1 → 120.4 px, the 19 rows); macOS failed earlier at "reopened, no redraw by hand" (Q15). Not reproduced on the
-  workstation, also with every hidden top-bar button shown and a 60-character save state at 1600 and 1200 px in both languages (new step in
-  `tests/e2e/desktop.mjs`, which passes). `tiled-sections.mjs` now names each visible top-bar element with its height and text when the
-  view moves, so the next GitHub run identifies the element that grows.
-  GitHub run `44967861928` (`736d7af`): the mode buttons (`.seg`) grew from 31 to 50 px when the save state was long ("Saved on this
-  computer · no folder backup"): "Core column" wrapped onto two lines; the new `desktop.mjs` step failed the same way on all three systems
-  (48 → 66.7 px). **Fix:** `.seg button { white-space: nowrap; }` in `app/index.html`. Checks after the fix (Windows): `check_all --desktop
-  --tiled` all passed. Open: the GitHub run of the fix (Windows and Linux expected green; macOS fails in Q15's step).
+- [x] **Q14 - `tiled-sections.mjs` failed in the M8.4.42/M8.4.43 blocks** (done 22 Nov 2026: a test wait fixed and the top bar no longer grows; [CHANGELOG](../CHANGELOG.md#unreleased); record: [history](roadmap-history.md#q14---tiled-sectionsmjs-fails-in-the-m8443-split-block-on-all-three-systems)).
 
 - [ ] **Q16 - The view canvas is taller than its visible pane and depends on the window's first size** (found by Q14, 22 Nov 2026; fast tier,
   effort medium). At 1600 x 1000 `#view` is 1754 px tall while about 860 px are visible (clipped by `.viewport`): the implicit grid row of

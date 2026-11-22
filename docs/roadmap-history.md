@@ -3636,3 +3636,34 @@ Updated 21 November 2026.
   ruff; `desktop.mjs` engine off and on passed; `tiled-sections.mjs` **failed** at line 1464 (masks of the M8.4.43 split block never
   settle), also on unmodified `956f3e3` and on GitHub for `956f3e3` on all three systems: not caused by this card (Q14). Not measured:
   macOS, Linux, a clean machine, 16-bit sections in the reference projects.
+
+### Q14 - `tiled-sections.mjs` fails in the M8.4.43 split block on all three systems — state: Done (22 Nov 2026)
+
+- (found by M8.4.9, 22 Nov 2026; most capable,
+  effort high: mask syncing of split parts, where a mistake could lose user work). On `956f3e3` (M8.4.43) GitHub *Desktop builds* fails in
+  `tiled-sections.mjs` on Windows and macOS (`AssertionError: window: labels`) and on Linux (run `44957994403`: `TimeoutError` waiting 120 s);
+  on the maintainer's Windows workstation it times out at line 1464, the wait for every section's `_maskSync` to be settled after the split
+  and folder-backup steps, on unmodified `956f3e3` too. The *As built* of M8.4.43 recorded the test as passing on Windows. Earlier commits
+  (`89d080b` onwards) failed on macOS and Linux in another step ("reopened, no redraw by hand"). *Change:* diagnose and fix the cause (the
+  window block logs `BUSY` as `lastError` on two sections); never widen the wait. *Done when:* `tiled-sections.mjs` passes on Windows locally
+  and on the three systems on GitHub on one commit.
+  *Progress (22 Nov 2026; Opus sub-agent, high, reviewed line by line):* two causes. (a) The timeout at line 1464 was a test defect: after
+  the reopening in step (d), sections whose statistics came from their reopening cache keep `MaskSync` unsettled (tables not yet
+  acknowledged) until a round, and only a save or an edit asks for one; the test now calls `saveNow()` before the unchanged wait (it passed
+  before only when `writeReopenCaches` had not finished, a race). New Node test in `tests/app/tiledsync.test.mjs` pins that behaviour. The
+  `BUSY` in the "Window block" log is a stale `lastError` of a retried round, not a stuck sync. (b) `window: labels` (line 1285, M8.4.42 block,
+  GitHub Windows and macOS, also on `4676908`): in the cut section, one brush stroke landed 19 rows higher; the window section is correct.
+  Not reproduced locally (4 runs, one at 4x CPU throttling). `draw` now asserts that the view, the canvas box and the layout above it do not
+  move during a stroke, so the next CI run names what moved. Checks (Windows): `tiled-sections.mjs` passed twice in a row;
+  `check_all --desktop --tiled` all passed (pytest 932 / 9 skipped, npm 633 / 0).
+  GitHub run `44966181021` (`f7c1bb9`): on Windows and Linux the new check failed because the **top bar shrank from 66.7 to 48 px during
+  the stroke** (canvas top 139.1 → 120.4 px, the 19 rows); macOS failed earlier at "reopened, no redraw by hand" (Q15). Not reproduced on the
+  workstation, also with every hidden top-bar button shown and a 60-character save state at 1600 and 1200 px in both languages (new step in
+  `tests/e2e/desktop.mjs`, which passes). `tiled-sections.mjs` now names each visible top-bar element with its height and text when the
+  view moves, so the next GitHub run identifies the element that grows.
+  GitHub run `44967861928` (`736d7af`): the mode buttons (`.seg`) grew from 31 to 50 px when the save state was long ("Saved on this
+  computer · no folder backup"): "Core column" wrapped onto two lines; the new `desktop.mjs` step failed the same way on all three systems
+  (48 → 66.7 px). **Fix:** `.seg button { white-space: nowrap; }` in `app/index.html`. Checks after the fix (Windows): `check_all --desktop
+  --tiled` all passed. Open: the GitHub run of the fix (Windows and Linux expected green; macOS fails in Q15's step).
+  *Done (22 Nov 2026):* GitHub run `44969532221` (`647b480`): *Desktop builds* green on Windows and Linux; macOS fails only at "reopened,
+  no redraw by hand", which is card Q15 (agreed scope split: the failure of this card is gone on all three systems).
