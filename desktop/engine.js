@@ -9,7 +9,7 @@ const { controlFrame, frame, ControlReader } = require('./engine-protocol');
 // Methods the engine may advertise in its handshake; anything else makes the engine unavailable.
 const ADVERTISED_METHODS = new Set(['buffer.digest/1', 'section.intervals/1']);
 // The tile-store operations (contract §8) are main-process only: engine-ipc.js never forwards them, and `pyramid.build` carries a path.
-const OPERATIONS = new Set(['hello', 'buffer.begin', 'buffer.derive', 'buffer.chunk', 'buffer.commit', 'buffer.release', 'buffer.read', 'buffer.digest', 'section.analyze', 'job.cancel', 'shutdown',
+const OPERATIONS = new Set(['hello', 'buffer.begin', 'buffer.derive', 'buffer.chunk', 'buffer.commit', 'buffer.release', 'buffer.read', 'buffer.digest', 'section.analyze', 'method.run', 'job.cancel', 'shutdown',
   'pyramid.build', 'pyramid.info', 'tile.read', 'mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.slice', 'mask.forget', 'mask.derived.put', 'mask.derived.get', 'mask.export', 'mask.import']);
 // Requests followed by one binary frame (a descriptor/binary pair of contract §3); at most two of them wait for an answer at a time.
 const WITH_BINARY = new Set(['buffer.chunk', 'mask.put']);
@@ -21,6 +21,10 @@ const PYRAMID_BUDGET_BYTES = 50 * 2 ** 30;   // contract §8.4; the maintainer's
 // The engine ends every analysis within its own 120 s deadline; up to four more wait in its queue. This is only the backstop
 // against a coordinator that stops answering, and it ends the whole session (see `request`).
 const ANALYSIS_TIMEOUT_MS = 10 * 60 * 1000;
+// `method.run` (contract §9.4), the same backstop by priority. An interactive job waits at most behind the running job and four interactive
+// ones, as an analysis does. A batch job may also wait behind four batch jobs, and today every method job, batch included, ends within its
+// 120 s deadline: 9 x 120 s = 18 min. Card M8.5.14 (the first batch method, with progress events) revisits the batch value.
+const RUN_TIMEOUTS_MS = Object.freeze({ interactive: ANALYSIS_TIMEOUT_MS, batch: 20 * 60 * 1000 });
 
 // Card M8.4.34: the operations of the mask store have their own deadlines (contract §8.7) instead of the 5 s of an ordinary request, after which the
 // engine is stopped, which could be in the middle of a commit on a slow disk. Chosen with a wide margin over the times seen (a retain, commit or copy
@@ -117,7 +121,8 @@ class EngineClient {
     return this.starting;
   }
   /** `onEvent(payload)` receives the progress events of a `pyramid.build`; each event also restarts its idle timeout. */
-  request(op, payload, binary = null, { timeoutMs = op === 'section.analyze' ? ANALYSIS_TIMEOUT_MS : op === 'pyramid.build' ? PYRAMID_IDLE_TIMEOUT_MS : this.options.deadlines[op] ?? this.options.timeoutMs, onEvent = null } = {}) {
+  request(op, payload, binary = null, { timeoutMs = op === 'section.analyze' ? ANALYSIS_TIMEOUT_MS : op === 'method.run' ? RUN_TIMEOUTS_MS[payload?.priority] ?? ANALYSIS_TIMEOUT_MS
+    : op === 'pyramid.build' ? PYRAMID_IDLE_TIMEOUT_MS : this.options.deadlines[op] ?? this.options.timeoutMs, onEvent = null } = {}) {
     if (!OPERATIONS.has(op) || !this.child || !['starting', 'ready', 'stopping'].includes(this.state)) return Promise.reject(unavailable());
     if (this.pending.size >= 32) return Promise.reject(Object.assign(new Error('BUSY'), { code: 'BUSY' }));
     if (WITH_BINARY.has(op) && [...this.pending.values()].filter((item) => WITH_BINARY.has(item.op)).length >= 2) return Promise.reject(Object.assign(new Error('BUSY'), { code: 'BUSY' }));
@@ -363,4 +368,4 @@ function createEngineService({ enabled, packaged, executable, sourceDirectory, r
   return service;
 }
 
-module.exports = { EngineClient, terminateTree, createEngineService, ADVERTISED_METHODS, STORE_DEADLINES_MS };
+module.exports = { EngineClient, terminateTree, createEngineService, ADVERTISED_METHODS, STORE_DEADLINES_MS, RUN_TIMEOUTS_MS };

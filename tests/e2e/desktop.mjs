@@ -58,7 +58,7 @@ async function close(run) {
   } finally { clearTimeout(timer); run.browser.disconnect(); }
 }
 
-const BRIDGE_OPERATIONS = ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'deriveBuffer', 'readBuffer', 'release', 'restart', 'status'];   // plus the boolean `enabled`
+const BRIDGE_OPERATIONS = ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'deriveBuffer', 'readBuffer', 'release', 'restart', 'runMethod', 'status'];   // plus the boolean `enabled`
 const fixture = JSON.parse(readFileSync(new URL('../fixtures/section-intervals/basic-four-intervals.json', import.meta.url), 'utf8'));
 
 /** Runs in the page: uploads a reference fixture through window.corantoolDesktop.engine, analyses it and reads one result column. */

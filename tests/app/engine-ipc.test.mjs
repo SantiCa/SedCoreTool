@@ -63,7 +63,7 @@ const analysisRequest = (inputs, change = {}) => ({ requestKey: uuid(), method: 
 
 test('the bridge offers exactly the documented operations and never an engine operation by name', async () => {
   const ipc = createEngineIpc({ engine: fakeEngine({ answers: fakeAnswers() }) });
-  assert.deepEqual([...ipc.OPERATIONS].sort(), ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'deriveBuffer', 'readBuffer', 'release', 'restart']);
+  assert.deepEqual([...ipc.OPERATIONS].sort(), ['analyzeSection', 'appendBuffer', 'beginBuffer', 'cancel', 'commitBuffer', 'deriveBuffer', 'readBuffer', 'release', 'restart', 'runMethod']);
   for (const name of ['request', 'buffer.begin', 'shutdown', '__proto__', 'constructor', 'toString', 'hasOwnProperty', 7, null, undefined]) {
     assert.deepEqual(await ipc.call(1, name), { error: { code: 'UNSUPPORTED_METHOD' } }, String(name));
   }

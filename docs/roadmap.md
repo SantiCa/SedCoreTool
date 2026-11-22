@@ -18,11 +18,11 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.152, `8ee9776`) is contained in it.
 - **Released:** V0.152 (20 Nov 2026, tag `V0.152`, GitHub Release with 8 files). The next version is V0.153; Q10 must be done before it.
-- **Last verified code commit:** M8.5.2 (this commit): `check_all --desktop` passed on Windows (pytest 994/9 skipped, `npm test` 646/646,
+- **Last verified code commit:** M8.5.3 (this commit): `check_all --desktop` passed on Windows (pytest 994/9 skipped, `npm test` 660/660,
   typecheck, ruff, desktop e2e engine off and on).
-- **GitHub:** `1d166e7` (M8.4.10): `tests` green; *Desktop builds* green on Windows, macOS and Linux (run `44977813249`), macOS only after a
-  re-run of a failure at "window: labels" (card Q19). Result for the M8.5.1 and M8.5.2 pushes: read it at the start of the next card.
-- **Checks due:** none locally; the GitHub result of the M8.5.2 push.
+- **GitHub:** M8.5.1 `904cbcf` and M8.5.2 `8074285`: `tests` and *Desktop builds* green (Windows, macOS, Linux). M8.5.3: read its result
+  at the start of the next card.
+- **Checks due:** none locally; the GitHub result of the M8.5.3 push.
 - **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete. M8.5 needs design card **A1** first.
 - **Found, not done:** **Q19** (intermittent macOS "window: labels"; most capable, medium), **Q18** ("go to the trace" undone by the first
   fit; fast, medium), **Q16** (canvas taller than its pane; fast, medium), **Q17** (spurious BUSY notices and "Retry save" after a reopening;
@@ -30,8 +30,7 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
 - **Next:** A1 designed (contract §9, cards M8.5.1-M8.5.15); Y1-Y11 and the limits of §9.7 approved as recommended (22 Nov 2026).
-  Run in progress: M8.5.1 and M8.5.2 done; next **M8.5.3** (`method.run` from the page; most capable, medium; it must remove the
-  `engine_only` exception in the M8.5.1 table test), then the M8.5 cards in order. `Q10` before V0.153; `A4` open.
+  Run in progress: M8.5.1-M8.5.3 done (`method.run` in the engine and from the page); next **M8.5.4**, then the M8.5 cards in order. `Q10` before V0.153; `A4` open.
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). The engine path fails the timing gate of
   [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates) for whole sections; the tile store is the
   answer for large images.
@@ -630,7 +629,7 @@ after. The order is the order of this list; cards written later take the next fr
     `test_engine_method_run.py` (19; probes per scope through the real worker; 7 seeded faults all caught). Checks (Windows):
     `check_all --desktop` passed (pytest 994/9 skipped, engine 216/2 vs 197/2 before; `npm test` 646/646; typecheck; ruff; desktop e2e
     engine off and on). `app.js` 4,647 lines before and after.
-- [ ] **M8.5.3 - `method.run` from the page** (after M8.5.2).
+- [x] **M8.5.3 - `method.run` from the page** (done 22 Nov 2026, development gate).
   - *Goal:* the page can request `method.run` through the main process and decode its columns and tables; no interface uses it yet.
   - *Read first:* contract §9; `desktop/engine-ipc.js` (`analyzeSection`, `ANALYSES`, token limit), `desktop/engine.js` (`OPERATIONS`,
     `ADVERTISED_METHODS`, timeouts), `desktop/preload.js`; `app/js/engineclient.js` (`analyze`, `ensureTable`, `put`, `unpack`),
@@ -646,6 +645,15 @@ after. The order is the order of this list; cards written later take the next fr
     or failed job rejects; `readTableResult` of `buildTableSnapshot(x)` equals `x` for random tables with missing values. `npm test`,
     `npm run typecheck`, `python tools/build_standalone.py`, `tests/e2e/desktop.mjs` engine on and off.
   - *Done when:* these pass; development gate. The first desktop use comes with M8.5.8.
+  - *As built:* `engine-ipc.js`: `runMethod` with the closed fields of §9.2, checked in contract order against `METHODS`, a deep-frozen
+    mirror of `METHOD_SPECS` (compared with `specs.py` through Python by `engine-run.test.mjs`); inputs only fixed names and contiguous,
+    complete family members, at most 416; 1,024 tokens and 9 runs per page; the answer must echo the request and carry exactly the method's
+    dimensions and tables, else `INTERNAL` and the result is released; empty columns allowed. `engine.js` allows `method.run` (backstop 10
+    min interactive, 20 min batch, derived from 9 × 120 s; M8.5.14 revisits it). `preload.js` `runMethod`. `engineclient.js::run` uploads
+    the settings, decodes columns and tables (`tablesnapshot.js::readTableResult`), rejects `AbortError` when cancelled or superseded; 128
+    resident tables. The M8.5.2 `engine_only` exception is removed. Tests: `engine-run.test.mjs` (14, including `section.intervals/1`
+    through the real engine; 6 seeded faults caught). Checks (Windows): `check_all --desktop` passed (pytest 994/9 skipped, `npm test`
+    660/660, typecheck, ruff, desktop e2e engine off and on); standalone build. `app.js` 4,647 lines before and after.
 - [ ] **M8.5.4 - Contract and reference fixtures of `core.ages/1`** (slice a; waits for Y1, Y2, Y4).
   - *Goal:* the contract describes `core.ages/1`, and fixtures made by today's JavaScript fix its expected results.
   - *Read first:* contract §4 "Tables", §7 (numerical parity), §9; TECHNICAL_DOCUMENTATION §5; `app/js/core.js` (`parseAgeModelDetailed`,

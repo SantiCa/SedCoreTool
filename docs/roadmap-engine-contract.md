@@ -115,7 +115,7 @@ fields rather than silently ignore an unsupported setting. Protocol fixtures in 
 | `buffer.release` | `{handles:[...]}` (at most 64) | `{released:[...]}`; idempotent for previously released handles in this session. Referenced buffers remain pinned until the job ends. |
 | `buffer.read` | `{handle, offset, byte_length}`, 1 ≤ byte_length ≤ 1,048,576, offset + byte_length ≤ the buffer's length; the buffer must be committed and not released | `{offset, byte_length}`, immediately followed by exactly one binary frame holding those bytes. Any error response is not followed by a binary frame. |
 | `section.analyze` | `{method:"section.intervals/1", project, section, revision, settings_hash, inputs}`: project and section are session-local UUIDs, revision a non-negative integer, `settings_hash` the SHA-256 of the `settings` buffer (the coordinator rejects a different value), and `inputs` maps the names of §4 to committed handles of the matching dtype and rank (`labels` `i32le` 2-D, `exclude` `u8` 2-D of the same shape, `stack_offsets` and `stack_members` `u32le` 1-D, the others `utf8json`); `stack_members` may be omitted when there is no overlap, every other name is required, unknown names are rejected | `{project, section, revision, settings_hash, method, dimensions:{bins,classes,schemes}, outputs, layout, provenance}` echoing the request's identity. *Amended in card M8.4.3:* `outputs` holds exactly one entry, `result`, `{handle, dtype:"u8", shape:[N], byte_length, sha256}` of a committed buffer that counts against the session budget until released; it contains every §5 column (including each `<name>_valid`) one after another, and `layout` maps each column name to `{dtype, shape, offset, byte_length}` in it (one buffer instead of about 35 handles and reads). Every column starts at a multiple of 8 bytes, columns do not overlap, nothing in the buffer is unaccounted for, and N is a multiple of 8. Download the buffer with `buffer.read`. `provenance` holds `engine_version`, `runtime_id`, `method`, `revision`, `deterministic`, `input_sha256` (hash of every input buffer by name) and `elapsed_ms`. A rejected input is an error response whose `details.field` names the input and member (for example `settings.roi`). Progress events (`{stage, completed, total}`, at most 10 per second) are part of this contract but are not sent yet; the Electron client of card M8.3.6 does not read events. |
-| `method.run` (designed by card A1; in the engine since card M8.5.2, not sent by the client yet: card M8.5.3) | §9.2 | §9.3 |
+| `method.run` (designed by card A1; in the engine since card M8.5.2, client since card M8.5.3; no interface uses it yet) | §9.2 | §9.3 |
 | `job.cancel` | `{request_id}` | `{state:"requested"}` or `{state:"already_terminal"}`; the target still gets its own one terminal response. |
 | `shutdown` | `{}` | `{}` after cancelling/releasing work; main enforces the shutdown deadline. |
 
@@ -139,7 +139,7 @@ at the renderer IPC boundary; reading a whole buffer to split it afterwards does
 Reuse of inputs (card M8.4.2, client side): a client may keep the committed input buffers of a section between analyses and name them in later
 `section.analyze` requests, bounded by 16 sections and 256 MiB and valid only for the identity of the data they hold (masks) or the
 SHA-256 of their bytes (tables). Because those buffers stay live, the engine admitted 256 handles per session (it was 128; 1,024 since card M8.5.2, §9.7) and the bridge 512
-tokens per page; the byte budget is unchanged.
+tokens per page (1,024 since card M8.5.3); the byte budget is unchanged.
 
 Working pixels of small sections (card M8.4.9, client side): a client may keep the working image of a section that is not tiled (the
 array the interface decoded, after crop, downsampling and rotation) as `rgba` `u8[h,w,4]` and, for a 16-bit source, `rgba16`
@@ -169,7 +169,7 @@ runs per mode): public 912 MiB engine off, 1,095 MiB engine on with pixels resid
 these projects (both are 8-bit; 16-bit transfer is covered by tests, not by this measurement).
 
 Record tables (card M8.4.10, client side): a client may keep record tables (§4, "Tables") between requests, bounded separately: at most
-16 MiB as the engine charges them (values and validity once, the `utf8json` description 64 times) and 16 tables, least recently used first;
+16 MiB as the engine charges them (values and validity once, the `utf8json` description 64 times) and 16 tables (128 since card M8.5.3, §9.7), least recently used first;
 a table that does not fit is never kept (`LIMIT_EXCEEDED`, field `table`). With the inputs (256 MiB), the pixels (192 MiB) and the reserve
 (16 MiB) this takes 480 MiB of the 512 MiB session budget and leaves 32 MiB for the 64-fold charge of the analyses' metadata tables (at
 most 9.5 MiB measured in card M8.4.9) and for results; the budget is not raised. The 3 buffers of 16 tables and the 11 of 16 sections are 224
@@ -640,7 +640,7 @@ restart of the engine (card M8.4.7) when the engine is not ready. Clean tiles th
 
 ## 9. Methods of section, core and project scope: `method.run` (card A1)
 
-**State: designed on 22 November 2026 (card A1). In the engine: §9.5 (card M8.5.1); §9.1-§9.4, §9.6 and the 1,024 handles of §9.7 (card M8.5.2), tested with probe methods only, without the progress events and the 60 s stall of batch methods (§9.4), which come with the first batch method. Not implemented: the client side (card M8.5.3) and the 128 resident tables of §9.7.** Cards M8.5.1-M8.5.3 of the
+**State: designed on 22 November 2026 (card A1). In the engine: §9.5 (card M8.5.1); §9.1-§9.4, §9.6 and the 1,024 handles of §9.7 (card M8.5.2), tested with probe methods only, without the progress events and the 60 s stall of batch methods (§9.4), which come with the first batch method. Client side (card M8.5.3): requests checked against a mirror of the method table, the 1,024 tokens per page and the 128 resident tables of §9.7, decoding of columns and table outputs; no interface sends `method.run` yet, and the publication rule of §9.4 belongs to the interface cards that use it.** Cards M8.5.1-M8.5.3 of the
 [roadmap](roadmap.md#m85-cards) build it; the methods of M8.5 then use it. `section.analyze` (§3) stays as it is on the wire. Nothing here
 names Electron, IPC channels or the renderer (ARCHITECTURE §3.3); "client" is whatever sends the frames.
 

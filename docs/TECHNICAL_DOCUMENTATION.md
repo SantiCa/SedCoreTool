@@ -183,7 +183,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `maskchanges.js` | Which rows of each section's label and exclusion masks changed since the engine last received them: `createMaskChanges` (mark, take, restore, mark all) and `indexRangeOfPairs` (the pixels named by an edit-history list). A hint for the engine path, never a proof (§26.2) | Yes |
 | `residentstore.js` | The registry of buffers the engine keeps between requests, per section (card M8.4.9, taken out of `engineclient.js`): `createResidentStore` with a byte bound and an owner bound, least recently used first, a group of buffers replaced together under one key, `forget`, `releaseAll`, `invalidateAll`. `engineclient.js` holds one for analysis inputs and one for pixels | Yes |
 | `sectionpixels.js` | The working pixels of a section as engine buffers (card M8.4.9): `buildPixelBuffers` (views `u8[h,w,4]` and `u16le[h,w,4]`), `describePixels` (the SHA-256 of each buffer and the pixel identity, remembered in `s._pxid`), `pixelIdentity` | Yes |
-| `tablesnapshot.js` | A record table as engine buffers (card M8.4.10): `buildTableSnapshot` (named numeric columns with `null` for missing values to `f64le[columns, rows]` values, `u8[columns, rows]` validity and a `utf8json` description, with the table identity and the limits `MAX_TABLE_*`), `tableInputNames` | Yes |
+| `tablesnapshot.js` | A record table as engine buffers (card M8.4.10) and back (card M8.5.3, `readTableResult`, for the table outputs of `method.run`): `buildTableSnapshot` (named numeric columns with `null` for missing values to `f64le[columns, rows]` values, `u8[columns, rows]` validity and a `utf8json` description, with the table identity and the limits `MAX_TABLE_*`), `tableInputNames` | Yes |
 | `sectionanalysis.js` | Analysis of one section without the DOM: effective class of each object, class-index table, row counts (cached per section), interval bins with no-data padding, ages and manual indices (§3.2), plus the builders of the engine method's input snapshot and reference result columns (`buildIntervalSnapshot`, `referenceColumns`), the revision key of a section's calculation (`analysisRevision`) and the conversion of engine result columns to `s.bins` (`resultToBins`). `app.js::analyze` passes the project state in | Yes |
 | `imageproc.js` | Enhancement, detection, connected components, magic wand, lasso, descriptors, rotation, downsampling | ✓ |
 | `edit.js` | Editing algorithms: scissors, merging, undo records, project migration | ✓ |
@@ -2951,7 +2951,7 @@ windows can finish loading without a redundant navigation through the desktop cl
 
 ### 26.2 Experimental engine process
 
-Implementation: `desktop/engine.js` (main-process lifecycle/client), `desktop/engine-ipc.js` (the page bridge: `status`, `beginBuffer`, `appendBuffer` (at most 1 MiB, contiguous offsets), `commitBuffer`, `analyzeSection`, `cancel`, `readBuffer`, `release`; only the top frame of an `app://` page may call; at most 256 buffers and 5 running analyses per page; tokens are released when the page navigates, reloads, crashes or closes; a failed call resolves to `{error: {code, field?}}`), `desktop/engine-protocol.js` (framing),
+Implementation: `desktop/engine.js` (main-process lifecycle/client), `desktop/engine-ipc.js` (the page bridge: `status`, `beginBuffer`, `appendBuffer` (at most 1 MiB, contiguous offsets), `commitBuffer`, `analyzeSection`, `runMethod`, `cancel`, `readBuffer`, `release`; only the top frame of an `app://` page may call; at most 1,024 buffers, 5 running analyses and 9 `method.run` jobs per page; tokens are released when the page navigates, reloads, crashes or closes; a failed call resolves to `{error: {code, field?}}`), `desktop/engine-protocol.js` (framing),
 `src/sedcoretool/engine/{protocol,buffers,specs,server,worker}.py` (standard-library coordinator, staged data, input tables and
 worker-process wrappers) and `method_worker.py` (the long-lived script that runs scientific methods, one job at a time, in its own process). This experiment is disabled unless `SEDCORETOOL_ENGINE_EXPERIMENT=1`.
 It uses the verified bundled runtime (§26.3), or an explicitly selected absolute `SEDCORETOOL_ENGINE_PYTHON`
@@ -3014,7 +3014,25 @@ method and target (a waiting one is answered `cancelled`, a running one is asked
 the method, scope and verified input hashes), the declared dimensions (0 allowed), one packed result buffer (none when every column
 is empty), the descriptions of the table outputs, whose cells are the columns `<name>_values` and `<name>_valid` (the table format of
 contract §4), and a summary of at most 8 KiB (larger is `INTERNAL`). Only `section.intervals/1` is in the table, still requested
-through `section.analyze`; the desktop client does not send `method.run` yet.
+through `section.analyze` by the interface.
+
+From the page (card M8.5.3), `desktop/engine-ipc.js::runMethod` takes `{requestKey, method, scope, target, revision, priority,
+settings_hash, inputs}` and nothing else, and checks every field against `METHODS`, the main process's mirror of `METHOD_SPECS` (a test
+compares the two), before the engine sees the request: a method not in the mirror is `UNSUPPORTED_METHOD`; another scope, a target that
+is not a lowercase UUID, a negative or fractional revision, a priority the method does not allow, a malformed settings hash, an input name
+that is neither a fixed name nor a family member (`inputs.<name>`), a missing required input, more than 416 names, a family with a gap, an
+incomplete member or a member beyond its maximum (`inputs`) are `INVALID_REQUEST`; a token of another page or not committed is
+`INVALID_BUFFER`. A page holds at most 1,024 tokens and 9 `method.run` jobs at once (one running and four waiting per priority; `BUSY`
+beyond). The answer must echo the request and carry exactly the method's dimensions and table outputs, otherwise it is `INTERNAL` and its
+result buffer is released; the page receives a token for the packed result (none when every column is empty) and never an engine handle.
+`desktop/engine.js` allows `method.run` with a client backstop of 10 min for `interactive` (as `section.analyze`) and 20 min for `batch`
+(nine jobs of at most 120 s ahead of it). `app/js/engineclient.js::run(method, {scope, target, revision, priority, inputs}, {signal})` sends
+`inputs.settings` (a plain object) itself as `utf8json`, whose SHA-256 is the settings hash; every other input is a token the caller
+holds. It downloads and checks the packed result, cuts it by its layout (empty columns allowed), decodes each table output with
+`tablesnapshot.js::readTableResult` (`null` where a value is missing; the inverse of `buildTableSnapshot`; a validity other than 0 or 1,
+a present value that is not finite or cells whose shape is not `[columns, rows]` are `INTERNAL`) and returns `{dimensions, columns,
+tables, summary, provenance, inputsKey}`; an abort cancels the job, and a cancelled (or superseded) job rejects with an `AbortError`.
+No interface calls `run` yet.
 
 `buffer.begin`, `chunk`, `commit` and `release` stage data in private temporary files. Validate shape/dtype/
 declared size before allocation; enforce exact offsets, length, SHA-256, finite f64 data and strict metadata
@@ -3058,7 +3076,7 @@ JavaScript row-count cache); each table is valid for the SHA-256 of its bytes. A
 of the snapshot and uploads only the tables whose bytes changed (an interval-size change sends the settings table alone); a changed
 mask identity uploads the four masks and releases the ones they replace. Buffers that the engine no longer knows (it restarted) give
 `RESIDENT_LOST` and the controller uploads a full snapshot once. A failed or cancelled analysis leaves the resident buffers as they
-were and releases what it uploaded. The engine accepts 256 live buffers; the bridge 512 tokens per page.
+were and releases what it uploaded. The engine accepts 1,024 live buffers; the bridge 1,024 tokens per page.
 
 **Pixels kept in the engine (card M8.4.9).** No engine method uses pixels yet; this is the service the image methods of M8.5 will use.
 `engineclient.js::ensurePixels(owner, section)` (and `engineanalysis.js::ensurePixels(section)`) makes the working image of a section that
@@ -3089,7 +3107,7 @@ of description, non-empty unique names of at most 256 UTF-8 bytes, units of at m
 missing slot, name, unit or the column order and with nothing else. `engineclient.js::ensureTable(owner, key, snapshot)` makes the table
 resident as the table `key` of `owner` and returns the tokens `meta`, `values`, `valid`; the same identity sends nothing again, a new one
 replaces and releases the three old buffers. Tables have a registry of their own (`residentstore.js`): 16 MiB as the engine charges them
-(the description 64 times) and 16 tables, least recently used first; a larger table is refused before anything is sent (`LIMIT_EXCEEDED`,
+(the description 64 times) and 128 tables (16 before card M8.5.3), least recently used first; a larger table is refused before anything is sent (`LIMIT_EXCEEDED`,
 field `table`). When the engine reports its budget full, the client drops the other tables and all resident pixels and tries once more.
 `forget(owner)`, `releaseAll` and a restart cover tables. On the engine side `methods/validation.py::table(inputs, name, columns, *, required)`
 decodes a table for a method and refuses, naming the field, a missing or malformed description, another version, the limits above, a

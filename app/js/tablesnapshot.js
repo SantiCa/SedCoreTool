@@ -1,6 +1,6 @@
 // @ts-check
-// A record table as the engine receives it (card M8.4.10): named numeric columns of one length (depth/age records, data tables,
-// multiproxy series), with missing values, in one columnar format. Pure: no DOM.
+// A record table as the engine receives it (card M8.4.10) and returns it (card M8.5.3): named numeric columns of one length (depth/age
+// records, data tables, multiproxy series), with missing values, in one columnar format. Pure: no DOM.
 //
 // Three buffers carry a table (contract §4, "Tables"): `<name>` (`utf8json`) holds `{version: 1, rows, columns: [{name, unit}]}` in
 // column order; `<name>_values` (`f64le[columns, rows]`) holds column i in row i, C order; `<name>_valid` (`u8[columns, rows]`) is 1
@@ -114,4 +114,34 @@ export async function buildTableSnapshot(columns) {
     },
     chargedBytes: values.byteLength + valid.byteLength + TABLE_METADATA_CHARGE * meta.length,
   };
+}
+
+/**
+ * The columns of a table in the format above, the inverse of `buildTableSnapshot`: a table output of `method.run` (contract §9.3) or the
+ * buffers of a snapshot. `description` is the parsed `{version: 1, rows, columns: [{name, unit}]}`; `values` and `valid` hold the cells
+ * column after column (`columns.length * rows` each). A value is `null` where its validity is 0. An output table may have 0 rows. Anything
+ * else (another version, a count that does not match, a validity other than 0 or 1, a present value that is not finite, a name that is not
+ * a non-empty string) is refused with `INVALID_REQUEST` naming the part at fault.
+ * @param {any} description @param {ArrayLike<number>} values @param {ArrayLike<number>} valid
+ * @returns {{name: string, unit: string, values: (number | null)[]}[]}
+ */
+export function readTableResult(description, values, valid) {
+  if (!description || typeof description !== 'object' || description.version !== TABLE_FORMAT_VERSION) throw new TableSnapshotError('INVALID_REQUEST', 'description');
+  const { rows, columns } = description;
+  if (!Number.isSafeInteger(rows) || rows < 0 || rows > MAX_TABLE_ROWS) throw new TableSnapshotError('INVALID_REQUEST', 'rows');
+  if (!Array.isArray(columns) || columns.length < 1 || columns.length > MAX_TABLE_COLUMNS) throw new TableSnapshotError('INVALID_REQUEST', 'columns');
+  const cells = columns.length * rows;
+  if (!values || values.length !== cells) throw new TableSnapshotError('INVALID_REQUEST', 'values');
+  if (!valid || valid.length !== cells) throw new TableSnapshotError('INVALID_REQUEST', 'valid');
+  return columns.map((column, i) => {
+    if (!column || typeof column.name !== 'string' || !column.name || typeof column.unit !== 'string') throw new TableSnapshotError('INVALID_REQUEST', `columns[${i}]`);
+    /** @type {(number | null)[]} */
+    const read = new Array(rows);
+    for (let j = 0, k = i * rows; j < rows; j++, k++) {
+      if (valid[k] === 0) { read[j] = null; continue; }
+      if (valid[k] !== 1 || !Number.isFinite(values[k])) throw new TableSnapshotError('INVALID_REQUEST', `columns[${i}].values[${j}]`);
+      read[j] = values[k];
+    }
+    return { name: column.name, unit: column.unit, values: read };
+  });
 }

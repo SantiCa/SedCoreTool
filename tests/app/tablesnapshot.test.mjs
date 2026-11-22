@@ -188,7 +188,8 @@ test('tables have a budget of their own: the least recently used table is droppe
   const counted = createEngineClient(memoryBridge(), { tables: 2 });
   for (const key of ['a', 'b', 'c']) await counted.ensureTable(owner, key, snapshots[0]);
   assert.equal(counted.stats().residentTables, 2);
-  assert.equal(RESIDENT_TABLES * 3 + 16 * 11 <= 256 - 16, true, 'tables, inputs and pixels of 16 sections leave room for an analysis in 256 handles');
+  // Contract §9.7 (card M8.5.3): 128 tables, and the inputs and pixels of 16 sections, leave room for one request's fixed inputs (32) in 1,024 handles.
+  assert.equal(RESIDENT_TABLES * 3 + 16 * 11 + 32 <= 1024, true);
 });
 
 test('a table larger than the table budget is refused before anything is sent and older buffers of its key are released', async () => {

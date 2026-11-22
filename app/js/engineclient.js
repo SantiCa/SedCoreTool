@@ -1,11 +1,11 @@
 // @ts-check
 // Renderer side of the engine bridge (window.corantoolDesktop.engine, see desktop/engine-ipc.js): uploads the inputs of
 // one section analysis in bounded chunks, requests it, downloads the result columns and always releases every token.
-// It also keeps the working pixels of sections (card M8.4.9) and record tables (card M8.4.10) in the engine. Pure: the bridge is passed in, so Node can test it
-// with a fake. No DOM.
+// It also keeps the working pixels of sections (card M8.4.9) and record tables (card M8.4.10) in the engine, and runs any method of the
+// engine's method table through `method.run` (card M8.5.3, contract §9). Pure: the bridge is passed in, so Node can test it with a fake. No DOM.
 import { createResidentStore } from './residentstore.js';
 import { describePixels, PIXEL_INPUTS } from './sectionpixels.js';
-import { TABLE_METADATA_CHARGE } from './tablesnapshot.js';
+import { TABLE_METADATA_CHARGE, readTableResult } from './tablesnapshot.js';
 
 const CHUNK_BYTES = 1048576;
 const OUTPUT_TYPES = /** @type {const} */ ({ u8: Uint8Array, u16le: Uint16Array, i32le: Int32Array, u32le: Uint32Array, u64le: BigUint64Array, f64le: Float64Array });
@@ -42,8 +42,9 @@ export const RESIDENT_BYTES = 256 * 1048576, RESIDENT_SECTIONS = 16;
 export const RESIDENT_PIXEL_BYTES = 192 * 1048576;
 /** Record tables that the engine keeps (card M8.4.10): their bytes as the engine charges them (a `utf8json` description 64 times) and
  * their number. With the inputs (256 MiB), the pixels (192 MiB) and the engine's reserve (16 MiB) they take 480 of the 512 MiB session
- * budget, and the 3 buffers of 16 tables keep a page within the engine's 256 handles. Contract §3. */
-export const RESIDENT_TABLE_BYTES = 16 * 1048576, RESIDENT_TABLES = 16;
+ * budget. The 3 buffers of 128 tables (one project request's family, contract §9.7) and the 11 of 16 sections are 560 of the engine's
+ * 1,024 handles and of the bridge's 1,024 tokens per page. Contract §3. */
+export const RESIDENT_TABLE_BYTES = 16 * 1048576, RESIDENT_TABLES = 128;
 /** The buffers of one table (tablesnapshot.js), replaced together when its identity changes. */
 const TABLE_BUFFERS = /** @type {const} */ (['meta', 'values', 'valid']);
 
@@ -51,7 +52,7 @@ const TABLE_BUFFERS = /** @type {const} */ (['meta', 'values', 'valid']);
 
 /**
  * @param {{status: () => Promise<any>, beginBuffer: Function, appendBuffer: Function, commitBuffer: Function,
- *   analyzeSection: Function, cancel: Function, readBuffer: Function, release: Function, deriveBuffer?: Function, restart?: Function}} bridge
+ *   analyzeSection: Function, cancel: Function, readBuffer: Function, release: Function, deriveBuffer?: Function, restart?: Function, runMethod?: Function}} bridge
  * @param {{readyTimeoutMs?: number, residentBytes?: number, residentSections?: number, pixelBytes?: number, tableBytes?: number, tables?: number}} [options]
  */
 export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentBytes = RESIDENT_BYTES, residentSections = RESIDENT_SECTIONS, pixelBytes = RESIDENT_PIXEL_BYTES,
@@ -158,19 +159,24 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
   /**
    * The columns of a packed result, cut up by its layout. The layout comes from another process, so every entry is checked against the
    * buffer before it is read: a known type, a shape that matches the length, a start that is a multiple of 8, and no overlap.
+   * `allowEmpty` (results of `method.run`, contract §9.3): a column may have a 0 in its shape and a length of 0; empty columns sort before
+   * a column that starts at the same offset, as the engine checks them.
    * @param {Uint8Array} bytes
    * @param {Record<string, {dtype: string, shape: number[], offset: number, byte_length: number}>} layout
+   * @param {boolean} [allowEmpty]
    * @returns {Record<string, number[]>}
    */
-  function unpack(bytes, layout) {
+  function unpack(bytes, layout, allowEmpty = false) {
     /** @type {Record<string, number[]>} */
     const columns = {};
     let end = 0;
-    for (const [name, part] of Object.entries(layout).sort((a, b) => a[1].offset - b[1].offset)) {
+    const order = allowEmpty ? (/** @type {any} */ a, /** @type {any} */ b) => a[1].offset - b[1].offset || a[1].byte_length - b[1].byte_length
+      : (/** @type {any} */ a, /** @type {any} */ b) => a[1].offset - b[1].offset;
+    for (const [name, part] of Object.entries(layout).sort(order)) {
       const Type = /** @type {Record<string, any>} */ (OUTPUT_TYPES)[part.dtype];
       const items = Array.isArray(part.shape) ? part.shape.reduce((n, d) => n * d, 1) : NaN;
       const sound = !!Type && Number.isSafeInteger(part.offset) && part.offset % 8 === 0 && part.offset >= end && Number.isSafeInteger(part.byte_length)
-        && part.byte_length > 0 && items * Type.BYTES_PER_ELEMENT === part.byte_length && part.offset + part.byte_length <= bytes.length;
+        && (part.byte_length > 0 || allowEmpty) && items * Type.BYTES_PER_ELEMENT === part.byte_length && part.offset + part.byte_length <= bytes.length;
       if (!sound) throw new EngineError('INTERNAL', 'result');
       end = part.offset + part.byte_length;
       columns[name] = Array.from(new Type(bytes.buffer, bytes.byteOffset + part.offset, items), Number);
@@ -458,6 +464,67 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
   }
 
   /**
+   * Runs `method` of the engine's method table through `method.run` (contract §9, card M8.5.3) and returns its decoded result.
+   * `inputs` maps each input name of the method to a committed token of this page (from `ensureTable`, `ensurePixels` or the caller's own
+   * uploads), except `settings`, the method's settings as a plain JSON object, which `run` sends itself and whose SHA-256 is the request's
+   * `settings_hash`. `revision` is the caller's counter of the scientific inputs of (method, target); `target` a session-local UUID.
+   * The result: `dimensions`; `columns` (name -> `{data, shape, valid?}`, as `analyze` gives them, without the cells of table outputs);
+   * `tables` (name -> the table's columns, `tablesnapshot.js::readTableResult`, `null` where a value is missing); `summary`; `provenance`;
+   * `inputsKey` (equal for equal inputs whatever the revision, §9.3). Rejects with an `EngineError` (code and field), or with an
+   * `AbortError` when `signal` fires first or the engine answers `cancelled` (a newer request of the same method and target superseded it).
+   * Every token `run` made (settings, the packed result) is released when the call ends; the caller's input tokens are not.
+   * @param {string} method
+   * @param {{scope: string, target: string, revision: number, priority?: 'interactive' | 'batch', inputs: Record<string, any>}} request
+   * @param {{signal?: AbortSignal}} [options]
+   * @returns {Promise<{dimensions: Record<string, number>, columns: Record<string, {data: number[], shape: number[], valid?: number[]}>,
+   *   tables: Record<string, {name: string, unit: string, values: (number | null)[]}[]>, summary: Record<string, any>, provenance: any, inputsKey: string}>}
+   */
+  async function run(method, { scope, target, revision, priority = 'interactive', inputs }, { signal } = {}) {
+    if (typeof bridge.runMethod !== 'function') throw new EngineError('ENGINE_UNAVAILABLE');
+    const settings = inputs?.settings;
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new EngineError('INVALID_REQUEST', 'inputs.settings');
+    await ready();
+    const transient = /** @type {Set<string>} */ (new Set());
+    const requestKey = crypto.randomUUID();
+    const onAbort = () => { void bridge.cancel(requestKey); };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      const bytes = new TextEncoder().encode(JSON.stringify(settings)), settingsHash = await sha256(bytes);
+      const tokens = { ...inputs, settings: await put(bytes, 'utf8json', [bytes.length], signal, transient, settingsHash) };
+      if (signal?.aborted) throw abortError();
+      const result = unwrap(await bridge.runMethod({ requestKey, method, scope, target, revision, priority, settings_hash: settingsHash, inputs: tokens }));
+      if (result.cancelled) throw abortError();
+      for (const output of Object.values(result.outputs ?? {})) transient.add(/** @type {any} */ (output).token);
+      const packed = result.outputs?.result;
+      if (!result.layout || typeof result.layout !== 'object' || !result.tables || typeof result.tables !== 'object') throw new EngineError('INTERNAL', 'result');
+      const cells = unpack(packed ? await download(packed) : new Uint8Array(0), result.layout, true);
+      if (signal?.aborted) throw abortError();
+      /** @type {Record<string, {name: string, unit: string, values: (number | null)[]}[]>} */
+      const tables = {};
+      const tableCells = new Set();
+      for (const [name, description] of Object.entries(result.tables)) {
+        const values = `${name}_values`, valid = `${name}_valid`, shape = [description?.columns?.length, description?.rows];
+        const sound = [values, valid].every((cell) => cells[cell] && result.layout[cell].shape.length === 2 && result.layout[cell].shape.every((/** @type {number} */ n, /** @type {number} */ i) => n === shape[i]))
+          && result.layout[values].dtype === 'f64le' && result.layout[valid].dtype === 'u8';
+        if (!sound) throw new EngineError('INTERNAL', `tables.${name}`);
+        try { tables[name] = readTableResult(description, cells[values], cells[valid]); }
+        catch { throw new EngineError('INTERNAL', `tables.${name}`); }
+        tableCells.add(values).add(valid);
+      }
+      /** @type {Record<string, {data: number[], shape: number[], valid?: number[]}>} */
+      const columns = {};
+      for (const name of Object.keys(cells)) {
+        if (tableCells.has(name) || name.endsWith('_valid')) continue;
+        columns[name] = { data: cells[name], shape: [...result.layout[name].shape], ...(cells[`${name}_valid`] ? { valid: cells[`${name}_valid`] } : {}) };
+      }
+      return { dimensions: result.dimensions, columns, tables, summary: result.summary, provenance: result.provenance, inputsKey: result.inputs_key };
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+      void releaseTokens([...transient]);
+    }
+  }
+
+  /**
    * Starts a new engine session (card M8.4.7). Everything the old session held is gone, so every resident input is forgotten without
    * asking the engine to release it, and the next analysis of each section uploads its inputs whole. `automatic` marks the one restart per
    * program session that the interface may make by itself; the main process refuses a second one with `LIMIT_EXCEEDED`.
@@ -472,7 +539,7 @@ export function createEngineClient(bridge, { readyTimeoutMs = 60000, residentByt
     await ready();
   }
 
-  return { analyze, ready, restart, hasMasks, canDerive, forget, releaseAll, ensurePixels, hasPixels, ensureTable, hasTable,
+  return { analyze, run, ready, restart, hasMasks, canDerive, forget, releaseAll, ensurePixels, hasPixels, ensureTable, hasTable,
     residentBytes: resident.bytes, residentSections: resident.owners, residentPixelBytes: pixels.bytes, residentPixelSections: pixels.owners,
     residentTableBytes: tables.bytes, residentTables: tables.owners,
     stats: () => ({ ...stats, residentBytes: resident.bytes(), residentPixelBytes: pixels.bytes(), residentPixelSections: pixels.owners(),

@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('corantoolDesktop', {
     appendBuffer: (token, offset, bytes) => ipcRenderer.invoke('engine:appendBuffer', token, offset, bytes),
     commitBuffer: (token) => ipcRenderer.invoke('engine:commitBuffer', token),
     analyzeSection: (request) => ipcRenderer.invoke('engine:analyzeSection', request),
+    runMethod: (request) => ipcRenderer.invoke('engine:runMethod', request),   // `method.run` (contract §9, card M8.5.3)
     cancel: (requestKey) => ipcRenderer.invoke('engine:cancel', requestKey),
     readBuffer: (token, offset, length) => ipcRenderer.invoke('engine:readBuffer', token, offset, length),
     release: (tokens) => ipcRenderer.invoke('engine:release', tokens),

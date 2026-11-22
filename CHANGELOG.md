@@ -38,6 +38,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.5.3: the page can request `method.run` through the desktop bridge and decode its columns and table outputs; no interface uses it yet.
 - Card M8.5.2: the engine runs `method.run` (contract §9: scopes, priorities, superseding, table outputs, summary), tested with probe methods only; no production method or client uses it yet.
 - Card M8.5.1: the engine coordinator finds each request's operation in a table instead of a chain of conditions; nothing changes on the wire.
 - Card A1 (design): methods of section, core and project scope through one engine operation `method.run` (contract §9), with the implementing cards M8.5.1-M8.5.15 and decisions Y1-Y11 for the maintainer; no code changes.
