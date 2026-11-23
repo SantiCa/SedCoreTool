@@ -10,6 +10,7 @@
     "app/js/sectiondepth.js",
     "app/js/sectionanalysis.js",
     "app/js/maskchanges.js",
+    "app/js/pixelbudget.js",
     "app/js/residentstore.js",
     "app/js/sectionpixels.js",
     "app/js/tablesnapshot.js",

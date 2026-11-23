@@ -12,6 +12,10 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ## Unreleased
 
+### For users
+
+- Fixed: laying out figures (such as «Whole interpreted core») or the core column on a core with many high-resolution sections no longer makes the core photos appear and disappear continuously.
+
 ### Internal
 
 - Card M8.5.6b: sped up coordinator `f64le` finiteness verification and replaced polling waits with immediate worker/mask wakeup without changing the wire protocol or validation; all `core.ages/1` matched-timing cases up to 100,000 rows now meet the 150 ms Y9 target on Windows (`docs/validation/M8.5.6b-ages-windows.json`), unblocking M8.5.8.

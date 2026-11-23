@@ -5,6 +5,7 @@ import { effectiveClassId, effectiveClassIndex, computeSectionBins, binsFromRowC
 import { createEngineClient } from './engineclient.js';
 import { createEngineAnalysis } from './engineanalysis.js';
 import { createMaskChanges, indexRangeOfPairs } from './maskchanges.js';
+import { createPixelBudget, createPixelLoader, lruPush } from './pixelbudget.js';
 export { pxPerCm, depthAtRow, rowAtDepth };
 import { withProvenance, ageModelText, bioturbationTable, objectsTable } from './exportio.js';
 
@@ -92,7 +93,16 @@ function newSection({ name, file, w, h, orig, orig16 = null, ds = 1, labels = nu
 const maskChanges = createMaskChanges();
 
 /* ───────────── V0.1: images on disk, pixels in memory only while a section is in use ───────────── */
-const MEM = { px: [], mask: [], pinned: new Set(), pxBudget: 9e8, maskBudget: 5e8 };
+const pixelBudget = createPixelBudget({
+  isProtected: (s) => s === sec() || Boolean(s._loading),
+  onForget: (s) => pixelLoader.forget(s),
+  onClearAll: () => pixelLoader.clear(),
+});
+const MEM = {
+  px: pixelBudget.px, reduced: pixelBudget.reduced, mask: [], pinned: pixelBudget.pinned, maskBudget: 5e8,
+  get pxBudget() { return pixelBudget.pxBudget; }, set pxBudget(v) { pixelBudget.pxBudget = v; },
+  get reducedBudget() { return pixelBudget.reducedBudget; }, set reducedBudget(v) { pixelBudget.reducedBudget = v; },
+};
 /** A mask layer stored packed (RLE array) and unpacked on first access; `init` = array, { rle } or null (empty). */
 function lazyMask(s, key, Type, init) {
   let arr = init && !init.rle ? init : null, rle = init?.rle || null;
@@ -107,8 +117,7 @@ function lazyMask(s, key, Type, init) {
   const enc = () => { if (rle) return rle; const v = `${s._mv || 0}|${s.w}x${s.h}`; if (cache?.v !== v) cache = { v, rle: rleEncode(arr) }; return cache.rle; };
   (s._mk ||= {})[key] = { pack() { if (arr) { rle = enc(); arr = null; } }, rle: enc, loaded: () => !!arr };
 }
-const lruPush = (list, s) => { const i = list.indexOf(s); if (i >= 0) list.splice(i, 1); list.push(s); };
-const keepLoaded = (s) => s === sec() || MEM.pinned.has(s) || s._loading;
+const keepLoaded = (s) => pixelBudget.isProtected(s);
 function maskTouch(s) {
   lruPush(MEM.mask, s);
   const bytes = () => MEM.mask.reduce((a, x) => a + 5 * x.w * x.h, 0);
@@ -118,18 +127,8 @@ function maskTouch(s) {
     x._mk.labels.pack(); x._mk.exclude.pack(); MEM.mask.splice(i, 1);
   }
 }
-function pxTouch(s) {
-  lruPush(MEM.px, s);
-  // V0.41: besides original + enhanced (8 B/px) it counts the U-Net probabilities (4 B/px) and the cached pictures
-  const cv = (c) => (c ? 4 * c.width * c.height : 0);
-  const one = (x) => 8 * x.w * x.h + (x.orig16?.byteLength || 0) + (x._unet?.prob?.byteLength || 0) + cv(x._lc?.canvas) + cv(x._lb?.canvas) + [...(x._fc?.values() || [])].reduce((a, r) => a + cv(r.canvas), 0);
-  const bytes = () => MEM.px.reduce((a, x) => a + one(x), 0);
-  for (let i = 0; i < MEM.px.length && MEM.px.length > 1 && bytes() > MEM.pxBudget;) {
-    const x = MEM.px[i];
-    if (x === s || keepLoaded(x)) { i++; continue; }
-    x.orig = null; x.orig16 = null; x.enh = null; x._unet = null; x._fc = null; x._lc = null; x._lb = null; MEM.px.splice(i, 1);   // card M8.4.39: _lc, _lb too (counted above)
-  }
-}
+const pxTouch = (s) => pixelBudget.touchWorkingPixels(s);
+export const touchReducedCache = (s) => pixelBudget.touchReducedCache(s);
 /** The original file of a section as a Blob (from memory if not yet stored, else from the image store on disk). */
 async function sectionBlob(s) {
   if (s.file.blob) return s.file.blob;
@@ -162,18 +161,13 @@ function ensurePixels(s) {
   return s._loading;
 }
 /** Sections whose pictures a view asked for while they were not in memory: loaded two at a time, then the views redrawn. */
-const pxWanted = new Set(); let pxBusy = false;
-export function needPixels(s) { if (s._pxErr) return; pxWanted.add(s); if (!pxBusy) setTimeout(loadWanted, 0); }
-async function loadWanted() {
-  if (pxBusy) return; pxBusy = true;
-  try {
-    while (pxWanted.size) {
-      const batch = [...pxWanted].slice(0, 2); batch.forEach((x) => pxWanted.delete(x));
-      for (const x of batch) { MEM.pinned.add(x); try { await ensurePixels(x); } catch (e) { console.error(e); } }
-      try { rerenderPixelViews(); } finally { batch.forEach((x) => MEM.pinned.delete(x)); }
-    }
-  } finally { pxBusy = false; }
-}
+const pixelLoader = createPixelLoader({
+  ensurePixels,
+  onBatchRendered: rerenderPixelViews,
+  pin: (s) => MEM.pinned.add(s),
+  unpin: (s) => MEM.pinned.delete(s),
+});
+export function needPixels(s) { pixelLoader.need(s); }
 function rerenderPixelViews() {
   requestRender();
   if (mode === 'log') renderLog();
@@ -2422,7 +2416,7 @@ async function changeResolution(s, k2) {
     s.marks = (s.marks || []).map((m) => { const [x, y] = pt(m.x + 0.5, m.y + 0.5); return { ...m, x: Math.min(r.w - 1, Math.floor(x)), y: Math.min(r.h - 1, Math.floor(y)) }; });
     s.w = r.w; s.h = r.h; s.orig = r.rgba; s.orig16 = r.rgba16 || null; s.labels = labels; s.exclude = exclude; s.roi = roi; s.ds = k2;
     compactSectionStacks(s, true);
-    s.view = null; s._lc = null; s._lb = null; s._fc = null; s.logVer++;
+    s.view = null; pixelBudget.clearReducedCache(s); s.logVer++;
     enhance(s); refreshObjects(s, new Set(s.objects.keys()), null);
     discardEditHistory(s);
   });
@@ -2675,7 +2669,7 @@ for (const id of ['secTop', 'secBottom', 'secUnits']) $(id).addEventListener('ch
 $('secDel').addEventListener('click', (e) => {
   if (!sec()) return;
   if (!armed(e.currentTarget, t('confirm.secDel', { n: [...sec().objects.values()].filter((o) => o.cls).length }))) return;
-  const [removed] = S.sections.splice(S.cur, 1); discardEditHistory(removed); stopTiledWork(removed); if (removed.tiled) resetTiledTools();   // card M8.4.39
+  const [removed] = S.sections.splice(S.cur, 1); discardEditHistory(removed); stopTiledWork(removed); pixelBudget.forgetSection(removed); if (removed.tiled) resetTiledTools();   // card M8.4.39, Q21
   selectSection(Math.min(S.cur, S.sections.length - 1)); scheduleLearn(); markDirty();
 });
 $('roiBtn').addEventListener('click', () => setTool('roi'));
@@ -3169,8 +3163,9 @@ function resetState() {
   const maxMP = S.settings.maxMP || 8;
   const closedId = S.id; S.id = uid(); S.name = t('proj.untitled'); S.notes = ''; S.comments = []; S.finalTests = [];
   clearNavigationPreviews();
-  MEM.px.length = 0; MEM.mask.length = 0; pxWanted.clear();   // V0.1: pictures of the previous project can be freed
-  for (const q of S.cores.flatMap((c) => c.sections)) stopTiledWork(q); resetTiles(); resetTiledTools(); engineAnalysis?.releaseAll(); forgetSections(closedId); forgetLastImport(); forgetMapBackgrounds();   // card M8.4.39: saved (canLeaveProject) or deleted
+  const closedSections = S.cores.flatMap((c) => c.sections);
+  pixelBudget.clearAll(closedSections); MEM.mask.length = 0;   // V0.1: pictures of the previous project can be freed
+  for (const q of closedSections) stopTiledWork(q); resetTiles(); resetTiledTools(); engineAnalysis?.releaseAll(); forgetSections(closedId); forgetLastImport(); forgetMapBackgrounds();   // card M8.4.39: saved (canLeaveProject) or deleted
   S.selected = 0; S.multi.clear(); S.library = []; S.sheet = { columns: [], cells: {} }; resetFigTabs(); S.kind = 'normal'; S.multiSource = null; S.plots = []; S.plotCur = 0; S.coreModels = {};
   S.geo = defaultGeo(); geoReset();
   S.classes = defaultClasses(); S.active = 'undet';

@@ -19,23 +19,21 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.153, `ba98eb1`) is contained in it.
 - **Released:** V0.153 (22 Nov 2026): integrated into `master` as `ba98eb1`; tag `V0.153` and GitHub Release (8 files, run
   `45058054277`) at the owner's request. The V0.152 Release and tag were deleted at the owner's request; V0.84 and V0.48 remain.
-- **Last verified code commit:** M8.5.6b (this commit): Windows checks passed (`pytest -q` 1040 passed / 9 skipped, `ruff`,
-  bundled runtime refreshed offline, `measure_engine_analysis.mjs --only ages` → `docs/validation/M8.5.6b-ages-windows.json`
-  with all 12 cases passing Y9 ≤ 150 ms, `tests/e2e/desktop.mjs` engine off and on). Last full `check_all --e2e`: V0.153 `35659e5`.
+- **Last verified code commit:** Q21 (this commit): Windows checks passed (`npm test` 678/679, 1 skipped; `npm run typecheck`;
+  `tools/build_standalone.py`). Last full `check_all --e2e`: V0.153 `35659e5`.
 - **GitHub:** M8.5.7 `d8fef3f`: `tests` (`45080558681`) and *Desktop builds* (`45080558666`) green (Windows, macOS, Linux). Read
-  M8.5.6b's push result at the next checkpoint.
-- **Checks due:** none locally; the GitHub result of the M8.5.6b push.
-- **Authorised run (23 Nov 2026):** `M8.5.6b` (done) → `Q21` (next) → `Q22` → `Q23`.
+  M8.5.6b (`a100cdb`) and Q21 push results at the next checkpoint.
+- **Checks due:** none locally; GitHub results of M8.5.6b (`a100cdb`) and Q21.
+- **Authorised run (23 Nov 2026):** `M8.5.6b` (done) → `Q21` (done) → `Q22` (next) → `Q23`.
 - **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete.
-- **Found, not done:** **Q21** (figure photos flicker in infinite eviction loop; fast, medium), **Q22** (core image missing in Multiproxy
+- **Found, not done:** **Q22** (core image missing in Multiproxy
   log of a core; fast, medium), **Q23** (no coloured line at 0% taxon presence + photo/proxies in Ichnotaxa distribution + compact
   distribution view in other figures; fast, medium), **Q20** (start-failure test races exit event; fast, low), **Q19** (intermittent macOS
   "window: labels"; most capable, medium), **Q18** ("go to the trace" undone by first fit; fast, medium), **Q16** (canvas taller than pane;
   fast, medium), **Q17** (spurious BUSY notices; most capable, medium), **Q11** (hostile ML settings), **Q12** (evicted placeholder).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
-- **Next:** **Q21** (fast/medium, in the authorised run `M8.5.6b → Q21 → Q22 → Q23`). On M8.5: M8.5.6b met Y9 on all cases up to 100,000 rows
-  (`gen_100000` p95 `120.1`/`82.1`/`107.8` ms ≤ 150 ms; parity max abs error `5.68e-14`), so **M8.5.8 is unblocked** (most capable/medium).
+- **Next:** **Q22** (fast/medium, in the authorised run `M8.5.6b → Q21 → Q22 → Q23`). On M8.5: **M8.5.8** is unblocked (most capable/medium).
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.7 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
   long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 is approved.
@@ -1060,14 +1058,13 @@ web/frontend security, UI correctness and architecture cards sit here.
   classify after `client.exited` (or the 2 s wait already there), keeping "exited first" meaning the process ended without a handshake;
   the program's own diagnosis is unchanged. *Done when:* the cause is stated and the test no longer depends on event order.
 
-- [ ] **Q21 - Figure core photos flicker in an infinite eviction loop when sections exceed `pxBudget`** — state: Ready (reported by maintainer on V0.153, 23 Nov 2026; authorised).
-  - *Goal:* laying out *Whole interpreted core* (or any multi-section column/figure) on a core whose full working pixels exceed `MEM.pxBudget` (900 MB) loads each section once and stays stable with all photos visible, without flickering or looping.
-  - *Read first:* `app/js/app.js` (`MEM`, `pxTouch`, `loadWanted`, `rerenderPixelViews`, `resetState`, `secDel`); `app/js/columns.js` (`sectionCanvas`); `app/js/figures.js` (`sectionModeCanvas`).
-  - *Change:* extract pixel-budget eviction and reduced-strip retention / wave-guarded loading into a new pure module `app/js/pixelbudget.js` (`ORDER` in `tools/build_standalone.py`, `tsconfig.strict.json`, `docs/ARCHITECTURE.md` §3.2, `docs/TECHNICAL_DOCUMENTATION.md` §1.4): (1) evicting full working pixels (`orig`, `orig16`, `enh`, `_unet`) keeps the small reduced figure/column caches (`_fc`, `_lc`, `_lb`) intact so evicted sections still hit their reduced cache on redraw; (2) bound reduced caches under their own separate budget and release them on `resetState` / `secDel` (preserving M8.4.39); (3) add a wave/oscillation guard in `loadWanted` so a single render cannot trigger an infinite reload loop even if reduced caches overflow. Lower `APP_JS_CEILING` in `tests/app/architecture.test.mjs` accordingly.
-  - *Do not touch:* scientific calculations, saved-project format, `legacy/`, or M8.4.39 teardown on project close/section delete.
-  - *Model:* fast, effort medium.
-  - *Tests:* new `tests/app/pixelbudget.test.mjs` reproducing a multi-section core exceeding `pxBudget` (confirming full pixels stay within budget, reduced caches survive eviction, all sections converge in one pass with zero infinite reloads, and close/delete frees reduced caches); `npm test`, `npm run typecheck`, `tools/build_standalone.py`.
-  - *Done when:* all tests pass, `app.js` is shorter, and the flicker loop cannot reproduce.
+- [x] **Q21 - Figure core photos flicker in an infinite eviction loop when sections exceed `pxBudget`** (done 23 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased)).
+  - *As built (23 Nov 2026; `flash` sub-agent, reviewed by director):* extracted `app/js/pixelbudget.js` (`// @ts-check`, added to `tsconfig.strict.json`,
+    `ORDER` in `tools/build_standalone.py`, ARCHITECTURE §3.2 and TECHNICAL_DOCUMENTATION §1.4) separating full working-pixel LRU eviction
+    (`orig`, `orig16`, `enh`, `_unet`) from a dedicated 256 MiB reduced-canvas cache LRU (`_fc`, `_lc`, `_lb`) plus a wave-guarded loader
+    (`createPixelLoader`, `loadedInWave`), keeping M8.4.39 teardown on `resetState`/`secDel` and caching `'pending'` placeholders in `sectionModeCanvas`.
+    `app.js` 4,607 → 4,602 lines (-5); `APP_JS_CEILING` lowered to `4602`. Tests: `tests/app/pixelbudget.test.mjs` (5). Checks (Windows):
+    `npm test` (678 passed, 1 skipped), `npm run typecheck`, `tools/build_standalone.py` (2.95 MB, no clashes). Not measured: macOS, Linux.
 
 - [ ] **Q22 - Core image missing or blank in *Multiproxy log of a core* (`geolog`)** — state: Ready (reported by maintainer on V0.153, 23 Nov 2026; authorised).
   - *Goal:* any core that has image sections shows its core image reliably in *Figures → Multiproxy log of a core* (both Depth and Age axes, including imported ages and mixed `core.units` / `section.units` / age-model units, and regardless of inherited `colHide`) and in *Multiproxy → Logs*.

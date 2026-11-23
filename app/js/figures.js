@@ -2,7 +2,7 @@ import { pxPerCm, depthAtRow, rowAtDepth } from './sectiondepth.js';
 /* Figures: representative traces, interpreted core, logs, location map and range chart. */
 import { $, S, clsById, fmt, hex, uid } from './state.js';
 import { tickFieldsHTML, arrowFormHTML, axesFormHTML, colOrderHTML, colView, editableColView, buildColumnLog, colorsFormHTML, compositeData, coreImages, logRecords, logStyleOf, mode, ndFormHTML, onStyleInput, reduceRGBA, scheduleLog, taxaFormHTML, styleFormHTML, syncColOrder } from './columns.js';
-import { busy, clsAbbr, compositeMarks, compositeTaxonPoints, curCore, effClassArray, effClassId, esc, idListOf, idMode, legendOf, markDirty, needPixels, requestRender, safe, saveFile, toast } from './app.js';
+import { busy, clsAbbr, compositeMarks, compositeTaxonPoints, curCore, effClassArray, effClassId, esc, idListOf, idMode, legendOf, markDirty, needPixels, requestRender, safe, saveFile, toast, touchReducedCache } from './app.js';
 import { buildGeoLog, eventShadeFormHTML, eventShadeSettings, fetchImage, geoComputeSamples, geoFigureTracks, geoFigureVars, geoLand, geoOverlay, geoRT, mapNetConsent, renderGeoMap } from './multiproxy.js';
 
 import { UNIT_TO_CM, hasId, interpAge, topAt, minOf, maxOf } from './core.js';
@@ -215,8 +215,18 @@ function coreSVG() {
 function sectionModeCanvas(s, mode, hx = S.fig.hideExcl, opacity = S.fig.alpha) {   // V0.25: hx = paint excluded zones white (per figure)
   opacity = Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : S.fig.alpha;
   const key = `${s.logVer}|${mode}|${opacity}|${!!hx}|${S.settings.predThr}|${S.settings.includePred}`, mk = mode + (hx ? '|x' : '');
-  s._fc ||= new Map(); if (s._fc.get(mk)?.key === key) return s._fc.get(mk);
-  if (!s.orig && !['mask', 'bw'].includes(mode)) { needPixels(s); const p = document.createElement('canvas'); p.width = 1; p.height = Math.max(1, Math.round(s.h / s.w)); const g = p.getContext('2d'); g.fillStyle = '#e4e7e6'; g.fillRect(0, 0, 1, p.height); return { key: 'pending', canvas: p, k: 1 / s.w }; }
+  s._fc ||= new Map();
+  const cached = s._fc.get(mk);
+  if (cached?.key === key) return cached;
+  if (!s.orig && !['mask', 'bw'].includes(mode)) {
+    needPixels(s);
+    if (cached?.key === 'pending') return cached;
+    if (cached?.canvas) { cached.canvas.width = 0; cached.canvas.height = 0; }
+    const p = document.createElement('canvas'); p.width = 1; p.height = Math.max(1, Math.round(s.h / s.w)); const g = p.getContext('2d'); g.fillStyle = '#e4e7e6'; g.fillRect(0, 0, 1, p.height);
+    const pending = { key: 'pending', canvas: p, k: 1 / s.w };
+    s._fc.set(mk, pending);
+    return pending;
+  }
   // V0.41: each pixel's colour is computed and averaged straight into the ≤ 900 px picture (no full-size canvas)
   const lab = s.labels, ex = s.exclude, W = s.w;
   const eff = effClassArray(s), cols = S.classes.map((k) => hex(k.color)), photo = !['mask', 'bw'].includes(mode), src = mode === 'orig' ? s.orig : s.enh;
@@ -234,7 +244,10 @@ function sectionModeCanvas(s, mode, hx = S.fig.hideExcl, opacity = S.fig.alpha) 
     return px;
   });
   out.getContext('2d').putImageData(im, 0, 0);
-  const r = { key, canvas: out, k: out.width / s.w }; s._fc.set(mk, r); return r;
+  if (cached?.canvas) { cached.canvas.width = 0; cached.canvas.height = 0; }
+  const r = { key, canvas: out, k: out.width / s.w }; s._fc.set(mk, r);
+  touchReducedCache(s);
+  return r;
 }
 /** One panel image for depths [from, to) (base units), H × W px. */
 export function panelDataURL(D, from, to, H, W, mode, hx = S.fig.hideExcl, opacity = S.fig.alpha) {

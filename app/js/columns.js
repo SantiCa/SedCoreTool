@@ -1,7 +1,7 @@
 import { rowAtDepth } from './sectiondepth.js';
 /* Composite log: shared drawing for the column view and independent figures, records and track controls. */
 import { $, S, fmt, hex, uid } from './state.js';
-import { analyze, analyzeSections, armed, busy, compositeMarks, compositeTaxonPoints, effClassArray, esc, idListOf, idMode, legendOf, markDirty, needPixels, requestRender, resizeCanvases, safe, saveFile, toast, updateTip, withProv } from './app.js';
+import { analyze, analyzeSections, armed, busy, compositeMarks, compositeTaxonPoints, effClassArray, esc, idListOf, idMode, legendOf, markDirty, needPixels, requestRender, resizeCanvases, safe, saveFile, toast, touchReducedCache, updateTip, withProv } from './app.js';
 import { geoOverlay, loadLand, logInteract, readTableFile, renderGeo, renderGeoLogs, renderImportReport } from './multiproxy.js';
 import { applyPanels } from './panels.js';
 import { removeById } from './dataedit.js';
@@ -94,12 +94,14 @@ export function sectionCanvas(s, lv = S.logView) {
       // stripDataURL asks once per output row: a new canvas of the full strip size each time took tens of seconds on a core
       // whose pictures were not loaded yet, so keep the grey one while the section stays pending at the same size.
       if (s._lc?.key === 'pending' && s._lc.canvas.width === sw && s._lc.canvas.height === sh) return s._lc.canvas;
+      if (s._lc?.canvas) { s._lc.canvas.width = 0; s._lc.canvas.height = 0; }
       const p = document.createElement('canvas'); p.width = sw; p.height = sh;
       const g = p.getContext('2d'); g.fillStyle = '#cfd4d2'; g.fillRect(0, 0, sw, sh); s._lc = { key: 'pending', canvas: p, k: sw / s.w }; return p;
     }
     const src = lv.imgMode === 'orig' ? s.orig : s.enh, px = [0, 0, 0, 255];
     const b = document.createElement('canvas'); b.width = sw; b.height = sh;
     b.getContext('2d').putImageData(reduceRGBA(s.w, s.h, sw, sh, (i) => { const j = i * 4; px[0] = src[j]; px[1] = src[j + 1]; px[2] = src[j + 2]; return px; }), 0, 0);   // V0.41
+    if (s._lb?.canvas) { s._lb.canvas.width = 0; s._lb.canvas.height = 0; }
     s._lb = { key: bkey, canvas: b };
   }
   const out = document.createElement('canvas'); out.width = sw; out.height = sh;
@@ -115,7 +117,9 @@ export function sectionCanvas(s, lv = S.logView) {
     const t2 = document.createElement('canvas'); t2.width = sw; t2.height = sh; t2.getContext('2d').putImageData(im, 0, 0);
     oc.drawImage(t2, 0, 0); t2.width = t2.height = 0;
   }
+  if (s._lc?.canvas) { s._lc.canvas.width = 0; s._lc.canvas.height = 0; }
   s._lc = { key, canvas: out, k: sw / s.w };
+  touchReducedCache(s);
   return out;
 }
 

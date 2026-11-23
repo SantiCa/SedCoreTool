@@ -33,7 +33,7 @@
  *   _maskSync?: import('./tiledsync.js').MaskSync, _maskLoader?: import('./tiledsync.js').MaskLoader, _undoTrimShown?: boolean,
  *   logVer: number, view: SectionView | null, crop: import('./core.js').Roi | null,
  *   filters: import('./imageproc.js').FilterSettings, _lc?: SectionCanvasCache | null,
- *   _lb?: SectionCanvasCache | null, file: SectionFile, objects: Map<number, TraceObject>, nextId: number, nextTraceOrder: number,
+ *   _lb?: SectionCanvasCache | null, _fc?: Map<string, SectionCanvasCache> | null, file: SectionFile, objects: Map<number, TraceObject>, nextId: number, nextTraceOrder: number,
  *   marks: TraceMark[], manual: ManualIndex[], detect: import('./imageproc.js').DetectionSettings, preset: string,
  *   loadWarnings?: {region: boolean, mask: boolean},
  *   lutFill?: Uint8ClampedArray, lutLine?: Uint8ClampedArray, lutStyle?: Uint8Array, _pxErr?: string,
