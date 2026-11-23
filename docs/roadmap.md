@@ -13,35 +13,32 @@ file and leave one line here.
 
 ## Status and handoff
 
-Updated 22 November 2026. Rules for this block: [AGENTS.md §1 step 8](../AGENTS.md#1-every-session-in-this-order) (about 30 lines, rewritten,
+Updated 23 November 2026. Rules for this block: [AGENTS.md §1 step 8](../AGENTS.md#1-every-session-in-this-order) (about 30 lines, rewritten,
 not appended). Earlier status records, check logs and audit texts: [roadmap-history.md § Status log](roadmap-history.md#status-log-until-21-november-2026).
 
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.153, `ba98eb1`) is contained in it.
 - **Released:** V0.153 (22 Nov 2026): integrated into `master` as `ba98eb1`; tag `V0.153` and GitHub Release (8 files, run
   `45058054277`) at the owner's request. The V0.152 Release and tag were deleted at the owner's request; V0.84 and V0.48 remain.
-- **Last verified code commit:** M8.5.7 (this commit): Windows checks passed (`npm test` 674/674, `npm run typecheck`,
-  `tools/build_standalone.py`, `tests/e2e/smoke.mjs`). Last full `check_all --e2e`: V0.153 `35659e5` (pytest 1024/9 skipped, `npm test`
-  667/667, typecheck, sync-version, ruff, e2e desktop off/on, smoke, large16, tiled).
-- **GitHub:** M8.5.6 `91e4c4c`: `tests` (`45077238452`) and *Desktop builds* (`45077238414`) green (Windows, macOS, Linux). Read
-  M8.5.7's push result at the next card.
-- **Checks due:** none locally; the GitHub result of the M8.5.7 push.
+- **Last verified code commit:** M8.5.6b (this commit): Windows checks passed (`pytest -q` 1040 passed / 9 skipped, `ruff`,
+  bundled runtime refreshed offline, `measure_engine_analysis.mjs --only ages` → `docs/validation/M8.5.6b-ages-windows.json`
+  with all 12 cases passing Y9 ≤ 150 ms, `tests/e2e/desktop.mjs` engine off and on). Last full `check_all --e2e`: V0.153 `35659e5`.
+- **GitHub:** M8.5.7 `d8fef3f`: `tests` (`45080558681`) and *Desktop builds* (`45080558666`) green (Windows, macOS, Linux). Read
+  M8.5.6b's push result at the next checkpoint.
+- **Checks due:** none locally; the GitHub result of the M8.5.6b push.
+- **Authorised run (23 Nov 2026):** `M8.5.6b` (done) → `Q21` (next) → `Q22` → `Q23`.
 - **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete.
-- **Found, not done:** **Q20** (start-failure test races the exit event; fast, low), **Q19** (intermittent macOS "window: labels"; most capable, medium), **Q18** ("go to the trace" undone by the first
-  fit; fast, medium), **Q16** (canvas taller than its pane; fast, medium), **Q17** (spurious BUSY notices and "Retry save" after a reopening;
-  most capable, medium), **Q11** (hostile ML settings stop the classifier), **Q12** (an evicted placeholder section cannot rebuild its grey image).
+- **Found, not done:** **Q21** (figure photos flicker in infinite eviction loop; fast, medium), **Q22** (core image missing in Multiproxy
+  log of a core; fast, medium), **Q23** (no coloured line at 0% taxon presence + photo/proxies in Ichnotaxa distribution + compact
+  distribution view in other figures; fast, medium), **Q20** (start-failure test races exit event; fast, low), **Q19** (intermittent macOS
+  "window: labels"; most capable, medium), **Q18** ("go to the trace" undone by first fit; fast, medium), **Q16** (canvas taller than pane;
+  fast, medium), **Q17** (spurious BUSY notices; most capable, medium), **Q11** (hostile ML settings), **Q12** (evicted placeholder).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
-- **Next:** A1 designed (contract §9, cards M8.5.1-M8.5.15); Y1-Y11 and §9.7 limits approved (22 Nov 2026). M8.5.1-M8.5.7 done:
-  `core.ages/1` parity passes (max abs error 5.68e-14), and public/1k/10k plus 100k unchanged meet Y9 (≤ 150 ms), but 100k `first`
-  (p95 208.2 ms) and `one_changed` (p95 165.2 ms) fail Y9 (`docs/validation/M8.5.6-ages-windows.json`), so **M8.5.8 waits for the
-  maintainer** (optimise upload/run path vs adjust Y9 for 100k). Ready independent cards meanwhile: **Q20** (fast/low), **Q18** / **Q16**
-  / **Q11** / **Q12** / **A4** (fast/medium), **Q19** / **Q17** (most capable/medium).
-- **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). The engine path fails the timing gate of
-  [contract §7](roadmap-engine-contract.md#7-predeclared-verification-and-performance-gates) for whole sections; the tile store is the
-  answer for large images.
-- **Decisions waiting for the maintainer:** M8.5.6 Y9 failure on 100,000-row `core.ages/1` (`first` p95 208.2 ms, `one_changed` 165.2 ms;
-  blocks M8.5.8); promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of long series) only if a
-  save benchmark shows a slow save. Every lettered decision up to Y11 is approved. M8.4.9 kept the 512 MiB session budget by measurement.
+- **Next:** **Q21** (fast/medium, in the authorised run `M8.5.6b → Q21 → Q22 → Q23`). On M8.5: M8.5.6b met Y9 on all cases up to 100,000 rows
+  (`gen_100000` p95 `120.1`/`82.1`/`107.8` ms ≤ 150 ms; parity max abs error `5.68e-14`), so **M8.5.8 is unblocked** (most capable/medium).
+- **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.7 done (including M8.5.6b).
+- **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
+  long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 is approved.
 - **Open pull requests (Dependabot, against `master`, not merged):** #26 Electron 45.2.2 → 45.3.4, #24 `softprops/action-gh-release` 2 → 3.
   They wait for the maintainer (AGENTS §5.1).
 - **Standing reminders:** remind the maintainer to run the release-gate tests (the [release checklist](#release-checklist)) when an M8
@@ -727,6 +724,17 @@ after. The order is the order of this list; cards written later take the next fr
     plus avoiding boxed array copies in `unpack`/`readTableResult` (or trimming per-job file staging). **M8.5.8 waits for the maintainer.**
     Checks (Windows): `node --check tools/measure_engine_analysis.mjs`, `npm run typecheck`, `engine-gates`, `core-ages-fixtures`,
     `architecture`, `engine-run`, `trainer` all passed. `app.js` 4,647 → 4,647 lines. Not measured: macOS, Linux, clean machine.
+- [x] **M8.5.6b - Coordinator `f64le` verification and wakeup latency** (done 23 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased)).
+  - *As built (23 Nov 2026; reviewed line by line by director):* added pure-stdlib `all_finite_f64le(chunk)` in `src/sedcoretool/engine/buffers.py`
+    (scanning `chunk[7::8]` in C for `0x7F`/`0xFF` and falling back to exact `struct.iter_unpack('<d', chunk)` + `math.isfinite`), used by
+    `BufferStore.verify` and `adopt_packed`; added condition-backed `CoordinatorInbox(maxsize=2)` with coalesced non-blocking `wake()` in
+    `src/sedcoretool/engine/server.py` wired to `MaskIO`, `WorkerJob`/`DigestJob` and `MethodRunner` in `src/sedcoretool/engine/worker.py`.
+    Unit and transport tests in `tests/test_engine_transport.py`. Re-measured on Windows (`docs/validation/M8.5.6b-ages-windows.json`, 6 pairs):
+    **all 12 cases pass Y9 (p95 ≤ 150 ms)** with 0 mismatches (`max_abs_error 5.68e-14`): `public` p95 `69.9`/`30.4`/`42.7` ms, `gen_1000`
+    `49.4`/`28.9`/`45.7` ms, `gen_10000` `64.1`/`39.9`/`51.7` ms, `gen_100000` `first` **`120.1` ms** (med `108.4`, down from `208.2`),
+    `unchanged` **`82.1` ms** (med `70.0`, down from `142.8`), `one_changed` **`107.8` ms** (med `100.8`, down from `165.2`). **M8.5.8 unblocked.**
+    Checks (Windows): `pytest -q` (1040 passed, 9 skipped), `ruff check src tests tools`, offline runtime refresh (`Runtime ready: win32-x64`),
+    `tests/e2e/desktop.mjs` engine off and on. `app.js` 4,607 → 4,607 lines. Not measured: macOS, Linux, clean machine.
 - [x] **M8.5.7 - A core's merged data out of `app.js`** (done 22 Nov 2026, development gate).
   - *Goal:* `coreImageParts` and `refreshCoreData` (images, records, imported data and manual columns merged into a core's table) move to
     a pure module without changing behaviour (ARCHITECTURE §5.2), so that M8.5.8 changes only where the age column comes from.
@@ -745,7 +753,7 @@ after. The order is the order of this list; cards written later take the next fr
     wrapper delegating to `mergeCoreData` with `afterMerge` running `applyCellEdits` and `applyComputedColumns` untouched. `app.js` 4,647
     → 4,607 lines (-40); `APP_JS_CEILING` lowered to `4607`. Tests: `tests/app/coredata.test.mjs` (7). Checks (Windows): `npm test`
     674/674, `npm run typecheck` (0 new diagnostics), `tools/build_standalone.py` (2.94 MB, no name clashes), `tests/e2e/smoke.mjs` passed.
-- [ ] **M8.5.8 - Row ages of a core from the engine** (engine experiment; **Blocked** after M8.5.6 failed Y9 on `gen_100000` `first` and `one_changed`, waiting for maintainer decision; its steps are written then).
+- [ ] **M8.5.8 - Row ages of a core from the engine** (engine experiment; **Ready** after M8.5.6b passed Y9 on all cases up to 100,000 rows; steps to be written before starting).
   - *Goal:* with the engine experiment on, the age column of each core's merged table comes from `core.ages/1` (rows with an imported age
     keep it, as now); a core whose ages are pending shows it, exports wait for it, a failure is visible; with the flag off nothing changes.
   - *Read first:* contract §9.4 (publication); `app/js/engineanalysis.js` (the pending, ready and error states of sections);
@@ -1051,6 +1059,33 @@ web/frontend security, UI correctness and architecture cards sit here.
   `exitedFirst` is computed when `start()` rejects (stdout closed), and Node can deliver the child's `exit` event after that. *Change:*
   classify after `client.exited` (or the 2 s wait already there), keeping "exited first" meaning the process ended without a handshake;
   the program's own diagnosis is unchanged. *Done when:* the cause is stated and the test no longer depends on event order.
+
+- [ ] **Q21 - Figure core photos flicker in an infinite eviction loop when sections exceed `pxBudget`** — state: Ready (reported by maintainer on V0.153, 23 Nov 2026; authorised).
+  - *Goal:* laying out *Whole interpreted core* (or any multi-section column/figure) on a core whose full working pixels exceed `MEM.pxBudget` (900 MB) loads each section once and stays stable with all photos visible, without flickering or looping.
+  - *Read first:* `app/js/app.js` (`MEM`, `pxTouch`, `loadWanted`, `rerenderPixelViews`, `resetState`, `secDel`); `app/js/columns.js` (`sectionCanvas`); `app/js/figures.js` (`sectionModeCanvas`).
+  - *Change:* extract pixel-budget eviction and reduced-strip retention / wave-guarded loading into a new pure module `app/js/pixelbudget.js` (`ORDER` in `tools/build_standalone.py`, `tsconfig.strict.json`, `docs/ARCHITECTURE.md` §3.2, `docs/TECHNICAL_DOCUMENTATION.md` §1.4): (1) evicting full working pixels (`orig`, `orig16`, `enh`, `_unet`) keeps the small reduced figure/column caches (`_fc`, `_lc`, `_lb`) intact so evicted sections still hit their reduced cache on redraw; (2) bound reduced caches under their own separate budget and release them on `resetState` / `secDel` (preserving M8.4.39); (3) add a wave/oscillation guard in `loadWanted` so a single render cannot trigger an infinite reload loop even if reduced caches overflow. Lower `APP_JS_CEILING` in `tests/app/architecture.test.mjs` accordingly.
+  - *Do not touch:* scientific calculations, saved-project format, `legacy/`, or M8.4.39 teardown on project close/section delete.
+  - *Model:* fast, effort medium.
+  - *Tests:* new `tests/app/pixelbudget.test.mjs` reproducing a multi-section core exceeding `pxBudget` (confirming full pixels stay within budget, reduced caches survive eviction, all sections converge in one pass with zero infinite reloads, and close/delete frees reduced caches); `npm test`, `npm run typecheck`, `tools/build_standalone.py`.
+  - *Done when:* all tests pass, `app.js` is shorter, and the flicker loop cannot reproduce.
+
+- [ ] **Q22 - Core image missing or blank in *Multiproxy log of a core* (`geolog`)** — state: Ready (reported by maintainer on V0.153, 23 Nov 2026; authorised).
+  - *Goal:* any core that has image sections shows its core image reliably in *Figures → Multiproxy log of a core* (both Depth and Age axes, including imported ages and mixed `core.units` / `section.units` / age-model units, and regardless of inherited `colHide`) and in *Multiproxy → Logs*.
+  - *Read first:* `app/js/multiproxy.js` (`buildGeoLog`, `renderGeoLogs`); `app/js/figures.js` (`renderFigPanel` `geolog` branch, `renderFigure` `geolog` branch, `data-fgeo-track`); `app/js/figview.js`; `app/js/columns.js` (`compositeData`, `columnImages`, `stripDataURL`); `app/js/coredata.js`; `app/js/log.js` (`buildLogSVG` `image:` column ids and `orderCols`).
+  - *Change:* (1) on Age axis without a textual `core.ageModel.model`, derive a monotonic depth↔age mapping from the core's finite `(depth, age)` pairs (imported ages) so `compositeData` / `buildGeoLog` still renders the core image and tracks; (2) when `core.units` differs from `section.units` on Age axis, ensure age-model depths align with the core/section depth basis instead of producing an empty strip; (3) toggling `[data-fgeo-track="image"]` on clears any stale `image:*` entries from `view.style.colHide` (and `figureViewOf` does not silently hide `image:*` when `tracks.image` is enabled unless explicitly hidden in this figure); (4) in *Multiproxy → Logs* (`buildGeoLog` with `options = null`), show the core's image for any core that has `core.sections.length > 0`, not only `S.curCore`.
+  - *Do not touch:* saved-project format, scientific calculations, `legacy/`.
+  - *Model:* fast, effort medium.
+  - *Tests:* unit tests in `tests/app/` (and extend `tests/e2e/multiproxy-figure.mjs` / `smoke.mjs`) asserting `<image>` renders with non-blank data for `geolog` on Depth, Age with age model, Age with imported ages, mixed `m`/`cm` units, and after hiding/re-enabling the image track; `npm test`, `npm run typecheck`, `tools/build_standalone.py`, `tests/e2e/smoke.mjs`.
+  - *Done when:* all tests pass and every listed `geolog` case displays the core image.
+
+- [ ] **Q23 - Zero-presence taxon line removal, photo/proxies in *Ichnotaxa distribution*, and compact distribution view in other figures** — state: Ready (requested by maintainer on V0.153, 23 Nov 2026; authorised).
+  - *Goal:* (1) when a taxon's presence/abundance is `0`, no coloured line or polygon stroke is drawn across 0-presence intervals in any figure; (2) *Ichnotaxa distribution* (`range`) can optionally include the core photo and geochemical proxies / other records; (3) the compact *Ichnotaxa distribution* presentation (tilted 60° italic taxon headers, compact equal-width taxon columns) is available in *Whole interpreted core*, *Core log*, and *Multiproxy log of a core* as well.
+  - *Read first:* `app/js/log.js` (`taxaOptions`, `taxonColumnSVG`, `buildLogSVG`, `buildRangeSVG`); `app/js/figures.js` (`rangeSVG`, `renderFigPanel` `range` branch, `coreSVG`, `renderFigure`); `app/js/columns.js` (`taxaFormHTML`, `changeTaxaPresentation`); `app/js/i18n.js`; `tests/app/` taxon/figure tests.
+  - *Change:* (1) in `log.js` (`taxonColumnSVG` and `buildRangeSVG`), split abundance runs into positive sub-runs (tapering cleanly at adjacent zero boundaries without stroking along consecutive zero rows) so 0% intervals draw no coloured line in kite, line, or area modes; (2) in `figures.js` (`range` panel and `rangeSVG`) and `log.js` (`buildRangeSVG`), add opt-in core photo (default off, reusing `coreImages` / image panel controls) and opt-in geochemical proxies / external records of the core (both `S.records` and `curCore().proxies`), with column ordering/visibility and horizontal axes; (3) add a compact distribution header/layout option (`taxa.compact` or preset in `taxaOptions` / `taxaFormHTML`, default off) supported by `buildLogSVG` so *Whole interpreted core*, *Core log*, and *Multiproxy log of a core* can render ichnotaxa with compact columns and 60° rotated italic headers; (4) bilingual UI strings in `app/js/i18n.js`.
+  - *Do not touch:* default appearance of existing saved projects when the new options are unset, scientific calculations, `legacy/`.
+  - *Model:* fast, effort medium.
+  - *Tests:* Node tests in `tests/app/` verifying: (a) 0%-presence intervals emit no coloured polygon/polyline stroke across the zero span in kite, line and area modes (both `buildLogSVG` and `buildRangeSVG`); (b) `buildRangeSVG` with optional image and proxy records emits `<image>` and proxy tracks while preserving defaults when omitted; (c) `buildLogSVG` with compact taxon mode renders 60° rotated taxon headers and compact columns; plus `npm test`, `npm run typecheck`, `tools/build_standalone.py`, `tests/e2e/smoke.mjs`.
+  - *Done when:* all tests pass and `app.js` does not grow.
 
 - [ ] **Q19 - `tiled-sections.mjs` "window: labels" fails intermittently on macOS** (found by M8.4.11, 22 Nov 2026; most capable, effort
   medium: it may be a lost edit, not only a test race). First attempt of run `44977813249` on `1d166e7`: the section reopened with a window

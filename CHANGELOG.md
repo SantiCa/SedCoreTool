@@ -14,6 +14,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card M8.5.6b: sped up coordinator `f64le` finiteness verification and replaced polling waits with immediate worker/mask wakeup without changing the wire protocol or validation; all `core.ages/1` matched-timing cases up to 100,000 rows now meet the 150 ms Y9 target on Windows (`docs/validation/M8.5.6b-ages-windows.json`), unblocking M8.5.8.
 - Card M8.5.7: moved a core's table merge (`coreImageParts` and `refreshCoreData`) out of `app/js/app.js` into the pure module `app/js/coredata.js`, with unit tests and `APP_JS_CEILING` lowered to 4,607 lines.
 - Card M8.5.6: added the `ages` matched-timing benchmark for `core.ages/1` and recorded its Windows evidence (`docs/validation/M8.5.6-ages-windows.json`); parity is exact, while the 100,000-row first and one-depth-changed cases exceed the 150 ms Y9 target, so M8.5.8 waits for a maintainer decision.
 - Card Q20 written (not done): the start-failure test of the engine client can classify a failure before the exit event arrives.
