@@ -9,8 +9,12 @@ export function figureViewOf(figure, logView, geoView, geoAxis) {
       hideExcl: logView.hideExcl, alpha: figure.alpha, height: 700, axis: geoAxis, ...geoView, ...figure.geoView };
     view.style = { imgAspect: logView.style?.imgAspect || 'keep', imgW: logView.style?.imgW || 64,
       imgStretch: logView.style?.imgStretch || 1, ...view.style };
-    if (!figure.geoView && figure.geoFeatures != null && view.style) view.style = { ...view.style, colHide: (view.style.colHide || []).filter((id) => !id.startsWith('rec:')) };
-    return { ...view, tracks: geoTrackOptions(view) };
+    const tracks = geoTrackOptions(view);
+    if (!figure.geoView && view.style && Array.isArray(view.style.colHide)) {
+      const dropRec = figure.geoFeatures != null, dropImg = tracks.image;
+      if (dropRec || dropImg) view.style = { ...view.style, colHide: view.style.colHide.filter((id) => (!dropRec || !id.startsWith('rec:')) && (!dropImg || !id.startsWith('image:'))) };
+    }
+    return { ...view, tracks };
   }
   return { ...logView, keepRatio: !!figure.keepRatio, alpha: figure.alpha, depthFrom: figure.secFrom, depthTo: figure.secTo,
     ...(figure.type === 'core' ? { tracks: figure.tracks || logView.tracks, records: figure.recs, imgMode: 'enh', imgPanels: figure.corePanels, hideExcl: !!figure.coreHideExcl } : {}),

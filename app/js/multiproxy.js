@@ -7,6 +7,7 @@ import { $, S, fetchAsset, fmt, sec, uid } from './state.js';
 import { DELIVERY, armed, busy, compositeMarks, compositeTaxonPoints, cropState, endCrop, esc, finalTestsHTML, holdoutHTML, holdoutIds, loadLib, makeCore, markDirty, openCoreDlg, refreshAllCores, refreshCoreData, renderCoreBar, runFinalGeo, safe, saveFile, scheduleFloat, toast, updateTip, view, withProv, zoomAt } from './app.js';
 import { axesFormHTML, colOrderHTML, colorsFormHTML, columnImages, compositeData, logStyleOf, mode, scheduleLog, syncColOrder } from './columns.js';
 import { interpAge, parseAgeModel, toCSV } from './core.js';
+import { coreAgeRelation } from './coredata.js';
 import { buildLogSVG, compositeRows, decodeText, eventShadeOptions, eventShading, mergedStyle, parseTable, validHexColor } from './log.js';
 import { renderFigure, verticalStyleHTML } from './figures.js';
 import { INTERP_DEFAULT, INTERP_METHODS, RAMPS, colorRange, contourLevels, contourSegments, interpolate, maskLand, rampColor, visibleSeaOptions } from './interp.js';
@@ -703,7 +704,8 @@ export function buildGeoLog(core, features = null, options = null) {
   const g = S.geo, st = g.settings;
   if (!core) return null;
   const view = { ...g.view, ...options }, axis = options?.axis === 'depth' || options?.axis === 'age' ? options.axis : st.axis, xs = axis === 'age' ? coreAges(core) : core.depth;
-  const D = options && core.sections?.length && (axis === 'depth' || core.ageModel?.model) ? compositeData(axis, core) : null;
+  const ageModel = coreAgeRelation(core);
+  const D = options && core.sections?.length && (axis === 'depth' || ageModel) ? compositeData(axis, core, ageModel) : null;
   const ivAxis = intervalsOnAxis(g.intervals.filter((q) => q.core === core.id), axis, core).flatMap((q) => [q.from, q.to]);
   const valid = [...(xs || []).filter((v) => v != null), ...ivAxis, ...(D?.rows.flatMap((r) => [r.a0, r.a1]) || [])];
   if (!valid.length) return null;
@@ -733,16 +735,16 @@ export function buildGeoLog(core, features = null, options = null) {
     }
   }
   let rows = [], image = null, images = null, tracks = { image: false, total: false, species: false, BI: false, ii: false, manual: false };
-  if (!options && core.id === S.curCore && S.sections.length && (axis === 'depth' || S.age.model)) {
-    const D = compositeData();
-    rows = compositeRows(D.secs.map((s) => ({ name: s.name, bins: s.bins.map((b) => ({ ...b, dTop: b.dTop * D.f(s), dBottom: b.dBottom * D.f(s), depth: b.depth * D.f(s) })) })), { axis, model: S.age.model });
+  if (!options && core.sections?.length && (axis === 'depth' || ageModel)) {
+    const D0 = compositeData(axis, core, ageModel);
+    rows = D0.rows;
     tracks = { ...tracks, image: true, total: true };
-    const ims = columnImages({ ...D, axis }, from, to, 700); image = ims[0]; images = ims;   // V0.25: same panels and width as the core column
+    const ims = columnImages(D0, from, to, 700, core.logView || S.logView); image = ims[0]; images = ims;   // V0.25: same panels and width as the core column
   }
   if (D) {
     rows = D.rows;
     tracks = geoFigureTracks(options);
-    if (tracks.image) { images = columnImages(D, from, to, height, options.imageView || S.logView); image = images[0]; }
+    if (tracks.image) { images = columnImages(D, from, to, height, options.imageView || core.logView || S.logView); image = images[0]; }
   }
   const presentation = options ? logStyleOf({ axis, base: core.units || 'm' }, view, core.ageModel?.units || 'ka') : null;
   const style = presentation?.style || mergedStyle(view.style);

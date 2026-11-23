@@ -19,21 +19,20 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.153, `ba98eb1`) is contained in it.
 - **Released:** V0.153 (22 Nov 2026): integrated into `master` as `ba98eb1`; tag `V0.153` and GitHub Release (8 files, run
   `45058054277`) at the owner's request. The V0.152 Release and tag were deleted at the owner's request; V0.84 and V0.48 remain.
-- **Last verified code commit:** Q21 (this commit): Windows checks passed (`npm test` 678/679, 1 skipped; `npm run typecheck`;
-  `tools/build_standalone.py`). Last full `check_all --e2e`: V0.153 `35659e5`.
-- **GitHub:** M8.5.7 `d8fef3f`: `tests` (`45080558681`) and *Desktop builds* (`45080558666`) green (Windows, macOS, Linux). Read
-  M8.5.6b (`a100cdb`) and Q21 push results at the next checkpoint.
-- **Checks due:** none locally; GitHub results of M8.5.6b (`a100cdb`) and Q21.
-- **Authorised run (23 Nov 2026):** `M8.5.6b` (done) → `Q21` (done) → `Q22` (next) → `Q23`.
+- **Last verified code commit:** Q22 (this commit): Windows checks passed (`npm test` 683/684, 1 skipped; `npm run typecheck`;
+  `tools/build_standalone.py`; `tests/e2e/smoke.mjs`). Last full `check_all --e2e`: V0.153 `35659e5`.
+- **GitHub:** M8.5.6b (`a100cdb`) `tests` (`45252529166`) green; Q21 (`405f04b`) `tests` (`45254239195`) green, *Desktop builds*
+  (`45254239078`) running. Read Q22 push results at the next checkpoint.
+- **Checks due:** none locally; GitHub results of Q21/Q22.
+- **Authorised run (23 Nov 2026):** `M8.5.6b` (done) → `Q21` (done) → `Q22` (done) → `Q23` (next).
 - **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete.
-- **Found, not done:** **Q22** (core image missing in Multiproxy
-  log of a core; fast, medium), **Q23** (no coloured line at 0% taxon presence + photo/proxies in Ichnotaxa distribution + compact
+- **Found, not done:** **Q23** (no coloured line at 0% taxon presence + photo/proxies in Ichnotaxa distribution + compact
   distribution view in other figures; fast, medium), **Q20** (start-failure test races exit event; fast, low), **Q19** (intermittent macOS
   "window: labels"; most capable, medium), **Q18** ("go to the trace" undone by first fit; fast, medium), **Q16** (canvas taller than pane;
   fast, medium), **Q17** (spurious BUSY notices; most capable, medium), **Q11** (hostile ML settings), **Q12** (evicted placeholder).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
-- **Next:** **Q22** (fast/medium, in the authorised run `M8.5.6b → Q21 → Q22 → Q23`). On M8.5: **M8.5.8** is unblocked (most capable/medium).
+- **Next:** **Q23** (fast/medium, last card of the authorised run `M8.5.6b → Q21 → Q22 → Q23`). On M8.5: **M8.5.8** is unblocked (most capable/medium).
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.7 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
   long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 is approved.
@@ -1066,14 +1065,14 @@ web/frontend security, UI correctness and architecture cards sit here.
     `app.js` 4,607 → 4,602 lines (-5); `APP_JS_CEILING` lowered to `4602`. Tests: `tests/app/pixelbudget.test.mjs` (5). Checks (Windows):
     `npm test` (678 passed, 1 skipped), `npm run typecheck`, `tools/build_standalone.py` (2.95 MB, no clashes). Not measured: macOS, Linux.
 
-- [ ] **Q22 - Core image missing or blank in *Multiproxy log of a core* (`geolog`)** — state: Ready (reported by maintainer on V0.153, 23 Nov 2026; authorised).
-  - *Goal:* any core that has image sections shows its core image reliably in *Figures → Multiproxy log of a core* (both Depth and Age axes, including imported ages and mixed `core.units` / `section.units` / age-model units, and regardless of inherited `colHide`) and in *Multiproxy → Logs*.
-  - *Read first:* `app/js/multiproxy.js` (`buildGeoLog`, `renderGeoLogs`); `app/js/figures.js` (`renderFigPanel` `geolog` branch, `renderFigure` `geolog` branch, `data-fgeo-track`); `app/js/figview.js`; `app/js/columns.js` (`compositeData`, `columnImages`, `stripDataURL`); `app/js/coredata.js`; `app/js/log.js` (`buildLogSVG` `image:` column ids and `orderCols`).
-  - *Change:* (1) on Age axis without a textual `core.ageModel.model`, derive a monotonic depth↔age mapping from the core's finite `(depth, age)` pairs (imported ages) so `compositeData` / `buildGeoLog` still renders the core image and tracks; (2) when `core.units` differs from `section.units` on Age axis, ensure age-model depths align with the core/section depth basis instead of producing an empty strip; (3) toggling `[data-fgeo-track="image"]` on clears any stale `image:*` entries from `view.style.colHide` (and `figureViewOf` does not silently hide `image:*` when `tracks.image` is enabled unless explicitly hidden in this figure); (4) in *Multiproxy → Logs* (`buildGeoLog` with `options = null`), show the core's image for any core that has `core.sections.length > 0`, not only `S.curCore`.
-  - *Do not touch:* saved-project format, scientific calculations, `legacy/`.
-  - *Model:* fast, effort medium.
-  - *Tests:* unit tests in `tests/app/` (and extend `tests/e2e/multiproxy-figure.mjs` / `smoke.mjs`) asserting `<image>` renders with non-blank data for `geolog` on Depth, Age with age model, Age with imported ages, mixed `m`/`cm` units, and after hiding/re-enabling the image track; `npm test`, `npm run typecheck`, `tools/build_standalone.py`, `tests/e2e/smoke.mjs`.
-  - *Done when:* all tests pass and every listed `geolog` case displays the core image.
+- [x] **Q22 - Core image missing or blank in *Multiproxy log of a core* (`geolog`)** (done 23 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased)).
+  - *As built (23 Nov 2026; `flash` sub-agent, reviewed by director):* added pure `coreAgeRelation(core)` in `app/js/coredata.js` (aligns
+    section-unit age models to `core.units` when disjoint, and builds a sorted/deduplicated `{depth, age}` relation from imported `core.depth`/`core.age`
+    pairs when no textual model exists); wired `columns.js::compositeData` and `multiproxy.js::buildGeoLog` (including Multiproxy → Logs for any core with
+    sections, not only `S.curCore`); cleared stale `image:*` entries from `colHide` on `[data-fgeo-track]` and in `figview.js::figureViewOf`, and passed
+    `imageView: F.geoView ? colView('figure') : null` in `figures.js`. `app.js` 4,602 → 4,602 lines (untouched). Tests: `tests/app/geolog-image.test.mjs`
+    (5) + extended `tests/e2e/multiproxy-figure.mjs`. Checks (Windows): `npm test` (683 passed, 1 skipped), `npm run typecheck`,
+    `tools/build_standalone.py`, `tests/e2e/smoke.mjs`. Not measured: macOS, Linux.
 
 - [ ] **Q23 - Zero-presence taxon line removal, photo/proxies in *Ichnotaxa distribution*, and compact distribution view in other figures** — state: Ready (requested by maintainer on V0.153, 23 Nov 2026; authorised).
   - *Goal:* (1) when a taxon's presence/abundance is `0`, no coloured line or polygon stroke is drawn across 0-presence intervals in any figure; (2) *Ichnotaxa distribution* (`range`) can optionally include the core photo and geochemical proxies / other records; (3) the compact *Ichnotaxa distribution* presentation (tilted 60° italic taxon headers, compact equal-width taxon columns) is available in *Whole interpreted core*, *Core log*, and *Multiproxy log of a core* as well.

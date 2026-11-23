@@ -14,6 +14,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### For users
 
+- Fixed: «Multiproxy log of a core» (and the Multiproxy Logs tab) now shows the core image reliably on both Depth and Age axes, including cores with imported ages, cores whose section and age-model units differ from core units, non-active cores with photos, and after re-enabling the image track.
 - Fixed: laying out figures (such as «Whole interpreted core») or the core column on a core with many high-resolution sections no longer makes the core photos appear and disappear continuously.
 
 ### Internal

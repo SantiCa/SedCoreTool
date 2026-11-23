@@ -9,7 +9,12 @@ export function multiproxyFigureFixture() {
   second.age.text = '1, 100\n2, 200';
   second.imp = { depth: [1, 1.5, 2], proxies: { Ca: [10, 30, 20], Ti: [40, 20, 50] } };
   second.sections[0].id = 'other-section'; second.sections[0].top = 100; second.sections[0].bottom = 200;
-  fixture.cores.push(second, { id: 'numeric-core', name: 'Numeric only', units: 'cm', sections: [],
+  const importedAge = structuredClone(first);
+  importedAge.id = 'imp-age-core'; importedAge.name = 'Imported age core';
+  importedAge.age = { text: '', units: 'ka' };
+  importedAge.imp = { depth: [0, 5, 10], age: [10, 20, 40], proxies: { Ca: [1, 3, 2], Ti: [4, 2, 5] } };
+  importedAge.sections[0].id = 'imp-age-section';
+  fixture.cores.push(second, importedAge, { id: 'numeric-core', name: 'Numeric only', units: 'cm', sections: [],
     imp: { depth: [0, 5, 10], proxies: { Ca: [5, 6, 7] } } });
   fixture.geo = { settings: { axis: 'depth', step: 1, features: ['Ca', 'Ti'] } };
   return fixture;
@@ -51,6 +56,7 @@ export async function verifyMultiproxyFigure(browser, url, { screenshots = false
     await page.waitForSelector('#figOut svg');
     const original = await globalState(), firstTab = await page.evaluate(() => window.ichantool.S.figTab);
     assert.equal(await page.evaluate(() => window.ichantool.S.fig.geoView == null), true);
+    await page.waitForSelector('#figOut image[href^="data:image/"]');
     await taxa('abundance', 'kite'); await taxa('occurrence', 'names'); await taxa('source', 'marks');
     await taxa('opacity', 35); await taxa('scale', 'percent'); await taxa('values', true);
     await change('[data-fgeo-track="image"]', false);
@@ -100,6 +106,13 @@ export async function verifyMultiproxyFigure(browser, url, { screenshots = false
       return (+text.getAttribute('y') - 3 - +clip.getAttribute('y')) / +clip.getAttribute('height');
     });
     assert.ok(Math.abs(agePosition - 0.75) < 0.0001, 'Selected core uses its own age model');
+    await change('[data-fgeo-track="image"]', true);
+    await page.waitForSelector('#figOut image[href^="data:image/"]');
+    await change('[data-colord="figure"] [data-colshow^="image:"]', false);
+    await page.waitForFunction(() => !document.querySelector('#figOut image'));
+    await change('[data-fgeo-track="image"]', false);
+    await change('[data-fgeo-track="image"]', true);
+    await page.waitForSelector('#figOut image[href^="data:image/"]');
     await page.evaluate(() => {
       window.__figureExports = []; const createURL = URL.createObjectURL;
       URL.createObjectURL = (blob) => { if (['image/svg+xml', 'image/png'].includes(blob.type)) window.__figureExports.push(blob); return createURL(blob); };
@@ -118,6 +131,10 @@ export async function verifyMultiproxyFigure(browser, url, { screenshots = false
     assert.equal(await page.$eval('[data-fgeo-track="species"]', (input) => input.disabled), true);
     await click('#figGeoCompositionReset');
     assert.equal(await page.evaluate(() => window.ichantool.S.fig.geoView == null && window.ichantool.S.fig.taxaStyles.geolog == null), true);
+    await change('#figGeoCore', 'imp-age-core');
+    await page.waitForFunction(() => document.querySelector('#figOut svg')?.textContent.includes('Imported age core'));
+    await change('[data-fview="axis"]', 'age');
+    await page.waitForFunction(() => document.querySelector('#figOut svg')?.textContent.includes('(ka)') && document.querySelector('#figOut image[href^="data:image/"]'));
     await click(`[data-ftab="${secondTab}"] .ftl`);
     assert.equal(await page.evaluate(() => window.ichantool.S.fig.taxaStyles.geolog.opacity), 0.8);
     assert.deepEqual(errors, []);

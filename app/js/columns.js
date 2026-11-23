@@ -9,6 +9,7 @@ import { disposeDataTable, renderData } from './datatab.js';
 import { FIG_PANELS, arrowMarksSVG, axisErr, coreRatio, editSVGLabels, figTraces, panelDataURL, renderFigPanel, renderFigure, scheduleFigure } from './figures.js';
 
 import { UNIT_TO_CM, interpAge, topAt, guessRecordUnit, unitFactor, rangeOverlaps, minOf, maxOf } from './core.js';
+import { coreAgeRelation } from './coredata.js';
 import { validSavedRegion } from './edit.js';
 import { LOG_STYLE, ND_STYLE, mergedStyle, taxaOptions, validHexColor, buildLogSVG, compositeRows, guessAxisColumn, invertModel, orderCols, rowsRange, toAxis, windowCSV } from './log.js';
 import { t } from './i18n.js';
@@ -47,12 +48,12 @@ $('modeFig').addEventListener('click', () => setMode('fig'));
 
 export function scheduleLog(ms = 200) { if (mode !== 'log') return; clearTimeout(logTimer); logTimer = setTimeout(() => busy(renderLog), ms); }
 
-export function compositeData(axisPref = S.logView.axis, core = null) {
+export function compositeData(axisPref = S.logView.axis, core = null, ageModel = null) {
   const secs = [...(core?.sections || S.sections)].sort((a, b) => a.top * UNIT_TO_CM[a.units] - b.top * UNIT_TO_CM[b.units]);
   const base = core?.units || secs[0]?.units || 'cm';
   const f = (s) => UNIT_TO_CM[s.units] / UNIT_TO_CM[base];
   for (const s of secs) analyze(s);
-  const model = (core?.ageModel || S.age).model, axis = axisPref === 'age' && model ? 'age' : 'depth';
+  const model = ageModel ?? (core ? coreAgeRelation(core) : S.age.model), axis = axisPref === 'age' && model ? 'age' : 'depth';
   const rows = compositeRows(secs.map((s) => ({ name: s.name, bins: s.bins.map((b) => ({ ...b, dTop: b.dTop * f(s), dBottom: b.dBottom * f(s), depth: b.depth * f(s) })) })), { axis, model });
   return { secs, base, f, model, axis, rows };
 }

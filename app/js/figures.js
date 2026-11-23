@@ -831,7 +831,7 @@ export function renderFigure() {
     }
     else if (F.type === 'geolog') {
       if (geoRT.dirty) geoComputeSamples();
-      const log = buildGeoLog(figGeoCore(F), F.geoFeatures, { ...colView('figure'), taxa: F.taxaStyles?.geolog, imageView: F.geoView?.axis || F.geoView?.imgMode ? colView('figure') : null });
+      const log = buildGeoLog(figGeoCore(F), F.geoFeatures, { ...colView('figure'), taxa: F.taxaStyles?.geolog, imageView: F.geoView ? colView('figure') : null });
       syncColOrder('figure', log?.res.columns || []);
       svg = log?.res.svg || null;
     }
@@ -920,7 +920,18 @@ $('figPanel').addEventListener('change', (e) => {
   else if (el.dataset.frec != null) { const view = editableColView('figure'), set = new Set(view.records || S.records.flatMap((r) => r.series.filter((x) => x.show).map((x) => x.name))); if (el.checked) set.add(el.dataset.frec); else set.delete(el.dataset.frec); view.records = [...set]; }
   else if (el.id === 'figGeoCore') { F.geoCore = el.value; renderFigPanel(); }
   else if (el.dataset.fgeoTrack) {
-    const view = editableColView('figure'); view.tracks = geoFigureTracks(view); view.tracks[el.dataset.fgeoTrack] = el.checked;
+    const view = editableColView('figure'), track = el.dataset.fgeoTrack;
+    view.tracks = geoFigureTracks(view); view.tracks[track] = el.checked;
+    if (el.checked) {
+      if (Array.isArray(view.style?.colHide)) {
+        view.style.colHide = track === 'image'
+          ? view.style.colHide.filter((id) => !id.startsWith('image:'))
+          : view.style.colHide.filter((id) => id !== track);
+      }
+      for (const cb of document.querySelectorAll('[data-colord="figure"] [data-colshow]')) {
+        if (cb instanceof HTMLInputElement && (track === 'image' ? cb.dataset.colshow?.startsWith('image:') : cb.dataset.colshow === track)) cb.checked = true;
+      }
+    }
   }
   else if (el.dataset.fimage) {
     const view = editableColView('figure'), panels = new Set(view.imgPanels || []);
