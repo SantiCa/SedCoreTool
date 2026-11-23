@@ -2256,3 +2256,13 @@ Object.assign(D.en, {
   'bk.versionNote': 'The history keeps the last state of each day. Large sections are restored with the masks of that day.', 'bk.versionOpen': 'Open' });
 Object.assign(D.es, { 'pkg.withSources': 'El paquete lleva las máscaras de las secciones grandes. ¿Incluir también las imágenes originales que el proyecto conserva ({s})?\n\nAceptar: incluirlas (el paquete se abre con sus imágenes en otro ordenador).\nCancelar: solo las máscaras (las imágenes se localizan allí).' });
 Object.assign(D.en, { 'pkg.withSources': 'The package carries the masks of the large sections. Also include the original images the project keeps ({s})?\n\nOK: include them (the package opens with its images on another computer).\nCancel: masks only (the images are located there).' });
+Object.assign(D.es, {
+  'fig.rangeImage': 'Mostrar foto del sondeo',
+  'fig.rangeRecs': 'Proxies geoquímicos y otros registros',
+  'taxa.compact': 'Vista compacta de distribución (nombres inclinados)',
+});
+Object.assign(D.en, {
+  'fig.rangeImage': 'Show core photo',
+  'fig.rangeRecs': 'Geochemical proxies and other records',
+  'taxa.compact': 'Compact distribution view (tilted names)',
+});

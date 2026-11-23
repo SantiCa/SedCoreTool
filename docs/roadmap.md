@@ -19,20 +19,21 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.153, `ba98eb1`) is contained in it.
 - **Released:** V0.153 (22 Nov 2026): integrated into `master` as `ba98eb1`; tag `V0.153` and GitHub Release (8 files, run
   `45058054277`) at the owner's request. The V0.152 Release and tag were deleted at the owner's request; V0.84 and V0.48 remain.
-- **Last verified code commit:** Q22 (this commit): Windows checks passed (`npm test` 683/684, 1 skipped; `npm run typecheck`;
-  `tools/build_standalone.py`; `tests/e2e/smoke.mjs`). Last full `check_all --e2e`: V0.153 `35659e5`.
-- **GitHub:** M8.5.6b (`a100cdb`) `tests` (`45252529166`) green; Q21 (`405f04b`) `tests` (`45254239195`) green, *Desktop builds*
-  (`45254239078`) running. Read Q22 push results at the next checkpoint.
-- **Checks due:** none locally; GitHub results of Q21/Q22.
-- **Authorised run (23 Nov 2026):** `M8.5.6b` (done) → `Q21` (done) → `Q22` (done) → `Q23` (next).
+- **Last verified code commit:** Q23 (this commit): Windows checks passed (`npm test`, `npm run typecheck`, `tools/build_standalone.py`,
+  `tests/e2e/smoke.mjs`, `tools/sync_version.py --check`); Python unchanged since M8.5.6b `a100cdb` (`pytest -q` 1040 passed / 9 skipped,
+  `ruff`, `tests/e2e/desktop.mjs` off/on). Last full `check_all --e2e`: V0.153 `35659e5`.
+- **GitHub:** M8.5.6b (`a100cdb`) `tests` (`45252529166`) green; Q21 (`405f04b`) `tests` (`45254239195`) green; Q22 (`aff4f02`) `tests`
+  (`45255973513`) green, *Desktop builds* (`45255973699`) running. Read Q23 push result at the next session.
+- **Checks due:** none locally; GitHub result of Q23 push (and `desktop.mjs` if a full end-of-session e2e run is requested).
+- **Authorised run (23 Nov 2026):** `M8.5.6b` (done) → `Q21` (done) → `Q22` (done) → `Q23` (done).
 - **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete.
-- **Found, not done:** **Q23** (no coloured line at 0% taxon presence + photo/proxies in Ichnotaxa distribution + compact
-  distribution view in other figures; fast, medium), **Q20** (start-failure test races exit event; fast, low), **Q19** (intermittent macOS
+- **Found, not done:** **Q20** (start-failure test races exit event; fast, low), **Q19** (intermittent macOS
   "window: labels"; most capable, medium), **Q18** ("go to the trace" undone by first fit; fast, medium), **Q16** (canvas taller than pane;
   fast, medium), **Q17** (spurious BUSY notices; most capable, medium), **Q11** (hostile ML settings), **Q12** (evicted placeholder).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
-- **Next:** **Q23** (fast/medium, last card of the authorised run `M8.5.6b → Q21 → Q22 → Q23`). On M8.5: **M8.5.8** is unblocked (most capable/medium).
+- **Next:** **M8.5.8** (most capable/medium, now unblocked after M8.5.6b passed Y9; write its steps before starting), or any ready Q-card
+  (**Q20** fast/low; **Q18**/**Q16**/**Q11**/**Q12** fast/medium; **Q19**/**Q17** most capable/medium).
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.7 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
   long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 is approved.
@@ -1074,14 +1075,15 @@ web/frontend security, UI correctness and architecture cards sit here.
     (5) + extended `tests/e2e/multiproxy-figure.mjs`. Checks (Windows): `npm test` (683 passed, 1 skipped), `npm run typecheck`,
     `tools/build_standalone.py`, `tests/e2e/smoke.mjs`. Not measured: macOS, Linux.
 
-- [ ] **Q23 - Zero-presence taxon line removal, photo/proxies in *Ichnotaxa distribution*, and compact distribution view in other figures** — state: Ready (requested by maintainer on V0.153, 23 Nov 2026; authorised).
-  - *Goal:* (1) when a taxon's presence/abundance is `0`, no coloured line or polygon stroke is drawn across 0-presence intervals in any figure; (2) *Ichnotaxa distribution* (`range`) can optionally include the core photo and geochemical proxies / other records; (3) the compact *Ichnotaxa distribution* presentation (tilted 60° italic taxon headers, compact equal-width taxon columns) is available in *Whole interpreted core*, *Core log*, and *Multiproxy log of a core* as well.
-  - *Read first:* `app/js/log.js` (`taxaOptions`, `taxonColumnSVG`, `buildLogSVG`, `buildRangeSVG`); `app/js/figures.js` (`rangeSVG`, `renderFigPanel` `range` branch, `coreSVG`, `renderFigure`); `app/js/columns.js` (`taxaFormHTML`, `changeTaxaPresentation`); `app/js/i18n.js`; `tests/app/` taxon/figure tests.
-  - *Change:* (1) in `log.js` (`taxonColumnSVG` and `buildRangeSVG`), split abundance runs into positive sub-runs (tapering cleanly at adjacent zero boundaries without stroking along consecutive zero rows) so 0% intervals draw no coloured line in kite, line, or area modes; (2) in `figures.js` (`range` panel and `rangeSVG`) and `log.js` (`buildRangeSVG`), add opt-in core photo (default off, reusing `coreImages` / image panel controls) and opt-in geochemical proxies / external records of the core (both `S.records` and `curCore().proxies`), with column ordering/visibility and horizontal axes; (3) add a compact distribution header/layout option (`taxa.compact` or preset in `taxaOptions` / `taxaFormHTML`, default off) supported by `buildLogSVG` so *Whole interpreted core*, *Core log*, and *Multiproxy log of a core* can render ichnotaxa with compact columns and 60° rotated italic headers; (4) bilingual UI strings in `app/js/i18n.js`.
-  - *Do not touch:* default appearance of existing saved projects when the new options are unset, scientific calculations, `legacy/`.
-  - *Model:* fast, effort medium.
-  - *Tests:* Node tests in `tests/app/` verifying: (a) 0%-presence intervals emit no coloured polygon/polyline stroke across the zero span in kite, line and area modes (both `buildLogSVG` and `buildRangeSVG`); (b) `buildRangeSVG` with optional image and proxy records emits `<image>` and proxy tracks while preserving defaults when omitted; (c) `buildLogSVG` with compact taxon mode renders 60° rotated taxon headers and compact columns; plus `npm test`, `npm run typecheck`, `tools/build_standalone.py`, `tests/e2e/smoke.mjs`.
-  - *Done when:* all tests pass and `app.js` does not grow.
+- [x] **Q23 - Zero-presence taxon line removal, photo/proxies in *Ichnotaxa distribution*, and compact distribution view in other figures** (done 23 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased)).
+  - *As built (23 Nov 2026; `flash` sub-agent, reviewed by director):* added `positiveRuns` and `horizontalAxisScale` in `app/js/log.js`
+    so `kite`, `line` and `area` modes emit polygons/polylines only for positive sub-runs (`> 0`, no coloured strokes over 0-presence intervals)
+    in both `taxonColumnSVG` and `buildRangeSVG`; added opt-in core photo (`#figRangeImage`, `figureImageHTML`) and geochemical proxies /
+    records (`[data-range-rec]`, `rangeRecordNames`, `rangeSelectedRecords`, `axesFormHTML`) to *Ichnotaxa distribution* (`rangeSVG` & `buildRangeSVG`,
+    default off); added `taxa.compact` (`data-taxa="compact"`, default off) in `taxaOptions`, `taxaFormHTML` and `buildLogSVG` for narrow
+    ichnotaxon columns with `-60°` rotated italic headers across *Whole interpreted core*, *Core log* and *Multiproxy log of a core*; added ES/EN
+    strings in `app/js/i18n.js`. `app.js` 4,602 → 4,602 lines (untouched). Tests: `tests/app/range-and-taxa.test.mjs`. Checks (Windows):
+    `npm test`, `npm run typecheck`, `tools/build_standalone.py`, `tests/e2e/smoke.mjs`, `tools/sync_version.py --check`. Not measured: macOS, Linux.
 
 - [ ] **Q19 - `tiled-sections.mjs` "window: labels" fails intermittently on macOS** (found by M8.4.11, 22 Nov 2026; most capable, effort
   medium: it may be a lost edit, not only a test race). First attempt of run `44977813249` on `1d166e7`: the section reopened with a window

@@ -366,8 +366,56 @@ export function wrapTitle(text, w) {
  * titles for the bioturbation and ichnotaxa columns; fontSize and whether title/subtitle are drawn.
  */
 /**
+ * Split a contiguous run into maximal sub-runs where `isPositive(row)` holds.
+ * @template T
+ * @param {readonly T[]} rows
+ * @param {(row: T) => boolean} isPositive
+ * @returns {T[][]}
+ */
+function positiveRuns(rows, isPositive) {
+  const subs = [];
+  let cur = [];
+  for (const row of rows) {
+    if (isPositive(row)) cur.push(row);
+    else if (cur.length) { subs.push(cur); cur = []; }
+  }
+  if (cur.length) subs.push(cur);
+  return subs;
+}
+
+/**
+ * Shared horizontal axis scale, grid lines, and top tick SVG for log and range record tracks.
+ */
+function horizontalAxisScale(c, lo, hi, reverse, ticks, st, top, H) {
+  const ax = (st.axes || {})[c.id || c.key] || {};
+  if (ax.min != null && ax.min !== '') lo = +ax.min;
+  if (ax.max != null && ax.max !== '') hi = +ax.max;
+  if (ax.rev) reverse = !reverse;
+  if (ax.log && !(lo > 0) && ax.min == null) lo = hi > 0 ? hi / 1000 : 0.001;
+  if (!(hi > lo) || (ax.log && !(lo > 0))) throw new Error('Invalid horizontal axis: max > min; logarithmic limits must be positive.');
+  const lg = !!ax.log, tf = (v) => (lg ? Math.log10(Math.max(v, 1e-12)) : v), L0 = tf(lo), L1 = tf(hi);
+  const sx = (v) => f2(c.x + ((reverse ? L1 - tf(v) : tf(v) - L0) / (L1 - L0 || 1)) * c.w);
+  sx.base = sx(lg ? lo : Math.min(Math.max(0, lo), hi));
+  if (ax.step > 0 && !lg) { ticks = []; for (let v = Math.ceil(lo / ax.step) * ax.step; v <= hi && ticks.length < 400; v += ax.step) ticks.push(v); }
+  else if (ax.div > 0 || lg) {
+    if (lg) { ticks = []; for (let e = Math.floor(L0); e <= Math.ceil(L1); e++) { const v = 10 ** e; if (v >= lo * 0.999 && v <= hi * 1.001) ticks.push(v); } }
+    else ticks = Array.from({ length: Math.min(400, Math.round(ax.div)) + 1 }, (_, k) => lo + ((hi - lo) * k) / Math.min(400, Math.round(ax.div)));
+  }
+  const fmtT = (v) => (ax.dec != null && ax.dec !== '' ? (+v).toFixed(Math.min(6, Math.max(0, +ax.dec))) : lbl(v));
+  const parts = [];
+  for (const tv of (ticks || niceTicks(lo, hi, 3)).filter((v) => v >= lo && v <= hi)) {
+    const xx = sx(tv);
+    if (st.grid) parts.push(`<line x1="${xx}" y1="${top}" x2="${xx}" y2="${top + H}" stroke="${st.gridColor}" stroke-width="0.6"/>`);
+    parts.push(`<line x1="${xx}" y1="${top - 4}" x2="${xx}" y2="${top}" stroke="${st.subColor}" stroke-width="0.6"/>`);
+    parts.push(`<text x="${xx}" y="${top - 7}" text-anchor="middle" fill="${st.subColor}" font-size="9">${fmtT(tv)}</text>`);
+  }
+  sx.log = lg;
+  return { sx, axisSvg: parts.join('') };
+}
+
+/**
  * Resolve new presentation options without changing the defaults of existing figures.
- * @param {Partial<{layout:string, abundance:string, occurrence:string, source:string, opacity:number, scale:string, values:boolean, hidden:string[]}>} [value]
+ * @param {Partial<{layout:string, abundance:string, occurrence:string, source:string, opacity:number, scale:string, values:boolean, compact:boolean, hidden:string[]}>} [value]
  * @param {{range?:boolean, style?:{speciesMode?:string, speciesHide?:string[], colHide?:string[]}, display?:string, source?:string}} [context]
  */
 export function taxaOptions(value = {}, { range = false, style = {}, display = 'symbols', source = 'all' } = {}) {
@@ -378,7 +426,7 @@ export function taxaOptions(value = {}, { range = false, style = {}, display = '
   const defaults = { layout: range ? 'separate' : style?.speciesMode || 'stack',
     abundance: range ? (kite ? 'kite' : ['bars', 'both'].includes(display) ? 'bars' : 'none') : 'bars',
     occurrence: range && ['symbols', 'both', 'kiteSymbols'].includes(display) ? 'symbols' : 'none',
-    source, opacity: range && kite ? 0.85 : 1, scale: 'auto', values: false,
+    source, opacity: range && kite ? 0.85 : 1, scale: 'auto', values: false, compact: false,
     hidden: [...spHide, ...colHide] };
   const q = { ...defaults, ...raw };
   for (const [key, choices] of Object.entries({ layout: ['stack', 'overlay', 'separate'], abundance: ['none', 'bars', 'line', 'area', 'kite'],
@@ -387,8 +435,9 @@ export function taxaOptions(value = {}, { range = false, style = {}, display = '
   }
   q.opacity = (typeof q.opacity === 'number' || typeof q.opacity === 'string') && Number.isFinite(+q.opacity) ? Math.max(0, Math.min(1, +q.opacity)) : defaults.opacity;
   q.values = q.values === true;
+  q.compact = q.compact === true;
   q.hidden = Array.isArray(q.hidden) ? q.hidden.filter((name) => typeof name === 'string') : [];
-  if (q.layout === 'stack' && ['kite', 'none'].includes(q.abundance)) q.layout = 'separate';
+  if (q.compact || (q.layout === 'stack' && ['kite', 'none'].includes(q.abundance))) q.layout = 'separate';
   return q;
 }
 
@@ -468,19 +517,23 @@ function taxonColumnSVG({ rows, classes, points, q, x, width, top, height, y, fr
       }
       if (mirrored) {
         const half = (row) => Math.max(0, Math.min(width / 2, Math.abs(sx(valueAt(row)) - baseX) / 2));
-        const coords = [[center, y(data[0].a0)], ...data.map((row) => [center + half(row), y((row.a0 + row.a1) / 2)]),
-          [center, y(data.at(-1).a1)], ...[...data].reverse().map((row) => [center - half(row), y((row.a0 + row.a1) / 2)])];
-        segments.push(`<polygon points="${coords.map(([xx, yy]) => `${f2(xx)},${yy}`).join(' ')}" fill="${color}" stroke="${color}" stroke-width="0.8"/>`);
+        for (const sub of positiveRuns(data, (row) => valueAt(row) > 0)) {
+          const coords = [[center, y(sub[0].a0)], ...sub.map((row) => [center + half(row), y((row.a0 + row.a1) / 2)]),
+            [center, y(sub.at(-1).a1)], ...[...sub].reverse().map((row) => [center - half(row), y((row.a0 + row.a1) / 2)])];
+          segments.push(`<polygon points="${coords.map(([xx, yy]) => `${f2(xx)},${yy}`).join(' ')}" fill="${color}" stroke="${color}" stroke-width="0.8"/>`);
+        }
       } else if (q.abundance === 'line' || q.abundance === 'area') {
         const rightAt = (row) => sx(beforeAt(row) + valueAt(row));
-        const right = [[rightAt(data[0]), y(data[0].a0)], ...data.map((row) => [rightAt(row), y((row.a0 + row.a1) / 2)]),
-          [rightAt(data.at(-1)), y(data.at(-1).a1)]];
-        if (q.abundance === 'line') segments.push(`<polyline points="${right.map(([xx, yy]) => `${f2(xx)},${yy}`).join(' ')}" fill="none" stroke="${color}" stroke-width="1.2"/>`);
-        else {
-          const leftAt = (row) => stacked ? sx(beforeAt(row)) : baseX;
-          const left = [[leftAt(data.at(-1)), y(data.at(-1).a1)], ...[...data].reverse().map((row) => [leftAt(row), y((row.a0 + row.a1) / 2)]),
-            [leftAt(data[0]), y(data[0].a0)]];
-          segments.push(`<polygon points="${[...right, ...left].map(([xx, yy]) => `${f2(xx)},${yy}`).join(' ')}" fill="${color}" stroke="${color}" stroke-width="0.8"/>`);
+        const leftAt = (row) => stacked ? sx(beforeAt(row)) : baseX;
+        for (const sub of positiveRuns(data, (row) => valueAt(row) > 0)) {
+          const right = [[leftAt(sub[0]), y(sub[0].a0)], ...sub.map((row) => [rightAt(row), y((row.a0 + row.a1) / 2)]),
+            [leftAt(sub.at(-1)), y(sub.at(-1).a1)]];
+          if (q.abundance === 'line') segments.push(`<polyline points="${right.map(([xx, yy]) => `${f2(xx)},${yy}`).join(' ')}" fill="none" stroke="${color}" stroke-width="1.2"/>`);
+          else {
+            const left = [[leftAt(sub.at(-1)), y(sub.at(-1).a1)], ...[...sub].reverse().map((row) => [leftAt(row), y((row.a0 + row.a1) / 2)]),
+              [leftAt(sub[0]), y(sub[0].a0)]];
+            segments.push(`<polygon points="${[...right, ...left].map(([xx, yy]) => `${f2(xx)},${yy}`).join(' ')}" fill="${color}" stroke="${color}" stroke-width="0.8"/>`);
+          }
         }
       }
       if (q.values) for (const row of data) {
@@ -542,13 +595,13 @@ export function buildLogSVG(o) {
   const L = { total: 'Bioturbation (%)', species: 'Ichnotaxa (%)', image: 'Core', ...(o.labels || {}) };
   if (st.totalTitle) L.total = st.totalTitle;
   if (st.speciesTitle) L.species = st.speciesTitle;
-  const H = o.height, top = 84, from = o.from, to = o.to;
+  const H = o.height, from = o.from, to = o.to;
   const span = to - from || 1;
-  const y = (v) => f2(top + ((v - from) / span) * H);
   const rows = o.rows.filter((r) => r.a1 > from && r.a0 < to);
   /** @type {{key:string, w:number, x?:number, id?:string, title?:string, full?:string, cls?:any, img?:any, band?:any, rec?:any}[]} */
   const cols = [];
-  const t = o.tracks, cw = o.colWidths || {}, wOf = (id, d) => Math.max(30, Math.min(600, +cw[id] || d));
+  const t = o.tracks, cw = o.colWidths || {}, wOf = (id, d, min = 30) => Math.max(min, Math.min(600, +cw[id] || d));
+  const compactTaxa = !!(taxa && taxa.compact && t.species);
   cols.push({ key: 'axis', w: 64 });
   if (t.image && o.images?.length) for (const im of o.images) cols.push({ key: 'image', w: im.w || o.imageWidth || 60, title: im.title || L.image, img: im });   // V0.23: several panels
   else if (t.image && o.image) cols.push({ key: 'image', w: o.imageWidth || 60, title: L.image, img: o.image });
@@ -557,8 +610,10 @@ export function buildLogSVG(o) {
   const spHide = new Set(Array.isArray(st.speciesHide) ? st.speciesHide : []), presentClasses = taxa
     ? visibleTaxa(o.taxonClasses || o.classes, rows, o.taxonPoints || [], taxa, from, to)
     : o.classes.filter((c) => !spHide.has(c.name) && rows.some((r) => (r.classPct[c.index] || 0) > 0));
-  if (t.species && (taxa ? taxa.layout === 'separate' : st.speciesMode === 'separate')) for (const k of presentClasses) { const id = 'sp:' + k.name; cols.push({ key: 'sp1', id, w: wOf(id, taxa?.occurrence === 'names' || taxa?.occurrence === 'both' ? 140 : 70), title: k.name, cls: k }); }
-  else if (t.species) cols.push({ key: 'species', id: 'species', w: wOf('species', 150), title: L.species });
+  if (t.species && (taxa ? taxa.layout === 'separate' : st.speciesMode === 'separate')) {
+    const defSpW = compactTaxa ? (taxa.occurrence === 'names' || taxa.occurrence === 'both' ? 110 : 30) : (taxa?.occurrence === 'names' || taxa?.occurrence === 'both' ? 140 : 70);
+    for (const k of presentClasses) { const id = 'sp:' + k.name; cols.push({ key: 'sp1', id, w: wOf(id, defSpW, compactTaxa ? 20 : 30), title: k.name, cls: k }); }
+  } else if (t.species) cols.push({ key: 'species', id: 'species', w: wOf('species', 150), title: L.species });
   if (t.BI) cols.push({ key: 'BI', id: 'BI', w: wOf('BI', 46), title: 'BI' });
   if (t.ii) cols.push({ key: 'ii', id: 'ii', w: wOf('ii', 46), title: 'ii' });
   for (const b of o.bands || []) { const id = 'band:' + (b.key || b.full || b.title); cols.push({ key: 'band', id, w: wOf(id, b.w || 46), title: b.title, full: b.full, band: b }); }
@@ -570,9 +625,19 @@ export function buildLogSVG(o) {
   cols.forEach((c, i) => { if (!c.id && c.key === 'image') c.id = 'image:' + (c.img?.title || i); });
   const allCols = cols.filter((c) => c.key !== 'axis').map((c) => ({ id: c.id, title: c.full || c.title, key: c.key }));
   orderCols(cols, taxa && !o.respectTaxonColumnVisibility ? { ...st, colHide: colHideArr.filter((id) => !id.startsWith('sp:')) } : st, 1);
+  const compactSpCols = compactTaxa ? cols.filter((c) => c.key === 'sp1') : [];
+  const longestTaxon = compactSpCols.length ? Math.max(8, maxOf(presentClasses.map((c) => String(c.name).length))) : 0;
+  const top = compactSpCols.length ? Math.max(84, 46 + Math.min(150, longestTaxon * 5.2 * 0.87)) : 84;
+  const y = (v) => f2(top + ((v - from) / span) * H);
   let x = 8;
-  for (const c of cols) { c.x = x; x += c.w + 14; }
-  const W = x;
+  for (let i = 0; i < cols.length; i++) {
+    const c = cols[i];
+    c.x = x;
+    const gap = compactTaxa && c.key === 'sp1' && cols[i + 1]?.key === 'sp1' ? 6 : 14;
+    x += c.w + gap;
+  }
+  const tiltRight = compactSpCols.length ? maxOf(compactSpCols.map((c) => c.x + c.w / 2 + 10 + Math.min(110, String(c.title || '').length * 5.2 * 0.5))) : 0;
+  const W = Math.max(x, Math.ceil(tiltRight));
   const taxonLegend = [...(t.species ? presentClasses : []), ...(o.legendClasses || [])].filter((c) =>
     (!taxa || !taxa.hidden.includes(c.name)) && (!o.respectTaxonColumnVisibility || !colHideArr.includes(taxa?.layout === 'separate' ? 'sp:' + c.name : 'species')));
   const seenL = new Set(), legendItems = [...taxonLegend, ...(o.bandLegend || []), ...(o.shadeLegend || [])].filter((k) => !seenL.has(k.name) && seenL.add(k.name));
@@ -595,36 +660,19 @@ export function buildLogSVG(o) {
   const frame = (c) => { if (st.frame) out.push(`<rect x="${c.x}" y="${top}" width="${c.w}" height="${H}" fill="none" stroke="${st.frameColor}" stroke-width="0.8"/>`); };
   // track names: up to two lines that fit the column width (V25); the full name is in the returned layout
   const title = (c) => {
-    if (c.w < 34 && c.title) { out.push(`<text transform="translate(${f2(c.x + c.w / 2 + 3)},80) rotate(-90)" text-anchor="start" font-size="9" font-weight="600" fill="${st.textColor}">${escXml(c.title)}</text>`); return; }   // V0.27: narrow columns, upright title
+    if (compactTaxa && c.key === 'sp1') {
+      out.push(`<text transform="translate(${f2(c.x + c.w / 2 + 3)},${top - 6}) rotate(-60)" font-style="${c.cls?.plain ? 'normal' : 'italic'}" font-weight="600" fill="${st.textColor}">${escXml(c.title)}</text>`);
+      return;
+    }
+    if (c.w < 34 && c.title) { out.push(`<text transform="translate(${f2(c.x + c.w / 2 + 3)},${top - 4}) rotate(-90)" text-anchor="start" font-size="9" font-weight="600" fill="${st.textColor}">${escXml(c.title)}</text>`); return; }   // V0.27: narrow columns, upright title
     const ls = wrapTitle(c.title, c.w);
-    out.push(`<text x="${c.x + c.w / 2}" y="${ls.length > 1 ? 46 : 54}" text-anchor="middle" font-weight="600" fill="${st.textColor}">${ls.map((l, i) => `<tspan x="${c.x + c.w / 2}" dy="${i ? 12 : 0}">${escXml(l)}</tspan>`).join('')}</text>`);
+    out.push(`<text x="${c.x + c.w / 2}" y="${ls.length > 1 ? top - 38 : top - 30}" text-anchor="middle" font-weight="600" fill="${st.textColor}">${ls.map((l, i) => `<tspan x="${c.x + c.w / 2}" dy="${i ? 12 : 0}">${escXml(l)}</tspan>`).join('')}</text>`);
   };
   // V0.6: axis of a column; the user may fix min/max, divisions, decimals, invert it or (records) use a log scale
   const xScale = (c, lo, hi, reverse = false, ticks = null) => {
-    const ax = (st.axes || {})[c.id || c.key] || {};
-    if (ax.min != null && ax.min !== '') lo = +ax.min;
-    if (ax.max != null && ax.max !== '') hi = +ax.max;
-    if (ax.rev) reverse = !reverse;
-    if (ax.log && !(lo > 0) && ax.min == null) lo = hi > 0 ? hi / 1000 : 0.001;
-    if (!(hi > lo) || (ax.log && !(lo > 0))) throw new Error('Invalid horizontal axis: max > min; logarithmic limits must be positive.');
-    const lg = !!ax.log, tf = (v) => (lg ? Math.log10(Math.max(v, 1e-12)) : v), L0 = tf(lo), L1 = tf(hi);
-    const sx = (v) => f2(c.x + ((reverse ? L1 - tf(v) : tf(v) - L0) / (L1 - L0 || 1)) * c.w);
-    sx.base = sx(lg ? lo : Math.min(Math.max(0, lo), hi));
-    if (ax.step > 0 && !lg) { ticks = []; for (let v = Math.ceil(lo / ax.step) * ax.step; v <= hi && ticks.length < 400; v += ax.step) ticks.push(v); }
-    else if (ax.div > 0 || lg) {
-      if (lg) { ticks = []; for (let e = Math.floor(L0); e <= Math.ceil(L1); e++) { const v = 10 ** e; if (v >= lo * 0.999 && v <= hi * 1.001) ticks.push(v); } }
-      else ticks = Array.from({ length: Math.min(400, Math.round(ax.div)) + 1 }, (_, k) => lo + ((hi - lo) * k) / Math.min(400, Math.round(ax.div)));
-    }
-    const fmtT = (v) => (ax.dec != null && ax.dec !== '' ? (+v).toFixed(Math.max(0, Math.min(6, +ax.dec))) : lbl(v));
-    out.push('</g><g>');
-    for (const tv of (ticks || niceTicks(lo, hi, 3)).filter((v) => v >= lo && v <= hi)) {
-      const xx = sx(tv);
-      if (st.grid) out.push(`<line x1="${xx}" y1="${top}" x2="${xx}" y2="${top + H}" stroke="${st.gridColor}" stroke-width="0.6"/>`);
-      out.push(`<line x1="${xx}" y1="${top - 4}" x2="${xx}" y2="${top}" stroke="${st.subColor}" stroke-width="0.6"/>`);
-      out.push(`<text x="${xx}" y="${top - 7}" text-anchor="middle" fill="${st.subColor}" font-size="9">${fmtT(tv)}</text>`);
-    }
-    out.push(`</g><g clip-path="url(#track-${c.x})">`);
-    sx.log = lg; return sx;
+    const { sx, axisSvg } = horizontalAxisScale(c, lo, hi, reverse, ticks, st, top, H);
+    out.push('</g><g>', axisSvg, `</g><g clip-path="url(#track-${c.x})">`);
+    return sx;
   };
 
   for (const c of cols) {
@@ -665,7 +713,7 @@ export function buildLogSVG(o) {
       if (d && line) out.push(`<path d="${d}" fill="none" stroke="${st.lineColor}" stroke-width="1.2"/>`);
     } else if (taxa && (c.key === 'species' || c.key === 'sp1')) {
       const drawing = taxonColumnSVG({ rows, classes: c.key === 'sp1' ? [c.cls] : presentClasses, points: o.taxonPoints || [],
-        q: taxa, x: c.x, width: c.w, top, height: H, y, from, to, axis: st.axes?.[c.id] || {}, ink: st.textColor, axisY: top - 7 });
+        q: taxa, x: c.x, width: c.w, top, height: H, y, from, to, axis: st.axes?.[c.id] || {}, ink: st.textColor, axisY: compactTaxa && c.key === 'sp1' ? top + H + 14 : top - 7 });
       out.push(`</g>${drawing.axis}<g clip-path="url(#track-${c.x})">${drawing.body}`);
     } else if (c.key === 'species') {
       const max = Math.max(1, maxOf(rows.map((r) => presentClasses.reduce((s, k) => s + (r.classPct[k.index] || 0), 0))));
@@ -780,21 +828,60 @@ export function abbrevs(names) {
 export function buildRangeSVG(o) {
   const K = mergedStyle(o.style);
   const taxa = o.taxa ? taxaOptions(o.taxa, { range: true, style: K, display: o.display }) : null;
-  if (taxa && taxa.layout !== 'separate') return buildLogSVG({ ...o, taxa, taxonPoints: o.points || [], records: [], tracks: { species: true, total: !!o.total }, labels: { total: o.totalLabel || 'Bioturbation (%)' } });
+  if (taxa && taxa.layout !== 'separate') return buildLogSVG({
+    ...o,
+    taxa,
+    taxonPoints: o.points || [],
+    image: o.image || null,
+    images: o.images || null,
+    imageWidth: o.imageWidth || 64,
+    records: o.records || [],
+    tracks: { image: !!(o.image || o.images?.length), species: true, total: !!o.total },
+    labels: { total: o.totalLabel || 'Bioturbation (%)', image: o.imageLabel || 'Core', ...(o.labels || {}) },
+  });
   const H = o.height, from = o.from, to = o.to, span = to - from || 1, colW = Math.max(16, Math.min(200, +o.colW || 30)), x0 = 72;   // V0.51: column width
-  const longest = Math.max(8, maxOf(o.classes.map((c) => String(c.name).length))), top = 46 + Math.min(150, longest * 5.2 * 0.87);   // room for names at 60°
+  const rawImages = Array.isArray(o.images) && o.images.length ? o.images : (o.image ? [o.image] : []);
+  const rawRecords = Array.isArray(o.records) ? o.records : [];
+  const hasExtra = rawImages.length > 0 || rawRecords.length > 0;
+  const longest = Math.max(8, maxOf(o.classes.map((c) => String(c.name).length)));
+  const top = hasExtra ? Math.max(84, 46 + Math.min(150, longest * 5.2 * 0.87)) : 46 + Math.min(150, longest * 5.2 * 0.87);   // room for names at 60° and record/image headers
   const y = (v) => f2(top + ((v - from) / span) * H);
   const rows = (o.rows || []).filter((r) => r.a1 > from && r.a0 < to), display = o.display || 'symbols';
   const spHide = new Set(Array.isArray(K.speciesHide) ? K.speciesHide : []);   // V0.31
+  const cw = o.colWidths || {}, wOf = (id, d, min = 30) => Math.max(min, Math.min(600, +cw[id] || d));
   const inWin = (p) => (p.a != null ? p.a >= from && p.a <= to : p.a1 > from && p.a0 < to);
-  const cols = taxa ? visibleTaxa(o.classes, rows, o.points || [], taxa, from, to).map((c) => ({ ...c }))
-    : o.classes.filter((c) => !spHide.has(c.name)).filter((c) => rows.some((r) => (r.classPct?.[c.index] || 0) > 0) || [...(o.presence || []), ...(o.points || [])].some((p) => p.index === c.index && inWin(p)));
-  const allCols = cols.map((c) => ({ id: 'sp:' + c.name, title: c.name, key: 'sp' }));   // V0.33: ichnotaxon columns can be reordered and hidden
-  cols.forEach((c) => { c.id = 'sp:' + c.name; });
+  const spCols = (taxa ? visibleTaxa(o.classes, rows, o.points || [], taxa, from, to).map((c) => ({ ...c }))
+    : o.classes.filter((c) => !spHide.has(c.name)).filter((c) => rows.some((r) => (r.classPct?.[c.index] || 0) > 0) || [...(o.presence || []), ...(o.points || [])].some((p) => p.index === c.index && inWin(p))))
+    .map((c) => ({ ...c, key: 'sp', id: 'sp:' + c.name, title: c.name, w: colW }));
+  const imageLabel = o.imageLabel || o.labels?.image || 'Core';
+  const totalLabel = o.totalLabel || o.labels?.total || 'Bioturbation (%)';
+  const cols = [
+    ...rawImages.map((im, idx) => {
+      const id = 'image:' + (im.title || idx), defW = im.w || o.imageWidth || 64;
+      return { key: 'image', id, title: im.title || imageLabel, w: cw[id] != null ? wOf(id, defW, 8) : defW, img: im };
+    }),
+    ...(o.total ? [{ key: 'total', id: 'total', title: totalLabel, w: cw.total != null ? wOf('total', 90) : 90 }] : []),
+    ...spCols,
+    ...rawRecords.map((r) => ({ key: 'rec', id: 'rec:' + r.name, title: r.name, w: wOf('rec:' + r.name, o.recWidth || 100), rec: r })),
+  ];
+  const allCols = (hasExtra ? cols : spCols).map((c) => ({ id: c.id, title: c.title, key: c.key }));   // V0.33: columns can be reordered and hidden
   const colHideArr = Array.isArray(K.colHide) ? K.colHide.filter((id) => typeof id === 'string') : [];
   orderCols(cols, taxa ? { ...K, colHide: colHideArr.filter((id) => !id.startsWith('sp:')) } : K);
-  const totW = o.total ? 90 : 0, W = x0 + totW + (o.total ? 14 : 0) + cols.length * colW + 20 + Math.min(110, longest * 5.2 * 0.5), Htot = top + H + 26;
-  const out = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${Htot}" viewBox="0 0 ${W} ${Htot}" font-family="IBM Plex Sans, Arial, Helvetica, sans-serif" font-size="10">`,
+  let x = x0 + 10;
+  for (let i = 0; i < cols.length; i++) {
+    const c = cols[i];
+    c.x = x;
+    const gap = i < cols.length - 1 ? (c.key === 'sp' && cols[i + 1].key === 'sp' ? 0 : 14) : 0;
+    x += c.w + gap;
+  }
+  const spVisible = cols.filter((c) => c.key === 'sp'), lastIsSp = cols.at(-1)?.key === 'sp';
+  const tiltMargin = spVisible.length
+    ? Math.max(14, ...(lastIsSp ? [10 + Math.min(110, longest * 5.2 * 0.5)] : []),
+      ...spVisible.map((c) => c.x + c.w / 2 + 10 + Math.min(110, String(c.name).length * 5.2 * 0.5) - x))
+    : 14;
+  const W = !hasExtra && lastIsSp ? x0 + (o.total ? 90 + 14 : 0) + spVisible.length * colW + 20 + Math.min(110, longest * 5.2 * 0.5) : x + tiltMargin;
+  const Htot = top + H + 26;
+  const out = [`<svg xmlns="http://www.w3.org/2000/svg"${rawImages.length ? ' xmlns:xlink="http://www.w3.org/1999/xlink"' : ''} width="${W}" height="${Htot}" viewBox="0 0 ${W} ${Htot}" font-family="IBM Plex Sans, Arial, Helvetica, sans-serif" font-size="10">`,
     `<rect width="${W}" height="${Htot}" fill="${K.bgColor}"/>`, `<text x="8" y="16" font-size="13" font-weight="600" fill="${K.textColor}">${escXml(o.title || '')}</text>`];
   if (o.subtitle) out.push(`<text x="8" y="31" fill="${K.subColor}">${escXml(o.subtitle)}</text>`);
   for (const v of verticalTicks(from, to, H, K)) {
@@ -804,60 +891,98 @@ export function buildRangeSVG(o) {
   for (const e of extraTicks(from, to, H, K)) out.push(`<line x1="${x0 - e.len}" y1="${y(e.v)}" x2="${x0}" y2="${y(e.v)}" stroke="${K.textColor}" stroke-width="0.6"/>`);
   out.push(`<line x1="${x0}" y1="${top}" x2="${x0}" y2="${top + H}" stroke="${K.textColor}" stroke-width="0.8"/>`);
   out.push(`<text transform="translate(16,${top + H / 2}) rotate(-90)" text-anchor="middle" font-weight="600" fill="${K.textColor}">${escXml(o.axisLabel || '')}</text>`);
+  const gaps = noDataGaps(rows);
   {   // V0.23: NO DATA intervals across the plot (style: show, fill, colours, label)
     SYM = { k: +K.markSize > 0 ? +K.markSize : 1, stroke: K.markStroke === 'none' ? 'none' : validHexColor(K.markStroke, '#ffffff'), sw: K.markStrokeW != null && +K.markStrokeW >= 0 ? +K.markStrokeW : 0.8 };
     out.push(`<defs>${noDataDefs(K)}</defs>`);
-    for (const g of noDataGaps(rows)) { const ya = y(Math.max(g.a0, from)), yb = y(Math.min(g.a1, to)); out.push(noDataRect(K, x0, W - 14 - x0, ya, yb - ya, o.labels?.noData)); }
+    for (const g of gaps) { const ya = y(Math.max(g.a0, from)), yb = y(Math.min(g.a1, to)); out.push(noDataRect(K, x0, W - 14 - x0, ya, yb - ya, o.labels?.noData)); }
   }
-  const rangeScale = (id, x, w, defaultMax) => {
+  const rangeScale = (id, rx, w, defaultMax) => {
     const ax = id === 'species' && display === 'symbols' ? {} : K.axes?.[id] || {}, hi = ax.max ?? defaultMax, lo = ax.min ?? (ax.log ? hi / 1000 : 0);
     if (!(hi > lo) || (ax.log && !(lo > 0))) throw new Error('Invalid horizontal axis: max > min; logarithmic limits must be positive.');
     const tf = (v) => ax.log ? Math.log10(Math.max(v, 1e-12)) : v;
-    const sx = (v) => x + (ax.rev ? 1 - (tf(v) - tf(lo)) / (tf(hi) - tf(lo)) : (tf(v) - tf(lo)) / (tf(hi) - tf(lo))) * w;
+    const sx = (v) => rx + (ax.rev ? 1 - (tf(v) - tf(lo)) / (tf(hi) - tf(lo)) : (tf(v) - tf(lo)) / (tf(hi) - tf(lo))) * w;
     let ticks = niceTicks(lo, hi, ax.div || 3);
     if (ax.log) { ticks = []; for (let e = Math.ceil(Math.log10(lo)); e <= Math.floor(Math.log10(hi)); e++) ticks.push(10 ** e); }
     else if (ax.step > 0) { ticks = []; for (let k = Math.ceil(lo / ax.step); k * ax.step <= hi && ticks.length < 400; k++) ticks.push(k * ax.step); }
     else if (ax.div > 0) { const n = Math.min(400, Math.max(1, Math.round(ax.div))); ticks = Array.from({length:n + 1}, (_, i) => lo + i * (hi - lo) / n); }
     for (const v of (Object.keys(ax).length ? ticks : []).filter((v) => v >= lo && v <= hi)) out.push(`<text x="${f2(sx(v))}" y="${top + H + 14}" text-anchor="middle" font-size="8">${ax.dec != null ? v.toFixed(Math.min(6, Math.max(0, ax.dec))) : lbl(v)}</text>`);
-    out.push(`<defs><clipPath id="range-${x}"><rect x="${x}" y="${top}" width="${id === 'species' && !Object.keys(ax).length ? w + 6 : w}" height="${H}"/></clipPath></defs>`);
+    out.push(`<defs><clipPath id="range-${rx}"><rect x="${rx}" y="${top}" width="${id === 'species' && !Object.keys(ax).length ? w + 6 : w}" height="${H}"/></clipPath></defs>`);
     sx.base = sx(lo); sx.log = !!ax.log; return sx;
   };
-  let x = x0 + 10;
-  if (o.total) {
-    out.push(`<text x="${x + totW / 2}" y="${top - 8}" text-anchor="middle" font-weight="600" fill="${K.textColor}">${escXml(o.totalLabel || 'Bioturbation (%)')}</text>`);
-    const sx = rangeScale('total', x, totW, 100);
-    out.push(`<g clip-path="url(#range-${x})">`);
-    for (const r of rows) if (r.pct != null && (!sx.log || r.pct > 0)) out.push(`<rect x="${f2(Math.min(sx.base, sx(r.pct)))}" y="${y(r.a0)}" width="${f2(Math.abs(sx(r.pct) - sx.base))}" height="${f2(Math.max(0.4, y(r.a1) - y(r.a0)))}" fill="${K.barColor}"/>`);
-    out.push('</g>');
-    out.push(`<rect x="${x}" y="${top}" width="${totW}" height="${H}" fill="none" stroke="${K.frameColor}" stroke-width="0.8"/>`);
-    x += totW + 14;
-  }
+  const drawColTitle = (c) => {
+    if (c.w < 34 && c.title) {
+      out.push(`<text transform="translate(${f2(c.x + c.w / 2 + 3)},${top - 4}) rotate(-90)" text-anchor="start" font-size="9" font-weight="600" fill="${K.textColor}">${escXml(c.title)}</text>`);
+      return;
+    }
+    const ls = wrapTitle(c.title, c.w);
+    out.push(`<text x="${c.x + c.w / 2}" y="${ls.length > 1 ? top - 38 : top - 30}" text-anchor="middle" font-weight="600" fill="${K.textColor}">${ls.map((l, i) => `<tspan x="${c.x + c.w / 2}" dy="${i ? 12 : 0}">${escXml(l)}</tspan>`).join('')}</text>`);
+  };
   for (const c of cols) {
-    const cx = x + colW / 2, max = Math.max(1e-9, maxOf(rows.map((r) => r.classPct?.[c.index] || 0))), cColor = validHexColor(c.color, '#777777');
+    if (c.key === 'image') {
+      drawColTitle(c);
+      out.push(`<defs><clipPath id="range-${c.x}"><rect x="${c.x}" y="${top}" width="${c.w}" height="${H}"/></clipPath></defs><g clip-path="url(#range-${c.x})">`);
+      out.push(`<image x="${c.x}" y="${top}" width="${c.w}" height="${H}" preserveAspectRatio="none" href="${escXml(c.img.href)}" xlink:href="${escXml(c.img.href)}"/>`);
+      if (K.ndImage) for (const g of gaps) { const ya = y(Math.max(g.a0, from)), yb = y(Math.min(g.a1, to)); out.push(noDataRect(K, c.x, c.w, ya, yb - ya, o.labels?.noData)); }
+      if (typeof c.img.draw === 'function') out.push(c.img.draw(c.x, c.w, y));
+      if (c.img.marks !== false) for (const m of o.marks || []) if (m.a >= from && m.a <= to) out.push(traceSymbol(c.x + Math.min(1, Math.max(0, m.xf)) * c.w, y(m.a), m.color, m.symbol));
+      out.push('</g>');
+      if (K.frame) out.push(`<rect x="${c.x}" y="${top}" width="${c.w}" height="${H}" fill="none" stroke="${K.frameColor}" stroke-width="0.8"/>`);
+      continue;
+    }
+    if (c.key === 'total') {
+      out.push(`<text x="${c.x + c.w / 2}" y="${top - 8}" text-anchor="middle" font-weight="600" fill="${K.textColor}">${escXml(totalLabel)}</text>`);
+      const sx = rangeScale('total', c.x, c.w, 100);
+      out.push(`<g clip-path="url(#range-${c.x})">`);
+      for (const r of rows) if (r.pct != null && (!sx.log || r.pct > 0)) out.push(`<rect x="${f2(Math.min(sx.base, sx(r.pct)))}" y="${y(r.a0)}" width="${f2(Math.abs(sx(r.pct) - sx.base))}" height="${f2(Math.max(0.4, y(r.a1) - y(r.a0)))}" fill="${K.barColor}"/>`);
+      out.push('</g>');
+      out.push(`<rect x="${c.x}" y="${top}" width="${c.w}" height="${H}" fill="none" stroke="${K.frameColor}" stroke-width="0.8"/>`);
+      continue;
+    }
+    if (c.key === 'rec') {
+      drawColTitle(c);
+      const validPts = (c.rec.pts || []).filter((p) => Number.isFinite(p?.[0]) && Number.isFinite(p?.[1]) && p[0] >= from - span * 0.02 && p[0] <= to + span * 0.02);
+      if (validPts.length) {
+        const [lo, hi] = niceRange(minOf(validPts.map((p) => p[1])), maxOf(validPts.map((p) => p[1])));
+        const { sx, axisSvg } = horizontalAxisScale(c, lo, hi, !!c.rec.reverse, null, K, top, H);
+        const recColor = validHexColor(c.rec.color, '#0b5394');
+        out.push(axisSvg, `<defs><clipPath id="range-${c.x}"><rect x="${c.x}" y="${top}" width="${c.w}" height="${H}"/></clipPath></defs><g clip-path="url(#range-${c.x})">`);
+        const recRuns = positiveRuns(c.rec.pts || [], (p) => Number.isFinite(p?.[0]) && Number.isFinite(p?.[1]) && p[0] >= from - span * 0.02 && p[0] <= to + span * 0.02 && (!sx.log || p[1] > 0));
+        for (const run of recRuns) {
+          if (run.length === 1) out.push(`<circle cx="${sx(run[0][1])}" cy="${y(run[0][0])}" r="1.5" fill="${recColor}"/>`);
+          else out.push(`<polyline fill="none" stroke="${recColor}" stroke-width="1.1" points="${run.map((p) => `${sx(p[1])},${y(p[0])}`).join(' ')}"/>`);
+        }
+        out.push('</g>');
+      }
+      if (K.frame) out.push(`<rect x="${c.x}" y="${top}" width="${c.w}" height="${H}" fill="none" stroke="${K.frameColor}" stroke-width="0.8"/>`);
+      continue;
+    }
+    const cx = c.x + colW / 2, max = Math.max(1e-9, maxOf(rows.map((r) => r.classPct?.[c.index] || 0))), cColor = validHexColor(c.color, '#777777');
     out.push(`<text transform="translate(${cx + 3},${top - 6}) rotate(-60)" font-style="${c.plain ? 'normal' : 'italic'}" font-weight="600" fill="${K.textColor}">${escXml(c.name)}</text>`);
     out.push(`<line x1="${cx}" y1="${top}" x2="${cx}" y2="${top + H}" stroke="${K.gridColor}" stroke-width="0.6"/>`);
     if (taxa) {
-      const drawing = taxonColumnSVG({ rows, classes: [c], points: o.points || [], q: taxa, x: x + 3, width: colW - 6,
+      const drawing = taxonColumnSVG({ rows, classes: [c], points: o.points || [], q: taxa, x: c.x + 3, width: colW - 6,
         top, height: H, y, from, to, axis: K.axes?.['sp:' + c.name] || K.axes?.species || {},
         ink: K.textColor, axisY: top + H + 14, markHollow: o.markHollow });
-      out.push(drawing.axis, `<defs><clipPath id="range-${x}"><rect x="${x}" y="${top}" width="${colW}" height="${H}"/></clipPath></defs><g clip-path="url(#range-${x})">${drawing.body}</g>`);
-      x += colW; continue;
+      out.push(drawing.axis, `<defs><clipPath id="range-${c.x}"><rect x="${c.x}" y="${top}" width="${colW}" height="${H}"/></clipPath></defs><g clip-path="url(#range-${c.x})">${drawing.body}</g>`);
+      continue;
     }
-    const sx = rangeScale('species', x, colW - 6, max);
-    out.push(`<g clip-path="url(#range-${x})">`);
+    const sx = rangeScale('species', c.x, colW - 6, max);
+    out.push(`<g clip-path="url(#range-${c.x})">`);
     // V0.51: display = symbols | bars | both | kite (abundance as two symmetric curves) | kiteSymbols
     const showSym = display === 'symbols' || display === 'both' || display === 'kiteSymbols', kite = display === 'kite' || display === 'kiteSymbols';
     const custom = Object.keys(K.axes?.species || {}).length > 0;
-    if (kite) {   // one closed outline per run of intervals with data: right side downwards, left side back up
+    if (kite) {   // one closed outline per positive sub-run of intervals with data: right side downwards, left side back up
       const half = (v) => (custom ? Math.abs(sx(v) - sx.base) : (v / max) * (colW - 6)) / 2;
       const runs = []; let cur = [];
       for (const r of [...rows].sort((a, b) => a.a0 - b.a0)) { if (r.classPct?.[c.index] == null || r.pct == null) { if (cur.length) runs.push(cur); cur = []; continue; } cur.push(r); }
       if (cur.length) runs.push(cur);
       for (const run of runs) {
-        if (!run.some((r) => r.classPct[c.index] > 0)) continue;
-        const pts = run.map((r) => [half(r.classPct[c.index]), y((r.a0 + r.a1) / 2)]), y0 = y(run[0].a0), y1 = y(run.at(-1).a1);
-        const right = [[0, y0], ...pts, [0, y1]].map(([h, yy]) => `${f2(cx + h)},${f2(yy)}`), left = [...pts].reverse().map(([h, yy]) => `${f2(cx - h)},${f2(yy)}`);
-        out.push(`<polygon points="${[...right, ...left].join(' ')}" fill="${cColor}" fill-opacity="0.85" stroke="${cColor}" stroke-width="0.6" stroke-linejoin="round"/>`);
+        for (const sub of positiveRuns(run, (r) => r.classPct[c.index] > 0)) {
+          const pts = sub.map((r) => [half(r.classPct[c.index]), y((r.a0 + r.a1) / 2)]), y0 = y(sub[0].a0), y1 = y(sub.at(-1).a1);
+          const right = [[0, y0], ...pts, [0, y1]].map(([h, yy]) => `${f2(cx + h)},${f2(yy)}`), left = [...pts].reverse().map(([h, yy]) => `${f2(cx - h)},${f2(yy)}`);
+          out.push(`<polygon points="${[...right, ...left].join(' ')}" fill="${cColor}" fill-opacity="0.85" stroke="${cColor}" stroke-width="0.6" stroke-linejoin="round"/>`);
+        }
       }
     }
     for (const r of display === 'bars' || display === 'both' ? rows : []) {
@@ -882,7 +1007,6 @@ export function buildRangeSVG(o) {
       out.push(traceSymbol(cx, y(mid) + 4, cColor, c.symbol));
     }
     out.push('</g>');
-    x += colW;
   }
   out.push('</svg>');
   return { svg: out.join(''), width: W, height: Htot, columns: allCols };

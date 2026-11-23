@@ -421,7 +421,7 @@ export function speciesFormHTML(st) {
   return taxaFormHTML(taxaOptions(st.taxa, { style: st }), 'column');
 }
 /** Figure-specific controls use the same vocabulary and settings as the core column. */
-export function taxaFormHTML(q, scope = 'figure') {
+export function taxaFormHTML(q, scope = 'figure', { showCompact = true } = {}) {
   const select = (key, choices) => `<label class="f"><span>${t('taxa.' + key)}</span><select data-taxa="${esc(key)}">${choices.map((value) =>
     `<option value="${esc(value)}" ${q[key] === value ? 'selected' : ''} ${key === 'layout' && value === 'stack' && ['none', 'kite'].includes(q.abundance) ? 'disabled' : ''}>${t('taxa.' + key + '.' + value)}</option>`).join('')}</select></label>`;
   const names = S.classes.filter((c) => c.id !== 'artifact').map((c) => c.name), hidden = new Set(q.hidden);
@@ -430,6 +430,7 @@ export function taxaFormHTML(q, scope = 'figure') {
     ${select('occurrence', ['none', 'symbols', 'names', 'both'])}${select('source', ['all', 'objects', 'marks'])}
     ${select('scale', ['auto', 'percent'])}<label class="f"><span>${t('taxa.opacity')}</span><input type="number" data-taxa="opacity" min="0" max="100" step="5" value="${Math.round(q.opacity * 100)}"></label></div>
     <label class="chk"><input type="checkbox" data-taxa="values" ${q.values ? 'checked' : ''}><span>${t('taxa.values')}</span></label>
+    ${showCompact ? `<label class="chk"><input type="checkbox" data-taxa="compact" ${q.compact ? 'checked' : ''}><span>${t('taxa.compact')}</span></label>` : ''}
     <div class="chk2">${names.map((name) => `<label class="chk"><input type="checkbox" data-taxa-hide="${esc(name)}" ${hidden.has(name) ? '' : 'checked'}><span><i>${esc(name)}</i></span></label>`).join('')}</div>
     <div class="row"><button type="button" class="btn small" data-taxa-all="1">${t('mp.all')}</button><button type="button" class="btn small" data-taxa-all="0">${t('mp.none')}</button></div>
     <p class="note">${t('taxa.note')}</p><button type="button" class="btn small ghost" data-taxa-reset>${t('taxa.reset')}</button></div>`;
@@ -441,7 +442,7 @@ function changeTaxaPresentation(el, reset = false) {
   if (figure && F.type === 'geolog') context.style = { ...context.style, colHide: [] };
   const current = figure ? F.taxaStyles?.[F.type] ?? (['core', 'log'].includes(F.type) ? colView('figure').style?.taxa : undefined) : S.logView.style?.taxa;
   const q = taxaOptions(current, context);
-  const rebuild = reset || ['layout', 'abundance', 'occurrence', 'source'].includes(el.dataset.taxa);
+  const rebuild = reset || ['layout', 'abundance', 'occurrence', 'source', 'compact'].includes(el.dataset.taxa);
   if (el.dataset.taxaAll != null) {
     q.hidden = el.dataset.taxaAll === '1' ? [] : S.classes.filter((c) => c.id !== 'artifact').map((c) => c.name);
   } else if (el.dataset.taxaHide != null) {
@@ -449,6 +450,7 @@ function changeTaxaPresentation(el, reset = false) {
   } else if (el.dataset.taxa) {
     const key = el.dataset.taxa;
     q[key] = el.type === 'checkbox' ? el.checked : key === 'opacity' ? (el.value === '' ? 1 : +el.value / 100) : el.value;
+    if (key === 'layout' && q.layout !== 'separate') q.compact = false;
   }
   if (figure) {
     const enableTaxa = !reset && F.type === 'geolog' && !colView('figure').tracks?.species;
