@@ -6,6 +6,17 @@ export const DEFAULT_PX_BUDGET = 9e8;
 export const DEFAULT_REDUCED_BUDGET = 256 * 1024 * 1024;
 
 /**
+ * Determine how `ensurePixels` should rebuild working pixels for section `s`.
+ * @param {any} s
+ * @returns {'grey' | 'tiled' | 'decode'}
+ */
+export function pixelSourceKind(s) {
+  if (s?.tiled?.missing || s?.placeholder || s?.frozen === 'engine') return 'grey';
+  if (s?.tiled) return 'tiled';
+  return 'decode';
+}
+
+/**
  * Push `item` to the most-recently-used end of `list`.
  * @template T
  * @param {T[]} list

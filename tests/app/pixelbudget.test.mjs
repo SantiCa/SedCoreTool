@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   createPixelBudget,
   createPixelLoader,
+  pixelSourceKind,
   reducedCacheBytes,
   workingPixelBytes,
 } from '../../app/js/pixelbudget.js';
@@ -250,4 +251,66 @@ test('touchWorkingPixels and touchReducedCache respect protected sections', () =
   assert.ok(active._lc !== null);
   assert.equal(other._lc, null);
   assert.ok(newest._lc !== null);
+});
+
+test('pixelSourceKind classifies normal, tiled, missing-tiled, placeholder, and frozen-engine sections', () => {
+  assert.equal(pixelSourceKind({ name: 'normal' }), 'decode');
+  assert.equal(pixelSourceKind({ name: 'tiled', tiled: { manifest: 'm1' } }), 'tiled');
+  assert.equal(pixelSourceKind({ name: 'missing', tiled: { missing: true } }), 'grey');
+  assert.equal(pixelSourceKind({ frozen: 'engine', placeholder: { name: 'orig' } }), 'grey');
+  assert.equal(pixelSourceKind({ frozen: 'engine' }), 'grey');
+});
+
+test('placeholder section evicted under pxBudget reloads grey working pixels without error or mutating placeholder', async () => {
+  const placeholder = Object.freeze({ name: 'saved', tiled: Object.freeze({ manifest: 'abc' }) });
+  const placeholderSec = makeSection('placeholder', 10, 5); // 400 B working
+  placeholderSec.frozen = 'engine';
+  placeholderSec.placeholder = placeholder;
+  placeholderSec.orig = new Uint8ClampedArray(10 * 5 * 4).fill(128);
+  placeholderSec.enh = new Uint8ClampedArray(10 * 5 * 4).fill(128);
+
+  const otherSec = makeSection('other', 10, 5); // 400 B working
+  otherSec.orig = new Uint8ClampedArray(10 * 5 * 4);
+  otherSec.enh = new Uint8ClampedArray(10 * 5 * 4);
+
+  const budget = createPixelBudget({ pxBudget: 500, reducedBudget: 1000 });
+  budget.touchWorkingPixels(placeholderSec);
+  budget.touchWorkingPixels(otherSec);
+
+  assert.equal(placeholderSec.orig, null);
+  assert.equal(placeholderSec.enh, null);
+
+  const errors = [];
+  const greyRgba = (w, h) => {
+    const out = new Uint8ClampedArray(w * h * 4).fill(128);
+    for (let i = 3; i < out.length; i += 4) out[i] = 255;
+    return out;
+  };
+  const loader = createPixelLoader({
+    pin: (s) => budget.pinned.add(s),
+    unpin: (s) => budget.pinned.delete(s),
+    onError: (err) => errors.push(err),
+    ensurePixels: async (s) => {
+      const kind = pixelSourceKind(s);
+      if (kind === 'decode') throw new Error('locked');
+      const rgba = kind === 'grey' ? greyRgba(s.w, s.h) : new Uint8ClampedArray(s.w * s.h * 4);
+      s.orig = rgba;
+      s.enh = new Uint8ClampedArray(rgba);
+      budget.touchWorkingPixels(s);
+      return s;
+    },
+  });
+
+  loader.need(placeholderSec);
+  await loader.drain();
+
+  assert.deepEqual(errors, []);
+  assert.ok(placeholderSec.orig instanceof Uint8ClampedArray);
+  assert.equal(placeholderSec.orig.length, 10 * 5 * 4);
+  assert.equal(placeholderSec.orig[0], 128);
+  assert.equal(placeholderSec.orig[3], 255);
+  assert.ok(placeholderSec.enh instanceof Uint8ClampedArray);
+  assert.equal(placeholderSec.enh.length, 10 * 5 * 4);
+  assert.equal(placeholderSec.placeholder, placeholder);
+  assert.deepEqual(placeholderSec.placeholder, { name: 'saved', tiled: { manifest: 'abc' } });
 });

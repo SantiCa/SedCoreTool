@@ -19,13 +19,13 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.153, `ba98eb1`) is contained in it.
 - **Released:** V0.153 (22 Nov 2026): integrated into `master` as `ba98eb1`; tag `V0.153` and GitHub Release (8 files, run
   `45058054277`) at the owner's request. The V0.152 Release and tag were deleted at the owner's request; V0.84 and V0.48 remain.
-- **Last verified code commit:** Q18 (this commit): Windows checks passed (`verifyGotoTrace` in headless Chrome, `npm test` 691/691, `npm run typecheck`, `tools/build_standalone.py`). Previous M8.5.8 (`beb9181`) also passed `tests/e2e/desktop.mjs` engine off and on; Python unchanged since M8.5.6b `a100cdb` (`pytest -q` 1040 passed / 9 skipped, `ruff`). Last full `check_all --e2e`: V0.153 `35659e5`.
-- **GitHub:** Q20 (`7ae518d`): `tests` (`45716409787`) green; *Desktop builds* (`45716409785`) in progress. M8.5.8 (`beb9181`): `tests` (`45715645182`) green; earlier M8.5.8 (`8c4b71e`) *Desktop builds* (`45703990995`) green on Windows, macOS and Linux.
-- **Checks due:** none locally; read GitHub results of Q18.
+- **Last verified code commit:** Q12 (this commit): Windows checks passed (`npm test` 693/693, `npm run typecheck`, `tools/build_standalone.py`). Previous Q18 (`8576fd8`) also passed `verifyGotoTrace` in headless Chrome; M8.5.8 (`beb9181`) passed `tests/e2e/desktop.mjs` engine off and on; Python unchanged since M8.5.6b `a100cdb` (`pytest -q` 1040 passed / 9 skipped, `ruff`). Last full `check_all --e2e`: V0.153 `35659e5`.
+- **GitHub:** Q20 (`7ae518d`) `tests` (`45716409787`) and M8.5.8 (`beb9181`) `tests` (`45715645182`) green; earlier M8.5.8 (`8c4b71e`) *Desktop builds* (`45703990995`) green on Windows, macOS and Linux. Q18 (`8576fd8`) and Q12 (this push) running on GitHub.
+- **Checks due:** none locally; read GitHub `tests` and *Desktop builds* results of the Q12 push.
 - **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete.
-- **Found, not done:** **Q12** (evicted placeholder; fast, medium), **Q16** (canvas taller than pane; fast, medium), **Q11** (hostile ML settings), **Q19** (intermittent macOS "window: labels"; most capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
+- **Found, not done:** **Q16** (canvas taller than pane; fast, medium), **Q11** (hostile ML settings), **Q19** (intermittent macOS "window: labels"; most capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
-- **Next:** ready Q-cards (**Q12**/**Q16**/**Q11** fast/medium; **Q19**/**Q17** most capable/medium), remaining slice (a) cards before **M8.5.9** (record axis conversion `log.js::toAxis`, computed columns `sheet.js`, age-model parsing `parseAgeModelDetailed`/`baconToAgeText`, Y7 public functions — design/write cards first, most capable/high or medium), or cut V0.154 on request.
+- **Next:** remaining slice (a) cards before **M8.5.9** (record axis conversion `log.js::toAxis`, computed columns `sheet.js`, age-model parsing `parseAgeModelDetailed`/`baconToAgeText`, Y7 public functions — design/write cards first, most capable/high or medium), or remaining Q-cards (**Q16**/**Q11** fast/medium; **Q19**/**Q17** most capable/medium), or cut V0.154 on request.
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.8 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
   long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 is approved.
@@ -1010,12 +1010,8 @@ web/frontend security, UI correctness and architecture cards sit here.
   to the defaults with a visible note; *Tests:* Node tests with a non-numeric `k` and an unknown method; *Do not touch:* the classifier's
   results for valid settings. *Done when:* the tests pass and `tests/e2e/html-injection.mjs` can use hostile `k` and `method` too.
 
-- [ ] **Q12 - A placeholder section cannot rebuild its working image after eviction** (found by M8.4.39, 21 Nov 2026; fast tier, effort medium).
-  A tiled section kept as a placeholder after a failed engine opening (`placeholderSection` in `app.js`: `frozen: 'engine'`, no `tiled`) holds a
-  grey `orig`; when `pxTouch` evicts it, `ensurePixels` calls `decodeWorking`, which throws the "locked" message, so the section shows an
-  error instead of its grey image. *Change:* `ensurePixels` regenerates the grey image for a placeholder, as M8.4.39 did for `s.tiled.missing`;
-  *Tests:* a desktop e2e step (or a Node test if the branch moves to a module) that evicts a placeholder and reopens it; *Do not touch:* the
-  placeholder's saved record. *Done when:* the evicted placeholder reopens grey without an error.
+- [x] **Q12 - A placeholder section cannot rebuild its working image after eviction** (done 25 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased)).
+  - *As built (25 Nov 2026; `flash` sub-agent, reviewed by director):* added pure `pixelSourceKind(s)` in `app/js/pixelbudget.js` returning `'grey'` for `s?.tiled?.missing || s?.placeholder || s?.frozen === 'engine'`, `'tiled'` for `s?.tiled`, and `'decode'` otherwise; wired `ensurePixels(s)` in `app/js/app.js` to dispatch on `pixelSourceKind(s)` without touching `s.placeholder` (`app/js/app.js` unchanged at 4,602 lines). Added unit tests in `tests/app/pixelbudget.test.mjs` covering all 5 `pixelSourceKind` cases plus evicting and reloading a frozen placeholder section under `createPixelBudget` / `createPixelLoader`. Verified on Windows: `pixelbudget.test.mjs` (7/7), `npm test` (693/693), `npm run typecheck`, `tools/build_standalone.py`.
 
 - [x] **Q14 - `tiled-sections.mjs` failed in the M8.4.42/M8.4.43 blocks** (done 22 Nov 2026: a test wait fixed and the top bar no longer grows; [CHANGELOG](../CHANGELOG.md#unreleased); record: [history](roadmap-history.md#q14---tiled-sectionsmjs-fails-in-the-m8443-split-block-on-all-three-systems)).
 

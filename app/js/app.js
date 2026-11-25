@@ -6,7 +6,7 @@ import { createEngineClient } from './engineclient.js';
 import { createEngineAnalysis } from './engineanalysis.js';
 import { createEngineAges } from './engineages.js';
 import { createMaskChanges, indexRangeOfPairs } from './maskchanges.js';
-import { createPixelBudget, createPixelLoader, lruPush } from './pixelbudget.js';
+import { createPixelBudget, createPixelLoader, lruPush, pixelSourceKind } from './pixelbudget.js';
 export { pxPerCm, depthAtRow, rowAtDepth };
 import { withProvenance, ageModelText, bioturbationTable, objectsTable } from './exportio.js';
 
@@ -150,7 +150,7 @@ function ensurePixels(s) {
   if (s.orig) { pxTouch(s); return Promise.resolve(s); }
   if (s._loading) return s._loading;
   s._loading = (async () => {
-    const r = s.tiled?.missing ? { w: s.w, h: s.h, rgba: greyRgba(s.w, s.h), rgba16: null } : s.tiled ? await tiledWorkingImage(s.tiled) : await decodeWorking(s, s.ds);   // M8.4.39: no pyramid, grey
+    const src = pixelSourceKind(s), r = src === 'grey' ? { w: s.w, h: s.h, rgba: greyRgba(s.w, s.h), rgba16: null } : src === 'tiled' ? await tiledWorkingImage(s.tiled) : await decodeWorking(s, s.ds);   // M8.4.39 / Q12
     if (r.w !== s.w || r.h !== s.h) console.warn('image size differs from the stored masks', s.name, r.w, r.h, s.w, s.h);
     // V0.44: the enhancement of a section being opened is computed in the worker; orig and enh are set together
     const input = r.rgba16 || r.rgba;
