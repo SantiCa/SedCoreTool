@@ -51,21 +51,24 @@ async function clientFixture(t, options = {}) {
   const client = new EngineClient({ executable: python, script, version: 'test', runtimeId, captureDiagnostics: true, ...options });
   t.after(() => client.stop());
   const started = performance.now(), starting = client.start(), child = client.child;
-  let exited = null, spawnError = null;
+  let exited = null, spawnError = null, sawStdout = false;
   child?.once('exit', (code, signal) => { exited ??= { code, signal, atMs: Math.round(performance.now() - started) }; });
   child?.once('error', (error) => { spawnError ??= String(error?.message || error); });
+  child?.stdout?.once('data', () => { sawStdout = true; });
   const record = async (entry) => { if (startLog) await fs.appendFile(startLog, JSON.stringify({ test: t.name, platform: process.platform, ...entry }) + '\n'); };
   try {
     await starting;
   } catch (error) {
     const failedMs = Math.round(performance.now() - started);
-    const exitedFirst = exited !== null && exited.atMs <= failedMs;
+    const timedOut = failedMs >= client.options.startTimeoutMs - 50;
+    // Wait for client.exited before classifying: Node may close stdout and reject start() slightly before delivering the child's exit event.
     await Promise.race([client.exited, new Promise((resolve) => setTimeout(resolve, 2000))]);
+    const exitedFirst = !spawnError && !timedOut && !sawStdout && exited !== null;
     const evidence = {
       code: error?.code ?? null, failedMs, deadlineMs: client.options.startTimeoutMs, spawnError,
       reason: spawnError ? 'the process could not be started'
-        : exitedFirst ? 'the process exited before its handshake'
-          : failedMs >= client.options.startTimeoutMs - 50 ? 'no handshake within the start deadline' : 'the handshake was refused or malformed',
+        : timedOut ? 'no handshake within the start deadline'
+          : exitedFirst ? 'the process exited before its handshake' : 'the handshake was refused or malformed',
       exit: exitedFirst ? exited : null, stderr: client.stderr.toString('utf8').split(/\r?\n/).filter(Boolean).slice(-20),
     };
     await record({ ok: false, ...evidence });
@@ -89,9 +92,10 @@ async function upload(client, data) {
 test('a start that fails says why: the process exited first, or no handshake came within the start deadline', { skip: !python }, async (t) => {
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'engine-start-'));
   t.after(() => fs.rm(folder, { recursive: true, force: true }));
-  const exits = path.join(folder, 'exits.py'), silent = path.join(folder, 'silent.py');
+  const exits = path.join(folder, 'exits.py'), silent = path.join(folder, 'silent.py'), malformed = path.join(folder, 'malformed.py');
   await fs.writeFile(exits, "import sys\nsys.stderr.write('engine could not import its runtime\\n')\nsys.exit(3)\n");
   await fs.writeFile(silent, 'import time\ntime.sleep(30)\n');
+  await fs.writeFile(malformed, "import sys, time\nsys.stdout.buffer.write(b'not-a-frame\\n')\nsys.stdout.buffer.flush()\ntime.sleep(30)\n");
   await assert.rejects(clientFixture(t, { script: exits }), (error) => {
     const evidence = JSON.parse(error.message.replace('engine did not start: ', ''));
     assert.equal(error.code, 'ENGINE_UNAVAILABLE');
@@ -104,6 +108,12 @@ test('a start that fails says why: the process exited first, or no handshake cam
     const evidence = JSON.parse(error.message.replace('engine did not start: ', ''));
     assert.equal(evidence.reason, 'no handshake within the start deadline');
     assert.ok(evidence.failedMs >= 350 && evidence.deadlineMs === 400, JSON.stringify(evidence));
+    return true;
+  });
+  await assert.rejects(clientFixture(t, { script: malformed }), (error) => {
+    const evidence = JSON.parse(error.message.replace('engine did not start: ', ''));
+    assert.equal(evidence.reason, 'the handshake was refused or malformed');
+    assert.equal(evidence.exit, null);
     return true;
   });
 });

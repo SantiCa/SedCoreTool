@@ -19,23 +19,13 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.153, `ba98eb1`) is contained in it.
 - **Released:** V0.153 (22 Nov 2026): integrated into `master` as `ba98eb1`; tag `V0.153` and GitHub Release (8 files, run
   `45058054277`) at the owner's request. The V0.152 Release and tag were deleted at the owner's request; V0.84 and V0.48 remain.
-- **Last verified code commit:** M8.5.8 (this commit): Windows checks passed (`npm test` 691/691, `npm run typecheck`,
-  `tools/build_standalone.py`, `tests/e2e/desktop.mjs` engine off and on); `tests/e2e/smoke.mjs` stopped at unrelated
-  `navigation-preview.mjs` (4/257,928 px off by 1 on Chrome 158 ANGLE RTX 4070 D3D11). Python unchanged since M8.5.6b `a100cdb`
-  (`pytest -q` 1040 passed / 9 skipped, `ruff`). Last full `check_all --e2e`: V0.153 `35659e5`.
-- **GitHub:** Q23 (`007a7f6`): `tests` (`45258553666`) and *Desktop builds* (`45258553489`) green. M8.5.8 (`8c4b71e`): *Desktop builds*
-  (`45703990995`) green on Windows, macOS and Linux; `tests` (`45703990874`) failed in `data-table.mjs` (`dCsv` async microtask), fixed
-  in this commit (`verifyDataTable` green locally). Read push result at the next checkpoint.
-- **Checks due:** none locally; GitHub result of the M8.5.8 push (three-system `desktop.mjs` engine off/on).
+- **Last verified code commit:** Q20 (this commit; `node --test tests/app/engine.test.mjs` 25 passed / 1 skipped). Previous code commit M8.5.8 (`beb9181`): Windows checks passed (`npm test` 691/691, `npm run typecheck`, `tools/build_standalone.py`, `tests/e2e/desktop.mjs` engine off and on, `verifyDataTable`); `tests/e2e/smoke.mjs` stopped at unrelated `navigation-preview.mjs` (4/257,928 px off by 1 on Chrome 158 ANGLE RTX 4070 D3D11). Python unchanged since M8.5.6b `a100cdb` (`pytest -q` 1040 passed / 9 skipped, `ruff`). Last full `check_all --e2e`: V0.153 `35659e5`.
+- **GitHub:** Q23 (`007a7f6`): `tests` (`45258553666`) and *Desktop builds* (`45258553489`) green. M8.5.8 (`8c4b71e`): *Desktop builds* (`45703990995`) green on Windows, macOS and Linux; `tests` (`45703990874`) failed in `data-table.mjs`, fixed in `beb9181` (runs `45715645182` and `45715645297` in progress).
+- **Checks due:** none locally; read GitHub results of `beb9181` and Q20.
 - **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete.
-- **Found, not done:** **Q20** (start-failure test races exit event; fast, low), **Q19** (intermittent macOS
-  "window: labels"; most capable, medium), **Q18** ("go to the trace" undone by first fit; fast, medium), **Q16** (canvas taller than pane;
-  fast, medium), **Q17** (spurious BUSY notices; most capable, medium), **Q11** (hostile ML settings), **Q12** (evicted placeholder).
-- **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
-  the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
-- **Next:** remaining slice (a) cards before **M8.5.9** (record axis conversion `log.js::toAxis`, computed columns `sheet.js`, age-model
-  parsing `parseAgeModelDetailed`/`baconToAgeText`, Y7 public functions — design/write cards first, most capable/high or medium), or ready
-  Q-cards (**Q20** fast/low; **Q18**/**Q16**/**Q11**/**Q12** fast/medium; **Q19**/**Q17** most capable/medium), or cut V0.154 on request.
+- **Found, not done:** **Q18** ("go to the trace" undone by first fit; fast, medium), **Q12** (evicted placeholder; fast, medium), **Q16** (canvas taller than pane; fast, medium), **Q11** (hostile ML settings), **Q19** (intermittent macOS "window: labels"; most capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
+- **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
+- **Next:** ready Q-cards (**Q18**/**Q12**/**Q16**/**Q11** fast/medium; **Q19**/**Q17** most capable/medium), remaining slice (a) cards before **M8.5.9** (record axis conversion `log.js::toAxis`, computed columns `sheet.js`, age-model parsing `parseAgeModelDetailed`/`baconToAgeText`, Y7 public functions — design/write cards first, most capable/high or medium), or cut V0.154 on request.
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.8 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
   long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 is approved.
@@ -1057,12 +1047,8 @@ web/frontend security, UI correctness and architecture cards sit here.
   Windows by forcing the pending fit. Fix in `tests/e2e/tiled-sections.mjs`: two animation frames after `selectSection`; `checkProbe` asserts
   the probe's view is still on screen when the pixels are read. Checks (Windows): `check_all --desktop --tiled` all passed. Q16 is unrelated.
   *Result:* run `44977813249` on `1d166e7`: the macOS step now passes; Windows, macOS and Linux green (macOS after a re-run, see Q19).
-- [ ] **Q20 - The start-failure test of the engine client classifies before the exit event** (found by V0.153, 22 Nov 2026; fast tier,
-  effort low). Run `45048923428` attempt 1 on `35659e5`, macOS: `tests/app/engine.test.mjs` "a start that fails says why" got 'the
-  handshake was refused or malformed' instead of 'the process exited before its handshake'; the re-run passed. In `clientFixture`,
-  `exitedFirst` is computed when `start()` rejects (stdout closed), and Node can deliver the child's `exit` event after that. *Change:*
-  classify after `client.exited` (or the 2 s wait already there), keeping "exited first" meaning the process ended without a handshake;
-  the program's own diagnosis is unchanged. *Done when:* the cause is stated and the test no longer depends on event order.
+- [x] **Q20 - The start-failure test of the engine client classifies before the exit event** (done 25 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased)).
+  - *As built (25 Nov 2026; `flash` sub-agent, reviewed by director):* in `tests/app/engine.test.mjs`, `clientFixture` now awaits `Promise.race([client.exited, timeout(2000)])` before classifying `exitedFirst` (checking `timedOut` first, and tracking `sawStdout` so a process that closes stdout and exits without a handshake is always classified as `'the process exited before its handshake'` regardless of stdout-vs-`exit` event ordering). Added a `malformed` fixture case confirming `'the handshake was refused or malformed'` when the child stays alive after writing a non-handshake line. `app/js/app.js` unchanged (4,602 lines). Verified on Windows: `node --test tests/app/engine.test.mjs` (25 passed, 1 skipped pyvips, 0 failed).
 
 - [x] **Q21 - Figure core photos flicker in an infinite eviction loop when sections exceed `pxBudget`** (done 23 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased)).
   - *As built (23 Nov 2026; `flash` sub-agent, reviewed by director):* extracted `app/js/pixelbudget.js` (`// @ts-check`, added to `tsconfig.strict.json`,
