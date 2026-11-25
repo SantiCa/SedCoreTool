@@ -16,6 +16,7 @@
     "app/js/tablesnapshot.js",
     "app/js/engineclient.js",
     "app/js/engineanalysis.js",
+    "app/js/engineages.js",
     "app/js/unetmodel.js",
     "app/js/state.js",
     "app/js/imageproc.js",

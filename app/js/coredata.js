@@ -12,11 +12,11 @@ import { compositeRows, invertModel } from './log.js';
  * @typedef {{axis: string, series: {name: string, x: (number | null)[], y: (number | null)[]}[]}} RecordLike
  * @typedef {{depth: (number | null)[] | null, age: (number | null)[] | null, vals: Record<string, (number | null)[]>, src: string}} CorePart
  * @typedef {{units?: DepthUnit, frozen?: boolean, sections: SectionLike[], records: RecordLike[],
- *   ageModel: {text: string, model: AgeModel | null},
+ *   ageModel: {text: string, units?: string, model: AgeModel | null},
  *   imp?: {depth: (number | null)[] | null, age: (number | null)[] | null, proxies?: Record<string, (number | null)[]>} | null,
  *   user?: Record<string, {d: (number | null)[], v: (number | null)[]}>,
  *   depth: number[] | null, age: (number | null)[] | null, proxies: Record<string, (number | null)[]>,
- *   src: Record<string, string>, ageText: string}} CoreLike
+ *   src: Record<string, string>, ageText: string, ageAnalysis?: any}} CoreLike
  */
 
 /**
@@ -76,9 +76,12 @@ export function computeCoreAges(depths, importedAges, model) {
 /**
  * Recompute the derived arrays of a core (all sources merged on the union of depths).
  * @param {CoreLike} c
- * @param {{classes?: readonly ClassLike[], bioLabel?: string, analyzeSection?: ((s: SectionLike) => void) | null, afterMerge?: ((c: CoreLike) => void) | null}} [options]
+ * @param {{classes?: readonly ClassLike[], bioLabel?: string, analyzeSection?: ((s: SectionLike) => void) | null,
+ *   afterMerge?: ((c: CoreLike) => void) | null,
+ *   resolveAges?: ((c: CoreLike, req: {depths: number[], importedAges: (number | null)[], model: AgeModel, depthUnit: string, ageUnit: string}) => void) | null,
+ *   clearAges?: ((c: CoreLike) => void) | null}} [options]
  */
-export function mergeCoreData(c, { classes = [], bioLabel = 'Bioturbation %', analyzeSection = null, afterMerge = null } = {}) {
+export function mergeCoreData(c, { classes = [], bioLabel = 'Bioturbation %', analyzeSection = null, afterMerge = null, resolveAges = null, clearAges = null } = {}) {
   if (c.frozen) return; // read-only copy (windows built from the light index)
   const parts = collectCoreParts(c, { classes, bioLabel, analyzeSection }), model = c.ageModel.model;
   if (c.imp) parts.push({ depth: c.imp.depth, age: c.imp.age, vals: c.imp.proxies || {}, src: 'imp' });
@@ -91,9 +94,20 @@ export function mergeCoreData(c, { classes = [], bioLabel = 'Bioturbation %', an
     for (const q of withDepth) /** @type {readonly (number | null)[]} */ (q.depth).forEach((d, i) => { if (d != null) rows.push({ d, a: q.age?.[i] ?? null, q, i }); });
     rows.sort((x, y) => /** @type {number} */ (x.d) - /** @type {number} */ (y.d));
     c.depth = rows.map((r) => /** @type {number} */ (r.d));
-    const ages = computeCoreAges(c.depth, rows.map((r) => r.a), model);
-    c.age = ages.some((v) => v != null) ? ages : null;
+    const importedAges = rows.map((r) => r.a);
+    if (resolveAges) {
+      if (model && c.depth.length && importedAges.some((v) => v == null)) {
+        resolveAges(c, { depths: c.depth, importedAges, model, depthUnit: c.units || 'm', ageUnit: c.ageModel.units || 'ka' });
+      } else {
+        clearAges?.(c);
+        c.age = importedAges.some((v) => v != null) ? importedAges : null;
+      }
+    } else {
+      const ages = computeCoreAges(c.depth, importedAges, model);
+      c.age = ages.some((v) => v != null) ? ages : null;
+    }
   } else {
+    clearAges?.(c);
     const q = parts.find((x) => x.age); // age-only core (no depth anywhere)
     if (q && q.age) q.age.forEach((a, i) => rows.push({ d: null, a, q, i }));
     c.depth = null; c.age = rows.length ? rows.map((r) => r.a) : null;

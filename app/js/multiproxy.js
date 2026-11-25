@@ -4,7 +4,7 @@ import { geoTrackOptions } from './figview.js';
 import { mergeAgeImports, mergeMixedImports } from './geo.js';
 import { MAP_PROJECTIONS, MAP_STYLE, MAP_SYMBOLS, METHODS, applyCatalogue, buildMapSVG, buildSamples, coreAges, coreFromRows, coresFromLongTable, crossValidateSteps, featureSeries, fitBBoxAspect, fitModel, fitModelSteps, fitSampleTransform, intervalsFromTable, intervalsOnAxis, labelSamples, layerFeatureNames, mapBBox, mapFrame, mapGeometry, mapSummary, orphanIntervals, predictLabel, segmentsOnAxis, tidyIntervals, transformSample, zoomBBox } from './geo.js';
 import { $, S, fetchAsset, fmt, sec, uid } from './state.js';
-import { DELIVERY, armed, busy, compositeMarks, compositeTaxonPoints, cropState, endCrop, esc, finalTestsHTML, holdoutHTML, holdoutIds, loadLib, makeCore, markDirty, openCoreDlg, refreshAllCores, refreshCoreData, renderCoreBar, runFinalGeo, safe, saveFile, scheduleFloat, toast, updateTip, view, withProv, zoomAt } from './app.js';
+import { DELIVERY, armed, busy, compositeMarks, compositeTaxonPoints, cropState, endCrop, esc, finalTestsHTML, holdoutHTML, holdoutIds, loadLib, makeCore, markDirty, openCoreDlg, refreshAllCores, refreshCoreData, renderCoreBar, runFinalGeo, safe, saveFile, scheduleFloat, settleCoreAges, toast, updateTip, view, withProv, zoomAt } from './app.js';
 import { axesFormHTML, colOrderHTML, colorsFormHTML, columnImages, compositeData, logStyleOf, mode, scheduleLog, syncColOrder } from './columns.js';
 import { interpAge, parseAgeModel, toCSV } from './core.js';
 import { coreAgeRelation } from './coredata.js';
@@ -1654,7 +1654,9 @@ export function initMultiproxy() {
   });
   $('geoModelOut').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-c]'); if (!tr) return; S.geo.view.clf = tr.dataset.c; S.geo.view.clfTarget = tr.dataset.l; syncCurrent(); renderGeoPanel(); renderGeoModel(); });
   $('geoModelOut').addEventListener('change', (e) => { const g = e.target.dataset.group; if (!g) return; S.geo.groupNames[g] = e.target.value; markDirty(); scheduleLog(); });
-  $('geoPredCsv').addEventListener('click', () => {
+  $('geoPredCsv').addEventListener('click', async () => {
+    await settleCoreAges(S.cores);
+    if (geoRT.dirty) geoComputeSamples();
     if (!geoRT.samples.length) return;
     const st = S.geo.settings, rows = [['core', st.axis, 'depth', 'age', ...geoRT.featNames, 'label', 'label_source', 'predicted', 'probability']];
     geoRT.samples.forEach((s, i) => rows.push([geoCore(s.core)?.name, s.x, s.depth, s.age, ...s.raw, geoCat(geoRT.labels[i]?.label)?.name ?? '', geoRT.labels[i]?.source ?? '', geoCat(geoRT.preds[i]?.label)?.name ?? '', geoRT.preds[i]?.prob]));

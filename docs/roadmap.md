@@ -13,28 +13,29 @@ file and leave one line here.
 
 ## Status and handoff
 
-Updated 23 November 2026. Rules for this block: [AGENTS.md §1 step 8](../AGENTS.md#1-every-session-in-this-order) (about 30 lines, rewritten,
+Updated 25 November 2026. Rules for this block: [AGENTS.md §1 step 8](../AGENTS.md#1-every-session-in-this-order) (about 30 lines, rewritten,
 not appended). Earlier status records, check logs and audit texts: [roadmap-history.md § Status log](roadmap-history.md#status-log-until-21-november-2026).
 
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.153, `ba98eb1`) is contained in it.
 - **Released:** V0.153 (22 Nov 2026): integrated into `master` as `ba98eb1`; tag `V0.153` and GitHub Release (8 files, run
   `45058054277`) at the owner's request. The V0.152 Release and tag were deleted at the owner's request; V0.84 and V0.48 remain.
-- **Last verified code commit:** Q23 (this commit): Windows checks passed (`npm test`, `npm run typecheck`, `tools/build_standalone.py`,
-  `tests/e2e/smoke.mjs`, `tools/sync_version.py --check`); Python unchanged since M8.5.6b `a100cdb` (`pytest -q` 1040 passed / 9 skipped,
-  `ruff`, `tests/e2e/desktop.mjs` off/on). Last full `check_all --e2e`: V0.153 `35659e5`.
-- **GitHub:** M8.5.6b (`a100cdb`) `tests` (`45252529166`) green; Q21 (`405f04b`) `tests` (`45254239195`) green; Q22 (`aff4f02`) `tests`
-  (`45255973513`) green, *Desktop builds* (`45255973699`) running. Read Q23 push result at the next session.
-- **Checks due:** none locally; GitHub result of Q23 push (and `desktop.mjs` if a full end-of-session e2e run is requested).
-- **Authorised run (23 Nov 2026):** `M8.5.6b` (done) → `Q21` (done) → `Q22` (done) → `Q23` (done).
+- **Last verified code commit:** M8.5.8 (this commit): Windows checks passed (`npm test` 691/691, `npm run typecheck`,
+  `tools/build_standalone.py`, `tests/e2e/desktop.mjs` engine off and on); `tests/e2e/smoke.mjs` stopped at unrelated
+  `navigation-preview.mjs` (4/257,928 px off by 1 on Chrome 158 ANGLE RTX 4070 D3D11). Python unchanged since M8.5.6b `a100cdb`
+  (`pytest -q` 1040 passed / 9 skipped, `ruff`). Last full `check_all --e2e`: V0.153 `35659e5`.
+- **GitHub:** Q23 (`007a7f6`): `tests` (`45258553666`) and *Desktop builds* (`45258553489`) green (Windows, macOS, Linux). Read
+  M8.5.8's push result at the next session.
+- **Checks due:** none locally; GitHub result of the M8.5.8 push (three-system `desktop.mjs` engine off/on).
 - **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete.
 - **Found, not done:** **Q20** (start-failure test races exit event; fast, low), **Q19** (intermittent macOS
   "window: labels"; most capable, medium), **Q18** ("go to the trace" undone by first fit; fast, medium), **Q16** (canvas taller than pane;
   fast, medium), **Q17** (spurious BUSY notices; most capable, medium), **Q11** (hostile ML settings), **Q12** (evicted placeholder).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until
   the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
-- **Next:** **M8.5.8** (most capable/medium, now unblocked after M8.5.6b passed Y9; write its steps before starting), or any ready Q-card
-  (**Q20** fast/low; **Q18**/**Q16**/**Q11**/**Q12** fast/medium; **Q19**/**Q17** most capable/medium).
-- **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.7 done (including M8.5.6b).
+- **Next:** remaining slice (a) cards before **M8.5.9** (record axis conversion `log.js::toAxis`, computed columns `sheet.js`, age-model
+  parsing `parseAgeModelDetailed`/`baconToAgeText`, Y7 public functions — design/write cards first, most capable/high or medium), or ready
+  Q-cards (**Q20** fast/low; **Q18**/**Q16**/**Q11**/**Q12** fast/medium; **Q19**/**Q17** most capable/medium), or cut V0.154 on request.
+- **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.8 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
   long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 is approved.
 - **Open pull requests (Dependabot, against `master`, not merged):** #26 Electron 45.2.2 → 45.3.4, #24 `softprops/action-gh-release` 2 → 3.
@@ -751,15 +752,19 @@ after. The order is the order of this list; cards written later take the next fr
     wrapper delegating to `mergeCoreData` with `afterMerge` running `applyCellEdits` and `applyComputedColumns` untouched. `app.js` 4,647
     → 4,607 lines (-40); `APP_JS_CEILING` lowered to `4607`. Tests: `tests/app/coredata.test.mjs` (7). Checks (Windows): `npm test`
     674/674, `npm run typecheck` (0 new diagnostics), `tools/build_standalone.py` (2.94 MB, no name clashes), `tests/e2e/smoke.mjs` passed.
-- [ ] **M8.5.8 - Row ages of a core from the engine** (engine experiment; **Ready** after M8.5.6b passed Y9 on all cases up to 100,000 rows; steps to be written before starting).
-  - *Goal:* with the engine experiment on, the age column of each core's merged table comes from `core.ages/1` (rows with an imported age
-    keep it, as now); a core whose ages are pending shows it, exports wait for it, a failure is visible; with the flag off nothing changes.
-  - *Read first:* contract §9.4 (publication); `app/js/engineanalysis.js` (the pending, ready and error states of sections);
-    `app/js/coredata.js`.
-  - *Change (outline):* a pure module for the per-core state keyed by (target, revision); `coredata.js`; a step of `tests/e2e/desktop.mjs`
-    that compares the age column with the flag on and off on the public example within §9.8.
-  - *Model:* most capable, effort medium (every consumer of a core's table, exports included).
-  - *Done when:* written with the steps; at least the end-to-end comparison on three systems.
+- [x] **M8.5.8 - Row ages of a core from the engine** (done 25 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased)).
+  - *As built (25 Nov 2026; director on most capable / medium):* added pure module `app/js/engineages.js` (`// @ts-check`, added to
+    `tsconfig.strict.json`, `ORDER` in `tools/build_standalone.py`, ARCHITECTURE §3.2 and TECHNICAL_DOCUMENTATION §1.4) managing per-core
+    `core.ageAnalysis` (`pending`/`ready`/`error`) keyed by `(target, revision)`, caching unchanged inputs, aborting superseded requests,
+    recovering from resident-table loss (`INVALID_BUFFER`) and one automatic `ENGINE_UNAVAILABLE` restart, preserving imported ages and
+    never falling back to JavaScript on error. Hooked `app/js/coredata.js::mergeCoreData` (`resolveAges`/`clearAges`), shared one
+    `engineClient` in `app/js/app.js` (exposing `settleCoreAges`/`retryCoreAges`, wired into `refreshCoreData`, `setAge`, `resetState`),
+    added Data-tab pending/error banner with `#engineAgesRetry` and export waits in `app/js/datatab.js` (`dCsv`, plot CSV) and
+    `app/js/multiproxy.js` (`geoPredCsv`). `app.js` 4,602 → 4,602 lines (unchanged). Tests: `tests/app/engine-ages.test.mjs` (4) + age-parity
+    step in `tests/e2e/desktop.mjs` (`U1385I-1H`, `≤ 1e-9` and exact missing pattern, engine off and on). Checks (Windows): `npm test`
+    (691/691), `npm run typecheck`, `tools/build_standalone.py` (2.98 MB), `tests/e2e/desktop.mjs` off/on. `tests/e2e/smoke.mjs` stopped at
+    unrelated `navigation-preview.mjs` (4/257,928 px off by 1 on Chrome 158 ANGLE RTX 4070 D3D11; verified in GitHub CI). Not measured
+    locally: macOS, Linux (checked via GitHub CI on push).
 - [ ] **M8.5.9 - Milestone gate of slice (a).** Before it come the remaining cards of slice (a), written after M8.5.6: record axis
   conversion (`log.js::toAxis`), computed columns (`sheet.js`, a restricted evaluator, never Python `eval`), age-model text and Bacon
   tables (`parseAgeModelDetailed`, `baconToAgeText`), the record reader if Y2 asks for it, and the public functions of Y7.

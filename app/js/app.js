@@ -4,6 +4,7 @@ import { pxPerCm, depthAtRow, rowAtDepth } from './sectiondepth.js';
 import { effectiveClassId, effectiveClassIndex, computeSectionBins, binsFromRowCounts, binRowsOfSection } from './sectionanalysis.js';
 import { createEngineClient } from './engineclient.js';
 import { createEngineAnalysis } from './engineanalysis.js';
+import { createEngineAges } from './engineages.js';
 import { createMaskChanges, indexRangeOfPairs } from './maskchanges.js';
 import { createPixelBudget, createPixelLoader, lruPush } from './pixelbudget.js';
 export { pxPerCm, depthAtRow, rowAtDepth };
@@ -1236,16 +1237,15 @@ function scheduleAnalysis() { clearTimeout(anaTimer); anaTimer = setTimeout(() =
 // The calculation lives in sectionanalysis.js (pure); these wrappers pass the project state in.
 export function effClassArray(s) { return effectiveClassIndex(s, S.classes, S.settings); }
 
-// M8.3.7: with the engine experiment on (desktop only, SEDCORETOOL_ENGINE_EXPERIMENT=1) the bins of every section come from
-// the engine; with it off only the JavaScript calculation below runs. There is no per-call choice and no fallback.
+// M8.3.7 & M8.5.8: with the engine experiment on (SEDCORETOOL_ENGINE_EXPERIMENT=1) section bins and core row ages come from the engine.
 const analysisProject = () => ({ classes: S.classes, settings: S.settings, ageModel: S.age.model, ageUnits: S.age.units });
 let engineRefresh = 0;
+const scheduleEngineRefresh = () => { clearTimeout(engineRefresh); engineRefresh = setTimeout(() => { renderResults(); requestRender(); if (mode === 'log') scheduleLog(0); else if (mode !== 'section' && !(['data', 'fig', 'geo'].includes(mode) && document.activeElement?.closest('input, textarea, select, [contenteditable]'))) setMode(mode); }, 50); };   // card Q10
 const engineBridge = /** @type {any} */ (window).corantoolDesktop?.engine;
-const engineAnalysis = engineBridge?.enabled === true ? createEngineAnalysis({ client: createEngineClient(engineBridge), project: analysisProject, maskChanges, onNotice: (key) => toast(t(key), 6000), onChange: () => {
-  clearTimeout(engineRefresh);
-  engineRefresh = setTimeout(() => { renderResults(); requestRender(); if (mode === 'log') scheduleLog(0); else if (mode !== 'section' && !(['data', 'fig', 'geo'].includes(mode) && document.activeElement?.closest('input, textarea, select, [contenteditable]'))) setMode(mode); }, 50);   // card Q10: never rebuild a tab while a cell or field is being edited
-} }) : null;
-/** Brings the bins of the sections up to date. Resolves when every section has a final state (always, without the engine). */
+const engineClient = engineBridge?.enabled === true ? createEngineClient(engineBridge) : null;
+const engineAnalysis = engineClient ? createEngineAnalysis({ client: engineClient, project: analysisProject, maskChanges, onNotice: (key) => toast(t(key), 6000), onChange: scheduleEngineRefresh }) : null;
+const engineAges = engineClient ? createEngineAges({ client: engineClient, onNotice: (key) => toast(t(key), 6000), onPublish: (c) => { applyCellEdits(c); applyComputedColumns(c); if (geoRT) geoRT.dirty = true; scheduleEngineRefresh(); } }) : null;
+export const settleCoreAges = (cores = S.cores) => (engineAges ? engineAges.all(cores) : Promise.resolve()), retryCoreAges = (cores = S.cores) => (engineAges ? engineAges.restartAndRetry(cores) : Promise.resolve());
 export function analyzeSections(sections) {
   const maskless = (s) => s.frozen === 'engine' || s.frozen === 'store';   // no masks here: D2 of card M8.4.18; a missing stored version (M8.4.27)
   for (const s of sections) if (maskless(s)) s.bins = [];
@@ -2694,7 +2694,7 @@ function setAge() {
   $('ageStatus').textContent = m ? t('age.ok', { n: m.depth.length, a: fmt(minOf(m.age), 3), b: fmt(maxOf(m.age), 3), u: S.age.units }) + (m.reversals ? ' ' + t('age.reversal', { n: m.reversals }) : '') + (m.bacon ? ' ' + t('age.baconPasted') : '') + (m.rangeIgnored ? ' ' + t('age.rangeIgnored', { n: m.rangeIgnored }) : '')
     : parsed.issue?.kind === 'dupDepth' ? t('age.dupDepth', { d: fmt(parsed.issue.depth, 4) }) : t('age.none');
   $('ageStatus').classList.toggle('warn', !!(m?.reversals || m?.bacon || m?.rangeIgnored || parsed.issue));
-  const c = curCore(); if (c) c.ageText = S.age.text;
+  const c = curCore(); if (c) { c.ageText = S.age.text; if (engineAges) refreshCoreData(c); }
   scheduleAnalysis(); markDirty(); scheduleLog(); if (geoRT) geoRT.dirty = true;
   $('logAxis').querySelector('[value=age]').disabled = !m;
 }
@@ -2890,7 +2890,7 @@ function activateCore(id, silent = false) {
 
 /** Recompute the derived arrays of a core (all sources merged on the union of depths). */
 export function refreshCoreData(c) {
-  mergeCoreData(c, { classes: S.classes, bioLabel: t('geo.p.bio'), analyzeSection: analyze, afterMerge: (core) => { applyCellEdits(core); applyComputedColumns(core); } });
+  mergeCoreData(c, { classes: S.classes, bioLabel: t('geo.p.bio'), analyzeSection: analyze, afterMerge: (core) => { applyCellEdits(core); applyComputedColumns(core); }, resolveAges: engineAges ? (core, req) => { void engineAges.request(core, req); } : null, clearAges: engineAges ? (core) => engineAges.clear(core) : null });
 }
 export function refreshAllCores() { for (const c of S.cores) refreshCoreData(c); }
 
@@ -3165,7 +3165,7 @@ function resetState() {
   clearNavigationPreviews();
   const closedSections = S.cores.flatMap((c) => c.sections);
   pixelBudget.clearAll(closedSections); MEM.mask.length = 0;   // V0.1: pictures of the previous project can be freed
-  for (const q of closedSections) stopTiledWork(q); resetTiles(); resetTiledTools(); engineAnalysis?.releaseAll(); forgetSections(closedId); forgetLastImport(); forgetMapBackgrounds();   // card M8.4.39: saved (canLeaveProject) or deleted
+  for (const q of closedSections) stopTiledWork(q); resetTiles(); resetTiledTools(); engineAnalysis?.releaseAll(); engineAges?.releaseAll(); forgetSections(closedId); forgetLastImport(); forgetMapBackgrounds();   // card M8.4.39, M8.5.8
   S.selected = 0; S.multi.clear(); S.library = []; S.sheet = { columns: [], cells: {} }; resetFigTabs(); S.kind = 'normal'; S.multiSource = null; S.plots = []; S.plotCur = 0; S.coreModels = {};
   S.geo = defaultGeo(); geoReset();
   S.classes = defaultClasses(); S.active = 'undet';
@@ -4599,4 +4599,4 @@ window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, engi
   tiledCountsStats: () => { const q = sec()?._counts; return q ? { tiles: q.counts.hists.size, bytes: q.counts.bytes } : null; }, tiledMasksLoad: (index) => { const q = S.sections[index], m = q.maskTiles; return maskLoader(q).want([...m.stored].map((i) => [Math.floor(i / m.cols), i % m.cols])); },   // card M8.4.29 tests: a reopened section's stored tiles into the page
   tiledStatsIdle: () => S.sections.every((q) => !q._statsRunner || q._statsRunner.idle),
   masksSettled: () => S.sections.every((q) => !q.maskTiles || !q._maskSync || q._maskSync.settled), splitTiledSection: (s, count, opts) => tiledSplit.splitSection(s ?? sec(), count, opts), mergeObjects, deleteObjects, selectSection, forceTiledSections: (on) => { forceTiled = !!on; },
-  saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };
+  saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, settleCoreAges, retryCoreAges, refreshCoreData, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, referenceCoreAges: (c) => { const snap = { ...c, depth: null, age: null, proxies: {}, src: {} }; mergeCoreData(snap, { classes: S.classes, bioLabel: t('geo.p.bio') }); return snap.age; }, assignClass, learnNow, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };

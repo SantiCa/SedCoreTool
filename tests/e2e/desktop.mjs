@@ -264,6 +264,26 @@ try {
   assert.deepEqual(parity.mismatches, [], 'the interface shows the JavaScript reference');
   assert.ok(parity.bins > 100, `enough intervals compared (${parity.bins})`);
   assert.deepEqual(parity.states, Array(6).fill(engineOn ? 'ready' : null), engineOn ? 'every section was analysed by the engine' : 'without the experiment the JavaScript calculation runs');
+  // Card M8.5.8: row ages of the core's merged table come from `core.ages/1` with the engine on and match the JS reference within 1e-9.
+  const ageParity = await p.evaluate(async () => {
+    const I = window.ichantool, core = I.S.cores.find((c) => c.id === I.S.curCore) || I.S.cores[0];
+    I.refreshCoreData(core);
+    await I.settleCoreAges([core]);
+    const actual = core.age, expected = I.referenceCoreAges(core);
+    const mismatches = [];
+    if (!Array.isArray(actual) || !Array.isArray(expected) || actual.length !== expected.length) {
+      mismatches.push(`length ${actual?.length} vs ${expected?.length}`);
+    } else {
+      for (let i = 0; i < actual.length; i++) {
+        const a = actual[i], e = expected[i];
+        if ((a == null) !== (e == null) || (a != null && Math.abs(a - e) > 1e-9)) mismatches.push(`row ${i}: ${a} vs ${e}`);
+      }
+    }
+    return { rows: actual?.length ?? 0, state: core.ageAnalysis?.state ?? null, mismatches: mismatches.slice(0, 10) };
+  });
+  assert.deepEqual(ageParity.mismatches, [], 'M8.5.8: core row ages match the JavaScript reference within 1e-9');
+  assert.ok(ageParity.rows > 100, `M8.5.8: enough core rows compared (${ageParity.rows})`);
+  assert.equal(ageParity.state, engineOn ? 'ready' : null, engineOn ? 'M8.5.8: core ages came from the engine' : 'M8.5.8: without the experiment core ages stay in JavaScript');
   // An edit immediately followed by close exercises the desktop's deferred beforeunload save.
   const deleted = await p.evaluate(() => {
     const I = window.ichantool, s = I.S.sections[I.S.cur], id = s.objects.keys().next().value;
