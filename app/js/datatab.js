@@ -110,13 +110,15 @@ $('dBody').addEventListener('click', (e) => {
   else if (a === 'svg') { if (plotLast) saveFile(`${safe(p.name)}.svg`, plotLast.full(), 'image/svg+xml'); return; }
   else if (a === 'png') { if (plotLast) busy(() => withSvgImage(plotLast.full(), async (img) => { const c = document.createElement('canvas'); c.width = img.width * 3; c.height = img.height * 3; const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height); const b = await new Promise((r) => c.toBlob(r, 'image/png')); if (b) await saveFile(`${safe(p.name)}.png`, b, 'image/png'); })); return; }
   else if (a === 'csv') {
-    void (async () => {
-      const targetCores = S.cores.filter((q) => p.cores.includes(q.id));
-      await settleCoreAges(targetCores);
+    const targetCores = S.cores.filter((q) => p.cores.includes(q.id));
+    const writePlotCsv = () => {
       const rows = [['core', p.v, 'variable', 'value']];
       for (const c of targetCores) for (const y of p.ys) { const X = plotCol(c, p.v), Y = plotCol(c, y.col); for (let i = 0; i < X.length; i++) if (X[i] != null && Y[i] != null) rows.push([c.name, X[i], y.col, Y[i]]); }
       saveFile(`${safe(p.name)}.csv`, withProv(toCSV(rows)), 'text/csv');
-    })(); return;
+    };
+    if (targetCores.some((c) => c?.ageAnalysis?.state === 'pending')) void settleCoreAges(targetCores).then(writePlotCsv);
+    else writePlotCsv();
+    return;
   }
   markDirty(); renderDataPlot();
 });
@@ -413,12 +415,16 @@ $('dBody').addEventListener('focusout', (e) => {
 });
 $('dBody').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset.ref) e.target.blur(); });
 for (const id of ['dCore', 'dView', 'dLayers']) $(id).addEventListener('change', () => { dataLimit = 400; renderData(); });
-$('dCsv').addEventListener('click', async () => {
-  await settleCoreAges(dataCores());
-  const M = tableModel();
-  const rows = [['core', 'depth', 'age', ...M.cols.map(([k]) => k), ...M.layers.map((L) => L.name)], ...M.rows.map((r) => [r.c.name, r.depth, r.age, ...r.vals, ...r.lay])];
-  // V0.35: the cells edited by hand are listed in the header (lines starting with # are ignored when the file is read back)
-  const notes = [];
-  for (const c of M.cores) for (const [col, E] of Object.entries(c.edits || {})) for (const [x, ed] of Object.entries(E)) notes.push(`# edited by hand: ${csvCommentText(c.name)}; ${csvCommentText(col)}; ${c.depth ? 'depth' : 'age'} ${csvCommentText(x)}; original ${csvCommentText(ed.o ?? '')}; new ${csvCommentText(ed.v ?? '')}; ${csvCommentText(ed.at || '')}`);
-  saveFile(`${safe(S.name)}_datos.csv`, notes.join('\n') + '\n' + withProv(toCSV(rows)), 'text/csv');
+$('dCsv').addEventListener('click', () => {
+  const cores = dataCores();
+  const writeDataCsv = () => {
+    const M = tableModel();
+    const rows = [['core', 'depth', 'age', ...M.cols.map(([k]) => k), ...M.layers.map((L) => L.name)], ...M.rows.map((r) => [r.c.name, r.depth, r.age, ...r.vals, ...r.lay])];
+    // V0.35: the cells edited by hand are listed in the header (lines starting with # are ignored when the file is read back)
+    const notes = [];
+    for (const c of M.cores) for (const [col, E] of Object.entries(c.edits || {})) for (const [x, ed] of Object.entries(E)) notes.push(`# edited by hand: ${csvCommentText(c.name)}; ${csvCommentText(col)}; ${c.depth ? 'depth' : 'age'} ${csvCommentText(x)}; original ${csvCommentText(ed.o ?? '')}; new ${csvCommentText(ed.v ?? '')}; ${csvCommentText(ed.at || '')}`);
+    saveFile(`${safe(S.name)}_datos.csv`, notes.join('\n') + '\n' + withProv(toCSV(rows)), 'text/csv');
+  };
+  if (cores.some((c) => c?.ageAnalysis?.state === 'pending')) void settleCoreAges(cores).then(writeDataCsv);
+  else writeDataCsv();
 });

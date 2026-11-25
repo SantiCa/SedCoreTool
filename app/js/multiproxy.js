@@ -1654,12 +1654,15 @@ export function initMultiproxy() {
   });
   $('geoModelOut').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-c]'); if (!tr) return; S.geo.view.clf = tr.dataset.c; S.geo.view.clfTarget = tr.dataset.l; syncCurrent(); renderGeoPanel(); renderGeoModel(); });
   $('geoModelOut').addEventListener('change', (e) => { const g = e.target.dataset.group; if (!g) return; S.geo.groupNames[g] = e.target.value; markDirty(); scheduleLog(); });
-  $('geoPredCsv').addEventListener('click', async () => {
-    await settleCoreAges(S.cores);
-    if (geoRT.dirty) geoComputeSamples();
-    if (!geoRT.samples.length) return;
-    const st = S.geo.settings, rows = [['core', st.axis, 'depth', 'age', ...geoRT.featNames, 'label', 'label_source', 'predicted', 'probability']];
-    geoRT.samples.forEach((s, i) => rows.push([geoCore(s.core)?.name, s.x, s.depth, s.age, ...s.raw, geoCat(geoRT.labels[i]?.label)?.name ?? '', geoRT.labels[i]?.source ?? '', geoCat(geoRT.preds[i]?.label)?.name ?? '', geoRT.preds[i]?.prob]));
-    saveFile(`${safe(S.name)}_clasificacion_intervalos.csv`, withProv(toCSV(rows)), 'text/csv');
+  $('geoPredCsv').addEventListener('click', () => {
+    const writePredCsv = () => {
+      if (geoRT.dirty) geoComputeSamples();
+      if (!geoRT.samples.length) return;
+      const st = S.geo.settings, rows = [['core', st.axis, 'depth', 'age', ...geoRT.featNames, 'label', 'label_source', 'predicted', 'probability']];
+      geoRT.samples.forEach((s, i) => rows.push([geoCore(s.core)?.name, s.x, s.depth, s.age, ...s.raw, geoCat(geoRT.labels[i]?.label)?.name ?? '', geoRT.labels[i]?.source ?? '', geoCat(geoRT.preds[i]?.label)?.name ?? '', geoRT.preds[i]?.prob]));
+      saveFile(`${safe(S.name)}_clasificacion_intervalos.csv`, withProv(toCSV(rows)), 'text/csv');
+    };
+    if (S.cores.some((c) => c?.ageAnalysis?.state === 'pending')) void settleCoreAges(S.cores).then(writePredCsv);
+    else writePredCsv();
   });
 }

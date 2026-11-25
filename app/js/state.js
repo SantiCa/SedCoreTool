@@ -44,7 +44,7 @@
  *   waterDepth: number | null, notes: string, source: string | null, logView: LogView, imp: CoreData | null,
  *   depth: number[] | null, age: (number | null)[] | null, proxies: Record<string, (number | null)[]>,
  *   src: Record<string, string>, ageText: string, user: Record<string, {d: number[], v: (number | null)[]}>,
- *   edits: Record<string, Record<string, CellEdit>>}} CoreState
+ *   edits: Record<string, Record<string, CellEdit>>, ageAnalysis?: import('./engineages.js').CoreAgeState}} CoreState
  * @typedef {{s: SectionState, lm: (number | number[])[], ex: number[], nextId: number, sel: number,
  *   objs: Map<number, TraceObject | null>, group?: string, stackChanged?: boolean,
  *   tiles?: import('./tiledundo.js').TileChanges}} UndoStep `tiles`: the mask tiles of a tiled edit (card M8.4.16 step 5)

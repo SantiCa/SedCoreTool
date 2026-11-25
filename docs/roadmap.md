@@ -23,8 +23,9 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
   `tools/build_standalone.py`, `tests/e2e/desktop.mjs` engine off and on); `tests/e2e/smoke.mjs` stopped at unrelated
   `navigation-preview.mjs` (4/257,928 px off by 1 on Chrome 158 ANGLE RTX 4070 D3D11). Python unchanged since M8.5.6b `a100cdb`
   (`pytest -q` 1040 passed / 9 skipped, `ruff`). Last full `check_all --e2e`: V0.153 `35659e5`.
-- **GitHub:** Q23 (`007a7f6`): `tests` (`45258553666`) and *Desktop builds* (`45258553489`) green (Windows, macOS, Linux). Read
-  M8.5.8's push result at the next session.
+- **GitHub:** Q23 (`007a7f6`): `tests` (`45258553666`) and *Desktop builds* (`45258553489`) green. M8.5.8 (`8c4b71e`): *Desktop builds*
+  (`45703990995`) green on Windows, macOS and Linux; `tests` (`45703990874`) failed in `data-table.mjs` (`dCsv` async microtask), fixed
+  in this commit (`verifyDataTable` green locally). Read push result at the next checkpoint.
 - **Checks due:** none locally; GitHub result of the M8.5.8 push (three-system `desktop.mjs` engine off/on).
 - **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete.
 - **Found, not done:** **Q20** (start-failure test races exit event; fast, low), **Q19** (intermittent macOS
