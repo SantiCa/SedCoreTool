@@ -19,13 +19,13 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.153, `ba98eb1`) is contained in it.
 - **Released:** V0.153 (22 Nov 2026): integrated into `master` as `ba98eb1`; tag `V0.153` and GitHub Release (8 files, run
   `45058054277`) at the owner's request. The V0.152 Release and tag were deleted at the owner's request; V0.84 and V0.48 remain.
-- **Last verified code commit:** Q20 (this commit; `node --test tests/app/engine.test.mjs` 25 passed / 1 skipped). Previous code commit M8.5.8 (`beb9181`): Windows checks passed (`npm test` 691/691, `npm run typecheck`, `tools/build_standalone.py`, `tests/e2e/desktop.mjs` engine off and on, `verifyDataTable`); `tests/e2e/smoke.mjs` stopped at unrelated `navigation-preview.mjs` (4/257,928 px off by 1 on Chrome 158 ANGLE RTX 4070 D3D11). Python unchanged since M8.5.6b `a100cdb` (`pytest -q` 1040 passed / 9 skipped, `ruff`). Last full `check_all --e2e`: V0.153 `35659e5`.
-- **GitHub:** Q23 (`007a7f6`): `tests` (`45258553666`) and *Desktop builds* (`45258553489`) green. M8.5.8 (`8c4b71e`): *Desktop builds* (`45703990995`) green on Windows, macOS and Linux; `tests` (`45703990874`) failed in `data-table.mjs`, fixed in `beb9181` (runs `45715645182` and `45715645297` in progress).
-- **Checks due:** none locally; read GitHub results of `beb9181` and Q20.
+- **Last verified code commit:** Q18 (this commit): Windows checks passed (`verifyGotoTrace` in headless Chrome, `npm test` 691/691, `npm run typecheck`, `tools/build_standalone.py`). Previous M8.5.8 (`beb9181`) also passed `tests/e2e/desktop.mjs` engine off and on; Python unchanged since M8.5.6b `a100cdb` (`pytest -q` 1040 passed / 9 skipped, `ruff`). Last full `check_all --e2e`: V0.153 `35659e5`.
+- **GitHub:** Q20 (`7ae518d`): `tests` (`45716409787`) green; *Desktop builds* (`45716409785`) in progress. M8.5.8 (`beb9181`): `tests` (`45715645182`) green; earlier M8.5.8 (`8c4b71e`) *Desktop builds* (`45703990995`) green on Windows, macOS and Linux.
+- **Checks due:** none locally; read GitHub results of Q18.
 - **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete.
-- **Found, not done:** **Q18** ("go to the trace" undone by first fit; fast, medium), **Q12** (evicted placeholder; fast, medium), **Q16** (canvas taller than pane; fast, medium), **Q11** (hostile ML settings), **Q19** (intermittent macOS "window: labels"; most capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
+- **Found, not done:** **Q12** (evicted placeholder; fast, medium), **Q16** (canvas taller than pane; fast, medium), **Q11** (hostile ML settings), **Q19** (intermittent macOS "window: labels"; most capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
-- **Next:** ready Q-cards (**Q18**/**Q12**/**Q16**/**Q11** fast/medium; **Q19**/**Q17** most capable/medium), remaining slice (a) cards before **M8.5.9** (record axis conversion `log.js::toAxis`, computed columns `sheet.js`, age-model parsing `parseAgeModelDetailed`/`baconToAgeText`, Y7 public functions — design/write cards first, most capable/high or medium), or cut V0.154 on request.
+- **Next:** ready Q-cards (**Q12**/**Q16**/**Q11** fast/medium; **Q19**/**Q17** most capable/medium), remaining slice (a) cards before **M8.5.9** (record axis conversion `log.js::toAxis`, computed columns `sheet.js`, age-model parsing `parseAgeModelDetailed`/`baconToAgeText`, Y7 public functions — design/write cards first, most capable/high or medium), or cut V0.154 on request.
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.8 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
   long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 is approved.
@@ -1084,10 +1084,8 @@ web/frontend security, UI correctness and architecture cards sit here.
   *Change:* find whether the program loses or misplaces a stroke, or the script races; fix the cause (AGENTS §3.7). *Done when:* the cause
   is stated with evidence and the step passes on macOS.
 
-- [ ] **Q18 - "Go to the trace" can land elsewhere in a section not yet shown** (found by Q15, 22 Nov 2026; fast tier, effort medium). The
-  examples dialog calls `selectSection(i); centerOn(o)`; a section without a remembered view gets `fitView` one animation frame later, which
-  undoes the centring. *Change:* the delayed first fit is skipped when the view changed meanwhile; *Tests:* an e2e step that selects an unseen
-  section and centres on an object at once, and checks the view a few frames later; *Done when:* the object is centred.
+- [x] **Q18 - "Go to the trace" can land elsewhere in a section not yet shown** (done 25 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased)).
+  - *As built (25 Nov 2026; `flash` sub-agent, reviewed by director):* in `app/js/app.js` `selectSection`, snapshotted `S.view` before scheduling `requestAnimationFrame` and skipped the delayed `fitView()` if `sec() !== s` or `S.view` (`x`, `y`, `zoom`) changed meanwhile; exposed `centerOn` on `window.ichantool`. `app/js/app.js` unchanged at 4,602 lines (`<= 4,602` ceiling). Added `tests/e2e/goto-trace.mjs` (`verifyGotoTrace`, wired into `tests/e2e/smoke.mjs`), which failed before the fix (`S.view.y` overwritten from `3543.08` to `-5.94`) and passed after, confirming both `centerOn` preservation after 6 frames and plain unseen-section `fitView`. Verified on Windows: `verifyGotoTrace` in headless Chrome, `npm test` (691/691), `npm run typecheck`, `tools/build_standalone.py`.
 
 - [x] **Q10 - Data-tab edit precision, virtualized table cap, engine-refresh/CSV races & SVG PNG Blob export.** (done 22 Nov 2026,
   development gate)

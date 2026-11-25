@@ -2441,7 +2441,7 @@ function selectSection(k, fresh = false) {
   if (s && !s.orig) ensurePixels(s).then(() => { if (sec() === s) { renderSectionForm(); requestRender(); } }).catch(() => requestRender());   // V0.1
   else if (s) pxTouch(s);
   renderSectionForm();
-  if (s) { rebuildLUT(s); if (s.view && !fresh) { S.view = { ...s.view }; requestRender(); } else requestAnimationFrame(fitView); }
+  if (s) { rebuildLUT(s); if (s.view && !fresh) { S.view = { ...s.view }; requestRender(); } else { const v = { ...S.view }; requestAnimationFrame(() => { if (sec() === s && S.view.x === v.x && S.view.y === v.y && S.view.zoom === v.zoom) fitView(); }); } }
   analyze(s); renderResults(); renderClasses(); renderObject(); renderLearn(); requestRender();
 }
 
@@ -4598,5 +4598,5 @@ window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, engi
   tiledCountsIdle: () => S.sections.every((q) => !q._counts || (!q._counts.runner.running && q._counts.counts.ready)),
   tiledCountsStats: () => { const q = sec()?._counts; return q ? { tiles: q.counts.hists.size, bytes: q.counts.bytes } : null; }, tiledMasksLoad: (index) => { const q = S.sections[index], m = q.maskTiles; return maskLoader(q).want([...m.stored].map((i) => [Math.floor(i / m.cols), i % m.cols])); },   // card M8.4.29 tests: a reopened section's stored tiles into the page
   tiledStatsIdle: () => S.sections.every((q) => !q._statsRunner || q._statsRunner.idle),
-  masksSettled: () => S.sections.every((q) => !q.maskTiles || !q._maskSync || q._maskSync.settled), splitTiledSection: (s, count, opts) => tiledSplit.splitSection(s ?? sec(), count, opts), mergeObjects, deleteObjects, selectSection, forceTiledSections: (on) => { forceTiled = !!on; },
+  masksSettled: () => S.sections.every((q) => !q.maskTiles || !q._maskSync || q._maskSync.settled), splitTiledSection: (s, count, opts) => tiledSplit.splitSection(s ?? sec(), count, opts), mergeObjects, deleteObjects, selectSection, centerOn, forceTiledSections: (on) => { forceTiled = !!on; },
   saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, settleCoreAges, retryCoreAges, refreshCoreData, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, referenceCoreAges: (c) => { const snap = { ...c, depth: null, age: null, proxies: {}, src: {} }; mergeCoreData(snap, { classes: S.classes, bioLabel: t('geo.p.bio') }); return snap.age; }, assignClass, learnNow, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };
