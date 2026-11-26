@@ -22,6 +22,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- M8.5.8 tests: `tests/app/engine-ages.test.mjs` now waits until each request reaches the fake engine client instead of a fixed 10 ms sleep, which failed under a loaded full test run.
 - Card Q20: fixed the start-failure test race in `tests/app/engine.test.mjs` so failure classification waits for `client.exited` (or the existing 2 s timeout) instead of racing stdout closure against the child's `exit` event.
 - Card M8.5.8: wired core merged-table row ages through `core.ages/1` when the engine experiment is enabled (`app/js/engineages.js`, `coredata.js`, `datatab.js`, `multiproxy.js`), showing pending/error states with Retry, waiting in exports and verifying parity in `tests/e2e/desktop.mjs` with the flag off and on.
 - Card M8.5.6b: sped up coordinator `f64le` finiteness verification and replaced polling waits with immediate worker/mask wakeup without changing the wire protocol or validation; all `core.ages/1` matched-timing cases up to 100,000 rows now meet the 150 ms Y9 target on Windows (`docs/validation/M8.5.6b-ages-windows.json`), unblocking M8.5.8.

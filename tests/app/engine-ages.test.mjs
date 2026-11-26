@@ -22,6 +22,13 @@ function fakeClient(handler) {
   return { client, stats: () => ({ runCalls, ensureCalls, forgetCalls, restarts }) };
 }
 
+// Wait until the engine request has reached the fake client, instead of a fixed sleep: under a loaded full test run a fixed
+// 10 ms was not always enough for the request chain to call `client.run` (Q16 session, 26 Nov 2026). Bounded by event-loop turns.
+async function until(ready, what) {
+  for (let turn = 0; turn < 10000; turn++) { if (ready()) return; await new Promise((r) => setImmediate(r)); }
+  throw new Error(`never happened: ${what}`);
+}
+
 function makeCore(model) {
   return {
     units: 'm',
@@ -62,7 +69,7 @@ test('M8.5.8: engineages computes row ages, preserves imported ages, caches unch
   });
   assert.deepEqual(core.ageAnalysis, { state: 'pending' });
   assert.deepEqual(core.age, [null, 999, null, null], 'while pending, only imported ages are shown (no JS interpolation)');
-  await new Promise((r) => setTimeout(r, 10));
+  await until(() => resolveRun, 'client.run called');
   resolveRun();
   await engineAges.all([core]);
   assert.deepEqual(core.ageAnalysis, { state: 'ready', summary: { rows: 4, outside: 1 } });
@@ -92,9 +99,9 @@ test('M8.5.8: superseding revision aborts older request and publishes only the l
   const core = makeCore({ depth: [0, 10], age: [0, 100] });
 
   const p1 = engineAges.request(core, { depths: [0, 5], importedAges: [null, null], model: { depth: [0, 10], age: [0, 100] } });
-  await new Promise((r) => setTimeout(r, 10));
+  await until(() => resolvers.length === 1, 'first request reached client.run');
   const p2 = engineAges.request(core, { depths: [0, 5], importedAges: [null, null], model: { depth: [0, 10], age: [0, 200] } });
-  await new Promise((r) => setTimeout(r, 10));
+  await until(() => resolvers.length === 2, 'second request reached client.run');
 
   assert.equal(signals[0].aborted, true, 'first request was aborted when superseded');
   assert.equal(targets[0], targets[1], 'same core keeps one session-local target UUID');
@@ -167,7 +174,7 @@ test('M8.5.8: automatic recovery on INVALID_BUFFER and ENGINE_UNAVAILABLE, plus 
   const slowAges = createEngineAges({ client: slowClient });
   const c2 = makeCore({ depth: [0, 10], age: [0, 100] });
   const pending = slowAges.request(c2, { depths: [0, 5], importedAges: [null, null], model: { depth: [0, 10], age: [0, 100] } });
-  await new Promise((r) => setTimeout(r, 10));
+  await until(() => resolvePending, 'slow client.run called');
   slowAges.releaseAll();
   resolvePending({ tables: { ages: [{ name: 'age', unit: 'ka', values: [0, 50] }] }, summary: { rows: 2, outside: 0 } });
   await pending;
