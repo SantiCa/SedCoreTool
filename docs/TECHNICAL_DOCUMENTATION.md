@@ -191,6 +191,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `imageproc.js` | Enhancement, detection, connected components, magic wand, lasso, descriptors, rotation, downsampling | ✓ |
 | `edit.js` | Editing algorithms: scissors, merging, undo records, project migration | ✓ |
 | `learn.js` | Ichnotaxa classifier (k-NN with novelty rejection; Random Forest and Bayes wrappers), evaluation, final-test metrics | ✓ |
+| `mlsettings.js` | Load-time validation of classifier settings: `sanitizeIchnoMl`, `sanitizeGeoClassifier`, `GEO_PARAMS` | ✓ |
 | `log.js` | Core column: table parsing, axes, ticks, SVG and CSV of a window, distribution figure | ✓ |
 | `geo.js` | Multiproxy: samples, interval layers, labels, Random Forest, k-NN, Bayes, neural network, k-means, cross-validation, maps | ✓ |
 | `interp.js` | Gridding of scattered values for maps (inverse distance, triangulation, splines, kriging…) and map projections | ✓ |
@@ -1598,6 +1599,7 @@ horizontally.
 - **Automatic** intervals (`auto: true`) are never training labels.
 
 ### 18.4 Learning methods
+Classifier settings read from a project file (`settings.ml` of the ichnotaxa classifier; `method` and `params` of each multiproxy classifier) are validated on load (`mlsettings.js`, card Q11): an unknown method, a non-numeric or non-finite value, a number outside the form's range (up to ten times its maximum is accepted, not rounded), a wrong type, or a `params` entry that is not an object is replaced by the default and reported in a toast.
 All methods use a seeded pseudo-random generator (mulberry32, `seededRandom`; seed 42 by default): the same project
 gives the same result. Default parameters in `METHODS`:
 

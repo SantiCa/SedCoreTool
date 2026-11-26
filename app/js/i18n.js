@@ -1942,6 +1942,8 @@ Object.assign(D.es, { 'sh.target': 'Clasificación (objetivo o predicción)', 's
   'h.sh.mode': '«Mezclar» superpone los colores de las familias elegidas; «Una franja por familia» las pone una al lado de otra en cada registro.' });
 Object.assign(D.en, { 'sh.target': 'Classification (target or prediction)', 'sh.mode': 'Several families', 'sh.mix': 'Blend colours', 'sh.split': 'One strip per family',
   'h.sh.mode': '«Blend» overlays the colours of the chosen families; «One strip per family» puts them side by side in each record.' });
+Object.assign(D.es, { 'load.mlReset': 'Ajustes de clasificación no válidos restablecidos a sus valores por defecto: {f}' });
+Object.assign(D.en, { 'load.mlReset': 'Invalid classifier settings reset to their defaults: {f}' });
 Object.assign(D.es, { 'iv.tidied': 'Se han corregido intervalos solapados de una misma familia y se han unido los contiguos de la misma clase.' });
 Object.assign(D.en, { 'iv.tidied': 'Overlapping intervals of the same family were corrected and touching intervals of the same class were joined.' });
 

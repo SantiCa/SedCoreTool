@@ -2,6 +2,7 @@
 import { lang, t } from './i18n.js';
 import { geoTrackOptions } from './figview.js';
 import { mergeAgeImports, mergeMixedImports } from './geo.js';
+import { GEO_PARAMS, sanitizeGeoClassifier } from './mlsettings.js';
 import { MAP_PROJECTIONS, MAP_STYLE, MAP_SYMBOLS, METHODS, applyCatalogue, buildMapSVG, buildSamples, coreAges, coreFromRows, coresFromLongTable, crossValidateSteps, featureSeries, fitBBoxAspect, fitModel, fitModelSteps, fitSampleTransform, intervalsFromTable, intervalsOnAxis, labelSamples, layerFeatureNames, mapBBox, mapFrame, mapGeometry, mapSummary, orphanIntervals, predictLabel, segmentsOnAxis, tidyIntervals, transformSample, zoomBBox } from './geo.js';
 import { $, S, fetchAsset, fmt, sec, uid } from './state.js';
 import { DELIVERY, armed, busy, compositeMarks, compositeTaxonPoints, cropState, endCrop, esc, finalTestsHTML, holdoutHTML, holdoutIds, loadLib, makeCore, markDirty, openCoreDlg, refreshAllCores, refreshCoreData, renderCoreBar, runFinalGeo, safe, saveFile, scheduleFloat, settleCoreAges, toast, updateTip, view, withProv, zoomAt } from './app.js';
@@ -48,21 +49,18 @@ export function normalizeGeo(pg = {}) {
     g.activeCat = pg.activeLabel || g.layers[0].cats[0]?.id;
   }
   delete g.labels; delete g.activeLabel;
-  g.classifiers = (pg.classifiers || []).map((c) => ({ ...classifierDefaults(), ...c, params: { ...(c.params || {}) } }));
+  const resets = [];   // card Q11: unknown methods and hostile parameters of a project file are reset, not run
+  g.classifiers = (pg.classifiers || []).map((c) => {
+    const r = sanitizeGeoClassifier({ ...classifierDefaults(), ...c, params: { ...(c.params || {}) } });
+    resets.push(...r.reset.map((f) => `${r.value.name || r.value.id}: ${f}`)); return r.value;
+  });
+  { const m = sanitizeGeoClassifier({ method: g.settings.method, params: g.settings.params }); if (m.reset.length) { g.settings.method = m.value.method; g.settings.params = m.value.params; resets.push(...m.reset.map((f) => `settings: ${f}`)); } }
+  if (resets.length) setTimeout(() => toast(t('load.mlReset', { f: resets.join(', ') })), 600);
   g.lastCat ||= {};
   return g;
 }
 
 export const geoRT = { samples: [], labels: [], preds: [], model: null, cv: null, dirty: true, featNames: [], orphans: new Set(), runs: new Map(), layerCols: new Map(), ruleLabels: new Map() };
-
-/** Parameters shown for each method (help text in i18n: geo.p.<method>.<name>). */
-const GEO_PARAMS = {
-  mlp: [['hidden', 'select', ['8', '16', '32', '16,8', '32,16', '64,32']], ['activation', 'select', ['relu', 'tanh']], ['epochs', 'int', 20, 2000, 10], ['lr', 'float', 0.0005, 0.1, 0.0005], ['l2', 'float', 0, 0.1, 0.0001], ['batch', 'int', 4, 256, 4], ['balanced', 'bool'], ['patience', 'int', 5, 200, 5]],
-  rf: [['trees', 'int', 10, 500, 10], ['maxDepth', 'int', 2, 30, 1], ['minLeaf', 'int', 1, 50, 1], ['mtry', 'select', ['sqrt', 'log2', 'all']], ['bins', 'int', 8, 128, 8], ['bootstrap', 'bool'], ['balanced', 'bool']],
-  knn: [['k', 'int', 1, 50, 1], ['weights', 'select', ['distance', 'uniform']]],
-  nb: [['smoothing', 'float', 1e-9, 0.1, 1e-6], ['priors', 'select', ['uniform', 'empirical']]],
-  kmeans: [['k', 'int', 2, 12, 1], ['restarts', 'int', 1, 20, 1], ['maxIter', 'int', 10, 500, 10]],
-};
 
 const geoCore = (id) => S.cores.find((c) => c.id === id);
 export const geoLayer = (id) => S.geo.layers.find((l) => l.id === id);

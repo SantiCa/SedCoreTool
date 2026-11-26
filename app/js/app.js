@@ -40,7 +40,7 @@ import { createTiledSplitController } from './tiledsplitui.js';
 import { createTiledState } from './tiledstate.js';
 import { createTiledTools } from './tiledtools.js';
 import { createTiledView } from './tiledview.js';
-import { classUse, deleteClass, restoreClass, repairOrphanLabels } from './taxa.js';
+import { classUse, deleteClass, restoreClass, repairOrphanLabels } from './taxa.js'; import { sanitizeIchnoMl } from './mlsettings.js';
 import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, tilesUnder, windowRange, planWindows, pinRanges, toWindowRect, windowRgba } from './tiledit.js';
 import { MaskLoader, MaskSync, buildMaskTables, classesText } from './tiledsync.js';
 import { TiledRowCounts, TiledCountsRunner, tileHistogram } from './tiledcounts.js';
@@ -3106,7 +3106,7 @@ async function loadProject(p) {
     p = sanitizeThumbs(upgradeProject(p));   // card Q9: thumbnails of older stored projects too
     S.id = p.id || uid(); S.name = p.name || APP; S.notes = p.notes || ''; S.comments = p.comments || [];
     S.classes = p.classes || defaultClasses(); S.active = p.active || 'undet';
-    Object.assign(S.settings, p.settings || {}); S.library = p.library || []; S.kind = p.projectKind || 'normal'; S.multiSource = p.multiSource || null; S.plots = p.plots || []; S.plotCur = p.plotCur || 0; S.coreModels = p.models?.cores || {};
+    Object.assign(S.settings, p.settings || {}); { const m = sanitizeIchnoMl(S.settings.ml, ML_DEFAULT); S.settings.ml = m.value; if (m.reset.length) setTimeout(() => toast(t('load.mlReset', { f: m.reset.join(', ') })), 600); } S.library = p.library || []; S.kind = p.projectKind || 'normal'; S.multiSource = p.multiSource || null; S.plots = p.plots || []; S.plotCur = p.plotCur || 0; S.coreModels = p.models?.cores || {};
     S.sheet = { columns: [], cells: {}, ...(p.sheet || {}) };
     loadFigTabs(p); S.finalTests = p.finalTests || [];
     S.geo = normalizeGeo(p.geo);

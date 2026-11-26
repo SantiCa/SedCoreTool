@@ -22,16 +22,15 @@ export function hostileProjectFixture() {
   g.layers[0].cats.forEach((cat) => { cat.name += ' ' + PAYLOAD; });
   g.settings.target = layerId;
   for (const iv of g.intervals) { if (iv.core === core.id || iv.core === 'taxon-core') iv.core = coreId; if (iv.layer === 'climate') iv.layer = layerId; }
-  Object.assign(g.classifiers[0], { id: clfId, name: 'Model ' + PAYLOAD, targets: [layerId], minProb: PAYLOAD, seed: PAYLOAD_SQ, params: { knn: { k: PAYLOAD } } });
+  Object.assign(g.classifiers[0], { id: clfId, name: 'Model ' + PAYLOAD, targets: [layerId], minProb: PAYLOAD, seed: PAYLOAD_SQ, method: PAYLOAD, params: { knn: { k: PAYLOAD } } });
   p.comments = [{ id: 'comment' + PAYLOAD, author: 'A ' + PAYLOAD, date: Date.UTC(2026, 0, 1), text: 'Text ' + PAYLOAD,
     replies: [{ id: 'reply' + PAYLOAD_SQ, author: PAYLOAD_SQ, date: Date.UTC(2026, 0, 2), text: PAYLOAD }] }];
   p.plots = [{ name: 'Plot ' + PAYLOAD, layout: 'xy', cores: [coreId, 'shade-other'], v: 'depth', title: PAYLOAD, width: '1" onload="window.__xss=1', height: PAYLOAD,
     panelWidth: PAYLOAD, legend: true, grid: true, xmin: PAYLOAD, xmax: null, ymin: null, ymax: null, y2label: PAYLOAD,
     ys: [{ col: 'Ca', type: 'linesym', y2: false, fit: 'poly', deg: PAYLOAD, window: PAYLOAD, log: false, inv: false, color: 'red"/><script>window.__xss=1</script>' }] }];
   p.plotCur = 0;
-  // ml.method and ml.k stay valid: an unknown method or a non-numeric k stops the classifier (learn.js, geo.js fitModel), a robustness
-  // defect outside this card.
-  p.settings = { ...p.settings, ml: { method: 'knn', k: 3, trees: PAYLOAD_SQ, maxDepth: PAYLOAD, minLeaf: PAYLOAD },
+  // Card Q11: an unknown ml.method or a non-numeric ml.k (and the hostile multiproxy method and parameters) are reset on load.
+  p.settings = { ...p.settings, ml: { method: PAYLOAD, k: PAYLOAD, trees: PAYLOAD_SQ, maxDepth: PAYLOAD, minLeaf: PAYLOAD },
     novelty: PAYLOAD, trainOpt: { epochs: PAYLOAD }, sideW: { total: PAYLOAD } };
   p.finalTests = [{ at: '2026-01-01T00:00:00Z', repeat: PAYLOAD, n: PAYLOAD, target: PAYLOAD, method: PAYLOAD, scope: PAYLOAD, classifier: PAYLOAD,
     cores: [PAYLOAD], balanced: 0.5, accuracy: 0.5 }];

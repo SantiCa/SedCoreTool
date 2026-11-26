@@ -19,15 +19,15 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.153, `ba98eb1`) is contained in it.
 - **Released:** V0.153 (22 Nov 2026): integrated into `master` as `ba98eb1`; tag `V0.153` and GitHub Release (8 files, run
   `45058054277`) at the owner's request. The V0.152 Release and tag were deleted at the owner's request; V0.84 and V0.48 remain.
-- **Last verified code commit:** Q16 (this commit): Windows `npm test` 693/693, `npm run typecheck`, `tools/build_standalone.py`, `smoke.mjs`,
+- **Last verified code commit:** Q11 (this commit; Q16 `722100a` before it): Windows `npm test` 701/701, `npm run typecheck`, `tools/build_standalone.py`, `smoke.mjs`,
   `desktop.mjs` (engine off and on), `pytest`/`ruff` (Python unchanged). Last full `check_all --e2e`: V0.153 `35659e5`.
-- **GitHub:** Q12 (`247f03e`) green: `tests` (`45718214741`) and *Desktop builds* (`45718214939`) on Windows, macOS and Linux. Q16 push running.
-- **Checks due:** read GitHub `tests` and *Desktop builds* of the Q16 push.
+- **GitHub:** Q12 (`247f03e`) green: `tests` (`45718214741`) and *Desktop builds* (`45718214939`) on Windows, macOS and Linux. Q16 (`722100a`) and Q11 pushes running.
+- **Checks due:** read GitHub `tests` and *Desktop builds* of the Q16 and Q11 pushes.
 - **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete.
-- **Found, not done:** **Q11** (hostile ML settings; fast, medium; brief written, next), **Q19** (intermittent macOS "window: labels"; most
+- **Found, not done:** **Q19** (intermittent macOS "window: labels"; most
   capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
-- **Run authorised 26 Nov 2026:** Q16 (done), then **Q11**. Recommended afterwards (not yet authorised): cut V0.154, then design the remaining slice (a)
+- **Run authorised 26 Nov 2026:** Q16 and Q11 (done). Recommended afterwards (not yet authorised): cut V0.154, then design the remaining slice (a)
   cards before **M8.5.9** (`log.js::toAxis`, `sheet.js` computed columns, `parseAgeModelDetailed`/`baconToAgeText`, Y7; most capable, high).
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.8 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
@@ -1007,11 +1007,16 @@ web/frontend security, UI correctness and architecture cards sit here.
 
 - [x] **Q9 - Sanitize `innerHTML` injection surfaces across project, data, ML and multiproxy views (P0 security)** (done 21 Nov 2026, development gate; record: [history](roadmap-history.md#q9---sanitize-innerhtml-injection-surfaces-across-project-data-ml-and-multiproxy-views-p0-security)).
 
-- [ ] **Q11 - A hostile or old ML setting stops the classifier** (found by Q9, 21 Nov 2026; fast tier, effort medium). A project whose
-  `settings.ml.k` is not a number, or whose `settings.ml.method` is unknown, makes the classifier fail with a page error (`learn.js` vote;
-  `geo.js` `fitModel` reading `defaults`). *Change:* validate `settings.ml` (and the classifier `params`) where a project is loaded, falling back
-  to the defaults with a visible note; *Tests:* Node tests with a non-numeric `k` and an unknown method; *Do not touch:* the classifier's
-  results for valid settings. *Done when:* the tests pass and `tests/e2e/html-injection.mjs` can use hostile `k` and `method` too.
+- [x] **Q11 - A hostile or old ML setting stops the classifier** (done 26 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased)).
+  - *As built (26 Nov 2026; Sonnet sub-agent at medium effort, reviewed by director):* pure `app/js/mlsettings.js` with `GEO_PARAMS` (moved
+    from `multiproxy.js`), `ICHNO_ML_PARAMS` (the training form's fields and ranges), `sanitizeIchnoMl(raw, defaults)` and
+    `sanitizeGeoClassifier(c, fallbackMethod)`. Rule: numbers must be finite and within [form minimum, 10 x form maximum], not rounded (values
+    typed past the form's maximum keep their results); selects must be one of the options; booleans must be booleans; unknown methods fall
+    back to `knn` (ichnotaxa) or `rf` (multiproxy); invalid fields return to their defaults and one toast `load.mlReset` names them. Wired
+    in `loadProject` (`app/js/app.js`, same lines, 4,602 -> 4,602) and `normalizeGeo` (`multiproxy.js`, also the old single-model
+    `settings.method`/`params`). Tests: `tests/app/mlsettings.test.mjs` (8, failed before the module existed; fits every supervised method
+    after sanitizing hostile parameters); `html-injection.mjs` now uses hostile `ml.method`, `ml.k` and multiproxy `method`. Windows:
+    `npm test` 701/701, `npm run typecheck`, `build_standalone.py`, `smoke.mjs`, `desktop.mjs` passed. Not checked: macOS, Linux.
 
 - [x] **Q12 - A placeholder section cannot rebuild its working image after eviction** (done 25 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased)).
   - *As built (25 Nov 2026; `flash` sub-agent, reviewed by director):* added pure `pixelSourceKind(s)` in `app/js/pixelbudget.js` returning `'grey'` for `s?.tiled?.missing || s?.placeholder || s?.frozen === 'engine'`, `'tiled'` for `s?.tiled`, and `'decode'` otherwise; wired `ensurePixels(s)` in `app/js/app.js` to dispatch on `pixelSourceKind(s)` without touching `s.placeholder` (`app/js/app.js` unchanged at 4,602 lines). Added unit tests in `tests/app/pixelbudget.test.mjs` covering all 5 `pixelSourceKind` cases plus evicting and reloading a frozen placeholder section under `createPixelBudget` / `createPixelLoader`. Verified on Windows: `pixelbudget.test.mjs` (7/7), `npm test` (693/693), `npm run typecheck`, `tools/build_standalone.py`.
