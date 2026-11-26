@@ -216,17 +216,20 @@ export function createPixelLoader({
   /** @type {Promise<void> | null} */
   let activeDrain = null;
 
+  function wake() {
+    if (busy || scheduled) return;
+    scheduled = true;
+    schedule(() => {
+      scheduled = false;
+      void drain();
+    });
+  }
+
   /** @param {any} s */
   function need(s) {
     if (!s || s._pxErr || loadedInWave.has(s)) return false;
     wanted.add(s);
-    if (!busy && !scheduled) {
-      scheduled = true;
-      schedule(() => {
-        scheduled = false;
-        void drain();
-      });
-    }
+    wake();
     return true;
   }
 
@@ -270,6 +273,8 @@ export function createPixelLoader({
         if (gen === generation) loadedInWave.clear();
         busy = false;
         activeDrain = null;
+        // A drain stopped by clear() leaves the requests made since then in `wanted`; need() did not schedule them while busy.
+        if (wanted.size > 0) wake();
       }
     })();
     return activeDrain;

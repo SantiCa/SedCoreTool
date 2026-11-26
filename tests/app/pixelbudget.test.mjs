@@ -314,3 +314,28 @@ test('placeholder section evicted under pxBudget reloads grey working pixels wit
   assert.equal(placeholderSec.placeholder, placeholder);
   assert.deepEqual(placeholderSec.placeholder, { name: 'saved', tiled: { manifest: 'abc' } });
 });
+
+test('a section asked for while a drain of a closed project is still decoding is loaded once that drain ends', async () => {
+  // Found by tests/e2e/large-16bit-desktop.mjs: a new project was created while the loader was still decoding a section of the project
+  // opened at start-up. The old drain ended on the generation check and left the new request in `wanted` with nothing scheduled.
+  let releaseOld;
+  const oldSec = makeSection('old', 10, 5), newSec = makeSection('new', 10, 5), decoded = [];
+  const loader = createPixelLoader({
+    ensurePixels: async (s) => {
+      if (s === oldSec) await new Promise((resolve) => { releaseOld = resolve; });
+      decoded.push(s.name);
+      s.orig = new Uint8ClampedArray(s.w * s.h * 4);
+    },
+  });
+  loader.need(oldSec);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(loader.busy, 'the drain is awaiting the old section');
+  loader.clear();                                     // the project is closed and a new one opened
+  assert.equal(loader.need(newSec), true);            // the new project's view asks for its section while the old drain still runs
+  releaseOld();
+  for (let i = 0; i < 20 && !newSec.orig; i++) await new Promise((resolve) => setTimeout(resolve, 0));   // no manual drain: only the loader may wake itself
+  assert.ok(newSec.orig, 'the section asked for during the old drain is decoded');
+  assert.deepEqual(decoded, ['old', 'new']);
+  assert.equal(loader.wanted.size, 0);
+  assert.equal(loader.busy, false);
+});

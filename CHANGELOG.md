@@ -10,10 +10,11 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ---
 
-## Unreleased
+## V0.154 — 2026-11-26
 
 ### For users
 
+- Fixed: a section could stay on its grey "loading" image for good when a project was opened or created while another project's images were still being decoded.
 - Fixed: a project file with an invalid or unknown classifier setting (for example a non-numeric number of neighbours or an unknown method) no longer stops the classifier; the setting returns to its default and a message names it.
 - Fixed: the image view now fills exactly the visible pane at every window size, so centring on a trace no longer lands below the visible area and only the visible part of a large image is read; depth ticks of the navigation strip are drawn on whole pixel rows (slightly sharper).
 - Fixed: a large (tiled) section opened as a grey placeholder when the engine is unavailable no longer shows a "locked" error after its working pixels are evicted from memory; reopening it regenerates its grey placeholder image while keeping its saved record unchanged.
@@ -24,6 +25,8 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card Q21 follow-up: the background pixel loader (`createPixelLoader`, `app/js/pixelbudget.js`) lost requests made while a drain stopped by `clear()` was still decoding; it now resumes them, with a unit test (found by `large-16bit-desktop.mjs` at V0.154).
+- Card Q16 follow-up: `tiled-sections.mjs` bounds its region to the rows the view shows, because the tiled wand grows over the visible area only and the view is no longer taller than its pane.
 - Card Q11: new pure module `app/js/mlsettings.js` validates ichnotaxa and multiproxy classifier settings when a project is loaded; `GEO_PARAMS` moved there from `multiproxy.js`; unit tests in `tests/app/mlsettings.test.mjs` and hostile `method`/`k` in `tests/e2e/html-injection.mjs`.
 - Card Q16: the `.viewport` grid row is sized by the pane, not by the canvas; new end-to-end check `tests/e2e/canvas-viewport.mjs` in the smoke suite. A navigation-preview mismatch this exposed came from a half-pixel tick antialiased differently between frames on GPU canvases.
 - M8.5.8 tests: `tests/app/engine-ages.test.mjs` now waits until each request reaches the fake engine client instead of a fixed 10 ms sleep, which failed under a loaded full test run.

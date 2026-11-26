@@ -647,7 +647,10 @@ try {
     await page.evaluate((index) => {
       const { S } = window.ichantool; S.cur = index; window.ichantool.selectSection?.(index);
       S.view = { x: 0, y: 3000, zoom: 1 }; S.brushSize = 10; S.exShape = 'free'; S.overlap = true; S.wandTol = 20; S.selected = 0; S.multi.clear();
-      S.active = S.classes[0].id; S.sections[index].roi = { x0: 0, y0: 3000, x1: 620, y1: 4400 };   // bounds the wand and the lasso alike on both paths
+      // The region bounds the wand and the lasso alike on both paths. The tiled wand grows over the visible area only (tiledtools.js), so the
+      // region must also end within the rows the view shows at zoom 1 (card Q16: the view is now exactly as tall as its pane).
+      const shown = document.getElementById('view').height;
+      S.active = S.classes[0].id; S.sections[index].roi = { x0: 0, y0: 3000, x1: 620, y1: Math.min(4400, 3000 + shown) };
       window.ichantool.requestRender();
     }, index);
     // Measured before every stroke, as in the editing steps above (the pane may scroll; card M8.4.32).

@@ -1035,6 +1035,9 @@ web/frontend security, UI correctness and architecture cards sit here.
     6/5/5 of 6 before, 0/6 after; `verifyNavigationPreview` passed starting at window heights 700-1080. `app/js/app.js` 4,602 -> 4,602 lines.
     Windows: `npm test` 693/693, `npm run typecheck`, `build_standalone.py`, `smoke.mjs`, `desktop.mjs` passed. Not checked: macOS, Linux;
     the view box is still drawn at fractional y (no mismatch seen).
+  - *Follow-up (26 Nov 2026):* *Desktop builds* of `1d1eb5a` failed in `tiled-sections.mjs` on all three systems ("labels are identical"): the
+    tiled wand grows over the visible area only (`tiledtools.js`), and the script's region (rows 3000-4400) had fitted the old, too-tall canvas.
+    The region now ends within the rows the view shows (`Math.min(4400, 3000 + view.height)`); exact equality unchanged (1653 label runs).
 
 - [ ] **Q17 - Spurious "masks unsent" notices when three or more tiled sections send at once** (found by Q14, 22 Nov 2026; most capable,
   effort medium: concurrency of the engine bridge). `desktop/engine.js` refuses a third concurrent binary request (`mask.put`,
