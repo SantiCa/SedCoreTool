@@ -14,6 +14,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### For users
 
+- Fixed: the image view now fills exactly the visible pane at every window size, so centring on a trace no longer lands below the visible area and only the visible part of a large image is read; depth ticks of the navigation strip are drawn on whole pixel rows (slightly sharper).
 - Fixed: a large (tiled) section opened as a grey placeholder when the engine is unavailable no longer shows a "locked" error after its working pixels are evicted from memory; reopening it regenerates its grey placeholder image while keeping its saved record unchanged.
 - Fixed: "Go to the trace" (for example from the examples dialog) now stays centred on the trace when jumping to a section that has not been viewed yet, instead of jumping back to the top of the section one frame later.
 - Figures (card Q23): ichnotaxa plots (kite, curves and filled areas) no longer draw a coloured line across intervals where a taxon's presence is 0; «Ichnotaxa distribution» can now optionally include the core photo and geochemical proxies / other records; and «Whole interpreted core», «Core log» and «Multiproxy log of a core» now offer the compact ichnotaxa distribution view (narrow columns with tilted italic taxon names).
@@ -22,6 +23,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### Internal
 
+- Card Q16: the `.viewport` grid row is sized by the pane, not by the canvas; new end-to-end check `tests/e2e/canvas-viewport.mjs` in the smoke suite. A navigation-preview mismatch this exposed came from a half-pixel tick antialiased differently between frames on GPU canvases.
 - M8.5.8 tests: `tests/app/engine-ages.test.mjs` now waits until each request reaches the fake engine client instead of a fixed 10 ms sleep, which failed under a loaded full test run.
 - Card Q20: fixed the start-failure test race in `tests/app/engine.test.mjs` so failure classification waits for `client.exited` (or the existing 2 s timeout) instead of racing stdout closure against the child's `exit` event.
 - Card M8.5.8: wired core merged-table row ages through `core.ages/1` when the engine experiment is enabled (`app/js/engineages.js`, `coredata.js`, `datatab.js`, `multiproxy.js`), showing pending/error states with Retry, waiting in exports and verifying parity in `tests/e2e/desktop.mjs` with the flag off and on.

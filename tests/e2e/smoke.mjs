@@ -18,6 +18,7 @@ import { verifyEventShading } from './event-shading.mjs';
 import { verifyFigureComposition } from './figure-composition.mjs';
 import { verifyHtmlInjection } from './html-injection.mjs';
 import { verifyGotoTrace } from './goto-trace.mjs';
+import { verifyCanvasViewport } from './canvas-viewport.mjs';
 const { default: puppeteer } = await import(process.env.PUPPETEER_MODULE || 'puppeteer-core');
 
 const URL = process.env.APP_URL || 'http://localhost:8765/app/index.html';
@@ -64,6 +65,7 @@ try {
   await verifyEventShading(b, URL);
   await verifyFigureComposition(b, URL);
   await verifyGotoTrace(b, URL);
+  await verifyCanvasViewport(b, URL);
   { // card Q9: a hostile project file, in a fresh storage so the other checks never see it
     const context = await b.createBrowserContext(), page = await context.newPage();
     page.on('dialog', (d) => d.accept());

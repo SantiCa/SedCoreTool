@@ -1628,7 +1628,7 @@ function drawNav(s, cw, ch) {
     vctx.font = '9px "IBM Plex Mono", monospace'; vctx.textBaseline = 'middle'; vctx.textAlign = 'left';
     for (let v = Math.ceil(s.top / st - 1e-9) * st; v <= s.bottom + 1e-9; v += st) {
       const yy = Math.round(y + ((v - s.top) / span) * H) + 0.5;
-      vctx.fillStyle = '#e6e1d6'; vctx.fillRect(x + W - 4, yy, 4, 1);   // tick on the strip edge, so it is not read as a minus sign
+      vctx.fillStyle = '#e6e1d6'; vctx.fillRect(x + W - 4, yy - 0.5, 4, 1);   // tick on the strip edge (not read as a minus sign), on whole pixel rows: a half-pixel fill is antialiased differently from frame to frame on GPU canvases
       vctx.fillStyle = '#a49d91'; vctx.fillText(fmt(v, 3), tx + 1, yy);
     }
   }

@@ -13,19 +13,22 @@ file and leave one line here.
 
 ## Status and handoff
 
-Updated 25 November 2026. Rules for this block: [AGENTS.md §1 step 8](../AGENTS.md#1-every-session-in-this-order) (about 30 lines, rewritten,
+Updated 26 November 2026. Rules for this block: [AGENTS.md §1 step 8](../AGENTS.md#1-every-session-in-this-order) (about 30 lines, rewritten,
 not appended). Earlier status records, check logs and audit texts: [roadmap-history.md § Status log](roadmap-history.md#status-log-until-21-november-2026).
 
 - **Branch:** `work/2026-11-13` (pushed); `master` (V0.153, `ba98eb1`) is contained in it.
 - **Released:** V0.153 (22 Nov 2026): integrated into `master` as `ba98eb1`; tag `V0.153` and GitHub Release (8 files, run
   `45058054277`) at the owner's request. The V0.152 Release and tag were deleted at the owner's request; V0.84 and V0.48 remain.
-- **Last verified code commit:** Q12 (this commit): Windows checks passed (`npm test` 693/693, `npm run typecheck`, `tools/build_standalone.py`). Previous Q18 (`8576fd8`) also passed `verifyGotoTrace` in headless Chrome; M8.5.8 (`beb9181`) passed `tests/e2e/desktop.mjs` engine off and on; Python unchanged since M8.5.6b `a100cdb` (`pytest -q` 1040 passed / 9 skipped, `ruff`). Last full `check_all --e2e`: V0.153 `35659e5`.
-- **GitHub:** Q20 (`7ae518d`) `tests` (`45716409787`) and M8.5.8 (`beb9181`) `tests` (`45715645182`) green; earlier M8.5.8 (`8c4b71e`) *Desktop builds* (`45703990995`) green on Windows, macOS and Linux. Q18 (`8576fd8`) and Q12 (this push) running on GitHub.
-- **Checks due:** none locally; read GitHub `tests` and *Desktop builds* results of the Q12 push.
+- **Last verified code commit:** Q16 (this commit): Windows `npm test` 693/693, `npm run typecheck`, `tools/build_standalone.py`, `smoke.mjs`,
+  `desktop.mjs` (engine off and on), `pytest`/`ruff` (Python unchanged). Last full `check_all --e2e`: V0.153 `35659e5`.
+- **GitHub:** Q12 (`247f03e`) green: `tests` (`45718214741`) and *Desktop builds* (`45718214939`) on Windows, macOS and Linux. Q16 push running.
+- **Checks due:** read GitHub `tests` and *Desktop builds* of the Q16 push.
 - **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete.
-- **Found, not done:** **Q16** (canvas taller than pane; fast, medium), **Q11** (hostile ML settings), **Q19** (intermittent macOS "window: labels"; most capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
+- **Found, not done:** **Q11** (hostile ML settings; fast, medium; brief written, next), **Q19** (intermittent macOS "window: labels"; most
+  capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
-- **Next:** remaining slice (a) cards before **M8.5.9** (record axis conversion `log.js::toAxis`, computed columns `sheet.js`, age-model parsing `parseAgeModelDetailed`/`baconToAgeText`, Y7 public functions — design/write cards first, most capable/high or medium), or remaining Q-cards (**Q16**/**Q11** fast/medium; **Q19**/**Q17** most capable/medium), or cut V0.154 on request.
+- **Run authorised 26 Nov 2026:** Q16 (done), then **Q11**. Recommended afterwards (not yet authorised): cut V0.154, then design the remaining slice (a)
+  cards before **M8.5.9** (`log.js::toAxis`, `sheet.js` computed columns, `parseAgeModelDetailed`/`baconToAgeText`, Y7; most capable, high).
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.8 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
   long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 is approved.
@@ -1015,12 +1018,18 @@ web/frontend security, UI correctness and architecture cards sit here.
 
 - [x] **Q14 - `tiled-sections.mjs` failed in the M8.4.42/M8.4.43 blocks** (done 22 Nov 2026: a test wait fixed and the top bar no longer grows; [CHANGELOG](../CHANGELOG.md#unreleased); record: [history](roadmap-history.md#q14---tiled-sectionsmjs-fails-in-the-m8443-split-block-on-all-three-systems)).
 
-- [ ] **Q16 - The view canvas is taller than its visible pane and depends on the window's first size** (found by Q14, 22 Nov 2026; fast tier,
-  effort medium). At 1600 x 1000 `#view` is 1754 px tall while about 860 px are visible (clipped by `.viewport`): the implicit grid row of
-  `.viewport` is sized by the content and `resizeCanvases` copies `clientHeight` back into the canvas, so the height keeps the previous aspect
-  ratio; the headless window opens at 884 x 561 before `setViewport`, which differs per system. `visibleSource` (tiles read) and `centerOn`
-  (may centre off-screen) follow that height. Probable lead for Q15. *Change:* size the canvas from the visible pane; *Tests:* an e2e or DOM
-  check that the canvas height equals the visible pane after resizes; *Done when:* the height follows the pane on every resize.
+- [x] **Q16 - The view canvas is taller than its visible pane and depends on the window's first size** (done 26 Nov 2026, development gate;
+  [CHANGELOG](../CHANGELOG.md#unreleased)).
+  - *As built (26 Nov 2026; director, diagnosis by an Opus sub-agent at medium effort, reviewed):* `.viewport` in `app/index.html` gained
+    `grid-template-rows: minmax(0, 1fr)`, so `#view` and `#profile` take the pane's height instead of sizing the implicit row by their content.
+    New `tests/e2e/canvas-viewport.mjs` (in `smoke.mjs`) opens at 884 x 561 and resizes through five window sizes, asserting canvas box and
+    pixel height equal to the pane and no overflow; before the fix it failed (`1754 !== 857` at 1600 x 1000). The new heights exposed a
+    `navigation-preview.mjs` mismatch (1 value, 1 level, canvas 550 x 657, ANGLE D3D11): the legacy renderer was not stable between frames
+    because `drawNav` drew its depth ticks at `y + 0.5` (two half-covered rows) under the translucent view box; the tick now sits on whole
+    rows (`yy - 0.5`); the test is unchanged (exact equality). Measured self-mismatch of the legacy frame at canvas heights 557/625/657:
+    6/5/5 of 6 before, 0/6 after; `verifyNavigationPreview` passed starting at window heights 700-1080. `app/js/app.js` 4,602 -> 4,602 lines.
+    Windows: `npm test` 693/693, `npm run typecheck`, `build_standalone.py`, `smoke.mjs`, `desktop.mjs` passed. Not checked: macOS, Linux;
+    the view box is still drawn at fractional y (no mismatch seen).
 
 - [ ] **Q17 - Spurious "masks unsent" notices when three or more tiled sections send at once** (found by Q14, 22 Nov 2026; most capable,
   effort medium: concurrency of the engine bridge). `desktop/engine.js` refuses a third concurrent binary request (`mask.put`,
