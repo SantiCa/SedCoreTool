@@ -24,6 +24,8 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **GitHub:** `9babe23`: `tests` (`46007739429`) and *Desktop builds* (`46007739419`) green on Windows, macOS and Linux.
 - **Checks due:** none.
 - **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete.
+- **V0.154 offline file broken:** `SedCoreTool_V0.154.html` as built on `master` stops at start (two imports on one `app.js` line since
+  Q11); fixed on the branch in `2170fec` (with a test). No V0.154 Release exists; the fix reaches `master` with the next version.
 - **Found, not done:** **Q19** (intermittent macOS "window: labels"; most
   capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
