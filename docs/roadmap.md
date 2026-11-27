@@ -30,7 +30,7 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
   capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
 - **Design card A2 done (27 Nov 2026):** cards **M8.5.8a-M8.5.8o** of the rest of slice (a) written before M8.5.9, with decisions
-  **Z1-Z17** ([block](#decisions-for-the-rest-of-slice-a-a2)). Z1-Z17 approved as recommended (27 Nov 2026). **M8.5.8a-c** done; next **M8.5.8d** (most capable, medium). V0.155 waits for more cards (maintainer, 27 Nov 2026).
+  **Z1-Z17** ([block](#decisions-for-the-rest-of-slice-a-a2)). Z1-Z17 approved as recommended (27 Nov 2026). **M8.5.8a-d** done; next **M8.5.8e** (most capable, medium). V0.155 waits for more cards (maintainer, 27 Nov 2026).
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.8 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
   long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 and Z1-Z17 is approved.
@@ -942,7 +942,16 @@ after. The order is the order of this list; cards written later go before the ga
     plain-Python transcription of `interpAge` on seeded random models with repeated ages; refusals naming the field; transport through the
     real coordinator and worker, with cancel and superseding. `pytest`, `ruff`, `npm test`.
   - *Done when:* development gate.
-- [ ] **M8.5.8d - Contract and reference fixtures of `core.age_model/1` and `core.bacon/1`** (waits for Z5-Z8).
+- [x] **M8.5.8d - Contract and reference fixtures of `core.age_model/1` and `core.bacon/1`** (done 27 Nov 2026, development gate).
+  - *As built (27 Nov 2026; most capable / medium sub-agent, every line reviewed by the director):* contract §9.11 (text input as Z6,
+    whitespace set by code point, `StringToNumber` grammar, both readers' rules as the code has them, `toPrecision(8)` ties away from zero,
+    refusals); `tools/make_age_model_fixtures.mjs` writes 66 files (2.2 MiB) to `tests/fixtures/age_model/`: 41 age-model texts, 24 Bacon
+    tables (numbers and the text lines the program writes) and `js-numbers.json` (`Number()` and `toPrecision(8)` for the engine's port);
+    every file one line of printable ASCII JSON, so git cannot alter an input. Quirks found and recorded as they are: an absent and an empty
+    range cell are different rows (`5,10` / `5,10,` give `dupDepth`); first prefix match chooses the column (`age_min` before `age`); a first
+    line holding `Infinity` is a header; a lone `\r` and U+2028 do not end a line; in Bacon tables an empty cell reads 0 and a decimal comma
+    splits cells; metres are multiplied by the double 0.01. `core.bacon/1` summary `{rows}`. Open point moved to M8.5.8m (overflow).
+    `tests/app/age-model-fixtures.test.mjs` (6). Checks (Windows): `npm test` 718/718, typecheck. `app.js` unchanged.
   - *Goal:* the contract describes the age-model text reader (`core.js::parseAgeModelDetailed`) and the Bacon table conversion (the numbers
     of `core.js::baconToAgeText`), and fixtures made by today's JavaScript fix their results.
   - *Read first:* contract §3 (buffer dtypes, metadata limits), §4 "Tables", §9.2, §9.8; TECHNICAL_DOCUMENTATION §5; `core.js`
@@ -1095,6 +1104,9 @@ after. The order is the order of this list; cards written later go before the ga
   - *Done when:* development gate; `app.js` lines before and after recorded.
 - [ ] **M8.5.8m - Age model and Bacon tables from the engine** (engine experiment; waits for Z5-Z8 and for M8.5.8i's `agemodel` and `bacon`
   results; after M8.5.8k).
+  - *Open (from M8.5.8d, decide before this card):* a Bacon depth beyond about 1.8e307 mm overflows; JavaScript writes `Infinity` or
+    `-Infinity` into the saved text (the age-model reader then drops that row), while `core.bacon/1` returns a missing slot without the
+    sign (contract §9.11, fixture `bacon-depth-overflow-mm`). The saved text can then not be byte-identical for that hostile input only.
   - *Goal:* with the engine experiment on, a core's `ageModel.model` comes from `core.age_model/1` (age box, project opening, imported cores
     of `multiproxy.js::addImported`) and an opened Bacon table from `core.bacon/1`; the pending rule of Z5; the text written from a Bacon
     table is byte-identical to today's, so the saved `age.text` does not change (Z7); the load rule of Z8; a failure is visible; with the

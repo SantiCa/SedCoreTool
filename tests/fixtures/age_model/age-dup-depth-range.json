@@ -1,0 +1,1 @@
+{"format":"core-age-model-fixture/1","name":"age-dup-depth-range","description":"Same depth and age with a different range is a depth with two rows.","inputs":{"settings":{"version":1},"text":"1,2,1,3\n1,2,1,4\n5,6,5,7\n"},"expected":{"summary":{"rows":0,"reversals":0,"range_ignored":0,"bacon":false,"issue":"dupDepth","issue_depth":1},"model":{"depth":[],"age":[]}}}

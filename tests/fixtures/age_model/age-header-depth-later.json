@@ -1,0 +1,1 @@
+{"format":"core-age-model-fixture/1","name":"age-header-depth-later","description":"Depth named in a later column; age not named: the age is column 0.","inputs":{"settings":{"version":1},"text":"x,depth_cm\n5,1\n6,2\n"},"expected":{"summary":{"rows":2,"reversals":0,"range_ignored":0,"bacon":false,"issue":null,"issue_depth":null},"model":{"depth":[1,2],"age":[5,6]}}}

@@ -1,0 +1,1 @@
+{"format":"core-age-model-fixture/1","name":"age-no-header","description":"No header, whitespace separators.","inputs":{"settings":{"version":1},"text":"0 1\n5 2\n10 3.5\n"},"expected":{"summary":{"rows":3,"reversals":0,"range_ignored":0,"bacon":false,"issue":null,"issue_depth":null},"model":{"depth":[0,5,10],"age":[1,2,3.5]}}}

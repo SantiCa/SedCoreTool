@@ -1,0 +1,1 @@
+{"format":"core-bacon-fixture/1","name":"bacon-no-min-column","description":"No min column: no rows.","inputs":{"settings":{"version":1,"center":"median","depth_unit":"cm","age_divisor":1000},"table_text":"depth max median mean\n0 30 20 21\n5 90 60 62\n"},"expected":{"summary":{"rows":0},"rows":{"depth":[],"age":[],"age_min":[],"age_max":[]},"text_lines":null}}

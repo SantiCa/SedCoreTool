@@ -1,0 +1,1 @@
+{"format":"core-age-model-fixture/1","name":"age-comments-only","description":"Only comments and blank lines: no model.","inputs":{"settings":{"version":1},"text":"# nothing\n\n   \n# here\n"},"expected":{"summary":{"rows":0,"reversals":0,"range_ignored":0,"bacon":false,"issue":null,"issue_depth":null},"model":{"depth":[],"age":[]}}}

@@ -1,0 +1,1 @@
+{"format":"core-age-model-fixture/1","name":"age-negative-zero-second","description":"As above with 0 first: 0 is kept.","inputs":{"settings":{"version":1},"text":"0,1\n-0,1\n2,3\n"},"expected":{"summary":{"rows":2,"reversals":0,"range_ignored":0,"bacon":false,"issue":null,"issue_depth":null},"model":{"depth":[0,2],"age":[1,3]}}}

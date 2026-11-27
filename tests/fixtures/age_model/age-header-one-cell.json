@@ -1,0 +1,1 @@
+{"format":"core-age-model-fixture/1","name":"age-header-one-cell","description":"A one-cell first line is not a header (it is a row and is dropped as not numeric).","inputs":{"settings":{"version":1},"text":"ages\n1,2\n3,4\n"},"expected":{"summary":{"rows":2,"reversals":0,"range_ignored":0,"bacon":false,"issue":null,"issue_depth":null},"model":{"depth":[1,3],"age":[2,4]}}}

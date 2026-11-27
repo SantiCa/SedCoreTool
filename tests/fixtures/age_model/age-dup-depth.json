@@ -1,0 +1,1 @@
+{"format":"core-age-model-fixture/1","name":"age-dup-depth","description":"One depth with two ages: no model, issue dupDepth naming that depth.","inputs":{"settings":{"version":1},"text":"depth,age\n1,2\n3,4\n3,5\n6,7\n"},"expected":{"summary":{"rows":0,"reversals":0,"range_ignored":0,"bacon":false,"issue":"dupDepth","issue_depth":3},"model":{"depth":[],"age":[]}}}

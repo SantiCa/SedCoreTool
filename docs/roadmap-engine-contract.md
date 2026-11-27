@@ -791,3 +791,74 @@ ages (stable since ES2019); `interpAge` finds `lo` by bisection, which on an inv
 query, and `n − 2` for the largest age; with two equal ages around the query `span` is 0 and the depth of `lo` is returned (the deeper
 of two equal-age rows is never returned by interpolation). A non-finite age is left to the caller (`NaN` is not treated as outside); the
 client sends a missing age as missing and no fixture asks for `NaN`.
+
+### 9.11 Methods `core.age_model/1` and `core.bacon/1`
+
+**State: specified on 27 November 2026 (card M8.5.8d); not yet in the engine (card M8.5.8e), not used by the interface.** They read a
+core's age-model text, as `core.js::parseAgeModelDetailed` does today, and convert a Bacon age-depth table into the numbers of the
+age-model text, as `core.js::baconToAgeText` does (decisions Z5-Z8). Reference fixtures made by that JavaScript: `tests/fixtures/age_model/`
+(generator `tools/make_age_model_fixtures.mjs`), which also record ECMAScript `Number()` and `toPrecision(8)` for the engine's port.
+
+**Text input (decision Z6).** A text reaches a method as an input of dtype `u8`, rank 1: the UTF-8 bytes of the string, 1 byte to
+4 MiB (4,194,304 bytes, the metadata cap of §3). It is decoded strictly: an invalid sequence, an encoded surrogate (U+D800-U+DFFF), an
+overlong form or a code point above U+10FFFF is refused. A leading U+FEFF is kept as a character, not removed as a byte-order mark (both
+readers then treat it as whitespace). The client encodes the string with `TextEncoder`, which writes a lone surrogate as U+FFFD; no rule
+below treats either as anything but an ordinary character, so the results are the same. An empty text is not sent (the program has no
+model, as today); a text larger than 4 MiB is refused, and the interface shows the refusal.
+
+**Character classes used by both readers.** *Whitespace* is the set of ECMAScript `String.prototype.trim`, of the regular-expression class
+`\s` and of `StringToNumber` (the same set): U+0009-U+000D, U+0020, U+00A0, U+1680, U+2000-U+200A, U+2028, U+2029, U+202F, U+205F, U+3000
+and U+FEFF; not U+001C-U+001F, U+0085 or U+180E (unlike Python's `str.isspace` and `re` `\s`). *Lower case* is
+`String.prototype.toLowerCase`; for every decision below it is equivalent to mapping A-Z to a-z, because no other character lowercases to a
+string containing an ASCII letter or digit except U+0130 (to `i` U+0307) and U+212A (to `k`), and neither can form a name that is
+compared. *A number* is ECMAScript `StringToNumber` applied to a cell: whitespace at both ends removed, then an optionally signed decimal
+literal (ASCII digits with at most one `.` and digits on at least one side of it, then an optional `e`/`E` exponent with an optional
+sign), `Infinity` with an optional sign, or an unsigned `0x`/`0X`, `0b`/`0B`, `0o`/`0O` integer; nothing else (no `_`; no `nan`, `inf` or
+`infinity`; no non-ASCII digits; no sign before `0x`). The empty string is 0. Literals are rounded to the nearest double (ties to even);
+`1e400` is `Infinity`. *Finite* means neither NaN nor ±Infinity.
+
+#### `core.age_model/1`
+
+| Item | Rule |
+|---|---|
+| Name, scope, priority | `core.age_model/1`; scope `core` (§9.1); priority `interactive` only (`batch` is refused, §9.2). |
+| Inputs | `settings` (`utf8json` `{"version": 1}`, nothing else) and `text` (`u8`, rank 1, required: the age-model text, as above). |
+| Lines | The text is split at every `\n` and every `\r\n` (a lone `\r`, U+2028 and U+2029 do not end a line; they are whitespace inside it). Each line is trimmed of whitespace; empty lines and lines that then start with `#` are dropped. A `#` later in a line is an ordinary character. |
+| Cells | Chosen for each line. If the line contains `;` or a tab: it is split at the matches of the ECMAScript expression `/\s*[;\t]\s*/` found from the left, each as long as possible (so a run of tabs, or whitespace around one `;`, is one separator, while `;;` or `; ;` leaves an empty cell); in each cell every whitespace character is removed and then its first `,` becomes `.` (decimal comma: `1 000,5` is 1000.5; `6,1,2` is not a number). Otherwise, if the line contains `,`: split at the matches of `/\s*,\s*/` (whitespace inside a cell stays: `1 2` is not a number). Otherwise: split at runs of whitespace. |
+| Header | The first remaining line is a header when it has at least 2 cells and at least one of its cells, with every `"` removed and lower-cased, is non-empty and not a finite number (so a first line holding `Infinity` or `1e400` is a header). A header line is removed. On those cells (prefix match; the first matching cell wins): depth column `^(depth\|prof\|mcd\|mbsf\|cmcd\|ccsf\|z)`, else column 0; age column `^(age\|edad\|median\|mean\|cal)`, else column 1 when the depth column is 0 and column 0 otherwise; minimum `^(min\|lower\|low\|age_?min\|2\.5)` and maximum `^(max\|upper\|high\|age_?max\|97\.5)`, each absent when no cell matches. Consequences kept as they are: `age_min` before `age` makes `age_min` the age column; a header without a depth name whose column 0 matches the age gives depth = age; `mínimo` is not a minimum. Without a header the columns are 0 (depth), 1 (age), 2 (minimum) and 3 (maximum). The text is a *Bacon table* when the header's cells include exactly `depth`, `min`, `max`, `median` and `mean`. |
+| Rows | Each data line's cells are read as numbers, an empty cell being NaN (not 0); quotes are not removed (`"1"` is not a number). A line is a row when its depth and age cells are finite; other lines are dropped. Each row keeps its minimum and maximum cells in one of three states: a number (possibly not finite); *not a number* (the cell exists but is empty or not a number, or the header names no such column); or *absent* (the line has fewer cells than that column's position). |
+| Sort and merge | Rows are sorted by depth, then age (a stable sort: equal rows keep their order; `-0` equals `0`). Then, from the last row down to the second, a row whose depth equals the previous row's depth is removed when the two rows are *identical* (depth and age equal; each range cell equal as a number, or both *not a number*, or both *absent*; *not a number* never equals *absent*, so `5,10` and `5,10,` are different rows); otherwise the method stops with issue `dupDepth` and that depth (the largest depth that has two different rows) and gives no model. Of identical rows the one earlier in the sorted order is kept (a `-0` written first stays `-0`). |
+| Model | Fewer than 2 rows left: no model and no issue. Otherwise the model is the rows' depths and ages. The range is kept when every row's two range cells are finite and its age lies within [min(minimum, maximum), max(minimum, maximum)]; each row's `age_min` is then that min and `age_max` that max (swapped cells are reordered; `Math.min(-0, 0)` is `-0`). Otherwise the range is dropped, and `range_ignored` is the number of rows that failed the test when there was a header that named both range columns, else 0. `reversals` counts the rows (after the first) whose age is less than the previous row's age. |
+| Output table `model` | Columns `depth` and `age`, and `age_min`, `age_max` when the range is kept; units `""` (the text carries none; the client knows the core's units). One row per model row, nothing missing; 0 rows (columns `depth` and `age`) when there is no model. Every value is finite and depth strictly increasing: a valid `age_model` for §9.8 and §9.10. |
+| `summary` | `{"rows", "reversals", "range_ignored", "bacon", "issue", "issue_depth"}`: model rows (0 without a model); `reversals`; `range_ignored`; `bacon`, true when a model exists and its header made the text a Bacon table; `issue`, `"dupDepth"` or `null`; `issue_depth`, the depth of the issue or `null`. Without a model `reversals` and `range_ignored` are 0 and `bacon` false. `issue_depth` is the only cell value in the summary (the interface names that depth); a `-0` depth is written `0` there (JSON). |
+| Dimensions | `rows` = model rows (0 allowed, §9.3). |
+
+#### `core.bacon/1`
+
+| Item | Rule |
+|---|---|
+| Name, scope, priority | `core.bacon/1`; scope `core`; priority `interactive` only. |
+| Inputs | `settings` (`utf8json` `{"version": 1, "center": "median"\|"mean", "depth_unit": "mm"\|"cm"\|"m", "age_divisor": 1\|1000\|1000000}`, all four fields required, nothing else; `age_divisor` a JSON number) and `table_text` (`u8`, rank 1, required: the table's text, as above). The program sends the core's depth unit and the divisor of its age unit (`a` 1, `ka` 1000, `Ma` 1,000,000). |
+| Lines | Split at `\n` and `\r\n`; lines that are empty after trimming whitespace are dropped (`#` lines are not: a `#` first line is the header). No line left: no rows. |
+| Header | The first line, trimmed, every `"` removed, lower-cased, split at runs of `,`, `;`, tab and U+0020 (`/[,;\t ]+/`). The column of a name is the first cell exactly equal to it: depth `depth`, minimum `min`, maximum `max`; the centre is the column named by `center`, else `median`, else `mean`. Any of the four missing: no rows. |
+| Rows | Every later line, trimmed and split as the header (quotes not removed), each cell read as a number. Unlike the age-model reader an empty cell, or one of whitespace only (for example U+00A0), is **0** (a leading separator gives a depth of 0), and a decimal comma separates cells. A line is kept, in file order, when its depth, centre, minimum and maximum cells are all finite (`NA`, a missing cell or `Infinity` drop it). |
+| Conversion (Z7) | depth × f with f = 1 / (cm per unit) evaluated as a double (mm: 1 / 0.1 = 10; cm: 1; m: 1 / 100 = 0.01, so metres are multiplied by the double 0.01, not divided by 100); each age ÷ `age_divisor`. Each result x is rounded as ECMAScript `Number(x.toPrecision(8))`: the sign is set apart, the integer n with 10^7 ≤ n < 10^8 and the exponent e that make n × 10^(e−7) − abs(x) closest to zero are taken from the exact binary value of x, a tie taking the larger n (away from zero: 123,456,785 gives 123,456,790, where Python's formatting rounds to even), and the decimal n × 10^(e−7) is read back to the nearest double; zero, also `-0`, gives `+0`. |
+| Output table `rows` | Columns `depth` (unit `depth_unit`), `age`, `age_min`, `age_max` (unit `a`, `ka` or `Ma` from `age_divisor`), in that order, from the centre, minimum and maximum columns without reordering. One row per kept line, in file order. Fewer than 2 kept lines, or a missing column: 0 rows (the program then reads the file as plain age-model text, as today). A converted value that is not finite (only a depth beyond about 1.8e307 mm) is a missing slot (`rows_valid` 0); JavaScript writes `Infinity` or `-Infinity` there. |
+| `summary` | `{"rows": <rows of the output table>}`. |
+| Dimensions | `rows` = output rows (0 allowed). |
+| The page's text (Z7) | The page writes each row as `${depth}, ${age}, ${age_min}, ${age_max}` (ECMAScript `Number::toString` of each double: the shortest form that reads back to it) after its two comment lines, as `app.js` does today; the fixtures record the lines (`text_lines`), so the saved `age.text` stays byte-identical. A missing slot is outside this rule (the sign of the infinity is not returned; the age-model reader drops such a row). |
+
+**Both methods.**
+
+| Item | Rule |
+|---|---|
+| Tolerance (decision Y4) | Exact: every output value bit-identical to the JavaScript result (`-0` included), the missing pattern and `summary` exactly. |
+| Refusals | As §9.2: the field is named. `UNSUPPORTED_INPUT`: `text` or `table_text` not valid UTF-8; `settings` of another version. `LIMIT_EXCEEDED`: `text` or `table_text` longer than 4 MiB. `INVALID_REQUEST`: `settings` with another field or not an object; `settings.center`, `settings.depth_unit` or `settings.age_divisor` missing or of another value. A wrong dtype or rank of `text` or `table_text` is `INVALID_BUFFER` naming the input (§9.2); an empty buffer cannot be made (§3: shapes are positive). Malformed lines and cells are never refusals: they are dropped as above, as JavaScript does. |
+| Saved fields (decision Z8) | A malformed project can hold a non-text `age.text` or `age.bacon`, or a `center` other than `median`/`mean`; interface card M8.5.8m normalises them on load in both modes, so the methods never receive another `center`. |
+
+Behaviour of `core.js` that the fixtures record, so that the contract and the program agree: `parseAgeModelDetailed` returns
+`{model: {depth, age, min?, max?, rangeIgnored?, bacon?, reversals}, issue: null}`, `{model: null, issue: {kind: 'dupDepth', depth}}` or
+`{model: null, issue: null}` (`min` and `max` are `age_min` and `age_max`; `rangeIgnored` is `range_ignored`, absent when 0; `bacon` is
+absent when false). A short line's range cell is `undefined` and an empty one `NaN`, which is why the two are different rows.
+`baconToAgeText` returns the text lines or `null`; its numbers are `+(+v).toPrecision(8)`, so the text is the shortest form of the rounded
+double. TECHNICAL_DOCUMENTATION §5 lists the header names in short; the regular expressions above are the complete rule.

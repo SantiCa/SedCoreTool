@@ -1,0 +1,1 @@
+{"format":"core-age-model-fixture/1","name":"age-header-english","description":"English header; comma separators; LF.","inputs":{"settings":{"version":1},"text":"depth,age\n0,0.5\n10,1.25\n20,2\n"},"expected":{"summary":{"rows":3,"reversals":0,"range_ignored":0,"bacon":false,"issue":null,"issue_depth":null},"model":{"depth":[0,10,20],"age":[0.5,1.25,2]}}}
