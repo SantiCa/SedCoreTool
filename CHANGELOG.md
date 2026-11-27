@@ -14,6 +14,9 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 
 ### For users
 
+- **Computed columns:** formulas that used to give a browser error, an odd result or text now give a clear message or missing values,
+  and very long or deeply nested formulas are refused; well-formed formulas give exactly the same results. When a project opens,
+  malformed saved computed columns are dropped and a message says how many (card M8.5.8f).
 - **Fixed:** the single-file offline version (`SedCoreTool_V0.154.html`) stopped at start with a script error; it starts again.
 - **Experimental, off by default** (desktop program, engine experiment): a project with many cores no longer shows "engine busy"
   errors for the ages of some cores; the cores' requests now wait their turn (card M8.5.8a).

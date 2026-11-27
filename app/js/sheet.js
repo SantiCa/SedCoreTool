@@ -5,15 +5,25 @@ import { minOf, maxOf } from './core.js';
 
 /** Formula error carrying a key + args; the UI translates it with fxText() (i18n.js). `message` is the key. */
 const ferr = (key, args = {}) => Object.assign(new Error(key), { key, args });
+/** Any error without a key (a bug, or a hostile input reaching a browser built-in) is shown as `invalid`, never as browser text. */
+const keyed = (e) => (e && e.key ? e : ferr('invalid'));
+
+/**
+ * Card M8.5.8f (decision Z10): bounds of the formula language, because formulas come from project files. Each excess is a named error
+ * of that formula (fx.* in i18n.js).
+ */
+export const FORMULA_LIMITS = Object.freeze({ bytes: 4096, tokens: 1024, depth: 64, args: 64, columnsPerCore: 256, movavgAdditions: 1e8 });
+const utf8Bytes = (s) => new TextEncoder().encode(s).length;
 
 /* ───────── tokenizer and parser (recursive descent) ───────── */
 
 function tokenize(src) {
   const out = []; let i = 0;
   while (i < src.length) {
+    if (out.length > FORMULA_LIMITS.tokens) throw ferr('tooManyTokens', { n: FORMULA_LIMITS.tokens });
     const ch = src[i];
     if (/\s/.test(ch)) { i++; continue; }
-    if (/[0-9.]/.test(ch)) { const m = /^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?/i.exec(src.slice(i)); out.push({ t: 'num', v: +m[0] }); i += m[0].length; continue; }
+    if (/[0-9.]/.test(ch)) { const m = /^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?/i.exec(src.slice(i)); if (!m) throw ferr('badChar', { v: ch }); out.push({ t: 'num', v: +m[0] }); i += m[0].length; continue; }
     if (ch === '[') { const j = src.indexOf(']', i); if (j < 0) throw ferr('noBracket'); out.push({ t: 'name', v: src.slice(i + 1, j) }); i = j + 1; continue; }
     if (ch === '"' || ch === "'") { const j = src.indexOf(ch, i + 1); if (j < 0) throw ferr('noQuote'); out.push({ t: 'str', v: src.slice(i + 1, j) }); i = j + 1; continue; }
     const id = /^[A-Za-z_$][\w.$]*(:[A-Za-z]+\d+)?/.exec(src.slice(i));
@@ -22,30 +32,35 @@ function tokenize(src) {
     if (op) { out.push({ t: 'op', v: op[0] }); i += op[0].length; continue; }
     throw ferr('badChar', { v: ch });
   }
+  if (out.length > FORMULA_LIMITS.tokens) throw ferr('tooManyTokens', { n: FORMULA_LIMITS.tokens });
   return out;
 }
 
 /** Parse to an AST: {k:'num'|'str'|'ref'|'call'|'bin'|'neg', ...}. */
 export function parseFormula(src) {
-  const tk = tokenize(String(src).replace(/^\s*=/, '')); let p = 0;
+  const text = String(src);
+  if (text.length > FORMULA_LIMITS.bytes || utf8Bytes(text) > FORMULA_LIMITS.bytes) throw ferr('tooLong', { n: FORMULA_LIMITS.bytes });
+  const tk = tokenize(text.replace(/^\s*=/, '')); let p = 0, depth = 0;
   const peek = () => tk[p], eat = (v) => { if (tk[p]?.v !== v) throw ferr('expected', { v }); p++; };
+  /** Parentheses, calls, unary minus and the right side of ^ nest; at most FORMULA_LIMITS.depth deep. */
+  const nest = (parse) => { if (++depth > FORMULA_LIMITS.depth) throw ferr('tooDeep', { n: FORMULA_LIMITS.depth }); const r = parse(); depth--; return r; };
   const binary = (next, ops) => () => { let a = next(); while (tk[p]?.t === 'op' && ops.includes(tk[p].v)) { const op = tk[p++].v; a = { k: 'bin', op, a, b: next() }; } return a; };
   const primary = () => {
     const x = peek(); if (!x) throw ferr('incomplete');
     if (x.t === 'num') { p++; return { k: 'num', v: x.v }; }
     if (x.t === 'str') { p++; return { k: 'str', v: x.v }; }
     if (x.t === 'name') { p++; return { k: 'ref', v: x.v }; }
-    if (x.t === 'op' && x.v === '(') { p++; const e = cmp(); eat(')'); return e; }
-    if (x.t === 'op' && x.v === '-') { p++; return { k: 'neg', a: power() }; }
+    if (x.t === 'op' && x.v === '(') { p++; return nest(() => { const e = cmp(); eat(')'); return e; }); }
+    if (x.t === 'op' && x.v === '-') { p++; return { k: 'neg', a: nest(power) }; }
     if (x.t === 'id') {
       p++;
-      if (tk[p]?.v === '(') { p++; const args = []; if (tk[p]?.v !== ')') { args.push(cmp()); while (tk[p]?.v === ',') { p++; args.push(cmp()); } } eat(')'); return { k: 'call', f: x.v.toLowerCase(), args }; }
+      if (tk[p]?.v === '(') { p++; return nest(() => { const f = x.v.toLowerCase(), args = []; if (tk[p]?.v !== ')') { args.push(cmp()); while (tk[p]?.v === ',') { p++; if (args.length >= FORMULA_LIMITS.args) throw ferr('tooManyArgs', { v: f, n: FORMULA_LIMITS.args }); args.push(cmp()); } } eat(')'); return { k: 'call', f, args }; }); }
       return { k: 'ref', v: x.v };
     }
     throw ferr('unexpected', { v: x.v });
   };
-  const power = () => { const a = primary(); if (tk[p]?.v === '^') { p++; return { k: 'bin', op: '^', a, b: power() }; } return a; };
-  const unary = () => (tk[p]?.v === '-' ? (p++, { k: 'neg', a: unary() }) : power());
+  const power = () => { const a = primary(); if (tk[p]?.v === '^') { p++; return { k: 'bin', op: '^', a, b: nest(power) }; } return a; };
+  const unary = () => (tk[p]?.v === '-' ? (p++, { k: 'neg', a: nest(unary) }) : power());
   const mul = binary(unary, ['*', '/']);
   const add = binary(mul, ['+', '-']);
   const cmp = binary(add, ['<', '>', '<=', '>=', '==', '!=']);
@@ -71,11 +86,16 @@ function zip(a, b, f) {
   for (let i = 0; i < n; i++) { const x = Array.isArray(a) ? a[i] : a, y = Array.isArray(b) ? b[i] : b; const r = ok(x) && ok(y) ? f(x, y) : null; out[i] = ok(r) ? r : null; }
   return out;
 }
+/** Argument kinds (decision Z9): a function that needs a column refuses a single value, and the reverse. */
+const needCol = (fn, x) => { if (!Array.isArray(x)) throw ferr('argKind', { v: fn }); return x; };
+const needOne = (fn, x) => { if (Array.isArray(x)) throw ferr('argKind', { v: fn }); return x; };
+/** Digits of round(): Number.prototype.toFixed accepts 0..100 after truncation (NaN counts as 0); anything else is argKind. */
+const roundDigits = (d) => { needOne('round', d); const k = Number(d), t = Number.isNaN(k) ? 0 : Math.trunc(k); if (!(t >= 0 && t <= 100)) throw ferr('argKind', { v: 'round' }); return d; };
 const map1 = (a, f) => (Array.isArray(a) ? a.map((x) => { const r = ok(x) ? f(x) : null; return ok(r) ? r : null; }) : ok(a) ? f(a) : null);
 
 const FUN = {
   log10: (x) => map1(x, Math.log10), ln: (x) => map1(x, Math.log), log: (x) => map1(x, Math.log), exp: (x) => map1(x, Math.exp),
-  sqrt: (x) => map1(x, Math.sqrt), abs: (x) => map1(x, Math.abs), round: (x, d = 0) => map1(x, (v) => +v.toFixed(d)),
+  sqrt: (x) => map1(x, Math.sqrt), abs: (x) => map1(x, Math.abs), round: (x, d = 0) => { roundDigits(d); return map1(x, (v) => +v.toFixed(d)); },
   pow: (x, y) => zip(x, y, Math.pow), min2: (x, y) => zip(x, y, Math.min), max2: (x, y) => zip(x, y, Math.max),
   mean: meanOf, average: meanOf, std: stdOf, stdev: stdOf, median: (a) => { const v = vals(a).sort((p, q) => p - q); return v.length ? (v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : null; },
   sum: (...a) => { const v = vals(a); return v.length ? v.reduce((s, x) => s + x, 0) : 0; }, count: (...a) => vals(a).length,
@@ -83,11 +103,15 @@ const FUN = {
   max: (...a) => { if (a.length === 2 && Array.isArray(a[0]) && Array.isArray(a[1])) return zip(a[0], a[1], Math.max); const v = vals(a); return v.length ? maxOf(v) : null; },
   zscore: (x) => { const m = meanOf(x), s = stdOf(x); return map1(x, (v) => (s ? (v - m) / s : 0)); },
   norm01: (x) => { const v = vals(x), lo = minOf(v), hi = maxOf(v); return map1(x, (q) => (hi > lo ? (q - lo) / (hi - lo) : 0)); },
-  movavg: (x, n = 3) => { const h = Math.floor(n / 2); return x.map((_, i) => meanOf(x.slice(Math.max(0, i - h), i + h + 1))); },
-  diff: (x) => x.map((v, i) => (i && ok(v) && ok(x[i - 1]) ? v - x[i - 1] : null)),
-  cumsum: (x) => { let s = 0; return x.map((v) => (ok(v) ? (s += v) : null)); },
+  movavg: (x, n = 3) => {
+    needCol('movavg', x); needOne('movavg', n); const h = Math.floor(n / 2);
+    if (x.length * (2 * h + 1) > FORMULA_LIMITS.movavgAdditions) throw ferr('tooCostly', { v: 'movavg', n: FORMULA_LIMITS.movavgAdditions });
+    return x.map((_, i) => meanOf(x.slice(Math.max(0, i - h), i + h + 1)));
+  },
+  diff: (x) => needCol('diff', x).map((v, i) => (i && ok(v) && ok(x[i - 1]) ? v - x[i - 1] : null)),
+  cumsum: (x) => { let s = 0; return needCol('cumsum', x).map((v) => (ok(v) ? (s += v) : null)); },
   if: (c, a, b) => (Array.isArray(c) ? c.map((v, i) => (v == null ? null : v ? (Array.isArray(a) ? a[i] : a) : (Array.isArray(b) ? b[i] : b))) : c ? a : b),
-  corr: corrOf,
+  corr: (a, b) => corrOf(needCol('corr', a), needCol('corr', b)),
 };
 export const FUNCTIONS = Object.keys(FUN);
 
@@ -104,22 +128,36 @@ function evalAst(e, resolve) {
     }
     case 'call': {
       if (e.f === 'col') return resolve({ col: evalAst(e.args[0], resolve), core: e.args[1] ? evalAst(e.args[1], resolve) : null });
-      const fn = FUN[e.f]; if (!fn) throw ferr('unkFn', { v: e.f });
+      if (!Object.hasOwn(FUN, e.f)) throw ferr('unkFn', { v: e.f });   // own properties only: never constructor, __proto__...
+      const fn = FUN[e.f];
       return fn(...e.args.map((a) => evalAst(a, resolve)));
     }
     default: throw ferr('invalid');
   }
 }
 
-/** Evaluate a column formula over the columns of one core. Returns an array of length n. */
+/** Parse and evaluate one formula (column or cell); every error carries a key. */
+function evaluate(src, resolve) {
+  try { return evalAst(parseFormula(src), resolve); } catch (e) { throw keyed(e); }
+}
+
+/**
+ * Evaluate a column formula over the columns of one core. Returns an array of length n whose cells are numbers or null: a text result
+ * (`if(c, "a", "b")`) is a missing value (decision Z9).
+ */
 export function evalColumn(formula, columns, n) {
-  const ast = parseFormula(formula);
-  const r = evalAst(ast, (name) => {
+  const r = evaluate(formula, (name) => {
     if (typeof name !== 'string') throw ferr('colOnly');
-    if (!(name in columns)) throw ferr('noCol', { v: name });
+    if (!Object.hasOwn(columns, name)) throw ferr('noCol', { v: name });   // own properties only: never toString, __proto__...
     return columns[name];
   });
-  return Array.isArray(r) ? r : new Array(n).fill(ok(r) ? r : null);
+  if (!Array.isArray(r)) return new Array(n).fill(ok(r) ? r : null);
+  return r.every((v) => v === null || typeof v === 'number') ? r : r.map((v) => (typeof v === 'number' ? v : null));
+}
+
+/** Decision Z10: at most FORMULA_LIMITS.columnsPerCore computed columns apply to one core; `count` is the 1-based position. */
+export function checkComputedCount(count) {
+  if (count > FORMULA_LIMITS.columnsPerCore) throw ferr('tooManyCols', { n: FORMULA_LIMITS.columnsPerCore });
 }
 
 /* ───────── free cells (A1 notation) ───────── */
@@ -141,7 +179,7 @@ export function evalCells(cells, getCol) {
     let v;
     try {
       if (raw == null || raw === '') v = null;
-      else if (String(raw).startsWith('=')) v = evalAst(parseFormula(raw), resolve);
+      else if (String(raw).startsWith('=')) v = evaluate(raw, resolve);
       else v = Number.isFinite(+raw) && String(raw).trim() !== '' ? +raw : raw;
       if (Array.isArray(v)) v = meanOf(v); // a cell shows one value
     } catch (e) { v = { error: e.message, err: e }; }
@@ -159,6 +197,27 @@ export function evalCells(cells, getCol) {
   };
   for (const ref of Object.keys(cells)) value(ref);
   return out;
+}
+
+/**
+ * Decision Z13: saved computed columns (`project.sheet.columns`) come from a file. Keeps entries whose `name` is non-empty text of at
+ * most 256 UTF-8 bytes and not `__proto__`, `formula` is text, `core` is text or absent and `interp` is boolean or absent; returns fresh
+ * objects with only those fields (`error` is recomputed, never trusted) and how many entries were dropped.
+ * @param {unknown} value
+ * @returns {{columns: {name: string, formula: string, core?: string, interp?: boolean}[], dropped: number}}
+ */
+export function cleanSheetColumns(value) {
+  if (value == null) return { columns: [], dropped: 0 };
+  if (!Array.isArray(value)) return { columns: [], dropped: 1 };
+  const columns = [];
+  for (const q of value) {
+    if (!q || typeof q !== 'object' || Array.isArray(q)) continue;
+    const { name, formula, core, interp } = q, has = (k) => Object.hasOwn(q, k);
+    if (typeof name !== 'string' || !name || name === '__proto__' || name.length > 256 || utf8Bytes(name) > 256) continue;
+    if (typeof formula !== 'string' || (has('core') && typeof core !== 'string') || (has('interp') && typeof interp !== 'boolean')) continue;
+    columns.push({ name, formula, ...(has('core') ? { core } : {}), ...(has('interp') ? { interp } : {}) });
+  }
+  return { columns, dropped: value.length - columns.length };
 }
 
 /** V0.35: names of the columns a formula refers to. */

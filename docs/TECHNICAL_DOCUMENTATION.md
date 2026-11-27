@@ -1475,13 +1475,26 @@ and validation. Changing the default and removing the flag requires the maintain
 ### 17.3 Computed columns
 One formula per column (`sheet.js::evalColumn`), evaluated row by row over the core. Operators `+ − * / ^` and
 comparisons (`< > <= >= == !=`, giving 1/0); names without spaces or in brackets (`[XRF Ba/Ti]`), `depth`, `age`.
-Functions: `log10, ln, exp, sqrt, abs, round, pow, min, max` (element-wise with two columns), `mean, std` (sample
-standard deviation, n − 1), `median, sum, count, zscore` ((x − mean) / sample standard deviation), `norm01`,
-`movavg(x, n)` (centred mean of n rows), `diff, cumsum, if(c, a, b)`, `corr`. A missing value gives a missing
-result; so does division by 0. By default (`interp`), each column used is interpolated linearly to the depth of each
-row between its neighbouring values, without extrapolating (`sheet.js::fillLinear`), because each record is measured
-at its own depths. Computed columns can apply to all cores or to one, are recalculated automatically and are
-available as variables in Multiproxy.
+Functions: `log10, ln` and `log` (both the natural logarithm), `exp, sqrt, abs, round(x, d)` (0 to 100 decimals),
+`pow, min, max` (element-wise with two columns), `mean, std` (sample standard deviation, n − 1; both use only their
+first argument), `median, sum` (all arguments; `sum()` of nothing is 0), `count, zscore` ((x − mean) / sample standard
+deviation), `norm01`, `movavg(x, n)` (centred mean of the 2⌊n/2⌋ + 1 rows around each row, fewer at the ends; n = 3 by
+default), `diff, cumsum, if(c, a, b)` (a column condition picks row by row and a missing condition gives a missing
+value; a single condition picks by truthiness), `corr`. A missing value gives a missing result; so does division by 0,
+and so does a text result (`if(c, "a", "b")`): a computed column holds only numbers and missing values. Function and
+column names are looked up only among the defined functions and the core's columns (never `constructor`,
+`toString`…). A column given where a number is expected (`round(x, d)` with a column `d`, `movavg(x, n)` with a column
+`n`), a number where a column is expected (`movavg`, `diff`, `cumsum`, `corr`) or `round` decimals outside 0-100 give
+the error `argKind`; any other failure gives `invalid`. Because formulas are read from project files, they are bounded
+(`sheet.js::FORMULA_LIMITS`): at most 4,096 UTF-8 bytes and 1,024 tokens, nesting (parentheses, calls, unary minus,
+`^`) at most 64 deep, at most 64 arguments per call, at most 256 computed columns per core and at most 10⁸ additions
+in one `movavg` (rows × (2⌊n/2⌋ + 1)); each excess is an error of that column only. On opening a project, saved
+computed columns are kept only when the name is non-empty text of at most 256 UTF-8 bytes and not `__proto__`, the
+formula is text, the core is text or absent and `interp` is true, false or absent (`sheet.js::cleanSheetColumns`); the
+others are dropped and a message says how many; the stored error is never read, it is recalculated. By default
+(`interp`), each column used is interpolated linearly to the depth of each row between its neighbouring values, without
+extrapolating (`sheet.js::fillLinear`), because each record is measured at its own depths. Computed columns can apply
+to all cores or to one, are recalculated automatically and are available as variables in Multiproxy.
 
 ### 17.4 Free sheet
 `sheet.js::evalCells`: cells A1… with a number, text or a formula starting with `=`; references, ranges `A1:B5`, the
@@ -3721,6 +3734,10 @@ models of 2 and 1,000 rows, with and without age reversals and range, and querie
 100,000 random depths. `tests/app/core-ages-fixtures.test.mjs` requires every committed file to be byte-identical to a regeneration by
 `tools/make_core_ages_fixtures.mjs` (also through its command line) and re-checks each row against `core.js`. The engine method `core.ages/1` reproduces them
 (`tests/test_core_ages.py`; largest age error measured 2.3e-13).
+
+**Formula regression corpus.** `tests/fixtures/formula-corpus.json` holds three generated cores with missing values (40, 7 and 1 rows), 73
+well-formed column formulas and 19 free-sheet cells, with the results `sheet.js` gave before the fixes of card M8.5.8f;
+`tests/app/formula-corpus.test.mjs` requires every result cell to be identical (`Object.is`, so −0 and missing values count).
 
 **Temporary diagnostics.** Node tests cover default-off activation, persisted expiry, redaction, two-file
 rotation, queue overflow, independent write failure, bounded reads and atomic export failure. The real

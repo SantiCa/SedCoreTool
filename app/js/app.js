@@ -15,7 +15,7 @@ import { parseTable, decodeText, invertModel, toAxis, abbrevs, traceSymbolPath, 
 import { storageAvailable, listProjects, getProject, putProject, putMeta, deleteProject, getPref, setPref, putLite, listLite, getMeta, putImage, getImage, gcImages, forgetSections } from './storage.js';
 import { INTERP_DEFAULT } from './interp.js';
 
-import { evalColumn, formulaRefs, fillLinear } from './sheet.js';
+import { evalColumn, formulaRefs, fillLinear, checkComputedCount, cleanSheetColumns } from './sheet.js';
 import { TaxonModel, evaluateModels, finalTestMetrics, independentExternalExamples, descriptorSig, vec, FEATURES } from './learn.js';
 import { splitPieces, mergeKeeper, sameTaxonGroups, swapHistoryPixels, trimEditHistory, upgradeProject, validSavedRegion, hasBrokenMaskRefs } from './edit.js';
 import { t, lang, setLang, applyI18n, fxText } from './i18n.js';
@@ -2913,10 +2913,10 @@ export const editCount = (cores) => cores.reduce((n, c) => n + Object.values(c.e
 
 /** Computed columns of the Data tab (formulas over the core's columns), applied after merging. */
 function applyComputedColumns(c) {
-  const n = (c.depth || c.age || []).length;
+  const n = (c.depth || c.age || []).length; let applied = 0;
   for (const col of S.sheet.columns) {
     if (col.core && col.core !== 'all' && col.core !== c.id) continue;
-    try {
+    try { checkComputedCount(++applied);   // decision Z10: at most 256 per core
       const cols = { ...c.proxies, depth: c.depth || new Array(n).fill(null), age: c.age || new Array(n).fill(null) };
       // V0.35: columns measured at different depths are interpolated to every row (linear, no extrapolation)
       if (col.interp !== false) { const x = c.depth || c.age || []; for (const r of formulaRefs(col.formula)) if (c.proxies[r]) cols[r] = fillLinear(x, c.proxies[r]); }
@@ -3107,7 +3107,7 @@ async function loadProject(p) {
     S.id = p.id || uid(); S.name = p.name || APP; S.notes = p.notes || ''; S.comments = p.comments || [];
     S.classes = p.classes || defaultClasses(); S.active = p.active || 'undet';
     Object.assign(S.settings, p.settings || {}); { const m = sanitizeIchnoMl(S.settings.ml, ML_DEFAULT); S.settings.ml = m.value; if (m.reset.length) setTimeout(() => toast(t('load.mlReset', { f: m.reset.join(', ') })), 600); } S.library = p.library || []; S.kind = p.projectKind || 'normal'; S.multiSource = p.multiSource || null; S.plots = p.plots || []; S.plotCur = p.plotCur || 0; S.coreModels = p.models?.cores || {};
-    S.sheet = { columns: [], cells: {}, ...(p.sheet || {}) };
+    S.sheet = { columns: [], cells: {}, ...(p.sheet || {}) }; { const k = cleanSheetColumns(S.sheet.columns); S.sheet.columns = k.columns; if (k.dropped) setTimeout(() => toast(t('load.sheetDropped', { n: k.dropped })), 600); }   // decision Z13
     loadFigTabs(p); S.finalTests = p.finalTests || [];
     S.geo = normalizeGeo(p.geo);
     geoReset();

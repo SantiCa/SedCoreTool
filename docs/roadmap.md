@@ -30,7 +30,7 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
   capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
 - **Design card A2 done (27 Nov 2026):** cards **M8.5.8a-M8.5.8o** of the rest of slice (a) written before M8.5.9, with decisions
-  **Z1-Z17** ([block](#decisions-for-the-rest-of-slice-a-a2)). Z1-Z17 approved as recommended (27 Nov 2026). **M8.5.8a-e** done; next **M8.5.8f** (most capable, medium). V0.155 waits for more cards (maintainer, 27 Nov 2026).
+  **Z1-Z17** ([block](#decisions-for-the-rest-of-slice-a-a2)). Z1-Z17 approved as recommended (27 Nov 2026). **M8.5.8a-f** done; next **M8.5.8g** (most capable, high). V0.155 waits for more cards (maintainer, 27 Nov 2026).
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.8 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
   long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 and Z1-Z17 is approved.
@@ -1004,7 +1004,18 @@ after. The order is the order of this list; cards written later go before the ga
     by the fixture tool; hostile input: invalid UTF-8, 4 MiB + 1 byte, one 4 MiB line, NUL bytes, 100,000 header-like lines, each refused or
     parsed within the interactive deadline (time recorded); transport with cancel and superseding. `pytest`, `ruff`, `npm test`.
   - *Done when:* development gate.
-- [ ] **M8.5.8f - Formula language: fixes and bounds in JavaScript** (waits for Z9, Z10, Z13).
+- [x] **M8.5.8f - Formula language: fixes and bounds in JavaScript** (done 28 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased)).
+  - *As built (28 Nov 2026; most capable / medium sub-agent, every production line reviewed by the director):* `sheet.js`: own-property
+    lookups of functions and columns, a lone `.` → `badChar`, argument kinds → `argKind` (also `corr(a, 3)` and `round(x, 101)`, which
+    gave a silent missing result or a browser error), any other thrown error → `invalid` (shared `evaluate` wrapper, also for free cells),
+    text result cells → missing; `FORMULA_LIMITS` (Z10: 4,096 bytes, 1,024 tokens, depth 64, 64 arguments, 256 columns per core through
+    `checkComputedCount`, `movavg` rows × (2⌊n/2⌋+1) ≤ 10⁸) with keys `tooLong`, `tooManyTokens`, `tooDeep`, `tooManyArgs`, `tooManyCols`,
+    `tooCostly`; `cleanSheetColumns` (Z13) wired at load with message `load.sheetDropped` (`core: null` is dropped; only `name`,
+    `formula`, `core`, `interp` kept). Regression corpus made before any change (73 column formulas on 3 generated cores, 19 free cells;
+    `tests/fixtures/formula-corpus.json`) passes exactly before and after; 11 quirk/bound tests failed before the fix. TECHNICAL §17.3
+    states the rules, bounds and kept behaviours. Checks (Windows): `npm test` 732/732, typecheck, `build_standalone.py`, `smoke.mjs`.
+    `app.js` 4,602 → 4,602 lines. Not in the card's files, recorded: `COL("constructor")` in the free sheet resolves through
+    `datatab.js::cellResults` by a prototype lookup (no code runs; reads as missing).
   - *Goal:* before fixtures are made, `sheet.js` behaves as the contract of M8.5.8g will say: the quirks of Z9 give named errors or missing
     values, the bounds of Z10 apply, saved computed columns are checked on load (Z13); well-formed formulas give exactly the results they
     give today.
