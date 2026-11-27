@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sedcoretool"
-version = "0.153.0"
+version = "0.154.0"
 description = "SedCoreTool (formerly CorAnTool and IchAnTool): quantitative ichnofabric analysis of sediment core images"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
