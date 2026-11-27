@@ -16,20 +16,18 @@ file and leave one line here.
 Updated 26 November 2026. Rules for this block: [AGENTS.md §1 step 8](../AGENTS.md#1-every-session-in-this-order) (about 30 lines, rewritten,
 not appended). Earlier status records, check logs and audit texts: [roadmap-history.md § Status log](roadmap-history.md#status-log-until-21-november-2026).
 
-- **Branch:** `work/2026-11-13` (pushed); `master` (V0.153, `ba98eb1`) is contained in it.
-- **Released:** V0.153 (22 Nov 2026): integrated into `master` as `ba98eb1`; tag `V0.153` and GitHub Release (8 files, run
-  `45058054277`) at the owner's request. The V0.152 Release and tag were deleted at the owner's request; V0.84 and V0.48 remain.
-- **Last verified code commit:** V0.154 version commit (this commit; fixes `4fcab2e`, Q11 `1d1eb5a`, Q16 `722100a`): full
-  `check_all --e2e` on Windows (see GitHub line for the other systems).
-- **GitHub:** `1d1eb5a`: `tests` green (`45878296107`); *Desktop builds* (`45878296411`) failed in `tiled-sections.mjs` on all three systems
-  (fixed in `4fcab2e`). V0.154 push running.
-- **Checks due:** GitHub `tests` and *Desktop builds* on the V0.154 commit; then `tools/integrate_version.py` (authorised 26 Nov 2026).
+- **Branch:** `work/2026-11-13` (pushed); `master` (V0.154, `1db156a`) is contained in it.
+- **Versions:** V0.154 (27 Nov 2026) integrated into `master` as `1db156a` (files of `9babe23`); no tag or Release (owner's decision).
+  V0.153 (`ba98eb1`) has tag and GitHub Release; the V0.152 Release and tag were deleted at the owner's request; V0.84 and V0.48 remain.
+- **Last verified code commit:** `9babe23` (V0.154): full `check_all --e2e` on Windows (pytest 1040, npm test 702, desktop engine
+  off/on, smoke, large-16bit, tiled).
+- **GitHub:** `9babe23`: `tests` (`46007739429`) and *Desktop builds* (`46007739419`) green on Windows, macOS and Linux.
+- **Checks due:** none.
 - **Milestone gates:** M8.4 part C (M8.4.19) and part B (M8.4.11) met; M8.4 is complete.
 - **Found, not done:** **Q19** (intermittent macOS "window: labels"; most
   capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
-- **Run authorised 26 Nov 2026:** Q16 and Q11 (done); V0.154 integration once GitHub is green on its commit (authorised). Next, not yet
-  authorised: design the remaining slice (a) cards before **M8.5.9** (`log.js::toAxis`, `sheet.js` computed columns,
+- **Run authorised 26 Nov 2026:** Q16, Q11 and V0.154 integration (all done). Next, not yet authorised: design the remaining slice (a) cards before **M8.5.9** (`log.js::toAxis`, `sheet.js` computed columns,
   `parseAgeModelDetailed`/`baconToAgeText`, Y7; most capable, high).
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.8 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
