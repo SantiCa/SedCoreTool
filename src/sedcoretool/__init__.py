@@ -10,7 +10,7 @@ from .io import load_image, load_mask
 from .pipeline import CoreSection, analyze_image, analyze_mask
 from .segmentation import mask_from_palette, mask_from_threshold, mask_from_unet
 
-__version__ = "0.153.0"
+__version__ = "0.154.0"
 
 __all__ = [
     "mask_from_unet",

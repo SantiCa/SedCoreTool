@@ -122,8 +122,9 @@ class MaskIO:
     state (staged versions, open stores, the session's commits, the blob cache). It never writes to the transport and never waits for the
     coordinator: ``run`` returns ``(result, binary frames)`` or raises, and the outcome goes to ``done`` for the coordinator to answer."""
 
-    def __init__(self, run):
+    def __init__(self, run, on_done=None):
         self.run = run
+        self.on_done = (lambda: None) if on_done is None else on_done
         self.requests = queue.Queue(maxsize=MAX_PENDING_MASK_REQUESTS)
         self.done = queue.Queue()                 # never full: at most MAX_PENDING_MASK_REQUESTS + 1 outcomes wait in it
         self.pending = 0                          # given and not answered yet; changed only by the coordinator's thread
@@ -138,6 +139,7 @@ class MaskIO:
             except BaseException as error:        # answered, or raised again, by the coordinator's thread as before card M8.4.40
                 outcome = ('raised', error)
             self.done.put((request, buffers, outcome))
+            self.on_done()
 
     def offer(self, item, timeout) -> bool:
         try:
@@ -282,12 +284,13 @@ def empty_layout(packed) -> dict:
 
 class Coordinator:
     def __init__(self, output, *, version, runtime_id, worker_script=None, method_script=None, scratch_directory=None,
-                 pyramid_directory=None, pyramid_budget=None, projects_directory=None, extra_methods=None):
+                 pyramid_directory=None, pyramid_budget=None, projects_directory=None, extra_methods=None, wake=None):
         self.output = output
         self.version = version
         self.runtime_id = runtime_id
         self.worker_script = worker_script
         self.method_script = method_script
+        self.wake = (lambda: None) if wake is None else wake
         self.attachment = None
         self.session = None
         self.seen = OrderedDict()                 # request ID -> None, oldest first (decision V)
@@ -549,7 +552,7 @@ class Coordinator:
         """Give a mask request to the MaskIO thread. While MAX_PENDING_MASK_REQUESTS wait, finished ones are answered and jobs kept going,
         and no other request is read: the transport slows down instead of memory growing."""
         if self.mask_io is None:
-            self.mask_io = MaskIO(self.mask_operation)
+            self.mask_io = MaskIO(self.mask_operation, on_done=self.wake)
         item = (request, data, self.mask_buffers(request))
         while not self.mask_io.offer(item, timeout=0.002):
             self.poll()
@@ -961,7 +964,7 @@ class Coordinator:
         if request['op'] == 'pyramid.build':
             return self.start_pyramid(request)
         if request['op'] == 'buffer.digest':
-            return DigestJob(self.store.buffers[payload['handle']].path, script=self.worker_script)
+            return DigestJob(self.store.buffers[payload['handle']].path, script=self.worker_script, on_done=self.wake)
         directory = Path(self.store.directory.name) / f'job-{uuid4()}'
         (directory / 'out').mkdir(parents=True)
         buffers = {name: self.store.buffers[handle] for name, handle in payload['inputs'].items()}
@@ -982,7 +985,7 @@ class Coordinator:
         if self.runner is not None and not self.runner.alive():
             self.stop_runner()
         if self.runner is None:
-            self.runner = MethodRunner(self.method_script)
+            self.runner = MethodRunner(self.method_script, on_done=self.wake)
         return self.runner
 
     def stop_runner(self):
@@ -1219,6 +1222,46 @@ OPERATIONS = {
 }
 
 
+class CoordinatorInbox:
+    """Bounded FIFO request queue with a coalesced non-blocking wakeup signal for background completions."""
+
+    def __init__(self, maxsize=2):
+        if maxsize < 1:
+            raise ValueError('maxsize must be positive')
+        self._maxsize = maxsize
+        self._items = deque()
+        self._woken = False
+        self._condition = threading.Condition()
+
+    def put(self, item):
+        with self._condition:
+            while len(self._items) >= self._maxsize:
+                self._condition.wait()
+            self._items.append(item)
+            self._condition.notify_all()
+
+    def wake(self):
+        with self._condition:
+            self._woken = True
+            self._condition.notify_all()
+
+    def get(self, timeout):
+        """Return ``(True, item)`` when a request or EOF/error arrives, or ``(False, None)`` on wakeup or timeout."""
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while not self._items and not self._woken:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False, None
+                self._condition.wait(remaining)
+            if self._items:
+                item = self._items.popleft()
+                self._condition.notify_all()
+                return True, item
+            self._woken = False
+            return False, None
+
+
 def read_requests(stream, inbox):
     try:
         while (frame := read_frame(stream)) is not None:
@@ -1245,22 +1288,21 @@ def read_requests(stream, inbox):
 
 def serve(input_stream, output_stream, *, version, runtime_id, scratch_directory, pyramid_directory=None, pyramid_budget=None,
           projects_directory=None):
+    inbox = CoordinatorInbox(maxsize=2)
     coordinator = Coordinator(output_stream, version=version, runtime_id=runtime_id, scratch_directory=scratch_directory,
-                              pyramid_directory=pyramid_directory, pyramid_budget=pyramid_budget, projects_directory=projects_directory)
-    inbox = queue.Queue(maxsize=2)
+                              pyramid_directory=pyramid_directory, pyramid_budget=pyramid_budget,
+                              projects_directory=projects_directory, wake=inbox.wake)
     threading.Thread(target=read_requests, args=(input_stream, inbox), daemon=True).start()
     try:
         while not coordinator.closing:
-            try:
-                # While a job or a mask request runs, look again after 2 ms so that its answer is not left waiting (it was up to 20 ms per job).
-                item = inbox.get(timeout=0.002 if coordinator.active or coordinator.mask_pending else 0.02)
+            # A finished worker or mask request calls inbox.wake(), so poll() runs at once without waiting for the timeout.
+            has_item, item = inbox.get(timeout=0.002 if coordinator.active or coordinator.mask_pending else 0.02)
+            if has_item:
                 if item is None:
                     break
                 if isinstance(item, Exception):
                     raise item
                 coordinator.receive(*item)
-            except queue.Empty:
-                pass
             coordinator.poll()
     finally:
         coordinator.close()

@@ -1,11 +1,12 @@
 import { pxPerCm, depthAtRow, rowAtDepth } from './sectiondepth.js';
 /* Figures: representative traces, interpreted core, logs, location map and range chart. */
 import { $, S, clsById, fmt, hex, uid } from './state.js';
-import { tickFieldsHTML, arrowFormHTML, axesFormHTML, colOrderHTML, colView, editableColView, buildColumnLog, colorsFormHTML, compositeData, coreImages, logRecords, logStyleOf, mode, ndFormHTML, onStyleInput, reduceRGBA, scheduleLog, taxaFormHTML, styleFormHTML, syncColOrder } from './columns.js';
-import { busy, clsAbbr, compositeMarks, compositeTaxonPoints, curCore, effClassArray, effClassId, esc, idListOf, idMode, legendOf, markDirty, needPixels, requestRender, safe, saveFile, toast } from './app.js';
-import { buildGeoLog, eventShadeFormHTML, eventShadeSettings, fetchImage, geoComputeSamples, geoFigureTracks, geoFigureVars, geoLand, geoOverlay, geoRT, mapNetConsent, renderGeoMap } from './multiproxy.js';
+import { tickFieldsHTML, arrowFormHTML, axesFormHTML, colOrderHTML, colView, editableColView, buildColumnLog, colorsFormHTML, columnImages, compositeData, coreImages, logRecords, logStyleOf, mode, ndFormHTML, onStyleInput, reduceRGBA, scheduleLog, taxaFormHTML, styleFormHTML, syncColOrder } from './columns.js';
+import { busy, clsAbbr, compositeMarks, compositeTaxonPoints, curCore, effClassArray, effClassId, esc, idListOf, idMode, legendOf, markDirty, needPixels, requestRender, safe, saveFile, toast, touchReducedCache } from './app.js';
+import { GROUP_COLORS, buildGeoLog, eventShadeFormHTML, eventShadeSettings, fetchImage, geoComputeSamples, geoFigureTracks, geoFigureVars, geoLand, geoOverlay, geoRT, mapNetConsent, renderGeoMap } from './multiproxy.js';
 
 import { UNIT_TO_CM, hasId, interpAge, topAt, minOf, maxOf } from './core.js';
+import { coreAges } from './geo.js';
 import { vec } from './learn.js';
 import { buildLogSVG, buildRangeSVG, taxaOptions, invertModel, extraTicks, noDataDefs, mergedStyle, noDataGaps, noDataRect, rowsRange, validHexColor, verticalTicks } from './log.js';
 import { t } from './i18n.js';
@@ -215,8 +216,18 @@ function coreSVG() {
 function sectionModeCanvas(s, mode, hx = S.fig.hideExcl, opacity = S.fig.alpha) {   // V0.25: hx = paint excluded zones white (per figure)
   opacity = Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : S.fig.alpha;
   const key = `${s.logVer}|${mode}|${opacity}|${!!hx}|${S.settings.predThr}|${S.settings.includePred}`, mk = mode + (hx ? '|x' : '');
-  s._fc ||= new Map(); if (s._fc.get(mk)?.key === key) return s._fc.get(mk);
-  if (!s.orig && !['mask', 'bw'].includes(mode)) { needPixels(s); const p = document.createElement('canvas'); p.width = 1; p.height = Math.max(1, Math.round(s.h / s.w)); const g = p.getContext('2d'); g.fillStyle = '#e4e7e6'; g.fillRect(0, 0, 1, p.height); return { key: 'pending', canvas: p, k: 1 / s.w }; }
+  s._fc ||= new Map();
+  const cached = s._fc.get(mk);
+  if (cached?.key === key) return cached;
+  if (!s.orig && !['mask', 'bw'].includes(mode)) {
+    needPixels(s);
+    if (cached?.key === 'pending') return cached;
+    if (cached?.canvas) { cached.canvas.width = 0; cached.canvas.height = 0; }
+    const p = document.createElement('canvas'); p.width = 1; p.height = Math.max(1, Math.round(s.h / s.w)); const g = p.getContext('2d'); g.fillStyle = '#e4e7e6'; g.fillRect(0, 0, 1, p.height);
+    const pending = { key: 'pending', canvas: p, k: 1 / s.w };
+    s._fc.set(mk, pending);
+    return pending;
+  }
   // V0.41: each pixel's colour is computed and averaged straight into the ≤ 900 px picture (no full-size canvas)
   const lab = s.labels, ex = s.exclude, W = s.w;
   const eff = effClassArray(s), cols = S.classes.map((k) => hex(k.color)), photo = !['mask', 'bw'].includes(mode), src = mode === 'orig' ? s.orig : s.enh;
@@ -234,7 +245,10 @@ function sectionModeCanvas(s, mode, hx = S.fig.hideExcl, opacity = S.fig.alpha) 
     return px;
   });
   out.getContext('2d').putImageData(im, 0, 0);
-  const r = { key, canvas: out, k: out.width / s.w }; s._fc.set(mk, r); return r;
+  if (cached?.canvas) { cached.canvas.width = 0; cached.canvas.height = 0; }
+  const r = { key, canvas: out, k: out.width / s.w }; s._fc.set(mk, r);
+  touchReducedCache(s);
+  return r;
 }
 /** One panel image for depths [from, to) (base units), H × W px. */
 export function panelDataURL(D, from, to, H, W, mode, hx = S.fig.hideExcl, opacity = S.fig.alpha) {
@@ -407,13 +421,58 @@ function sectionsSVG() {
   out.push('</svg>');
   return out.join('');
 }
+const isBioSummaryProxy = (name, core) => core?.src?.[name] === 'img'
+  || name === 'BI' || name === 'ii' || name === 'Bioturbation %' || name === t('geo.p.bio') || name.startsWith('% ');
+
+function rangeRecordNames(core = curCore()) {
+  const fromRecords = S.records.flatMap((r) => r.series.map((s) => s.name));
+  const seen = new Set(fromRecords);
+  const fromProxies = core?.proxies
+    ? Object.keys(core.proxies).filter((name) => !seen.has(name) && !isBioSummaryProxy(name, core)
+      && Array.isArray(core.proxies[name]) && core.proxies[name].some((v) => v != null && Number.isFinite(v)))
+    : [];
+  return [...new Set([...fromRecords, ...fromProxies])];
+}
+
+function rangeSelectedRecords(D, view, selectedNames, core = curCore()) {
+  if (!Array.isArray(selectedNames) || !selectedNames.length) return [];
+  const recNames = new Set(S.records.flatMap((r) => r.series.map((s) => s.name)));
+  const wantedRec = selectedNames.filter((n) => recNames.has(n));
+  const fromRecords = wantedRec.length ? logRecords(D, view, S.records, wantedRec) : [];
+  const seen = new Set(fromRecords.map((r) => r.name));
+  const proxyNames = selectedNames.filter((n) => !recNames.has(n) && !seen.has(n) && core?.proxies?.[n]);
+  if (!proxyNames.length || !core) return fromRecords;
+  const f = UNIT_TO_CM[core.units || 'm'] / UNIT_TO_CM[D.base];
+  const xs = D.axis === 'age'
+    ? (coreAges(core) || (D.model && core.depth ? core.depth.map((d) => (d == null ? null : interpAge(D.model, d * f))) : null))
+    : core.depth?.map((d) => (d == null ? null : d * f));
+  if (!xs) return fromRecords;
+  const fromProxies = [];
+  proxyNames.forEach((name, idx) => {
+    const ser = core.proxies[name];
+    if (!Array.isArray(ser)) return;
+    const pts = xs.map((x, i) => [x, ser[i]]);
+    if (pts.some((p) => p[0] != null && Number.isFinite(p[0]) && p[1] != null && Number.isFinite(p[1]))) {
+      fromProxies.push({ name, color: GROUP_COLORS[idx % GROUP_COLORS.length], reverse: false, pts });
+    }
+  });
+  return [...fromRecords, ...fromProxies];
+}
+
 function rangeSVG() {
   if (!S.sections.length) return null;
-  const F = S.fig, D = compositeData(colView('figure').axis), [from, to] = figAxisWin(D);
+  const F = S.fig, view = colView('figure'), D = compositeData(view.axis), [from, to] = figAxisWin(D);
   const classes = S.classes.map((c, i) => ({ name: c.name, color: c.color, symbol: c.symbol || 'triDown', index: i, plain: !!c.plain })).filter((c) => S.classes[c.index].id !== 'artifact');
   const points = compositeTaxonPoints(D, F.taxaStyles?.range ? 'all' : F.rangeSrc || 'all');
-  const res = buildRangeSVG({ title: curCore()?.name || S.name, subtitle: F.taxaStyles?.range ? t('taxa.subtitle') : t({ bars: 'fig.rangeSub', both: 'fig.rangeSubBoth', kite: 'fig.rangeSubKite', kiteSymbols: 'fig.rangeSubKiteSym' }[F.rangeDisplay] || 'fig.rangeSubPts'), colW: F.rangeColW || 30, axisLabel: logStyleOf(D, colView('figure')).label, style: logStyleOf(D, colView('figure')).style,
-    from, to, height: F.rangeH, rows: D.rows, classes, points, taxa: F.taxaStyles?.range, markHollow: (F.taxaStyles?.range?.source || F.rangeSrc) === 'all' && F.rangeHollow !== false, display: F.rangeDisplay || 'symbols', total: F.rangeTotal, totalLabel: t('log.total') });
+  const images = F.rangeImage ? columnImages(D, from, to, F.rangeH, view) : null;
+  const records = F.rangeRecs?.length ? rangeSelectedRecords(D, view, F.rangeRecs) : [];
+  const LS = logStyleOf(D, view);
+  const style = !F.views?.range && Array.isArray(LS.style.colHide)
+    ? { ...LS.style, colHide: LS.style.colHide.filter((id) => id.startsWith('sp:')) }
+    : LS.style;
+  const res = buildRangeSVG({ title: curCore()?.name || S.name, subtitle: F.taxaStyles?.range ? t('taxa.subtitle') : t({ bars: 'fig.rangeSub', both: 'fig.rangeSubBoth', kite: 'fig.rangeSubKite', kiteSymbols: 'fig.rangeSubKiteSym' }[F.rangeDisplay] || 'fig.rangeSubPts'), colW: F.rangeColW || 30, axisLabel: LS.label, style,
+    from, to, height: F.rangeH, rows: D.rows, classes, points, taxa: F.taxaStyles?.range, markHollow: (F.taxaStyles?.range?.source || F.rangeSrc) === 'all' && F.rangeHollow !== false, display: F.rangeDisplay || 'symbols', total: F.rangeTotal, totalLabel: t('log.total'),
+    images, image: images?.[0] || null, imageWidth: images?.[0]?.w || 64, imageLabel: t('log.image'), records, colWidths: view.colW || {} });
   setTimeout(() => syncColOrder('figure', res.columns), 0);   // V0.33 (after the form exists)
   return res.svg;
 }
@@ -520,13 +579,19 @@ export function renderFigPanel() {
       <p class="note">${t('fig.secNote')}</p>`;
     syncSecFigSize();
   } else if (F.type === 'range') {
+    const rangeRecNames = rangeRecordNames(), rangeRecSel = new Set(Array.isArray(F.rangeRecs) ? F.rangeRecs : []);
+    const rangeRecsOpen = /** @type {HTMLDetailsElement | null} */ (box.querySelector('[data-range-recs]'))?.open ?? false;
     box.innerHTML = `${figWinHTML()}<label class="f"><span>${t('log.height')}</span><input type="number" id="figRangeH" min="300" max="6000" step="50" value="${esc(F.rangeH)}"></label>
       <label class="f"><span>${t('fig.axisFig')}</span><select id="figRangeAxis"><option value="depth" ${view.axis !== 'age' ? 'selected' : ''}>${t('log.depth')}</option><option value="age" ${view.axis === 'age' ? 'selected' : ''} ${S.age.model ? '' : 'disabled'}>${t('log.age')}</option></select></label>
-      ${taxaFormHTML(taxaOptions(F.taxaStyles?.range, { range: true, style: view.style || {}, display: F.rangeDisplay, source: F.rangeSrc || 'all' }))}
+      ${taxaFormHTML(taxaOptions(F.taxaStyles?.range, { range: true, style: view.style || {}, display: F.rangeDisplay, source: F.rangeSrc || 'all' }), 'figure', { showCompact: false })}
       ${(F.taxaStyles?.range?.source || F.rangeSrc || 'all') === 'all' ? `<label class="chk"><input type="checkbox" id="figRangeHollow" ${F.rangeHollow !== false ? 'checked' : ''}><span>${t('fig.ptsHollow')}</span></label>` : ''}
       <details class="mini"><summary>${t('fig.taxonSymbols')}</summary>${S.classes.filter((c) => c.id !== 'artifact').map((c) => `<label class="f"><span>${esc(c.name)}</span><select data-taxon-symbol="${esc(c.id)}">${['triDown','tri','circle','square','diamond','star','cross'].map((v) => `<option value="${esc(v)}" ${(c.symbol || 'triDown') === v ? 'selected' : ''}>${t('fig.ms.' + v)}</option>`).join('')}</select></label>`).join('')}</details>
       <label class="f"><span>${t('fig.rangeColW')}</span><input type="number" id="figRangeColW" min="16" max="200" step="2" value="${esc(F.rangeColW || 30)}"></label>
-      <label class="chk"><input type="checkbox" id="figRangeTotal" ${F.rangeTotal ? 'checked' : ''}><span>${t('log.total')}</span></label><p class="note">${t('fig.rangeNote')}</p>`;   // V0.51: taxa shown and column width
+      <label class="chk"><input type="checkbox" id="figRangeTotal" ${F.rangeTotal ? 'checked' : ''}><span>${t('log.total')}</span></label>
+      <label class="chk"><input type="checkbox" id="figRangeImage" ${F.rangeImage ? 'checked' : ''}><span>${t('fig.rangeImage')}</span></label>
+      ${F.rangeImage ? figureImageHTML(view) : ''}
+      ${rangeRecNames.length ? `<details class="mini" data-range-recs ${rangeRecsOpen ? 'open' : ''}><summary>${t('fig.rangeRecs')}</summary><div class="chk2">${rangeRecNames.map((name) => `<label class="chk"><input type="checkbox" data-range-rec="${esc(name)}" ${rangeRecSel.has(name) ? 'checked' : ''}><span>${esc(name)}</span></label>`).join('')}</div></details>` : ''}
+      <p class="note">${t('fig.rangeNote')}</p>`;   // V0.51: taxa shown and column width
   } else if (F.type === 'core') {
     const tr = view.tracks, names = [...new Set(S.records.flatMap((r) => r.series.map((x) => x.name)))], shown = view.records || S.records.flatMap((r) => r.series.filter((x) => x.show).map((x) => x.name));
     const trLab = { image: t('log.image'), total: t('log.total'), species: t('log.species'), BI: 'BI', ii: 'ii', secs: t('log.secs'), manual: t('log.manual'), marks: t('color.marks') };
@@ -560,7 +625,10 @@ export function renderFigPanel() {
   if (['core', 'log', 'geolog'].includes(F.type)) box.insertAdjacentHTML('afterbegin', figureAxisHTML(view, F.type === 'geolog' ? figGeoCore(F) : curCore()));
   if (F.type === 'geolog') box.insertAdjacentHTML('beforeend', figureImageHTML(view));
   if (['core', 'log', 'geolog'].includes(F.type)) box.insertAdjacentHTML('beforeend', eventShadeFormHTML(view, F.type === 'geolog' ? figGeoCore(F) : curCore(), view.axis));
-  if (['sections', 'range', 'log'].includes(F.type)) box.insertAdjacentHTML('beforeend', `<details class="mini"><summary>${t('st.title')}</summary>${F.type === 'log' ? styleFormHTML(false, view, 'figure') : verticalStyleHTML(view.style || {}) + (F.type === 'range' ? colOrderHTML('figure') + colorsFormHTML(view.style || {}, 'range') + axesFormHTML(['total', 'species', ...S.classes.map((c) => 'sp:' + c.name)], view) : '')}</details>`);
+  if (['sections', 'range', 'log'].includes(F.type)) {
+    const rangeRecs = F.type === 'range' && Array.isArray(F.rangeRecs) ? F.rangeRecs : [];
+    box.insertAdjacentHTML('beforeend', `<details class="mini"><summary>${t('st.title')}</summary>${F.type === 'log' ? styleFormHTML(false, view, 'figure') : verticalStyleHTML(view.style || {}) + (F.type === 'range' ? colOrderHTML('figure') + colorsFormHTML(view.style || {}, 'range') + axesFormHTML(['total', 'species', ...S.classes.map((c) => 'sp:' + c.name), ...rangeRecs.map((n) => 'rec:' + n)], view, rangeRecs) : '')}</details>`);
+  }
   if (['core', 'log', 'range', 'sections'].includes(F.type)) box.insertAdjacentHTML('beforeend', `<button type="button" class="btn small ghost" id="figCompositionReset">${t('fig.compositionReset')}</button><p class="note">${t('fig.compositionNote')}</p>`);
 }
 
@@ -818,7 +886,7 @@ export function renderFigure() {
     }
     else if (F.type === 'geolog') {
       if (geoRT.dirty) geoComputeSamples();
-      const log = buildGeoLog(figGeoCore(F), F.geoFeatures, { ...colView('figure'), taxa: F.taxaStyles?.geolog, imageView: F.geoView?.axis || F.geoView?.imgMode ? colView('figure') : null });
+      const log = buildGeoLog(figGeoCore(F), F.geoFeatures, { ...colView('figure'), taxa: F.taxaStyles?.geolog, imageView: F.geoView ? colView('figure') : null });
       syncColOrder('figure', log?.res.columns || []);
       svg = log?.res.svg || null;
     }
@@ -907,7 +975,18 @@ $('figPanel').addEventListener('change', (e) => {
   else if (el.dataset.frec != null) { const view = editableColView('figure'), set = new Set(view.records || S.records.flatMap((r) => r.series.filter((x) => x.show).map((x) => x.name))); if (el.checked) set.add(el.dataset.frec); else set.delete(el.dataset.frec); view.records = [...set]; }
   else if (el.id === 'figGeoCore') { F.geoCore = el.value; renderFigPanel(); }
   else if (el.dataset.fgeoTrack) {
-    const view = editableColView('figure'); view.tracks = geoFigureTracks(view); view.tracks[el.dataset.fgeoTrack] = el.checked;
+    const view = editableColView('figure'), track = el.dataset.fgeoTrack;
+    view.tracks = geoFigureTracks(view); view.tracks[track] = el.checked;
+    if (el.checked) {
+      if (Array.isArray(view.style?.colHide)) {
+        view.style.colHide = track === 'image'
+          ? view.style.colHide.filter((id) => !id.startsWith('image:'))
+          : view.style.colHide.filter((id) => id !== track);
+      }
+      for (const cb of document.querySelectorAll('[data-colord="figure"] [data-colshow]')) {
+        if (cb instanceof HTMLInputElement && (track === 'image' ? cb.dataset.colshow?.startsWith('image:') : cb.dataset.colshow === track)) cb.checked = true;
+      }
+    }
   }
   else if (el.dataset.fimage) {
     const view = editableColView('figure'), panels = new Set(view.imgPanels || []);
@@ -951,6 +1030,22 @@ $('figPanel').addEventListener('change', (e) => {
   else if (el.id === 'figRangeHollow') F.rangeHollow = el.checked;
   else if (el.dataset.taxonSymbol) { const c = clsById(el.dataset.taxonSymbol); if (c) c.symbol = el.value; requestRender(); scheduleLog(); }
   else if (el.id === 'figRangeH') F.rangeH = Math.max(300, +el.value || 900); else if (el.id === 'figRangeTotal') F.rangeTotal = el.checked;
+  else if (el.id === 'figRangeImage') {
+    F.rangeImage = el.checked;
+    if (el.checked && F.views?.range?.style?.colHide) {
+      F.views.range.style.colHide = F.views.range.style.colHide.filter((id) => !id.startsWith('image:'));
+    }
+    renderFigPanel();
+  }
+  else if (el.dataset.rangeRec != null) {
+    const set = new Set(Array.isArray(F.rangeRecs) ? F.rangeRecs : []);
+    if (el.checked) set.add(el.dataset.rangeRec); else set.delete(el.dataset.rangeRec);
+    F.rangeRecs = [...set];
+    if (el.checked && F.views?.range?.style?.colHide) {
+      F.views.range.style.colHide = F.views.range.style.colHide.filter((id) => id !== 'rec:' + el.dataset.rangeRec);
+    }
+    renderFigPanel();
+  }
   else if (el.dataset.key) {
     const cls = /** @type {HTMLElement} */ (el.closest('.thumbs')).dataset.cls, set = new Set(F.picks[cls] || []);
     if (el.checked) set.add(el.dataset.key); else set.delete(el.dataset.key);

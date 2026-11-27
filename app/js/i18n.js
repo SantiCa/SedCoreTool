@@ -1942,6 +1942,8 @@ Object.assign(D.es, { 'sh.target': 'Clasificación (objetivo o predicción)', 's
   'h.sh.mode': '«Mezclar» superpone los colores de las familias elegidas; «Una franja por familia» las pone una al lado de otra en cada registro.' });
 Object.assign(D.en, { 'sh.target': 'Classification (target or prediction)', 'sh.mode': 'Several families', 'sh.mix': 'Blend colours', 'sh.split': 'One strip per family',
   'h.sh.mode': '«Blend» overlays the colours of the chosen families; «One strip per family» puts them side by side in each record.' });
+Object.assign(D.es, { 'load.mlReset': 'Ajustes de clasificación no válidos restablecidos a sus valores por defecto: {f}' });
+Object.assign(D.en, { 'load.mlReset': 'Invalid classifier settings reset to their defaults: {f}' });
 Object.assign(D.es, { 'iv.tidied': 'Se han corregido intervalos solapados de una misma familia y se han unido los contiguos de la misma clase.' });
 Object.assign(D.en, { 'iv.tidied': 'Overlapping intervals of the same family were corrected and touching intervals of the same class were joined.' });
 
@@ -2256,3 +2258,13 @@ Object.assign(D.en, {
   'bk.versionNote': 'The history keeps the last state of each day. Large sections are restored with the masks of that day.', 'bk.versionOpen': 'Open' });
 Object.assign(D.es, { 'pkg.withSources': 'El paquete lleva las máscaras de las secciones grandes. ¿Incluir también las imágenes originales que el proyecto conserva ({s})?\n\nAceptar: incluirlas (el paquete se abre con sus imágenes en otro ordenador).\nCancelar: solo las máscaras (las imágenes se localizan allí).' });
 Object.assign(D.en, { 'pkg.withSources': 'The package carries the masks of the large sections. Also include the original images the project keeps ({s})?\n\nOK: include them (the package opens with its images on another computer).\nCancel: masks only (the images are located there).' });
+Object.assign(D.es, {
+  'fig.rangeImage': 'Mostrar foto del sondeo',
+  'fig.rangeRecs': 'Proxies geoquímicos y otros registros',
+  'taxa.compact': 'Vista compacta de distribución (nombres inclinados)',
+});
+Object.assign(D.en, {
+  'fig.rangeImage': 'Show core photo',
+  'fig.rangeRecs': 'Geochemical proxies and other records',
+  'taxa.compact': 'Compact distribution view (tilted names)',
+});

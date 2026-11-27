@@ -24,6 +24,19 @@ TRANSIENT_RESERVE = 16 * MAX_CHUNK
 ITEM_BYTES = {'u8': 1, 'u16le': 2, 'i32le': 4, 'u32le': 4, 'u64le': 8, 'f64le': 8, 'utf8json': 1}   # u16le: 16-bit pixels (card M8.4.9)
 
 
+def all_finite_f64le(chunk: bytes) -> bool:
+    """Whether ``chunk`` holds a whole number of finite little-endian IEEE-754 binary64 values.
+
+    All 11 exponent bits are 1 (Inf or NaN) only when byte 7 is 0x7F or 0xFF, so scanning the high-byte stride in C
+    skips unpacking elements in Python on the common path."""
+    if len(chunk) % 8:
+        return False
+    high = chunk[7::8]
+    if 0x7F not in high and 0xFF not in high:
+        return True
+    return all(math.isfinite(item[0]) for item in struct.iter_unpack('<d', chunk))
+
+
 @dataclass
 class StagedBuffer:
     path: Path
@@ -151,7 +164,7 @@ class BufferStore:
                 digest.update(chunk)
                 if value.dtype == 'utf8json':
                     text += chunk
-                if value.dtype == 'f64le' and any(not math.isfinite(item[0]) for item in struct.iter_unpack('<d', chunk)):
+                if value.dtype == 'f64le' and not all_finite_f64le(chunk):
                     raise RequestError('INVALID_BUFFER')
         if digest.hexdigest() != value.expected_hash:
             raise RequestError('INVALID_BUFFER', 'sha256')
@@ -216,7 +229,7 @@ class BufferStore:
                         while remaining:
                             chunk = stream.read(min(remaining, MAX_CHUNK))
                             remaining -= len(chunk)
-                            if not chunk or any(not math.isfinite(item[0]) for item in struct.iter_unpack('<d', chunk)):
+                            if not chunk or not all_finite_f64le(chunk):
                                 raise RequestError('INVALID_BUFFER')
         except BaseException:
             target.unlink(missing_ok=True)

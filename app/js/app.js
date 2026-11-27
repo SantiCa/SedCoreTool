@@ -4,12 +4,14 @@ import { pxPerCm, depthAtRow, rowAtDepth } from './sectiondepth.js';
 import { effectiveClassId, effectiveClassIndex, computeSectionBins, binsFromRowCounts, binRowsOfSection } from './sectionanalysis.js';
 import { createEngineClient } from './engineclient.js';
 import { createEngineAnalysis } from './engineanalysis.js';
+import { createEngineAges } from './engineages.js';
 import { createMaskChanges, indexRangeOfPairs } from './maskchanges.js';
+import { createPixelBudget, createPixelLoader, lruPush, pixelSourceKind } from './pixelbudget.js';
 export { pxPerCm, depthAtRow, rowAtDepth };
 import { withProvenance, ageModelText, bioturbationTable, objectsTable } from './exportio.js';
 
 import { DEFAULT_FILTERS, FILTER_PRESETS, DEFAULT_DETECT, traceSeparation, localSeparability, applyFilters, detectMask, components, regionGrow, polygonPixels, objectStats, features, rotate90, downsampleRGBA, autoLevels, gammaForMedian, factorThatFits, workingBytes, WORKING_MEMORY_LIMIT } from './imageproc.js';
-import { parseTable, decodeText, invertModel, toAxis, compositeRows, abbrevs, traceSymbolPath, validHexColor } from './log.js';
+import { parseTable, decodeText, invertModel, toAxis, abbrevs, traceSymbolPath, validHexColor } from './log.js';
 import { storageAvailable, listProjects, getProject, putProject, putMeta, deleteProject, getPref, setPref, putLite, listLite, getMeta, putImage, getImage, gcImages, forgetSections } from './storage.js';
 import { INTERP_DEFAULT } from './interp.js';
 
@@ -31,13 +33,14 @@ import { TileCache, TileScheduler, coarserCover, levelForZoom, tileKey, tilePlac
 import { MaskTiles, overlayLayout, paintOverlay, reduceTile } from './tiledmasks.js';
 import { nestedIndicator, singleFlight } from './singleflight.js';
 import { joinCoreTables } from './coremerge.js';
+import { mergeCoreData } from './coredata.js';
 import { createTiledProject } from './tiledproject.js';
 import { FORMAT_VERSION_WINDOW, opensReadOnly, projectFormatVersion, serTiledSection } from './tiledrecord.js';
 import { createTiledSplitController } from './tiledsplitui.js';
 import { createTiledState } from './tiledstate.js';
 import { createTiledTools } from './tiledtools.js';
 import { createTiledView } from './tiledview.js';
-import { classUse, deleteClass, restoreClass, repairOrphanLabels } from './taxa.js';
+import { classUse, deleteClass, restoreClass, repairOrphanLabels } from './taxa.js'; import { sanitizeIchnoMl } from './mlsettings.js';
 import { EditWindow, TiledObjectStats, TiledStatsRunner, WINDOW_TILES, affectedTiles, tilesUnder, windowRange, planWindows, pinRanges, toWindowRect, windowRgba } from './tiledit.js';
 import { MaskLoader, MaskSync, buildMaskTables, classesText } from './tiledsync.js';
 import { TiledRowCounts, TiledCountsRunner, tileHistogram } from './tiledcounts.js';
@@ -49,7 +52,7 @@ import { frameRatio, onPointerEnd, panelPrefs, savePanels } from './panels.js';
 import { addRecordFromTable, defaultLogView, forgetLastImport, lastLog, mode, renderLog, renderLogPanel, renderRecList, scheduleLog, sectionCanvas, navigationPreviewCanvas, clearNavigationPreviews, setMode } from './columns.js';
 import { GROUP_COLORS, addImported, addNamedIntervals, attachMapZoom, coreListUI, defaultGeo, exportMapPNG, geoComputeSamples, geoLand, geoLayer, geoMarkDirty, geoRT, geoReset, geoTrain, interpUI, loadGeoDemo, loadLand, mapBackground, mapStyleUI, mapTip, normalizeGeo, renderGeo, renderGeoMap, scheduleGeo, valueLayer, initMultiproxy } from './multiproxy.js';
 /** Delivery number (V27…): shown in the header, the start screen, the help, the window title, project files and the name of the offline file. */
-export const DELIVERY = 'V0.153';
+export const DELIVERY = 'V0.154';
 /* V0.17: input of the ichnotaxon classifier — 12 shape/colour descriptors ('shape') or the vector of a pre-trained
    vision model ('vision', DINOv2). Vectors of the two sets are never mixed. */
 const visionOn = () => (S.settings.ml?.features || 'shape') === 'vision';
@@ -91,7 +94,16 @@ function newSection({ name, file, w, h, orig, orig16 = null, ds = 1, labels = nu
 const maskChanges = createMaskChanges();
 
 /* ───────────── V0.1: images on disk, pixels in memory only while a section is in use ───────────── */
-const MEM = { px: [], mask: [], pinned: new Set(), pxBudget: 9e8, maskBudget: 5e8 };
+const pixelBudget = createPixelBudget({
+  isProtected: (s) => s === sec() || Boolean(s._loading),
+  onForget: (s) => pixelLoader.forget(s),
+  onClearAll: () => pixelLoader.clear(),
+});
+const MEM = {
+  px: pixelBudget.px, reduced: pixelBudget.reduced, mask: [], pinned: pixelBudget.pinned, maskBudget: 5e8,
+  get pxBudget() { return pixelBudget.pxBudget; }, set pxBudget(v) { pixelBudget.pxBudget = v; },
+  get reducedBudget() { return pixelBudget.reducedBudget; }, set reducedBudget(v) { pixelBudget.reducedBudget = v; },
+};
 /** A mask layer stored packed (RLE array) and unpacked on first access; `init` = array, { rle } or null (empty). */
 function lazyMask(s, key, Type, init) {
   let arr = init && !init.rle ? init : null, rle = init?.rle || null;
@@ -106,8 +118,7 @@ function lazyMask(s, key, Type, init) {
   const enc = () => { if (rle) return rle; const v = `${s._mv || 0}|${s.w}x${s.h}`; if (cache?.v !== v) cache = { v, rle: rleEncode(arr) }; return cache.rle; };
   (s._mk ||= {})[key] = { pack() { if (arr) { rle = enc(); arr = null; } }, rle: enc, loaded: () => !!arr };
 }
-const lruPush = (list, s) => { const i = list.indexOf(s); if (i >= 0) list.splice(i, 1); list.push(s); };
-const keepLoaded = (s) => s === sec() || MEM.pinned.has(s) || s._loading;
+const keepLoaded = (s) => pixelBudget.isProtected(s);
 function maskTouch(s) {
   lruPush(MEM.mask, s);
   const bytes = () => MEM.mask.reduce((a, x) => a + 5 * x.w * x.h, 0);
@@ -117,18 +128,8 @@ function maskTouch(s) {
     x._mk.labels.pack(); x._mk.exclude.pack(); MEM.mask.splice(i, 1);
   }
 }
-function pxTouch(s) {
-  lruPush(MEM.px, s);
-  // V0.41: besides original + enhanced (8 B/px) it counts the U-Net probabilities (4 B/px) and the cached pictures
-  const cv = (c) => (c ? 4 * c.width * c.height : 0);
-  const one = (x) => 8 * x.w * x.h + (x.orig16?.byteLength || 0) + (x._unet?.prob?.byteLength || 0) + cv(x._lc?.canvas) + cv(x._lb?.canvas) + [...(x._fc?.values() || [])].reduce((a, r) => a + cv(r.canvas), 0);
-  const bytes = () => MEM.px.reduce((a, x) => a + one(x), 0);
-  for (let i = 0; i < MEM.px.length && MEM.px.length > 1 && bytes() > MEM.pxBudget;) {
-    const x = MEM.px[i];
-    if (x === s || keepLoaded(x)) { i++; continue; }
-    x.orig = null; x.orig16 = null; x.enh = null; x._unet = null; x._fc = null; x._lc = null; x._lb = null; MEM.px.splice(i, 1);   // card M8.4.39: _lc, _lb too (counted above)
-  }
-}
+const pxTouch = (s) => pixelBudget.touchWorkingPixels(s);
+export const touchReducedCache = (s) => pixelBudget.touchReducedCache(s);
 /** The original file of a section as a Blob (from memory if not yet stored, else from the image store on disk). */
 async function sectionBlob(s) {
   if (s.file.blob) return s.file.blob;
@@ -149,7 +150,7 @@ function ensurePixels(s) {
   if (s.orig) { pxTouch(s); return Promise.resolve(s); }
   if (s._loading) return s._loading;
   s._loading = (async () => {
-    const r = s.tiled?.missing ? { w: s.w, h: s.h, rgba: greyRgba(s.w, s.h), rgba16: null } : s.tiled ? await tiledWorkingImage(s.tiled) : await decodeWorking(s, s.ds);   // M8.4.39: no pyramid, grey
+    const src = pixelSourceKind(s), r = src === 'grey' ? { w: s.w, h: s.h, rgba: greyRgba(s.w, s.h), rgba16: null } : src === 'tiled' ? await tiledWorkingImage(s.tiled) : await decodeWorking(s, s.ds);   // M8.4.39 / Q12
     if (r.w !== s.w || r.h !== s.h) console.warn('image size differs from the stored masks', s.name, r.w, r.h, s.w, s.h);
     // V0.44: the enhancement of a section being opened is computed in the worker; orig and enh are set together
     const input = r.rgba16 || r.rgba;
@@ -161,18 +162,13 @@ function ensurePixels(s) {
   return s._loading;
 }
 /** Sections whose pictures a view asked for while they were not in memory: loaded two at a time, then the views redrawn. */
-const pxWanted = new Set(); let pxBusy = false;
-export function needPixels(s) { if (s._pxErr) return; pxWanted.add(s); if (!pxBusy) setTimeout(loadWanted, 0); }
-async function loadWanted() {
-  if (pxBusy) return; pxBusy = true;
-  try {
-    while (pxWanted.size) {
-      const batch = [...pxWanted].slice(0, 2); batch.forEach((x) => pxWanted.delete(x));
-      for (const x of batch) { MEM.pinned.add(x); try { await ensurePixels(x); } catch (e) { console.error(e); } }
-      try { rerenderPixelViews(); } finally { batch.forEach((x) => MEM.pinned.delete(x)); }
-    }
-  } finally { pxBusy = false; }
-}
+const pixelLoader = createPixelLoader({
+  ensurePixels,
+  onBatchRendered: rerenderPixelViews,
+  pin: (s) => MEM.pinned.add(s),
+  unpin: (s) => MEM.pinned.delete(s),
+});
+export function needPixels(s) { pixelLoader.need(s); }
 function rerenderPixelViews() {
   requestRender();
   if (mode === 'log') renderLog();
@@ -1241,16 +1237,15 @@ function scheduleAnalysis() { clearTimeout(anaTimer); anaTimer = setTimeout(() =
 // The calculation lives in sectionanalysis.js (pure); these wrappers pass the project state in.
 export function effClassArray(s) { return effectiveClassIndex(s, S.classes, S.settings); }
 
-// M8.3.7: with the engine experiment on (desktop only, SEDCORETOOL_ENGINE_EXPERIMENT=1) the bins of every section come from
-// the engine; with it off only the JavaScript calculation below runs. There is no per-call choice and no fallback.
+// M8.3.7 & M8.5.8: with the engine experiment on (SEDCORETOOL_ENGINE_EXPERIMENT=1) section bins and core row ages come from the engine.
 const analysisProject = () => ({ classes: S.classes, settings: S.settings, ageModel: S.age.model, ageUnits: S.age.units });
 let engineRefresh = 0;
+const scheduleEngineRefresh = () => { clearTimeout(engineRefresh); engineRefresh = setTimeout(() => { renderResults(); requestRender(); if (mode === 'log') scheduleLog(0); else if (mode !== 'section' && !(['data', 'fig', 'geo'].includes(mode) && document.activeElement?.closest('input, textarea, select, [contenteditable]'))) setMode(mode); }, 50); };   // card Q10
 const engineBridge = /** @type {any} */ (window).corantoolDesktop?.engine;
-const engineAnalysis = engineBridge?.enabled === true ? createEngineAnalysis({ client: createEngineClient(engineBridge), project: analysisProject, maskChanges, onNotice: (key) => toast(t(key), 6000), onChange: () => {
-  clearTimeout(engineRefresh);
-  engineRefresh = setTimeout(() => { renderResults(); requestRender(); if (mode === 'log') scheduleLog(0); else if (mode !== 'section' && !(['data', 'fig', 'geo'].includes(mode) && document.activeElement?.closest('input, textarea, select, [contenteditable]'))) setMode(mode); }, 50);   // card Q10: never rebuild a tab while a cell or field is being edited
-} }) : null;
-/** Brings the bins of the sections up to date. Resolves when every section has a final state (always, without the engine). */
+const engineClient = engineBridge?.enabled === true ? createEngineClient(engineBridge) : null;
+const engineAnalysis = engineClient ? createEngineAnalysis({ client: engineClient, project: analysisProject, maskChanges, onNotice: (key) => toast(t(key), 6000), onChange: scheduleEngineRefresh }) : null;
+const engineAges = engineClient ? createEngineAges({ client: engineClient, onNotice: (key) => toast(t(key), 6000), onPublish: (c) => { applyCellEdits(c); applyComputedColumns(c); if (geoRT) geoRT.dirty = true; scheduleEngineRefresh(); } }) : null;
+export const settleCoreAges = (cores = S.cores) => (engineAges ? engineAges.all(cores) : Promise.resolve()), retryCoreAges = (cores = S.cores) => (engineAges ? engineAges.restartAndRetry(cores) : Promise.resolve());
 export function analyzeSections(sections) {
   const maskless = (s) => s.frozen === 'engine' || s.frozen === 'store';   // no masks here: D2 of card M8.4.18; a missing stored version (M8.4.27)
   for (const s of sections) if (maskless(s)) s.bins = [];
@@ -1633,7 +1628,7 @@ function drawNav(s, cw, ch) {
     vctx.font = '9px "IBM Plex Mono", monospace'; vctx.textBaseline = 'middle'; vctx.textAlign = 'left';
     for (let v = Math.ceil(s.top / st - 1e-9) * st; v <= s.bottom + 1e-9; v += st) {
       const yy = Math.round(y + ((v - s.top) / span) * H) + 0.5;
-      vctx.fillStyle = '#e6e1d6'; vctx.fillRect(x + W - 4, yy, 4, 1);   // tick on the strip edge, so it is not read as a minus sign
+      vctx.fillStyle = '#e6e1d6'; vctx.fillRect(x + W - 4, yy - 0.5, 4, 1);   // tick on the strip edge (not read as a minus sign), on whole pixel rows: a half-pixel fill is antialiased differently from frame to frame on GPU canvases
       vctx.fillStyle = '#a49d91'; vctx.fillText(fmt(v, 3), tx + 1, yy);
     }
   }
@@ -2421,7 +2416,7 @@ async function changeResolution(s, k2) {
     s.marks = (s.marks || []).map((m) => { const [x, y] = pt(m.x + 0.5, m.y + 0.5); return { ...m, x: Math.min(r.w - 1, Math.floor(x)), y: Math.min(r.h - 1, Math.floor(y)) }; });
     s.w = r.w; s.h = r.h; s.orig = r.rgba; s.orig16 = r.rgba16 || null; s.labels = labels; s.exclude = exclude; s.roi = roi; s.ds = k2;
     compactSectionStacks(s, true);
-    s.view = null; s._lc = null; s._lb = null; s._fc = null; s.logVer++;
+    s.view = null; pixelBudget.clearReducedCache(s); s.logVer++;
     enhance(s); refreshObjects(s, new Set(s.objects.keys()), null);
     discardEditHistory(s);
   });
@@ -2446,7 +2441,7 @@ function selectSection(k, fresh = false) {
   if (s && !s.orig) ensurePixels(s).then(() => { if (sec() === s) { renderSectionForm(); requestRender(); } }).catch(() => requestRender());   // V0.1
   else if (s) pxTouch(s);
   renderSectionForm();
-  if (s) { rebuildLUT(s); if (s.view && !fresh) { S.view = { ...s.view }; requestRender(); } else requestAnimationFrame(fitView); }
+  if (s) { rebuildLUT(s); if (s.view && !fresh) { S.view = { ...s.view }; requestRender(); } else { const v = { ...S.view }; requestAnimationFrame(() => { if (sec() === s && S.view.x === v.x && S.view.y === v.y && S.view.zoom === v.zoom) fitView(); }); } }
   analyze(s); renderResults(); renderClasses(); renderObject(); renderLearn(); requestRender();
 }
 
@@ -2674,7 +2669,7 @@ for (const id of ['secTop', 'secBottom', 'secUnits']) $(id).addEventListener('ch
 $('secDel').addEventListener('click', (e) => {
   if (!sec()) return;
   if (!armed(e.currentTarget, t('confirm.secDel', { n: [...sec().objects.values()].filter((o) => o.cls).length }))) return;
-  const [removed] = S.sections.splice(S.cur, 1); discardEditHistory(removed); stopTiledWork(removed); if (removed.tiled) resetTiledTools();   // card M8.4.39
+  const [removed] = S.sections.splice(S.cur, 1); discardEditHistory(removed); stopTiledWork(removed); pixelBudget.forgetSection(removed); if (removed.tiled) resetTiledTools();   // card M8.4.39, Q21
   selectSection(Math.min(S.cur, S.sections.length - 1)); scheduleLearn(); markDirty();
 });
 $('roiBtn').addEventListener('click', () => setTool('roi'));
@@ -2699,7 +2694,7 @@ function setAge() {
   $('ageStatus').textContent = m ? t('age.ok', { n: m.depth.length, a: fmt(minOf(m.age), 3), b: fmt(maxOf(m.age), 3), u: S.age.units }) + (m.reversals ? ' ' + t('age.reversal', { n: m.reversals }) : '') + (m.bacon ? ' ' + t('age.baconPasted') : '') + (m.rangeIgnored ? ' ' + t('age.rangeIgnored', { n: m.rangeIgnored }) : '')
     : parsed.issue?.kind === 'dupDepth' ? t('age.dupDepth', { d: fmt(parsed.issue.depth, 4) }) : t('age.none');
   $('ageStatus').classList.toggle('warn', !!(m?.reversals || m?.bacon || m?.rangeIgnored || parsed.issue));
-  const c = curCore(); if (c) c.ageText = S.age.text;
+  const c = curCore(); if (c) { c.ageText = S.age.text; if (engineAges) refreshCoreData(c); }
   scheduleAnalysis(); markDirty(); scheduleLog(); if (geoRT) geoRT.dirty = true;
   $('logAxis').querySelector('[value=age]').disabled = !m;
 }
@@ -2893,50 +2888,9 @@ function activateCore(id, silent = false) {
   if (!silent) { markDirty(); scheduleGeo(); renderData(); }
 }
 
-/** Series of one core from its images (bioturbation per interval) and external records, in core units. */
-function coreImageParts(c) {
-  const parts = [], base = c.units || 'm', model = c.ageModel.model;
-  if (c.sections.length) {
-    const f = (s) => UNIT_TO_CM[s.units] / UNIT_TO_CM[base];
-    for (const s of c.sections) analyze(s);
-    const rows = compositeRows(c.sections.map((s) => ({ name: s.name, bins: s.bins.map((b) => ({ ...b, dTop: b.dTop * f(s), dBottom: b.dBottom * f(s), depth: b.depth * f(s) })) })), { axis: 'depth', model });
-    const vals = { [t('geo.p.bio')]: rows.map((r) => r.pct), BI: rows.map((r) => r.BI), ii: rows.map((r) => r.ii) };
-    S.classes.forEach((k, j) => { if (k.counts && rows.some((r) => r.classPct[j] > 0)) vals[`% ${k.name}`] = rows.map((r) => r.classPct[j]); });
-    parts.push({ depth: rows.map((r) => r.depth), age: null, vals, src: 'img' });
-  }
-  const inv = model ? invertModel(model) : null;
-  for (const rec of c.records) for (const se of rec.series) {
-    const depth = rec.axis === 'age' ? (inv ? se.x.map((a) => interpAge(inv, a)) : null) : se.x;
-    if (depth) parts.push({ depth, age: rec.axis === 'age' ? se.x : null, vals: { [se.name]: se.y }, src: 'rec' });
-  }
-  return parts;
-}
-
 /** Recompute the derived arrays of a core (all sources merged on the union of depths). */
 export function refreshCoreData(c) {
-  if (c.frozen) return; // read-only copy (windows built from the light index)
-  const parts = coreImageParts(c), model = c.ageModel.model;
-  if (c.imp) parts.push({ depth: c.imp.depth, age: c.imp.age, vals: c.imp.proxies || {}, src: 'imp' });
-  for (const [name, u] of Object.entries(c.user || {})) parts.push({ depth: u.d, age: null, vals: { [name]: u.v }, src: 'man' });
-  c.ageText = c.ageModel.text; c.src = {};
-  const withDepth = parts.filter((q) => q.depth);
-  let rows = [];
-  if (withDepth.length) {
-    for (const q of withDepth) q.depth.forEach((d, i) => { if (d != null) rows.push({ d, a: q.age?.[i] ?? null, q, i }); });
-    rows.sort((x, y) => x.d - y.d);
-    c.depth = rows.map((r) => r.d);
-    const ages = rows.map((r) => r.a ?? (model ? interpAge(model, r.d) : null));
-    c.age = ages.some((v) => v != null) ? ages : null;
-  } else {
-    const q = parts.find((x) => x.age); // age-only core (no depth anywhere)
-    if (q) q.age.forEach((a, i) => rows.push({ d: null, a, q, i }));
-    c.depth = null; c.age = rows.length ? rows.map((r) => r.a) : null;
-  }
-  c.proxies = {};
-  for (const q of parts) for (const name of Object.keys(q.vals)) { c.proxies[name] = rows.map(() => null); c.src[name] = q.src; }
-  rows.forEach((r, k) => { for (const [name, arr] of Object.entries(r.q.vals)) c.proxies[name][k] = arr?.[r.i] ?? null; });
-  applyCellEdits(c);   // V0.35
-  applyComputedColumns(c);
+  mergeCoreData(c, { classes: S.classes, bioLabel: t('geo.p.bio'), analyzeSection: analyze, afterMerge: (core) => { applyCellEdits(core); applyComputedColumns(core); }, resolveAges: engineAges ? (core, req) => { void engineAges.request(core, req); } : null, clearAges: engineAges ? (core) => engineAges.clear(core) : null });
 }
 export function refreshAllCores() { for (const c of S.cores) refreshCoreData(c); }
 
@@ -3152,7 +3106,7 @@ async function loadProject(p) {
     p = sanitizeThumbs(upgradeProject(p));   // card Q9: thumbnails of older stored projects too
     S.id = p.id || uid(); S.name = p.name || APP; S.notes = p.notes || ''; S.comments = p.comments || [];
     S.classes = p.classes || defaultClasses(); S.active = p.active || 'undet';
-    Object.assign(S.settings, p.settings || {}); S.library = p.library || []; S.kind = p.projectKind || 'normal'; S.multiSource = p.multiSource || null; S.plots = p.plots || []; S.plotCur = p.plotCur || 0; S.coreModels = p.models?.cores || {};
+    Object.assign(S.settings, p.settings || {}); { const m = sanitizeIchnoMl(S.settings.ml, ML_DEFAULT); S.settings.ml = m.value; if (m.reset.length) setTimeout(() => toast(t('load.mlReset', { f: m.reset.join(', ') })), 600); } S.library = p.library || []; S.kind = p.projectKind || 'normal'; S.multiSource = p.multiSource || null; S.plots = p.plots || []; S.plotCur = p.plotCur || 0; S.coreModels = p.models?.cores || {};
     S.sheet = { columns: [], cells: {}, ...(p.sheet || {}) };
     loadFigTabs(p); S.finalTests = p.finalTests || [];
     S.geo = normalizeGeo(p.geo);
@@ -3209,8 +3163,9 @@ function resetState() {
   const maxMP = S.settings.maxMP || 8;
   const closedId = S.id; S.id = uid(); S.name = t('proj.untitled'); S.notes = ''; S.comments = []; S.finalTests = [];
   clearNavigationPreviews();
-  MEM.px.length = 0; MEM.mask.length = 0; pxWanted.clear();   // V0.1: pictures of the previous project can be freed
-  for (const q of S.cores.flatMap((c) => c.sections)) stopTiledWork(q); resetTiles(); resetTiledTools(); engineAnalysis?.releaseAll(); forgetSections(closedId); forgetLastImport(); forgetMapBackgrounds();   // card M8.4.39: saved (canLeaveProject) or deleted
+  const closedSections = S.cores.flatMap((c) => c.sections);
+  pixelBudget.clearAll(closedSections); MEM.mask.length = 0;   // V0.1: pictures of the previous project can be freed
+  for (const q of closedSections) stopTiledWork(q); resetTiles(); resetTiledTools(); engineAnalysis?.releaseAll(); engineAges?.releaseAll(); forgetSections(closedId); forgetLastImport(); forgetMapBackgrounds();   // card M8.4.39, M8.5.8
   S.selected = 0; S.multi.clear(); S.library = []; S.sheet = { columns: [], cells: {} }; resetFigTabs(); S.kind = 'normal'; S.multiSource = null; S.plots = []; S.plotCur = 0; S.coreModels = {};
   S.geo = defaultGeo(); geoReset();
   S.classes = defaultClasses(); S.active = 'undet';
@@ -4643,5 +4598,5 @@ window.ichantool = { S, engineStats: () => engineAnalysis?.stats() ?? null, engi
   tiledCountsIdle: () => S.sections.every((q) => !q._counts || (!q._counts.runner.running && q._counts.counts.ready)),
   tiledCountsStats: () => { const q = sec()?._counts; return q ? { tiles: q.counts.hists.size, bytes: q.counts.bytes } : null; }, tiledMasksLoad: (index) => { const q = S.sections[index], m = q.maskTiles; return maskLoader(q).want([...m.stored].map((i) => [Math.floor(i / m.cols), i % m.cols])); },   // card M8.4.29 tests: a reopened section's stored tiles into the page
   tiledStatsIdle: () => S.sections.every((q) => !q._statsRunner || q._statsRunner.idle),
-  masksSettled: () => S.sections.every((q) => !q.maskTiles || !q._maskSync || q._maskSync.settled), splitTiledSection: (s, count, opts) => tiledSplit.splitSection(s ?? sec(), count, opts), mergeObjects, deleteObjects, selectSection, forceTiledSections: (on) => { forceTiled = !!on; },
-  saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, assignClass, learnNow, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };
+  masksSettled: () => S.sections.every((q) => !q.maskTiles || !q._maskSync || q._maskSync.settled), splitTiledSection: (s, count, opts) => tiledSplit.splitSection(s ?? sec(), count, opts), mergeObjects, deleteObjects, selectSection, centerOn, forceTiledSections: (on) => { forceTiled = !!on; },
+  saveToDB, renderProjects, showHome, runDetection, analyze, analyzeSections, settleCoreAges, retryCoreAges, refreshCoreData, referenceBins: (s) => computeSectionBins(s, analysisProject()).bins, referenceCoreAges: (c) => { const snap = { ...c, depth: null, age: null, proxies: {}, src: {} }; mergeCoreData(snap, { classes: S.classes, bioLabel: t('geo.p.bio') }); return snap.age; }, assignClass, learnNow, nextReview, setMode, renderLog, openTestProject, loadProject, serialize, BI, II, geoRT, geoTrain, renderGeo, loadGeoDemo };

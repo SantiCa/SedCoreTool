@@ -1,23 +1,21 @@
-## SedCoreTool V0.153
+## SedCoreTool V0.154
 
 SedCoreTool quantifies bioturbation and ichnotaxa in sediment-core images and combines them with other down-core
 records and described intervals. Version 0.x, in active development. The downloads contain no sample data: the
 program starts empty and you open your own images and tables.
 
 ### Highlights
-- **Tables of records read more of what laboratories write:** -999 and similar codes, values below a detection limit,
-  titles before the table, decimal commas and repeated column names; the import dialog shows how the file was read, and
-  an import can be undone. Adding a record asks the unit of its depth or age column and converts it.
-- **Data tab:** small values are edited without rounding, long tables scroll to the end without «Show more», plots of
-  very long series draw quickly, and very long series no longer stop a chart, map or figure.
-- **Figures:** PNG export at 300 or 600 dpi.
-- **Safer files:** opening a project or a table from someone else can no longer add elements to the program's pages or
-  run code.
-- **Fixed:** opening a project while a save was still waiting could overwrite the saved project; several save, backup
-  and project-switching problems with several cores are corrected.
-- **Experimental, off by default** (desktop program, engine experiment): large "tiled" sections can be split into parts,
-  are included in exports, backups and project-folder copies, reopen faster, and stay within memory when their masks
-  hold extreme numbers of objects.
+- **Figures of ichnotaxa:** «Ichnotaxa distribution» can include the core photo and geochemical proxies or other records;
+  «Whole interpreted core», «Core log» and «Multiproxy log of a core» offer a compact ichnotaxa view; plots no longer draw
+  a line across intervals where a taxon is absent.
+- **Fixed:** the core image of «Multiproxy log of a core» now shows reliably on depth and age axes; core photos no longer
+  flicker while laying out figures of cores with many high-resolution sections; «Go to the trace» stays on the trace;
+  the image view fills exactly its pane at every window size; a section no longer stays on its grey "loading" image
+  after opening or creating a project while another was still loading.
+- **Fixed:** a project file with an invalid classifier setting no longer stops the classifier; the setting returns to its
+  default and a message names it.
+- **Experimental, off by default** (desktop program, engine experiment): ages of a core's merged table are computed by
+  the engine; a large "tiled" section shown as a grey placeholder no longer reports a "locked" error after memory is freed.
 
 The full list of changes is in [CHANGELOG.md](https://github.com/SantiCa/SedCoreTool/blob/master/CHANGELOG.md).
 
@@ -25,10 +23,10 @@ The full list of changes is in [CHANGELOG.md](https://github.com/SantiCa/SedCore
 
 | System | File |
 |---|---|
-| Windows 10/11, x64 | `SedCoreTool-V0.153-windows-setup.exe` or `SedCoreTool-V0.153-windows-portable.zip` |
-| macOS 13 or later, Intel and Apple Silicon | `SedCoreTool-V0.153-mac-universal.dmg` |
-| Linux, x64 | `SedCoreTool-V0.153-linux-x86_64.AppImage` or `SedCoreTool-V0.153-linux-amd64.deb` |
-| Any system, in a browser | `SedCoreTool_V0.153.html` (single file, works offline) |
+| Windows 10/11, x64 | `SedCoreTool-V0.154-windows-setup.exe` or `SedCoreTool-V0.154-windows-portable.zip` |
+| macOS 13 or later, Intel and Apple Silicon | `SedCoreTool-V0.154-mac-universal.dmg` |
+| Linux, x64 | `SedCoreTool-V0.154-linux-x86_64.AppImage` or `SedCoreTool-V0.154-linux-amd64.deb` |
+| Any system, in a browser | `SedCoreTool_V0.154.html` (single file, works offline) |
 | Verification | `SHA256SUMS.txt` and `RELEASE_MANIFEST.json` |
 
 Windows: run the installer or open the portable version. macOS: drag the application to Applications. Linux: make

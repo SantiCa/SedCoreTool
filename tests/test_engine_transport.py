@@ -3,15 +3,19 @@
 import hashlib
 import io
 import json
+import os
 import struct
+import sys
+import threading
 import time
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
-from sedcoretool.engine.buffers import MAX_HANDLES, TRANSIENT_RESERVE, BufferStore
+from sedcoretool.engine.buffers import MAX_HANDLES, TRANSIENT_RESERVE, BufferStore, all_finite_f64le
 from sedcoretool.engine.protocol import (
+    BINARY_FRAME,
     HEADER,
     JSON_FRAME,
     MAX_CHUNK,
@@ -20,10 +24,11 @@ from sedcoretool.engine.protocol import (
     RequestError,
     read_frame,
     strict_json,
+    write_binary,
     write_json,
 )
-from sedcoretool.engine.server import Coordinator
-from sedcoretool.engine.worker import DigestJob
+from sedcoretool.engine.server import Coordinator, CoordinatorInbox, MaskIO, serve
+from sedcoretool.engine.worker import DigestJob, MethodJob, MethodRunner
 
 
 def committed(store, data=b'public synthetic bytes', dtype='u8'):
@@ -637,3 +642,274 @@ def test_dispatch_refuses_before_the_handshake_and_unknown_or_unconfigured_opera
         assert [answers[item['id']]['error']['code'] for item in refused] == ['UNSUPPORTED_METHOD'] * len(refused)
     finally:
         coordinator.close()
+
+
+# ---- fast f64le finiteness & coordinator wakeup (card M8.5.6b) ---------------------------------------------------------------
+
+def test_all_finite_f64le_accepts_finite_values_including_high_byte_boundary_cases():
+    assert all_finite_f64le(b'')
+    finite_samples = [
+        0.0, -0.0, 1.0, -42.5, 5e-324, -5e-324,
+        1e305, -1e305, sys.float_info.max, -sys.float_info.max,
+    ]
+    raw = b''.join(struct.pack('<d', value) for value in finite_samples)
+    raw += struct.pack('<QQQQ', 0x7FEFFFFFFFFFFFFF, 0xFFEFFFFFFFFFFFFF, 0x7F00000000000000, 0xFF00000000000000)
+    assert all_finite_f64le(raw)
+
+    # Large buffers with and without 0x7F/0xFF high bytes both validate as finite.
+    fast_large = struct.pack('<d', 123.456) * 12_000
+    assert all_finite_f64le(fast_large)
+    mixed_large = bytearray(fast_large)
+    mixed_large[8 * 7777:8 * 7778] = struct.pack('<d', sys.float_info.max)
+    mixed_large[8 * 11_999:8 * 12_000] = struct.pack('<d', -sys.float_info.max)
+    assert all_finite_f64le(bytes(mixed_large))
+
+
+@pytest.mark.parametrize('pattern', [
+    struct.pack('<d', float('inf')),
+    struct.pack('<d', float('-inf')),
+    struct.pack('<d', float('nan')),
+    struct.pack('<Q', 0xFFF8000000000000),   # negative quiet NaN
+    struct.pack('<Q', 0x7FF0000000000001),   # positive signaling NaN
+    struct.pack('<Q', 0xFFF0000000000001),   # negative signaling NaN
+    struct.pack('<Q', 0x7FF7FFFFFFFFFFFF),   # signaling NaN with max payload
+])
+def test_all_finite_f64le_rejects_nonfinite_patterns_at_every_position(pattern):
+    assert not all_finite_f64le(pattern)
+    count = 12_000
+    base = struct.pack('<d', 1.25) * count
+    for index in (0, count // 2, count - 1):
+        buf = bytearray(base)
+        buf[8 * index:8 * (index + 1)] = pattern
+        assert not all_finite_f64le(bytes(buf))
+
+
+@pytest.mark.parametrize('chunk', [b'\x00', b'\x00' * 7, struct.pack('<d', 1.0) + b'\x00', b'\x00' * 15])
+def test_all_finite_f64le_rejects_non_multiple_of_eight_lengths(chunk):
+    assert not all_finite_f64le(chunk)
+
+
+def test_buffer_store_verify_and_adopt_packed_with_boundary_finite_and_tail_nonfinite(tmp_path):
+    import numpy as np
+
+    store = BufferStore()
+    try:
+        count = 12_000
+        finite = np.linspace(-100.0, 100.0, count, dtype='<f8')
+        finite[0] = sys.float_info.max
+        finite[count // 2] = -sys.float_info.max
+        finite[-1] = 1e305
+        raw = finite.tobytes()
+
+        handle = store.begin({'dtype': 'f64le', 'shape': [count], 'byte_length': len(raw),
+                              'sha256': hashlib.sha256(raw).hexdigest()})['handle']
+        store.append({'handle': handle, 'offset': 0, 'byte_length': len(raw)}, raw)
+        assert store.commit({'handle': handle})['byte_length'] == len(raw)
+
+        path, length, digest, layout = packed_file(tmp_path, {'x': finite}, name='finite.bin')
+        adopted_handle, _ = store.adopt_packed(path, length, digest, layout)
+        store.release(adopted_handle)
+
+        for bad_bits in (0x7FF8000000000000, 0xFFF0000000000000, 0x7FF0000000000001):
+            bad = finite.copy()
+            bad.view('<u8')[-1] = bad_bits
+            bad_bytes = bad.tobytes()
+            staged = store.begin({'dtype': 'f64le', 'shape': [count], 'byte_length': len(bad_bytes),
+                                  'sha256': hashlib.sha256(bad_bytes).hexdigest()})['handle']
+            store.append({'handle': staged, 'offset': 0, 'byte_length': len(bad_bytes)}, bad_bytes)
+            with pytest.raises(RequestError, match='INVALID_BUFFER'):
+                store.commit({'handle': staged})
+            assert not store.get(staged).committed
+
+            bad_path, bad_len, bad_digest, bad_layout = packed_file(tmp_path, {'x': bad}, name=f'bad_{bad_bits:x}.bin')
+            with pytest.raises(RequestError, match='INVALID_BUFFER'):
+                store.adopt_packed(bad_path, bad_len, bad_digest, bad_layout)
+    finally:
+        store.close()
+
+
+def test_coordinator_inbox_fifo_backpressure_and_wakeups():
+    inbox = CoordinatorInbox(maxsize=2)
+    inbox.put('first')
+    inbox.put('second')
+
+    # Backpressure blocks a 3rd put, and wake() neither blocks nor consumes a request slot.
+    third_done = threading.Event()
+    third_thread = threading.Thread(target=lambda: (inbox.put('third'), third_done.set()), daemon=True)
+    third_thread.start()
+    time.sleep(0.03)
+    assert not third_done.is_set()
+
+    inbox.wake()
+    assert not third_done.is_set()
+
+    assert inbox.get(timeout=0.5) == (True, 'first')
+    assert third_done.wait(timeout=1.0)
+    third_thread.join(timeout=1.0)
+    assert inbox.get(timeout=0.5) == (True, 'second')
+    assert inbox.get(timeout=0.5) == (True, 'third')
+
+    # The wakeup raised while items were present is preserved until the queue drains, then cleared.
+    started = time.monotonic()
+    assert inbox.get(timeout=2.0) == (False, None)
+    assert time.monotonic() - started < 0.2
+
+    # wake() called before get() returns immediately without waiting for timeout.
+    inbox.wake()
+    started = time.monotonic()
+    assert inbox.get(timeout=2.0) == (False, None)
+    assert time.monotonic() - started < 0.2
+
+    # wake() unblocks a waiting get() promptly instead of waiting for the full timeout.
+    got = []
+    waiter_started = threading.Event()
+
+    def wait_for_wake():
+        waiter_started.set()
+        t0 = time.monotonic()
+        result = inbox.get(timeout=2.0)
+        got.append((result, time.monotonic() - t0))
+
+    waiter = threading.Thread(target=wait_for_wake, daemon=True)
+    waiter.start()
+    assert waiter_started.wait(timeout=1.0)
+    time.sleep(0.02)
+    inbox.wake()
+    waiter.join(timeout=1.0)
+    assert len(got) == 1
+    assert got[0][0] == (False, None) and got[0][1] < 0.25
+
+    # None (EOF) and Exception items are distinct from wakeup/timeout.
+    err = ProtocolError('bad')
+    inbox.put(err)
+    inbox.put(None)
+    assert inbox.get(timeout=0.1) == (True, err)
+    assert inbox.get(timeout=0.1) == (True, None)
+
+
+def test_on_done_callbacks_fire_on_completion_and_worker_failure(tmp_path):
+    mask_woke = threading.Event()
+    mask_io = MaskIO(lambda req, data, buffers: ({'ok': True}, []), on_done=mask_woke.set)
+    try:
+        assert mask_io.offer(({'id': '1'}, None, {}), timeout=1.0)
+        assert mask_woke.wait(timeout=2.0)
+    finally:
+        mask_io.stop()
+
+    failing = tmp_path / 'fail_runner.py'
+    failing.write_text('raise SystemExit(2)\n', encoding='utf-8')
+    job_file = tmp_path / 'job.json'
+    job_file.write_text('{}', encoding='utf-8')
+    runner_woke = threading.Event()
+    runner = MethodRunner(failing, on_done=runner_woke.set)
+    try:
+        job = MethodJob(runner, job_file, tmp_path / 'cancel')
+        assert runner_woke.wait(timeout=2.0)
+        assert job.finished() and job.result is None
+    finally:
+        runner.close()
+
+
+def test_serve_executes_core_ages_digest_and_mask_with_immediate_wakeup(tmp_path):
+    import numpy as np
+
+    req_r, req_w = os.pipe()
+    resp_r, resp_w = os.pipe()
+    in_stream = os.fdopen(req_r, 'rb', buffering=0)
+    out_stream = os.fdopen(resp_w, 'wb')
+    client_in = os.fdopen(req_w, 'wb')
+    client_out = os.fdopen(resp_r, 'rb')
+
+    errors = []
+
+    scratch_dir = tmp_path / 'scratch'
+    projects_dir = tmp_path / 'projects'
+    scratch_dir.mkdir()
+    projects_dir.mkdir()
+
+    def run_server():
+        try:
+            serve(in_stream, out_stream, version='test', runtime_id='0' * 64,
+                  scratch_directory=str(scratch_dir), projects_directory=str(projects_dir))
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            out_stream.close()
+
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+    session = str(uuid4())
+
+    def rpc(op, payload, binary=None):
+        item = request(session, op, payload)
+        write_json(client_in, item)
+        if binary is not None:
+            write_binary(client_in, binary)
+        while True:
+            frame = read_frame(client_out)
+            assert frame is not None and frame[0] == JSON_FRAME
+            msg = strict_json(frame[1])
+            if msg['kind'] == 'response' and msg['id'] == item['id']:
+                assert msg['status'] == 'ok', msg
+                data = None
+                if op == 'buffer.read':
+                    binary_frame = read_frame(client_out)
+                    assert binary_frame is not None and binary_frame[0] == BINARY_FRAME
+                    data = binary_frame[1]
+                return msg['result'], data
+
+    def upload_buffer(data, dtype, shape):
+        digest = hashlib.sha256(data).hexdigest()
+        handle = rpc('buffer.begin', {'dtype': dtype, 'shape': shape, 'byte_length': len(data), 'sha256': digest})[0]['handle']
+        rpc('buffer.chunk', {'handle': handle, 'offset': 0, 'byte_length': len(data)}, data)
+        rpc('buffer.commit', {'handle': handle})
+        return handle
+
+    try:
+        rpc('hello', {'protocol': 1})
+
+        age_meta = json.dumps({'version': 1, 'rows': 2, 'columns': [{'name': 'depth', 'unit': 'cm'}, {'name': 'age', 'unit': 'yr'}]},
+                              separators=(',', ':')).encode()
+        age_vals = np.array([[0.0, 10.0], [0.0, 100.0]], dtype='<f8')
+        age_valid = np.ones((2, 2), dtype='u1')
+        query_meta = json.dumps({'version': 1, 'rows': 2, 'columns': [{'name': 'depth', 'unit': 'cm'}]}, separators=(',', ':')).encode()
+        query_vals = np.array([[2.5, 7.5]], dtype='<f8')
+        query_valid = np.ones((1, 2), dtype='u1')
+        settings_bytes = b'{"version":1}'
+        settings_hash = hashlib.sha256(settings_bytes).hexdigest()
+
+        inputs = {
+            'age_model': upload_buffer(age_meta, 'utf8json', [len(age_meta)]),
+            'age_model_values': upload_buffer(age_vals.tobytes(), 'f64le', list(age_vals.shape)),
+            'age_model_valid': upload_buffer(age_valid.tobytes(), 'u8', list(age_valid.shape)),
+            'query': upload_buffer(query_meta, 'utf8json', [len(query_meta)]),
+            'query_values': upload_buffer(query_vals.tobytes(), 'f64le', list(query_vals.shape)),
+            'query_valid': upload_buffer(query_valid.tobytes(), 'u8', list(query_valid.shape)),
+            'settings': upload_buffer(settings_bytes, 'utf8json', [len(settings_bytes)]),
+        }
+
+        result, _ = rpc('method.run', {
+            'method': 'core.ages/1', 'scope': 'core', 'target': str(uuid4()), 'revision': 1,
+            'priority': 'interactive', 'settings_hash': settings_hash, 'inputs': inputs,
+        })
+        assert result['summary'] == {'rows': 2, 'outside': 0}
+        packed_meta = result['outputs']['result']
+        _, raw_result = rpc('buffer.read', {'handle': packed_meta['handle'], 'offset': 0, 'byte_length': packed_meta['byte_length']})
+        ages_part = result['layout']['ages_values']
+        ages = np.frombuffer(raw_result, dtype='<f8', count=2, offset=ages_part['offset'])
+        assert ages.tolist() == [25.0, 75.0]
+
+        digest_result, _ = rpc('buffer.digest', {'handle': inputs['settings']})
+        assert digest_result == {'sha256': settings_hash, 'byte_length': len(settings_bytes)}
+
+        mask_result, _ = rpc('mask.retain', {'project': 'p1', 'keep': []})
+        assert mask_result == {'removed': {'blobs': 0, 'manifests': 0}}
+
+        assert rpc('shutdown', {})[0] == {}
+    finally:
+        client_in.close()
+        server_thread.join(timeout=15)
+        for stream in (in_stream, out_stream, client_out):
+            stream.close()
+    assert not server_thread.is_alive()
+    assert errors == []

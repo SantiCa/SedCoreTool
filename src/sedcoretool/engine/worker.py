@@ -27,8 +27,9 @@ class WorkerJob:
 
     deadline = 30
 
-    def __init__(self, command, cancel_path):
+    def __init__(self, command, cancel_path, on_done=None):
         self.cancel_path = cancel_path
+        self.on_done = (lambda: None) if on_done is None else on_done
         self.result = None
         self.drained = threading.Event()
         self.process = subprocess.Popen(
@@ -52,6 +53,7 @@ class WorkerJob:
             self.kill()
         finally:
             self.drained.set()
+            self.on_done()
 
     def cancel(self):
         self.cancel_path.touch(exist_ok=True)
@@ -75,9 +77,9 @@ class WorkerJob:
 class DigestJob(WorkerJob):
     """Diagnostic: SHA-256 of a committed buffer, computed in an isolated process."""
 
-    def __init__(self, source, *, script=None):
+    def __init__(self, source, *, script=None, on_done=None):
         cancel_path = source.with_suffix('.cancel')
-        super().__init__([sys.executable, '-I', '-B', '-u', str(script or Path(__file__).resolve()), str(source), str(cancel_path)], cancel_path)
+        super().__init__([sys.executable, '-I', '-B', '-u', str(script or Path(__file__).resolve()), str(source), str(cancel_path)], cancel_path, on_done=on_done)
 
     def accepts(self, result):
         return (isinstance(result, dict) and set(result) == {'sha256', 'byte_length'}
@@ -92,7 +94,7 @@ class MethodRunner:
     unexpected, unapproved or missing frame, a write failure, a kill) ends the process; the coordinator then starts a new one
     for the next job, so a damaged worker never serves a second job."""
 
-    def __init__(self, script):
+    def __init__(self, script, on_done=None):
         self.process = subprocess.Popen(
             [sys.executable, '-I', '-B', '-u', str(script or Path(__file__).resolve().with_name('method_worker.py'))],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -100,6 +102,7 @@ class MethodRunner:
         )
         self.lock = threading.Lock()
         self.waiting = None                    # the job whose answer is expected
+        self.on_done = (lambda: None) if on_done is None else on_done
         self.idle_since = time.monotonic()
         self.reader = threading.Thread(target=self.read_answers, daemon=True)
         self.reader.start()
@@ -128,10 +131,12 @@ class MethodRunner:
                     raise ProtocolError('answer without a job')
                 if not job.accepts(answer):
                     job.drained.set()          # the job ends without a result, then the worker is stopped below
+                    self.on_done()
                     raise ProtocolError('unapproved answer')
                 job.result = answer
                 self.idle_since = time.monotonic()
                 job.drained.set()
+                self.on_done()
         except (ProtocolError, OSError):
             self.kill()
         finally:
@@ -139,6 +144,7 @@ class MethodRunner:
                 job, self.waiting = self.waiting, None
             if job is not None:
                 job.drained.set()              # the process ended without answering
+                self.on_done()
 
     def kill(self):
         if self.process.poll() is None:

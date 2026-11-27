@@ -33,7 +33,7 @@
  *   _maskSync?: import('./tiledsync.js').MaskSync, _maskLoader?: import('./tiledsync.js').MaskLoader, _undoTrimShown?: boolean,
  *   logVer: number, view: SectionView | null, crop: import('./core.js').Roi | null,
  *   filters: import('./imageproc.js').FilterSettings, _lc?: SectionCanvasCache | null,
- *   _lb?: SectionCanvasCache | null, file: SectionFile, objects: Map<number, TraceObject>, nextId: number, nextTraceOrder: number,
+ *   _lb?: SectionCanvasCache | null, _fc?: Map<string, SectionCanvasCache> | null, file: SectionFile, objects: Map<number, TraceObject>, nextId: number, nextTraceOrder: number,
  *   marks: TraceMark[], manual: ManualIndex[], detect: import('./imageproc.js').DetectionSettings, preset: string,
  *   loadWarnings?: {region: boolean, mask: boolean},
  *   lutFill?: Uint8ClampedArray, lutLine?: Uint8ClampedArray, lutStyle?: Uint8Array, _pxErr?: string,
@@ -44,7 +44,7 @@
  *   waterDepth: number | null, notes: string, source: string | null, logView: LogView, imp: CoreData | null,
  *   depth: number[] | null, age: (number | null)[] | null, proxies: Record<string, (number | null)[]>,
  *   src: Record<string, string>, ageText: string, user: Record<string, {d: number[], v: (number | null)[]}>,
- *   edits: Record<string, Record<string, CellEdit>>}} CoreState
+ *   edits: Record<string, Record<string, CellEdit>>, ageAnalysis?: import('./engineages.js').CoreAgeState}} CoreState
  * @typedef {{s: SectionState, lm: (number | number[])[], ex: number[], nextId: number, sel: number,
  *   objs: Map<number, TraceObject | null>, group?: string, stackChanged?: boolean,
  *   tiles?: import('./tiledundo.js').TileChanges}} UndoStep `tiles`: the mask tiles of a tiled edit (card M8.4.16 step 5)

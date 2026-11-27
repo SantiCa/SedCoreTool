@@ -1,7 +1,7 @@
 import { rowAtDepth } from './sectiondepth.js';
 /* Composite log: shared drawing for the column view and independent figures, records and track controls. */
 import { $, S, fmt, hex, uid } from './state.js';
-import { analyze, analyzeSections, armed, busy, compositeMarks, compositeTaxonPoints, effClassArray, esc, idListOf, idMode, legendOf, markDirty, needPixels, requestRender, resizeCanvases, safe, saveFile, toast, updateTip, withProv } from './app.js';
+import { analyze, analyzeSections, armed, busy, compositeMarks, compositeTaxonPoints, effClassArray, esc, idListOf, idMode, legendOf, markDirty, needPixels, requestRender, resizeCanvases, safe, saveFile, toast, touchReducedCache, updateTip, withProv } from './app.js';
 import { geoOverlay, loadLand, logInteract, readTableFile, renderGeo, renderGeoLogs, renderImportReport } from './multiproxy.js';
 import { applyPanels } from './panels.js';
 import { removeById } from './dataedit.js';
@@ -9,6 +9,7 @@ import { disposeDataTable, renderData } from './datatab.js';
 import { FIG_PANELS, arrowMarksSVG, axisErr, coreRatio, editSVGLabels, figTraces, panelDataURL, renderFigPanel, renderFigure, scheduleFigure } from './figures.js';
 
 import { UNIT_TO_CM, interpAge, topAt, guessRecordUnit, unitFactor, rangeOverlaps, minOf, maxOf } from './core.js';
+import { coreAgeRelation } from './coredata.js';
 import { validSavedRegion } from './edit.js';
 import { LOG_STYLE, ND_STYLE, mergedStyle, taxaOptions, validHexColor, buildLogSVG, compositeRows, guessAxisColumn, invertModel, orderCols, rowsRange, toAxis, windowCSV } from './log.js';
 import { t } from './i18n.js';
@@ -47,12 +48,12 @@ $('modeFig').addEventListener('click', () => setMode('fig'));
 
 export function scheduleLog(ms = 200) { if (mode !== 'log') return; clearTimeout(logTimer); logTimer = setTimeout(() => busy(renderLog), ms); }
 
-export function compositeData(axisPref = S.logView.axis, core = null) {
+export function compositeData(axisPref = S.logView.axis, core = null, ageModel = null) {
   const secs = [...(core?.sections || S.sections)].sort((a, b) => a.top * UNIT_TO_CM[a.units] - b.top * UNIT_TO_CM[b.units]);
   const base = core?.units || secs[0]?.units || 'cm';
   const f = (s) => UNIT_TO_CM[s.units] / UNIT_TO_CM[base];
   for (const s of secs) analyze(s);
-  const model = (core?.ageModel || S.age).model, axis = axisPref === 'age' && model ? 'age' : 'depth';
+  const model = ageModel ?? (core ? coreAgeRelation(core) : S.age.model), axis = axisPref === 'age' && model ? 'age' : 'depth';
   const rows = compositeRows(secs.map((s) => ({ name: s.name, bins: s.bins.map((b) => ({ ...b, dTop: b.dTop * f(s), dBottom: b.dBottom * f(s), depth: b.depth * f(s) })) })), { axis, model });
   return { secs, base, f, model, axis, rows };
 }
@@ -94,12 +95,14 @@ export function sectionCanvas(s, lv = S.logView) {
       // stripDataURL asks once per output row: a new canvas of the full strip size each time took tens of seconds on a core
       // whose pictures were not loaded yet, so keep the grey one while the section stays pending at the same size.
       if (s._lc?.key === 'pending' && s._lc.canvas.width === sw && s._lc.canvas.height === sh) return s._lc.canvas;
+      if (s._lc?.canvas) { s._lc.canvas.width = 0; s._lc.canvas.height = 0; }
       const p = document.createElement('canvas'); p.width = sw; p.height = sh;
       const g = p.getContext('2d'); g.fillStyle = '#cfd4d2'; g.fillRect(0, 0, sw, sh); s._lc = { key: 'pending', canvas: p, k: sw / s.w }; return p;
     }
     const src = lv.imgMode === 'orig' ? s.orig : s.enh, px = [0, 0, 0, 255];
     const b = document.createElement('canvas'); b.width = sw; b.height = sh;
     b.getContext('2d').putImageData(reduceRGBA(s.w, s.h, sw, sh, (i) => { const j = i * 4; px[0] = src[j]; px[1] = src[j + 1]; px[2] = src[j + 2]; return px; }), 0, 0);   // V0.41
+    if (s._lb?.canvas) { s._lb.canvas.width = 0; s._lb.canvas.height = 0; }
     s._lb = { key: bkey, canvas: b };
   }
   const out = document.createElement('canvas'); out.width = sw; out.height = sh;
@@ -115,7 +118,9 @@ export function sectionCanvas(s, lv = S.logView) {
     const t2 = document.createElement('canvas'); t2.width = sw; t2.height = sh; t2.getContext('2d').putImageData(im, 0, 0);
     oc.drawImage(t2, 0, 0); t2.width = t2.height = 0;
   }
+  if (s._lc?.canvas) { s._lc.canvas.width = 0; s._lc.canvas.height = 0; }
   s._lc = { key, canvas: out, k: sw / s.w };
+  touchReducedCache(s);
   return out;
 }
 
@@ -416,7 +421,7 @@ export function speciesFormHTML(st) {
   return taxaFormHTML(taxaOptions(st.taxa, { style: st }), 'column');
 }
 /** Figure-specific controls use the same vocabulary and settings as the core column. */
-export function taxaFormHTML(q, scope = 'figure') {
+export function taxaFormHTML(q, scope = 'figure', { showCompact = true } = {}) {
   const select = (key, choices) => `<label class="f"><span>${t('taxa.' + key)}</span><select data-taxa="${esc(key)}">${choices.map((value) =>
     `<option value="${esc(value)}" ${q[key] === value ? 'selected' : ''} ${key === 'layout' && value === 'stack' && ['none', 'kite'].includes(q.abundance) ? 'disabled' : ''}>${t('taxa.' + key + '.' + value)}</option>`).join('')}</select></label>`;
   const names = S.classes.filter((c) => c.id !== 'artifact').map((c) => c.name), hidden = new Set(q.hidden);
@@ -425,6 +430,7 @@ export function taxaFormHTML(q, scope = 'figure') {
     ${select('occurrence', ['none', 'symbols', 'names', 'both'])}${select('source', ['all', 'objects', 'marks'])}
     ${select('scale', ['auto', 'percent'])}<label class="f"><span>${t('taxa.opacity')}</span><input type="number" data-taxa="opacity" min="0" max="100" step="5" value="${Math.round(q.opacity * 100)}"></label></div>
     <label class="chk"><input type="checkbox" data-taxa="values" ${q.values ? 'checked' : ''}><span>${t('taxa.values')}</span></label>
+    ${showCompact ? `<label class="chk"><input type="checkbox" data-taxa="compact" ${q.compact ? 'checked' : ''}><span>${t('taxa.compact')}</span></label>` : ''}
     <div class="chk2">${names.map((name) => `<label class="chk"><input type="checkbox" data-taxa-hide="${esc(name)}" ${hidden.has(name) ? '' : 'checked'}><span><i>${esc(name)}</i></span></label>`).join('')}</div>
     <div class="row"><button type="button" class="btn small" data-taxa-all="1">${t('mp.all')}</button><button type="button" class="btn small" data-taxa-all="0">${t('mp.none')}</button></div>
     <p class="note">${t('taxa.note')}</p><button type="button" class="btn small ghost" data-taxa-reset>${t('taxa.reset')}</button></div>`;
@@ -436,7 +442,7 @@ function changeTaxaPresentation(el, reset = false) {
   if (figure && F.type === 'geolog') context.style = { ...context.style, colHide: [] };
   const current = figure ? F.taxaStyles?.[F.type] ?? (['core', 'log'].includes(F.type) ? colView('figure').style?.taxa : undefined) : S.logView.style?.taxa;
   const q = taxaOptions(current, context);
-  const rebuild = reset || ['layout', 'abundance', 'occurrence', 'source'].includes(el.dataset.taxa);
+  const rebuild = reset || ['layout', 'abundance', 'occurrence', 'source', 'compact'].includes(el.dataset.taxa);
   if (el.dataset.taxaAll != null) {
     q.hidden = el.dataset.taxaAll === '1' ? [] : S.classes.filter((c) => c.id !== 'artifact').map((c) => c.name);
   } else if (el.dataset.taxaHide != null) {
@@ -444,6 +450,7 @@ function changeTaxaPresentation(el, reset = false) {
   } else if (el.dataset.taxa) {
     const key = el.dataset.taxa;
     q[key] = el.type === 'checkbox' ? el.checked : key === 'opacity' ? (el.value === '' ? 1 : +el.value / 100) : el.value;
+    if (key === 'layout' && q.layout !== 'separate') q.compact = false;
   }
   if (figure) {
     const enableTaxa = !reset && F.type === 'geolog' && !colView('figure').tracks?.species;

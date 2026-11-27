@@ -164,6 +164,8 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `tiledmasks.js` | Masks of tiled sections in the page (card M8.4.16): the cache of level-0 mask tiles (`MaskTiles`: all-zero layers kept as nothing, tiles changed and not acknowledged by the engine never dropped, pinned tiles kept, clean tiles dropped least recently used first beyond 128 MiB), the reduced copy in the working image (`reduceTile`), and the mask layer painted over pixel tiles (`overlayLayout`, `axisMap`, `paintOverlay`) | Yes |
 | `tiledit.js` | Editing the masks of tiled sections (card M8.4.16): the edit window (`EditWindow`: whole level-0 mask tiles as flat arrays, written back tile by tile; `windowRange`, `WINDOW_TILES`) and object statistics kept per tile and summed per object (`tileStats`, `TiledObjectStats` with its budget `STATS_BUDGET_BYTES`, card M8.4.37, `affectedTiles`, `tilesUnder`, `TiledStatsRunner`: published per object only when current, tiles prioritised for an operation, card M8.4.28) | Yes |
 | `coremerge.js` | Joining the tables of one core from several projects in the units of the first one, with disagreeing values counted (card Q3; moved out of `app.js`) | Yes |
+| `coredata.js` | Merging a core's image intervals, external records, imported data and manual columns onto the union of depths or ages (card M8.5.7; moved out of `app.js`) | Yes |
+| `engineages.js` | Per-core row-age state (`pending`, `ready`, `error`) and publication for `core.ages/1` when the engine experiment is on, preserving imported ages and superseding stale revisions without JavaScript fallback (card M8.5.8) | Yes |
 | `tiledview.js` | The viewer of tiled sections (card M8.4.30 step 4): working image from the pyramid, tile cache and schedulers, mask overlay, the dialog of a long build or copy; context object from `app.js` | No (controller) |
 | `tiledtools.js` | Editing tiled sections (card M8.4.30 step 3): strokes on edit windows, undo and redo of tiled edits, wand, lasso, scissors and object operations, the wait for objects' statistics; context object from `app.js` | No (controller) |
 | `tiledstate.js` | One tiled section's state behind the page (card M8.4.30 step 2): per-tile object statistics, row counts and interval table, reads of level-0 pixels and dropped mask tiles, mask sends to the engine's store; context object from `app.js` | No (controller) |
@@ -181,6 +183,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `tiledsource.js` | The original image of a tiled section in the section form (card M8.4.18b): where it is, "Locate the image…" and "Copy the image into the project", through `window.corantoolDesktop.tiles` (`createTiledSourcePanel`); `sizeText` | — |
 | `tiledsync.js` | Sending the masks of tiled sections to the engine's store (card M8.4.16): rounds of staged version, dirty tiles and tables, commit and acknowledgement, retried after a failure (`MaskSync`); reading back tiles the page dropped (`MaskLoader`); the tables as bytes (`maskTables`) | Yes |
 | `maskchanges.js` | Which rows of each section's label and exclusion masks changed since the engine last received them: `createMaskChanges` (mark, take, restore, mark all) and `indexRangeOfPairs` (the pixels named by an edit-history list). A hint for the engine path, never a proof (§26.2) | Yes |
+| `pixelbudget.js` | Separate full-pixel working memory LRU (`pxBudget`) and reduced-canvas cache LRU (`reducedBudget`) plus the wave-guarded background pixel loader (`createPixelBudget`, `createPixelLoader`, `workingPixelBytes`, `reducedCacheBytes`), preventing eviction/re-decode flicker loops on multi-section cores (card Q21) | Yes |
 | `residentstore.js` | The registry of buffers the engine keeps between requests, per section (card M8.4.9, taken out of `engineclient.js`): `createResidentStore` with a byte bound and an owner bound, least recently used first, a group of buffers replaced together under one key, `forget`, `releaseAll`, `invalidateAll`. `engineclient.js` holds one for analysis inputs and one for pixels | Yes |
 | `sectionpixels.js` | The working pixels of a section as engine buffers (card M8.4.9): `buildPixelBuffers` (views `u8[h,w,4]` and `u16le[h,w,4]`), `describePixels` (the SHA-256 of each buffer and the pixel identity, remembered in `s._pxid`), `pixelIdentity` | Yes |
 | `tablesnapshot.js` | A record table as engine buffers (card M8.4.10) and back (card M8.5.3, `readTableResult`, for the table outputs of `method.run`): `buildTableSnapshot` (named numeric columns with `null` for missing values to `f64le[columns, rows]` values, `u8[columns, rows]` validity and a `utf8json` description, with the table identity and the limits `MAX_TABLE_*`), `tableInputNames` | Yes |
@@ -188,6 +191,7 @@ Program (`app/js/`). The modules marked "pure" do not use the browser (no DOM) a
 | `imageproc.js` | Enhancement, detection, connected components, magic wand, lasso, descriptors, rotation, downsampling | ✓ |
 | `edit.js` | Editing algorithms: scissors, merging, undo records, project migration | ✓ |
 | `learn.js` | Ichnotaxa classifier (k-NN with novelty rejection; Random Forest and Bayes wrappers), evaluation, final-test metrics | ✓ |
+| `mlsettings.js` | Load-time validation of classifier settings: `sanitizeIchnoMl`, `sanitizeGeoClassifier`, `GEO_PARAMS` | ✓ |
 | `log.js` | Core column: table parsing, axes, ticks, SVG and CSV of a window, distribution figure | ✓ |
 | `geo.js` | Multiproxy: samples, interval layers, labels, Random Forest, k-NN, Bayes, neural network, k-means, cross-validation, maps | ✓ |
 | `interp.js` | Gridding of scattered values for maps (inverse distance, triangulation, splines, kriging…) and map projections | ✓ |
@@ -1595,6 +1599,7 @@ horizontally.
 - **Automatic** intervals (`auto: true`) are never training labels.
 
 ### 18.4 Learning methods
+Classifier settings read from a project file (`settings.ml` of the ichnotaxa classifier; `method` and `params` of each multiproxy classifier) are validated on load (`mlsettings.js`, card Q11): an unknown method, a non-numeric or non-finite value, a number outside the form's range (up to ten times its maximum is accepted, not rounded), a wrong type, or a `params` entry that is not an object is replaced by the default and reported in a toast.
 All methods use a seeded pseudo-random generator (mulberry32, `seededRandom`; seed 42 by default): the same project
 gives the same result. Default parameters in `METHODS`:
 

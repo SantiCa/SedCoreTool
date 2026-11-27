@@ -2,11 +2,13 @@
 import { lang, t } from './i18n.js';
 import { geoTrackOptions } from './figview.js';
 import { mergeAgeImports, mergeMixedImports } from './geo.js';
+import { GEO_PARAMS, sanitizeGeoClassifier } from './mlsettings.js';
 import { MAP_PROJECTIONS, MAP_STYLE, MAP_SYMBOLS, METHODS, applyCatalogue, buildMapSVG, buildSamples, coreAges, coreFromRows, coresFromLongTable, crossValidateSteps, featureSeries, fitBBoxAspect, fitModel, fitModelSteps, fitSampleTransform, intervalsFromTable, intervalsOnAxis, labelSamples, layerFeatureNames, mapBBox, mapFrame, mapGeometry, mapSummary, orphanIntervals, predictLabel, segmentsOnAxis, tidyIntervals, transformSample, zoomBBox } from './geo.js';
 import { $, S, fetchAsset, fmt, sec, uid } from './state.js';
-import { DELIVERY, armed, busy, compositeMarks, compositeTaxonPoints, cropState, endCrop, esc, finalTestsHTML, holdoutHTML, holdoutIds, loadLib, makeCore, markDirty, openCoreDlg, refreshAllCores, refreshCoreData, renderCoreBar, runFinalGeo, safe, saveFile, scheduleFloat, toast, updateTip, view, withProv, zoomAt } from './app.js';
+import { DELIVERY, armed, busy, compositeMarks, compositeTaxonPoints, cropState, endCrop, esc, finalTestsHTML, holdoutHTML, holdoutIds, loadLib, makeCore, markDirty, openCoreDlg, refreshAllCores, refreshCoreData, renderCoreBar, runFinalGeo, safe, saveFile, scheduleFloat, settleCoreAges, toast, updateTip, view, withProv, zoomAt } from './app.js';
 import { axesFormHTML, colOrderHTML, colorsFormHTML, columnImages, compositeData, logStyleOf, mode, scheduleLog, syncColOrder } from './columns.js';
 import { interpAge, parseAgeModel, toCSV } from './core.js';
+import { coreAgeRelation } from './coredata.js';
 import { buildLogSVG, compositeRows, decodeText, eventShadeOptions, eventShading, mergedStyle, parseTable, validHexColor } from './log.js';
 import { renderFigure, verticalStyleHTML } from './figures.js';
 import { INTERP_DEFAULT, INTERP_METHODS, RAMPS, colorRange, contourLevels, contourSegments, interpolate, maskLand, rampColor, visibleSeaOptions } from './interp.js';
@@ -47,21 +49,18 @@ export function normalizeGeo(pg = {}) {
     g.activeCat = pg.activeLabel || g.layers[0].cats[0]?.id;
   }
   delete g.labels; delete g.activeLabel;
-  g.classifiers = (pg.classifiers || []).map((c) => ({ ...classifierDefaults(), ...c, params: { ...(c.params || {}) } }));
+  const resets = [];   // card Q11: unknown methods and hostile parameters of a project file are reset, not run
+  g.classifiers = (pg.classifiers || []).map((c) => {
+    const r = sanitizeGeoClassifier({ ...classifierDefaults(), ...c, params: { ...(c.params || {}) } });
+    resets.push(...r.reset.map((f) => `${r.value.name || r.value.id}: ${f}`)); return r.value;
+  });
+  { const m = sanitizeGeoClassifier({ method: g.settings.method, params: g.settings.params }); if (m.reset.length) { g.settings.method = m.value.method; g.settings.params = m.value.params; resets.push(...m.reset.map((f) => `settings: ${f}`)); } }
+  if (resets.length) setTimeout(() => toast(t('load.mlReset', { f: resets.join(', ') })), 600);
   g.lastCat ||= {};
   return g;
 }
 
 export const geoRT = { samples: [], labels: [], preds: [], model: null, cv: null, dirty: true, featNames: [], orphans: new Set(), runs: new Map(), layerCols: new Map(), ruleLabels: new Map() };
-
-/** Parameters shown for each method (help text in i18n: geo.p.<method>.<name>). */
-const GEO_PARAMS = {
-  mlp: [['hidden', 'select', ['8', '16', '32', '16,8', '32,16', '64,32']], ['activation', 'select', ['relu', 'tanh']], ['epochs', 'int', 20, 2000, 10], ['lr', 'float', 0.0005, 0.1, 0.0005], ['l2', 'float', 0, 0.1, 0.0001], ['batch', 'int', 4, 256, 4], ['balanced', 'bool'], ['patience', 'int', 5, 200, 5]],
-  rf: [['trees', 'int', 10, 500, 10], ['maxDepth', 'int', 2, 30, 1], ['minLeaf', 'int', 1, 50, 1], ['mtry', 'select', ['sqrt', 'log2', 'all']], ['bins', 'int', 8, 128, 8], ['bootstrap', 'bool'], ['balanced', 'bool']],
-  knn: [['k', 'int', 1, 50, 1], ['weights', 'select', ['distance', 'uniform']]],
-  nb: [['smoothing', 'float', 1e-9, 0.1, 1e-6], ['priors', 'select', ['uniform', 'empirical']]],
-  kmeans: [['k', 'int', 2, 12, 1], ['restarts', 'int', 1, 20, 1], ['maxIter', 'int', 10, 500, 10]],
-};
 
 const geoCore = (id) => S.cores.find((c) => c.id === id);
 export const geoLayer = (id) => S.geo.layers.find((l) => l.id === id);
@@ -703,7 +702,8 @@ export function buildGeoLog(core, features = null, options = null) {
   const g = S.geo, st = g.settings;
   if (!core) return null;
   const view = { ...g.view, ...options }, axis = options?.axis === 'depth' || options?.axis === 'age' ? options.axis : st.axis, xs = axis === 'age' ? coreAges(core) : core.depth;
-  const D = options && core.sections?.length && (axis === 'depth' || core.ageModel?.model) ? compositeData(axis, core) : null;
+  const ageModel = coreAgeRelation(core);
+  const D = options && core.sections?.length && (axis === 'depth' || ageModel) ? compositeData(axis, core, ageModel) : null;
   const ivAxis = intervalsOnAxis(g.intervals.filter((q) => q.core === core.id), axis, core).flatMap((q) => [q.from, q.to]);
   const valid = [...(xs || []).filter((v) => v != null), ...ivAxis, ...(D?.rows.flatMap((r) => [r.a0, r.a1]) || [])];
   if (!valid.length) return null;
@@ -733,16 +733,16 @@ export function buildGeoLog(core, features = null, options = null) {
     }
   }
   let rows = [], image = null, images = null, tracks = { image: false, total: false, species: false, BI: false, ii: false, manual: false };
-  if (!options && core.id === S.curCore && S.sections.length && (axis === 'depth' || S.age.model)) {
-    const D = compositeData();
-    rows = compositeRows(D.secs.map((s) => ({ name: s.name, bins: s.bins.map((b) => ({ ...b, dTop: b.dTop * D.f(s), dBottom: b.dBottom * D.f(s), depth: b.depth * D.f(s) })) })), { axis, model: S.age.model });
+  if (!options && core.sections?.length && (axis === 'depth' || ageModel)) {
+    const D0 = compositeData(axis, core, ageModel);
+    rows = D0.rows;
     tracks = { ...tracks, image: true, total: true };
-    const ims = columnImages({ ...D, axis }, from, to, 700); image = ims[0]; images = ims;   // V0.25: same panels and width as the core column
+    const ims = columnImages(D0, from, to, 700, core.logView || S.logView); image = ims[0]; images = ims;   // V0.25: same panels and width as the core column
   }
   if (D) {
     rows = D.rows;
     tracks = geoFigureTracks(options);
-    if (tracks.image) { images = columnImages(D, from, to, height, options.imageView || S.logView); image = images[0]; }
+    if (tracks.image) { images = columnImages(D, from, to, height, options.imageView || core.logView || S.logView); image = images[0]; }
   }
   const presentation = options ? logStyleOf({ axis, base: core.units || 'm' }, view, core.ageModel?.units || 'ka') : null;
   const style = presentation?.style || mergedStyle(view.style);
@@ -1653,9 +1653,14 @@ export function initMultiproxy() {
   $('geoModelOut').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-c]'); if (!tr) return; S.geo.view.clf = tr.dataset.c; S.geo.view.clfTarget = tr.dataset.l; syncCurrent(); renderGeoPanel(); renderGeoModel(); });
   $('geoModelOut').addEventListener('change', (e) => { const g = e.target.dataset.group; if (!g) return; S.geo.groupNames[g] = e.target.value; markDirty(); scheduleLog(); });
   $('geoPredCsv').addEventListener('click', () => {
-    if (!geoRT.samples.length) return;
-    const st = S.geo.settings, rows = [['core', st.axis, 'depth', 'age', ...geoRT.featNames, 'label', 'label_source', 'predicted', 'probability']];
-    geoRT.samples.forEach((s, i) => rows.push([geoCore(s.core)?.name, s.x, s.depth, s.age, ...s.raw, geoCat(geoRT.labels[i]?.label)?.name ?? '', geoRT.labels[i]?.source ?? '', geoCat(geoRT.preds[i]?.label)?.name ?? '', geoRT.preds[i]?.prob]));
-    saveFile(`${safe(S.name)}_clasificacion_intervalos.csv`, withProv(toCSV(rows)), 'text/csv');
+    const writePredCsv = () => {
+      if (geoRT.dirty) geoComputeSamples();
+      if (!geoRT.samples.length) return;
+      const st = S.geo.settings, rows = [['core', st.axis, 'depth', 'age', ...geoRT.featNames, 'label', 'label_source', 'predicted', 'probability']];
+      geoRT.samples.forEach((s, i) => rows.push([geoCore(s.core)?.name, s.x, s.depth, s.age, ...s.raw, geoCat(geoRT.labels[i]?.label)?.name ?? '', geoRT.labels[i]?.source ?? '', geoCat(geoRT.preds[i]?.label)?.name ?? '', geoRT.preds[i]?.prob]));
+      saveFile(`${safe(S.name)}_clasificacion_intervalos.csv`, withProv(toCSV(rows)), 'text/csv');
+    };
+    if (S.cores.some((c) => c?.ageAnalysis?.state === 'pending')) void settleCoreAges(S.cores).then(writePredCsv);
+    else writePredCsv();
   });
 }

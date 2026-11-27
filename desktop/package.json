@@ -1,7 +1,7 @@
 {
   "name": "sedcoretool",
   "productName": "SedCoreTool",
-  "version": "0.153.0",
+  "version": "0.154.0",
   "description": "SedCoreTool — sediment core analysis: ichnology on core images and multiproxy records",
   "author": {
     "name": "Santiago Casanova-Arenillas",

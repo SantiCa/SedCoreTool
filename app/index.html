@@ -134,7 +134,7 @@ input[type=number] { font-family: var(--font-data); font-variant-numeric: tabula
 .opt input[type=range] { width: 90px; accent-color: var(--accent); }
 .opt output { font: 12px var(--font-data); color: var(--ink); min-width: 2.5em; }
 .zoom { font: 12px var(--font-data); color: var(--muted); min-width: 4em; text-align: right; }
-.viewport { position: relative; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) var(--pw, clamp(200px, 13vw, 340px)); overflow: hidden; }
+.viewport { position: relative; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) var(--pw, clamp(200px, 13vw, 340px)); grid-template-rows: minmax(0, 1fr); overflow: hidden; }
 #profMenu { position: absolute; bottom: 6px; right: 6px; z-index: 3; font-size: 12px; }
 #profMenu > summary { list-style: none; cursor: pointer; color: #b5aea2; background: #1b201f; border: 1px solid #3a4240; border-radius: 4px; padding: 0 6px; line-height: 18px; }
 #profMenu > summary::-webkit-details-marker { display: none; }
