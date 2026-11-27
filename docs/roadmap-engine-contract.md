@@ -862,3 +862,221 @@ Behaviour of `core.js` that the fixtures record, so that the contract and the pr
 absent when false). A short line's range cell is `undefined` and an empty one `NaN`, which is why the two are different rows.
 `baconToAgeText` returns the text lines or `null`; its numbers are `+(+v).toPrecision(8)`, so the text is the shortest form of the rounded
 double. TECHNICAL_DOCUMENTATION §5 lists the header names in short; the regular expressions above are the complete rule.
+
+### 9.12 Method `core.columns/1`
+
+**State: specified on 28 November 2026 (card M8.5.8g); not yet in the engine (card M8.5.8h) and not used by the interface.** It evaluates
+the computed columns of one core (Data tab, TECHNICAL_DOCUMENTATION §17.3) in order, as `app.js::applyComputedColumns` does today with
+`sheet.js` (`parseFormula`, `evalColumn`, `formulaRefs`, `fillLinear`, `checkComputedCount`) as fixed by card M8.5.8f (decisions Z9-Z12).
+Reference fixtures made by that JavaScript: `tests/fixtures/core_columns/` (generator `tools/make_core_columns_fixtures.mjs`; its README
+gives the file format and the lines of `app.js` that the generator transcribes). Every rule below was checked against the code; where
+the code is surprising the rule says what the code does.
+
+| Item | Rule |
+|---|---|
+| Name, scope, priority | `core.columns/1`; scope `core` (§9.1); priority `interactive` only (`batch` is refused, §9.2). |
+| `settings` | `utf8json` `{"version": 1, "formulas": [{"name", "formula", "interp"}], "columns": [{"name"}]}`, every object closed. `formulas`: 1 to 256 entries in evaluation order (the computed columns that apply to the core, minus those the page refuses itself, below); `name` text of 1-256 UTF-8 bytes other than `__proto__` (what `sheet.js::cleanSheetColumns` keeps; several entries may share a name); `formula` text of at most 4,096 UTF-8 bytes, possibly empty; `interp` a boolean. `columns`: one entry per positional data column `c0…`, in that order; `name` text of at most 4,096 UTF-8 bytes, possibly empty (a core column with an empty name is reached by `[]`); names unique. Column names and formulas are user text and appear only here, never as table column names (Z12). |
+| `data` (table, §4 "Tables") | Columns `x`, `c0` … `c<m−1>` (m = the number of `settings.columns`), then `depth` when a formula names it, then `age` when a formula names it, in this order and no other; units are not read (the page sends `""`). `x` is the axis of `fillLinear`: the core's depths, or its ages for a core without depths (age-only; some may be missing, and they need not increase). `c<j>` is the core column named `settings.columns[j].name`. `depth` holds the core's depths (all missing for an age-only core) and `age` the rows' ages (all missing when the core has none). At least 1 row (§4). |
+| Output table `columns` | One column `f<k>` (unit `""`) per entry k of `settings.formulas`, one row per `data` row. A formula with an error gives a column with every slot missing. A slot whose value is not a finite number (missing, text, ±Infinity, NaN) is missing. |
+| `summary` | `{"rows": <data rows>, "errors": [{"index", "key", "arg"}]}`: one entry per failed formula, in formula order; `index` its position in `settings.formulas`; `key` one of "Errors" below; `arg` the text of the error's argument cut to its longest prefix of whole characters with at most 128 UTF-8 bytes, or `null` for a key without argument. The numeric bound that some messages show (`{n}`) is fixed per key (`sheet.js::FORMULA_LIMITS`) and is not sent. **Open, see "Open point" below: this summary can exceed 8 KiB.** |
+| Dimensions | `rows` = the number of `data` rows. |
+| Tolerance (decision Z11) | Exact (bit-identical, `-0` included): `+ − × ÷`, comparisons, `abs`, `sqrt`, `round`, `min`, `max`, `min2`, `max2`, `count`, `sum`, `cumsum`, `diff`, `median`, `norm01`, `if`, the filling of `fillLinear`, the missing pattern, `summary` (keys and arguments). At most 2 units in the last place: `log10`, `ln`, `log`, `exp`, `pow`, `^` of exact operands (also negated or under `abs`). \|Δ\| ≤ 1e-12 · max(1, \|reference\|): `mean`, `average`, `std`, `stdev`, `zscore`, `movavg`, `corr`, and any value computed from a value of the last two groups. A comparison, `round` or `if` condition that depends on such a value must still agree exactly; a difference is shown to the maintainer with its inputs, never accepted (the fixtures name these columns `fragile`). Sums follow row order (no pairwise summation). Each fixture names the class of each output column. |
+| Refusals | As §9.2 and §4: the field is named. `UNSUPPORTED_INPUT`: `settings` of another version (a `version` that is not the integer 1, a boolean included). `INVALID_REQUEST`: `settings` with another field, a missing field or not an object; `settings.formulas` not a list or empty, or an entry that is not exactly `{name, formula, interp}` of the types above; `settings.formulas.name` empty, longer than 256 bytes or `__proto__`; `settings.columns` not a list, an entry that is not exactly `{name}` with a text, or a repeated name; `data.columns` other columns, another order, or a number of `c` columns different from `settings.columns`. `LIMIT_EXCEEDED`: `settings.formulas` with more than 256 entries, or when the output table would exceed the §4 limits (formulas × rows × 9 bytes > 8 MiB: at most 9 formulas at 100,000 rows, 256 formulas up to 3,640 rows), checked before any formula is evaluated, so the coordinator never answers `INTERNAL` for it. An error of a formula is never a refusal. |
+
+**The page (what the interface card sends; transcribed by `pageRequest` in the generator).**
+
+1. *Which formulas.* The page walks `S.sheet.columns` in order and keeps those whose `core` is absent, empty, `all` or the core's id
+   (`applyComputedColumns`). Each kept formula has a position p = 1, 2, … among them. A formula with p > 256 gets `tooManyCols`
+   (`checkComputedCount`) and one whose UTF-8 length (`TextEncoder`) exceeds 4,096 bytes gets `tooLong`; neither is sent (a `utf8json`
+   string cannot carry it) and neither changes any column, so the remaining formulas give the same results. The others are sent in
+   order; `index` refers to that list and the page maps it back.
+2. *Which columns.* The names of the sent formulas (`formulaRefs`: references only, in order of first mention; a formula that does not
+   parse names nothing) that are columns of the core (own properties of `c.proxies` after merging and cell edits, before any computed
+   column) become `c0…` in that order; a name that is not a column of the core (a computed column's name, `depth`, `age`, or a name
+   that exists nowhere) is not sent, and the method gives `noCol` where it is looked up and absent. `depth` and `age` are added when
+   named.
+3. *Values.* A finite number is present; anything else (missing, NaN, ±Infinity, a non-number) is sent missing.
+4. *Size.* A `data` table beyond the §4 limits (more than 256 columns or 8 MiB: x and 8 named columns at 100,000 rows, 9 × 100,000 × 9
+   bytes) is refused by `tablesnapshot.js::buildTableSnapshot` (`LIMIT_EXCEEDED`) and the interface shows it (Z12).
+5. *Results.* Column `f<k>` becomes the core column named `formulas[k].name`, in order, and an error's key is translated with
+   `fxText` (`fx.<key>`, the bound `{n}` from `FORMULA_LIMITS`).
+
+**Evaluation of one request.** P maps names to columns; it starts with each `c<j>` under `settings.columns[j].name`. D is `data.depth`
+and A is `data.age` (all missing when not sent; they are then not named). For each formula k in order:
+
+1. *Environment.* The names of P with their columns, then `depth` → D and `age` → A (these replace a column of P with that name).
+2. *Interpolation.* When `interp` is true, every name r of the formula (`formulaRefs`) that is a name of P is replaced in the environment,
+   for this formula only, by `fillLinear(x, P[r])`. This includes earlier computed columns, and a column of P named `depth` or `age`,
+   which then replaces D or A. `depth` and `age` themselves are never filled.
+3. *Evaluation* of the formula (below) in that environment.
+4. *Publication.* On success P[`name`] becomes the result (its cells as computed, a ±Infinity or NaN kept), visible to every later formula
+   by that name (a repeated name replaces the earlier column, a computed column replaces a data column of the same name) and `f<k>` is
+   the result with every non-finite cell missing. On an error P does not change: a later formula finds the data column of that name, or
+   gets `noCol`; a name used before the formula that defines it runs is `noCol` unless a data column has it.
+
+**`fillLinear(x, v)`** (no gap limit is used). `out` = a copy of v; `prev` = none; for i = 0 … n−1: skip i when v[i] or x[i] is missing;
+when `prev` exists and i − `prev` > 1, for every k with `prev` < k < i whose x[k] is present, and only when x[i] ≠ x[`prev`],
+`out[k]` = v[`prev`] + ((v[i] − v[`prev`]) × (x[k] − x[`prev`])) / (x[i] − x[`prev`]), evaluated in exactly this order; then `prev` = i.
+So there is no extrapolation, gaps of any width are filled, nothing is filled between two equal x, a row whose x is missing is neither an
+anchor nor filled, a present cell never changes, and x is used in row order even when it does not increase (age-only cores are not
+sorted). Missing means missing: a ±Infinity or NaN cell of a computed column is an anchor (JavaScript tests `== null`).
+
+**Lexical rules.** The formula's UTF-8 length must not exceed 4,096 bytes (`tooLong`; refused by the page). One `=` after optional
+leading whitespace is removed. *Whitespace* is the set of §9.11 (U+0009-U+000D, U+0020, U+00A0, U+1680, U+2000-U+200A, U+2028, U+2029,
+U+202F, U+205F, U+3000, U+FEFF). Tokens are read from the left; at each position the first rule that applies decides:
+
+```
+whitespace  skipped
+number      a character 0-9 or "." starts it:  ( digit+ [ "." digit* ] | "." digit+ ) [ ("e" | "E") [ "+" | "-" ] digit+ ]   (longest)
+            no match (a "." without a digit after it, not after digits) -> badChar "."; value: the decimal read to the nearest
+            double (ties to even; 1e400 is Infinity)
+name        "[" any characters except "]" "]"            no "]" -> noBracket; the text between the brackets, nothing escaped
+string      '"' any except '"' '"'  |  "'" any except "'" "'"            no closing quote -> noQuote
+identifier  letter-or-_-or-$ { letter | digit | "_" | "." | "$" } [ ":" letter+ digit+ ]                                (longest)
+operator    "<=" | ">=" | "==" | "!=" | "-" | "+" | "*" | "/" | "^" | "(" | ")" | "," | "<" | ">"
+otherwise   badChar with that character
+```
+
+`digit` is 0-9 and `letter` A-Z or a-z (ASCII only). When a 1,025th token has been read the formula fails with `tooManyTokens` before
+anything after it (whitespace included) is examined; an error met while reading tokens 1 to 1,025 comes first. `a:b` is `a` then
+`badChar ":"`; `1.2.3` is 1.2 then 0.3; `0x10` is 0 then `x10`; there is no unary plus (`+3` is `unexpected`).
+
+**Syntax** (over tokens; ends with `extra` when tokens remain):
+
+```
+formula     = comparison ;
+comparison  = additive { ( "<" | ">" | "<=" | ">=" | "==" | "!=" ) additive } ;     left-associative
+additive    = term { ( "+" | "-" ) term } ;                                           left-associative
+term        = unary { ( "*" | "/" ) unary } ;                                         left-associative
+unary       = "-" unary | power ;
+power       = primary [ "^" power ] ;                                                 right-associative
+primary     = number | string | name
+            | identifier "(" [ comparison { "," comparison } ] ")"                    a call
+            | identifier                                                             a column name
+            | "(" comparison ")"
+            | "-" power ;                                                            only reached after "^"
+```
+
+So `-2^2` = −4, `2^-2^2` = 2^(−(2^2)), `2^3^2` = 512, `1 < 2 < 3` = (1 < 2) < 3. In five places the parser looks only at a token's
+text, whatever its kind: the `-` of `unary`, the `^` of `power`, the `(` after an identifier, the `,` and `)` of a call (including the
+test for an empty argument list), and the `)` closing a parenthesis. There a string or bracketed name whose text is exactly that
+character acts as the operator: `2 "^" 3` = 8, `[-]5` = −5, `sum(1 "," 2)` = 3, `(1 ")"` = 1, `sum"(" 1)` = 1 (a column named `-` can
+only be reached after `^`). Everywhere else (the binary operators and the `(` and `-` of `primary`) only an operator token counts.
+*Nesting:* a counter goes up on entering a parenthesis, a call's argument list, the operand of either unary minus and the right side of
+`^`; above 64 the formula fails with `tooDeep`. *Arguments:* a call with a 65th argument fails with `tooManyArgs` (argument: the function
+name, lower-cased) when the 64th comma is read, also for an unknown function (the name is checked when evaluated). Parse errors:
+`incomplete` (a primary is needed and no token is left), `expected` (argument `)`), `unexpected` (a primary starts with an operator
+other than `(` or `-`; argument: that operator), `extra` (argument: the next token's text; for a number, ECMAScript `Number::toString` of
+its value: `2`, `0.3`, `1e+21`, `1e-7`, `123456789012345680000`, `Infinity`; for a string or name its text without quotes or brackets).
+
+**Values.** A scalar is a double, a text, missing, or *absent* (an argument not given, or the result of `if` with a missing branch); a
+column has one cell per row, each a double, missing, a text or absent. *Present* means a finite double; a text, an absent value and a
+non-finite double read as missing wherever a number is read. A double can be non-finite only as a literal (`1e400`), after an overflow
+or a domain error (`exp(1000)`, `0^-1`, `sqrt(-1)` as scalars, or the unfiltered column results noted below). Number literals are never
+negative (`-` is an operator).
+
+**Evaluation order and names.** Depth first, left to right: a binary operator evaluates its left then its right operand, a call its
+arguments from left to right and then the function; the first error ends the formula. A function name is lower-cased and looked up
+among the functions below only (own names: never `constructor`, `toString`, `__proto__`…): an unknown name gives `unkFn` before its
+arguments are evaluated. A column name (bracketed name or identifier, case-sensitive) is looked up among the environment's names only
+(never inherited names): absent gives `noCol`. Identifiers with `.` and `$` and the free sheet's references (`A1`, `A1:B2`, `$A`) are
+just column names here; cell references belong to the free sheet (TECHNICAL §17.4) only. `col(…)` (any case) is for free cells: in a
+column formula its first argument is evaluated (no argument: `invalid`), then its second if given (later arguments are neither
+evaluated nor checked), and then the formula fails with `colOnly`.
+
+**Element-wise rule** (operators, `pow`, `min2`, `max2`, two-column `min`/`max`). Two scalars: f(a, b) when both are present (the result
+is kept even when not finite), else missing. Otherwise the result is a column; cell i takes cell i of a column operand or the scalar
+itself; it is f(aᵢ, bᵢ) when both are present and that value is finite, else missing. `+ − × ÷` are IEEE-754 double operations; a divisor
+of +0 or −0 gives missing; `^` and `pow` are ECMAScript `Math.pow` (a negative base with a non-integer exponent is NaN, 0 to a negative
+power +Infinity, −0 to a negative odd integer −Infinity, −0 to a positive odd integer −0); comparisons give 1 or 0, with `==` and `!=`
+comparing numbers (−0 equals 0); two texts are never compared (`"a" == "a"` is missing). Unary minus negates (0 ↔ −0) by the
+one-argument rule. *One-argument rule:* a scalar gives f(x) when x is present (kept even when not finite), else missing; a column gives
+f(xᵢ) per present cell, kept only when finite.
+
+| Function | Rule |
+|---|---|
+| `log10`, `ln`, `log`, `exp`, `sqrt`, `abs` | One-argument rule with ECMAScript `Math.log10`, `Math.log` (both `ln` and `log` are the natural logarithm), `Math.exp`, `Math.sqrt` (`sqrt(-0)` = −0), `Math.abs`. Further arguments are evaluated and ignored; a missing argument gives missing. |
+| `round(x, d)` | d must be a scalar (a column: `argKind`); d absent means 0; t = the integer part (toward zero) of ToNumber(d) (a text read as a number by §9.11, missing as 0, NaN as 0); t outside 0-100 (±Infinity included) gives `argKind`. Then the one-argument rule with v ↦ ECMAScript `Number(v.toFixed(t))`: v itself when \|v\| ≥ 1e21; otherwise the integer N ≥ 0 for which N / 10^t − \|v\| is closest to zero on the exact binary value of v, a tie taking the larger N (away from zero), written with t decimals, preceded by `-` when v < 0, read back to the nearest double. So `round(2.5)` = 3, `round(-2.5)` = −3, `round(0.125, 2)` = 0.13, `round(1.005, 2)` = 1 (1.005 is below 1.005 in binary), `round(-0.4)` = −0 and `round(-0)` = +0 (−0 is not < 0). Checked against V8 on 4,000 rounded values of the fixtures by an exact integer implementation of this rule. |
+| `pow(x, y)`, `min2(x, y)`, `max2(x, y)` | Element-wise with `Math.pow`, `Math.min`, `Math.max` (`Math.min(0, −0)` and `Math.min(−0, 0)` are −0; `Math.max` of them is 0). |
+| `mean(a)`, `average(a)` | First argument only (others evaluated and ignored): its present values (a scalar is one value), summed from +0 left to right in row order, divided by their count; none: missing. A scalar. |
+| `std(a)`, `stdev(a)` | First argument only: values as `mean`; fewer than 2: missing; else √(Σ (v − m)² / (count − 1)) with m their mean and the sum from +0 in row order. |
+| `median(a)` | First argument only (TECHNICAL §17.3 says all arguments; the code uses the first): present values sorted ascending by a stable sort on the difference (−0 and 0 keep their order); odd count: the middle one; even: (lower middle + upper middle) / 2; none: missing. |
+| `sum(…)`, `count(…)` | Every argument, in order, each column in row order: the present values summed from +0 left to right (none: 0), or counted. |
+| `min(…)`, `max(…)` | Exactly two arguments that are both columns: element-wise as `min2`/`max2`. Otherwise every present value of every argument folded with `Math.min` from +Infinity (`Math.max` from −Infinity); none: missing. |
+| `zscore(x)` | m = `mean(x)`, s = `std(x)` of the whole argument; one-argument rule with v ↦ (v − m) / s when s is a non-zero number, else +0 (s missing, 0 or NaN). |
+| `norm01(x)` | lo and hi folded over the present values of x as `min`/`max`; one-argument rule with q ↦ (q − lo) / (hi − lo) when hi > lo, else +0. |
+| `movavg(x, n)` | x must be a column and n a scalar (`argKind`, x checked first); n absent means 3; h = ⌊ToNumber(n) / 2⌋ (a text by §9.11, missing as 0). When rows × (2h + 1) > 10⁸ (in doubles; NaN and negative values never exceed) it fails with `tooCostly` (argument `movavg`). Cell i is the mean (as `mean`) of the present cells of ECMAScript `x.slice(max(0, i − h), i + h + 1)`: ends shorter, a NaN bound is 0, and a negative end counts from the end of the column (so `movavg(x, -3)` gives row 0 the mean of rows 2 … rows−2 and missing elsewhere); no present cell: missing. Cells are not filtered: an overflow stays ±Infinity for later formulas (missing in the output). A one-row window turns −0 into +0. |
+| `diff(x)` | x a column (`argKind`); cell 0 missing; cell i = xᵢ − xᵢ₋₁ when both are present, else missing; not filtered. |
+| `cumsum(x)` | x a column (`argKind`); a running sum from +0 over the present cells in row order; cell i = the sum after adding xᵢ when xᵢ is present, else missing; not filtered (once ±Infinity, it stays). |
+| `if(c, a, b)` | All three evaluated. c a column: cell i is missing when cᵢ is missing or absent, else cell i (or the scalar) of a when cᵢ is true and of b otherwise. c a scalar: the whole a or b. True and false are ECMAScript ToBoolean: a number is false only for ±0 and NaN (±Infinity is true), a text only when empty; missing and absent are false. A text or absent cell of the result is missing. |
+| `corr(a, b)` | Both columns (`argKind`, a checked first); the pairs with both cells present in row order; fewer than 3: missing; ma and mb their means (as `mean`); one pass from +0: sab += (x − ma)(y − mb), saa += (x − ma)², sbb += (y − mb)²; when saa and sbb are both non-zero (NaN counts as zero) sab / √(saa · sbb), else missing. A scalar. |
+
+*Result of a formula* (`evalColumn`): a scalar fills every row when it is present, and every row is missing otherwise (text, missing,
+absent, not finite); a column keeps its cells, a text or absent cell becoming missing (non-finite cells are kept for later formulas, step
+4). A missing value gives a missing result everywhere except in `sum`/`count` (skipped) and `if` (the rules above).
+
+**Errors** (the key is `fx.<key>` in `i18n.js`; "arg" is what `summary.errors[].arg` holds before the 128-byte cut):
+
+| Key | When | arg |
+|---|---|---|
+| `noBracket`, `noQuote` | `[` without `]`; a quote without its closing quote | `null` |
+| `badChar` | a character that starts no token (also a lone `.`, `=`, `!`, `:`, `#`, U+0085, U+001C, U+180E, any non-ASCII letter) | the character |
+| `expected` | a missing `)` | `)` |
+| `incomplete` | the formula ends where an operand is needed (also an empty formula) | `null` |
+| `unexpected` | an operand starts with an operator other than `(` or `-` | the operator |
+| `extra` | tokens after a complete formula | the token's text (numbers: `Number::toString`) |
+| `unkFn` | an unknown function | the name, lower-cased |
+| `invalid` | `col()` without arguments (the only case known in a column formula; any other unkeyed error would also give it) | `null` |
+| `colOnly` | `col(…)` in a column formula | `null` |
+| `noCol` | a column name absent from the environment | the name |
+| `argKind` | a column where a number is expected or the reverse (`round`, `movavg`, `diff`, `cumsum`, `corr`), `round` digits outside 0-100 | the function name |
+| `tooManyTokens` | more than 1,024 tokens | `null` |
+| `tooDeep` | nesting above 64 | `null` |
+| `tooManyArgs` | more than 64 arguments in one call | the function name, lower-cased |
+| `tooCostly` | `movavg` with rows × (2⌊n/2⌋ + 1) > 10⁸ | `movavg` |
+| `tooLong`, `tooManyCols` | more than 4,096 bytes; position above 256 (decided by the page, never by the method) | `null` |
+
+`circular`, `badRef` and `noCore` belong to the free sheet only. The bounds (decision Z10, `sheet.js::FORMULA_LIMITS`): 4,096 bytes,
+1,024 tokens, depth 64, 64 arguments, 256 computed columns per core, 10⁸ `movavg` additions; each excess is an error of that formula
+only. The method evaluates with an explicit depth counter and a fixed function table, never `eval`, `exec`, `compile` or a lookup of
+objects by a name taken from the formula (Z10).
+
+**Rules that differ from Python's defaults** (for card M8.5.8h). The character classes are those above, not `re`'s Unicode `\s`, `\d`,
+`\w`; `extra`'s number argument is `Number::toString` (`1e-7`, `1e+21`, `123456789012345680000`, not `repr`'s `1e-07`,
+`1.2345678901234568e+20`); `round` rounds ties away from zero on the exact binary value (not `round()`'s ties to even) with the `-0`
+rule above; `Math.pow` returns NaN or ±Infinity where `**` and `math.pow` return a complex number or raise; `Math.min`/`Math.max` prefer
+−0 and 0 as stated (Python's `min`/`max` return the first argument); sums and means are left folds from +0 in row order (not `sum` of
+NumPy, `math.fsum` or `statistics`); `median` needs a stable sort (NumPy's default sort is not); `movavg` uses ECMAScript `slice` bounds;
+texts become numbers only for `round`'s digits and `movavg`'s n, by §9.11; an absent argument differs from a missing one only as those
+two (the default applies); scalar results of the element-wise and one-argument rules are not filtered (`if(exp(1000), 1, 2)` = 1,
+`if(sqrt(-1), 1, 2)` = 2); a zero product saa · sbb in `corr` is a division by zero, which Python raises; non-finite cells stay inside
+computed columns until the output.
+
+**Differences between the page today and this contract** (recorded by card M8.5.8g, for the interface card):
+
+1. With `interp` on, `applyComputedColumns` looks a referenced name up with `c.proxies[r]`, which also finds inherited names: a formula
+   naming `constructor`, `toString`, `valueOf`, `hasOwnProperty`, `__proto__`… makes `fillLinear` throw a `TypeError` whose browser text
+   is shown and kept in `col.error`; the method gives `noCol` (as `interp` off does today). The generator uses a null-prototype object.
+2. With the engine experiment on, `engineAges` publishes ages by calling `applyCellEdits` and `applyComputedColumns` again on a core
+   whose `proxies` already hold the previous run's computed columns and edited cells: a name used before its formula, or after its
+   formula failed, then finds the previous run's column instead of `noCol`, and each edit's original value (`o`) is overwritten by the
+   edited one. This contract follows a fresh merge (`afterMerge`).
+3. A computed column keeps ±Infinity or NaN cells made by an overflow in `c.proxies` (TECHNICAL §17.3 says a computed column holds only
+   numbers and missing values); the output writes them missing. Inside one request later formulas see them as JavaScript does.
+4. A core column holding NaN, ±Infinity or a non-number is sent missing, whereas JavaScript's `fillLinear` takes it as an anchor (not
+   checked whether the program can produce such a cell).
+5. A core without rows cannot be sent (§4: a table has at least one row); JavaScript still evaluates its formulas and shows their
+   errors. The interface card decides what the page shows.
+6. `badChar` on a character outside the BMP: `sheet.js` reports its first UTF-16 code unit (a lone surrogate, which UTF-8 cannot carry);
+   the method reports the whole character. A lone surrogate in a formula or a name reaches the method as U+FFFD (§9.11, `TextEncoder`).
+   No fixture contains either.
+
+**Open point (found by card M8.5.8g; needs the maintainer).** Z12 cuts each argument to 128 bytes "so that the summary stays within
+8 KiB", but 256 errors cannot fit: an entry such as `{"index":255,"key":"tooDeep","arg":null}` is 41 bytes (256 of them about 10.5 KiB
+without any argument) and one with a 128-byte argument 162 bytes (about 50 fit in 8 KiB); the coordinator answers `INTERNAL` to a larger
+summary (§9.3). Options: (a) a larger summary bound for this method only, with each argument cut to 128 bytes of escaped JSON (about
+42 KiB at most, inside the 64 KiB frame); (b) error keys and arguments as result columns of the packed buffer (a `u8` key code per
+formula, the arguments' UTF-8 bytes with `u32` offsets), the summary keeping only `rows` and the number of errors (no size limit, no
+cut); (c) the method refuses with `LIMIT_EXCEEDED` (field `summary`) a request whose summary would exceed 8 KiB (visible, but the core
+then gets no computed column). *Recommended: (b).* The fixtures record each error's key and its argument cut to 128 bytes, and the
+argument before the cut, so they serve any of the three.

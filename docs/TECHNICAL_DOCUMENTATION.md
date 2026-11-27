@@ -1476,12 +1476,14 @@ and validation. Changing the default and removing the flag requires the maintain
 One formula per column (`sheet.js::evalColumn`), evaluated row by row over the core. Operators `+ − * / ^` and
 comparisons (`< > <= >= == !=`, giving 1/0); names without spaces or in brackets (`[XRF Ba/Ti]`), `depth`, `age`.
 Functions: `log10, ln` and `log` (both the natural logarithm), `exp, sqrt, abs, round(x, d)` (0 to 100 decimals),
-`pow, min, max` (element-wise with two columns), `mean, std` (sample standard deviation, n − 1; both use only their
-first argument), `median, sum` (all arguments; `sum()` of nothing is 0), `count, zscore` ((x − mean) / sample standard
+`pow, min, max` (element-wise with two columns), `mean, std` (sample standard deviation, n − 1), `median` (these three
+use only their first argument), `sum` (all arguments; `sum()` of nothing is 0), `count, zscore` ((x − mean) / sample standard
 deviation), `norm01`, `movavg(x, n)` (centred mean of the 2⌊n/2⌋ + 1 rows around each row, fewer at the ends; n = 3 by
 default), `diff, cumsum, if(c, a, b)` (a column condition picks row by row and a missing condition gives a missing
 value; a single condition picks by truthiness), `corr`. A missing value gives a missing result; so does division by 0,
-and so does a text result (`if(c, "a", "b")`): a computed column holds only numbers and missing values. Function and
+and so does a text result (`if(c, "a", "b")`): a computed column holds only numbers and missing values, except that an
+overflow in `movavg`, `diff`, `cumsum`, a value passed through `if` or `fillLinear` can leave ±Infinity or NaN cells, which
+later formulas see (the engine contract §9.12 states the exact rule). Function and
 column names are looked up only among the defined functions and the core's columns (never `constructor`,
 `toString`…). A column given where a number is expected (`round(x, d)` with a column `d`, `movavg(x, n)` with a column
 `n`), a number where a column is expected (`movavg`, `diff`, `cumsum`, `corr`) or `round` decimals outside 0-100 give

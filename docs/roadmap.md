@@ -30,7 +30,7 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
   capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
 - **Design card A2 done (27 Nov 2026):** cards **M8.5.8a-M8.5.8o** of the rest of slice (a) written before M8.5.9, with decisions
-  **Z1-Z17** ([block](#decisions-for-the-rest-of-slice-a-a2)). Z1-Z17 approved as recommended (27 Nov 2026). **M8.5.8a-f** done; next **M8.5.8g** (most capable, high). V0.155 waits for more cards (maintainer, 27 Nov 2026).
+  **Z1-Z17** ([block](#decisions-for-the-rest-of-slice-a-a2)). Z1-Z17 approved as recommended (27 Nov 2026). **M8.5.8a-g** done; next **M8.5.8h** (most capable, high), waiting for the maintainer's choice on the `core.columns/1` error summary (contract §9.12 "Open point"). V0.155 waits for more cards (maintainer, 27 Nov 2026).
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.8 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
   long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 and Z1-Z17 is approved.
@@ -1032,7 +1032,18 @@ after. The order is the order of this list; cards written later go before the ga
   - *Tests:* the corpus (exact); each quirk and bound (fails before, passes after); `cleanSheetColumns` with `__proto__`, non-text and
     oversized fields; `npm test`, `npm run typecheck`, `python tools/build_standalone.py`, `tests/e2e/smoke.mjs`.
   - *Done when:* development gate; the director writes the CHANGELOG "For users" entry.
-- [ ] **M8.5.8g - Contract and reference fixtures of `core.columns/1`** (waits for Z9-Z12; after M8.5.8f).
+- [x] **M8.5.8g - Contract and reference fixtures of `core.columns/1`** (done 28 Nov 2026, development gate; one open point for the maintainer).
+  - *As built (28 Nov 2026; most capable / high sub-agent, contract reviewed in full by the director):* contract §9.12 (settings, `data`
+    table and output as Z12; what the page decides itself: `tooManyCols`, `tooLong`, the core filter, names from `formulaRefs`; evaluation
+    environment and `fillLinear`; lexical rules and EBNF; every function with its tolerance class (Z11); 18 error keys; refusals including
+    `LIMIT_EXCEEDED` when formulas × rows × 9 > 8 MiB (at most 9 formulas at 100,000 rows); rules that differ from Python's defaults;
+    differences between today's page and the contract). `tools/make_core_columns_fixtures.mjs` (real `sheet.js`, a transcription of
+    `applyComputedColumns`) writes 66 files (6.9 MB) to `tests/fixtures/core_columns/`: 23 hand-written cases, 2,000 random formulas over 40
+    random cores, a 100,000-row case. Quirks recorded as the code has them: in five places the parser reads only a token's text (`2 "^" 3`
+    = 8); `movavg` with a negative `n` uses `slice` wrap-around; `round(-0.4)` = −0; scalar results are not filtered for finiteness.
+    TECHNICAL §17.3 corrected (`median` uses its first argument; overflow can leave ±Infinity/NaN cells). Bugs found outside the card moved
+    into M8.5.8j, M8.5.8l and M8.5.8n ("Also" items). `tests/app/core-columns-fixtures.test.mjs` (6). Checks (Windows): `npm test` 738/738,
+    typecheck. **Open:** the summary of 256 errors cannot fit in 8 KiB (contract §9.12 "Open point"); M8.5.8h waits for that decision.
   - *Goal:* the contract describes the formula language of computed columns and the method that evaluates a core's computed columns in
     order; fixtures made by `sheet.js` (as fixed by M8.5.8f) fix their results.
   - *Read first:* contract §3 (metadata limits), §4 "Tables", §9; TECHNICAL_DOCUMENTATION §17.1, §17.3; `sheet.js` (`tokenize`, `parseFormula`,
@@ -1085,15 +1096,19 @@ after. The order is the order of this list; cards written later go before the ga
   - *Done when:* the result is recorded with its host (development gate; macOS and Linux not measured); a failed target records the
     measurement and the narrowest next correction, and that path's interface card waits for the maintainer.
 - [ ] **M8.5.8j - Computed columns and cell edits out of `app.js`.**
-  - *Goal:* `applyCellEdits` and `applyComputedColumns` move to a pure module without changing behaviour (ARCHITECTURE §5.2), so that M8.5.8n
-    changes only where computed values come from.
+  - *Also (found in M8.5.8g, added 28 Nov 2026; a fix after the move, its own commit):* with the engine experiment on, `engineAges`'
+    `onPublish` calls `applyCellEdits` and `applyComputedColumns` again on a core whose `proxies` already hold the previous run's computed
+    columns and edited cells: a name used before its formula, or after its formula failed, finds the previous run's column instead of
+    `noCol`, and each edit's original value (`o`) is overwritten by the edited one (contract §9.12, "Differences" 2). Publish from a fresh
+    merge (`afterMerge`) instead; Node tests that fail before the fix (stale column, edit original kept). Because it touches saved cell
+    edits, this part is reviewed line by line and the card's tier becomes most capable, effort medium.
   - *Read first:* ARCHITECTURE §5.2; `app.js` (`applyCellEdits`, `applyComputedColumns`, `refreshCoreData`, the `onPublish` of
     `createEngineAges`); `coredata.js::mergeCoreData` (`afterMerge`); TECHNICAL_DOCUMENTATION §17.2-§17.3.
   - *Change:* new `app/js/computedcolumns.js` (the sheet columns and the error-text function passed in; no import of `i18n.js`); one-line
     wrappers in `app.js`; `ORDER`; `tsconfig.strict.json`; `APP_JS_CEILING`; ARCHITECTURE §3.2; TECHNICAL_DOCUMENTATION §1.4;
     `tests/app/computedcolumns.test.mjs`.
-  - *Do not touch:* behaviour; saved fields; `sheet.js`.
-  - *Model:* fast, effort medium.
+  - *Do not touch:* behaviour (except the "Also" fix above); saved fields; `sheet.js`.
+  - *Model:* most capable, effort medium (raised 28 Nov 2026 for the "Also" fix; the move alone would be fast, medium).
   - *Tests:* Node: edits applied before formulas; formulas in order, a later one using an earlier one; an error keeps the others; `interp`
     on and off; the `core` filter (`all`, an identifier); `npm test`, `npm run typecheck`, `python tools/build_standalone.py`, `tests/e2e/smoke.mjs`.
   - *Done when:* `app.js` is shorter and the checks pass; development gate.
@@ -1110,6 +1125,9 @@ after. The order is the order of this list; cards written later go before the ga
     to today's for median and mean; `npm test`, `npm run typecheck`, `python tools/build_standalone.py`, `tests/e2e/smoke.mjs`.
   - *Done when:* `app.js` is shorter and the checks pass; development gate.
 - [ ] **M8.5.8l - Record depths from the engine** (engine experiment; waits for Z3 and for M8.5.8i's `depths` result).
+  - *Also (found in M8.5.8g, added 28 Nov 2026):* `coredata.js` sets `c.proxies[name]` for an imported column named `__proto__`, which
+    replaces the prototype of the core's `proxies` object (no code runs; later lookups are corrupted). Build `proxies` so that every name,
+    `__proto__` included, is an own property (or refuse that name visibly); a Node test that fails before the fix.
   - *Goal:* with the engine experiment on, `coredata.js::collectCoreParts` takes the depths of age-axis record series from `core.depths/1`
     (one request per core with all its age-axis series, through the M8.5.8a gate, cached by inputs, superseded by the core's revision);
     while pending, those series are absent from the merged table and the core shows the pending state; a failure is visible; with the flag
@@ -1148,6 +1166,12 @@ after. The order is the order of this list; cards written later go before the ga
   - *Also (found in M8.5.8f, added 28 Nov 2026):* in the free sheet `COL("constructor")` (and other prototype names) resolves through
     `datatab.js::cellResults` by a prototype lookup of `c.proxies[name]` (no code runs; reads as missing). Look the name up as an own
     property and give `noCol`, as column formulas do since M8.5.8f; a test that fails before the fix.
+  - *Also (found in M8.5.8g, added 28 Nov 2026; contract §9.12 "Differences" 1, 4, 5, 6):* (1) with `interp` on, `applyComputedColumns`
+    looks referenced names up with `c.proxies[r]`, so `[constructor]`, `[toString]`… make `fillLinear` throw and its browser text is saved in
+    `col.error`; the JavaScript path must give `noCol` as the method does (a test that fails before the fix). (4) A core column holding NaN,
+    ±Infinity or a non-number is sent missing but is an anchor for JavaScript's `fillLinear`: check whether the program can produce such a
+    cell and make both paths agree. (5) A core without rows cannot be sent: decide and test what the page shows. (6) `badChar` on a
+    character outside the BMP: the page shows the whole character.
   - *Goal:* with the engine experiment on, `computedcolumns.js` requests `core.columns/1` for each core (after the core's ages and record
     depths are published when a formula names `age` or uses them), publishes by the rule of §9.4, writes each column's `error` text with
     `fxText` from the summary's key and argument, and the Data tab, exports and Multiproxy wait while it is pending (as M8.5.8 did for
