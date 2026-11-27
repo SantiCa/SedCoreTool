@@ -240,7 +240,8 @@ test('M8.5.8a: superseded, failed, cleared and released jobs give their place ba
 
   const a1 = engineAges.request(a, plainRequest(1));
   const b1 = engineAges.request(b, plainRequest(2));
-  await until(() => ran.length === 1, 'core a holds the only place');
+  // Core b builds its snapshots before it queues, so wait for it to reach the gate rather than assume it already has.
+  await until(() => ran.length === 1 && gate.stats().waiting === 1, 'core a holds the only place and core b waits');
   assert.deepEqual(gate.stats(), { holders: 1, waiting: 1 });
 
   // Superseding a's running job frees its place; b runs next and a's new revision waits behind it.
