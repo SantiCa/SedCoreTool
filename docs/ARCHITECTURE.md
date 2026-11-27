@@ -98,7 +98,7 @@ matching tier and the Python API the **last**; the kernel takes `precedence="fir
 
 | Kind | Rule | Examples |
 |---|---|---|
-| Pure modules | No `document`, `window` or DOM types; state arrives as arguments. Tested with Node in `tests/app/` | `core.js`, `sectiondepth.js`, `sectionanalysis.js`, `maskchanges.js`, `pixelbudget.js`, `tiledsection.js`, `tiledrecord.js`, `tiledsplit.js`, `tilecache.js`, `tiledmasks.js`, `tiledit.js`, `tiledcounts.js`, `tiledcache.js`, `tiledbackup.js`, `tiledsync.js`, `tiledundo.js`, `singleflight.js`, `taxa.js`, `coremerge.js`, `coredata.js`, `residentstore.js`, `sectionpixels.js`, `tablesnapshot.js`, `engineclient.js`, `engineanalysis.js`, `engineages.js`, `edit.js`, `imageproc.js`, `learn.js`, `mlsettings.js`, `log.js`, `geo.js`, `interp.js`, `locmap.js`, `plot.js`, `sheet.js`, `dataedit.js`, `exportio.js`, `zip.js`, `figsize.js`, `pngmeta.js`, `unet.js`, `unetmodel.js`, `navpreview.js`, `figview.js` |
+| Pure modules | No `document`, `window` or DOM types; state arrives as arguments. Tested with Node in `tests/app/` | `core.js`, `sectiondepth.js`, `sectionanalysis.js`, `maskchanges.js`, `pixelbudget.js`, `tiledsection.js`, `tiledrecord.js`, `tiledsplit.js`, `tilecache.js`, `tiledmasks.js`, `tiledit.js`, `tiledcounts.js`, `tiledcache.js`, `tiledbackup.js`, `tiledsync.js`, `tiledundo.js`, `singleflight.js`, `taxa.js`, `coremerge.js`, `coredata.js`, `residentstore.js`, `sectionpixels.js`, `tablesnapshot.js`, `engineclient.js`, `engineanalysis.js`, `corejobs.js`, `engineages.js`, `edit.js`, `imageproc.js`, `learn.js`, `mlsettings.js`, `log.js`, `geo.js`, `interp.js`, `locmap.js`, `plot.js`, `sheet.js`, `dataedit.js`, `exportio.js`, `zip.js`, `figsize.js`, `pngmeta.js`, `unet.js`, `unetmodel.js`, `navpreview.js`, `figview.js` |
 | State | The shared project state `S` and small helpers | `state.js` |
 | Controllers and views | Read and change `S`, call pure modules, build DOM/SVG, wire events | `app.js`, `columns.js`, `datatab.js`, `figures.js`, `multiproxy.js`, `panels.js`, `diagnostics.js`, `folderversion.js`, `tiledproject.js`, `tiledsplitui.js`, `tiledstate.js`, `tiledtools.js`, `tiledview.js`, `tableview.js` |
 | Storage | IndexedDB project library | `storage.js` |
@@ -132,6 +132,11 @@ Pure modules for M8.3:
   `analysisRevision`, empties `s.bins` while a result is awaited, queues one analysis at a time, cancels a request that
   an edit made obsolete and publishes a result only if the revision is still current. It never computes bins and never
   falls back to the JavaScript calculation. `app.js::analyze` delegates to it when `window.corantoolDesktop.engine.enabled`.
+- `corejobs.js` — the page-side gate of core-scope engine jobs (M8.5.8a): first in, first out, at most 2 core jobs in flight, so
+  that a project with many cores does not fill the engine's queue (one running and four waiting jobs per priority, shared with
+  section analyses; contract §9.4) and get `BUSY`. A waiter whose request is superseded, cleared or released leaves the queue.
+  `app.js` creates one gate and gives it to every core-scope engine module (today `engineages.js`, which holds it around its
+  table uploads and `method.run`).
 
 ### 3.3 Electron main process (`desktop/`)
 

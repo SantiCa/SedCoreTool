@@ -2,6 +2,7 @@
 // With the engine experiment on, a core's merged-table row ages come from `core.ages/1` instead of JavaScript (M8.5.8).
 // Keeps per-core state (`core.ageAnalysis`: pending, ready, error) keyed by (target, revision), preserves imported ages,
 // skips re-running when inputs are unchanged, cancels superseded requests, and never falls back to JavaScript on failure.
+// With a `gate` (`corejobs.js`, card M8.5.8a) each core's engine work waits for a place in the page before it is sent.
 // Pure module: no DOM; the engine client is injected.
 import { buildTableSnapshot, tableInputNames } from './tablesnapshot.js';
 
@@ -77,9 +78,10 @@ function tableTokensToInputs(name, tokens) {
  *   run: (method: string, request: {scope: string, target: string, revision: number, priority?: 'interactive' | 'batch', inputs: Record<string, any>}, options?: {signal?: AbortSignal}) => Promise<{tables: Record<string, {name: string, unit: string, values: (number | null)[]}[]>, summary: Record<string, any>}>,
  *   forget?: (owner: object) => void,
  *   restart?: (options: {automatic: boolean}) => Promise<void>,
- * }, onPublish?: (core: any) => void, onNotice?: (key: 'engine.restarted' | 'engine.restartFailed') => void}} deps
+ * }, onPublish?: (core: any) => void, onNotice?: (key: 'engine.restarted' | 'engine.restartFailed') => void,
+ *   gate?: {acquire: (signal?: AbortSignal) => Promise<() => void>} | null}} deps
  */
-export function createEngineAges({ client, onPublish, onNotice }) {
+export function createEngineAges({ client, onPublish, onNotice, gate = null }) {
   /** @type {WeakMap<object, string>} */
   const targets = new WeakMap();
   /** @type {WeakMap<object, number>} */
@@ -124,36 +126,42 @@ export function createEngineAges({ client, onPublish, onNotice }) {
     ]);
     const signal = job.controller.signal;
     const target = targetOf(core);
-    let restarted = false;
-    for (let attempt = 0; ; attempt++) {
-      try {
-        const modelTokens = await client.ensureTable(core, 'age_model', modelSnapshot, { signal });
-        const queryTokens = await client.ensureTable(core, 'query', querySnapshot, { signal });
-        return await client.run('core.ages/1', {
-          scope: 'core',
-          target,
-          revision: job.revision,
-          priority: 'interactive',
-          inputs: {
-            ...tableTokensToInputs('age_model', modelTokens),
-            ...tableTokensToInputs('query', queryTokens),
-            settings: { version: 1 },
-          },
-        }, { signal });
-      } catch (error) {
-        const code = /** @type {any} */ (error)?.code;
-        if (attempt === 0 && code === 'INVALID_BUFFER' && !signal.aborted) {
-          client.forget?.(core);
-          continue;
+    // The place is held across retries and freed on every exit: result, error, abort (superseded, cleared or released).
+    const release = gate ? await gate.acquire(signal) : null;
+    try {
+      let restarted = false;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const modelTokens = await client.ensureTable(core, 'age_model', modelSnapshot, { signal });
+          const queryTokens = await client.ensureTable(core, 'query', querySnapshot, { signal });
+          return await client.run('core.ages/1', {
+            scope: 'core',
+            target,
+            revision: job.revision,
+            priority: 'interactive',
+            inputs: {
+              ...tableTokensToInputs('age_model', modelTokens),
+              ...tableTokensToInputs('query', queryTokens),
+              settings: { version: 1 },
+            },
+          }, { signal });
+        } catch (error) {
+          const code = /** @type {any} */ (error)?.code;
+          if (attempt === 0 && code === 'INVALID_BUFFER' && !signal.aborted) {
+            client.forget?.(core);
+            continue;
+          }
+          if (code === 'ENGINE_UNAVAILABLE' && !restarted && !signal.aborted && client.restart) {
+            restarted = true;
+            try { await client.restart({ automatic: true }); } catch { throw error; }
+            onNotice?.('engine.restarted');
+            continue;
+          }
+          throw error;
         }
-        if (code === 'ENGINE_UNAVAILABLE' && !restarted && !signal.aborted && client.restart) {
-          restarted = true;
-          try { await client.restart({ automatic: true }); } catch { throw error; }
-          onNotice?.('engine.restarted');
-          continue;
-        }
-        throw error;
       }
+    } finally {
+      release?.();
     }
   }
 

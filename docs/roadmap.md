@@ -28,7 +28,7 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
   capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
 - **Design card A2 done (27 Nov 2026):** cards **M8.5.8a-M8.5.8o** of the rest of slice (a) written before M8.5.9, with decisions
-  **Z1-Z17** ([block](#decisions-for-the-rest-of-slice-a-a2)). Z1-Z17 approved as recommended (27 Nov 2026). **M8.5.8a** in progress (most capable, medium).
+  **Z1-Z17** ([block](#decisions-for-the-rest-of-slice-a-a2)). Z1-Z17 approved as recommended (27 Nov 2026). **M8.5.8a** done; next **M8.5.8b** (fast, medium).
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.8 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
   long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 and Z1-Z17 is approved.
@@ -863,7 +863,15 @@ after. The order is the order of this list; cards written later go before the ga
     (691/691), `npm run typecheck`, `tools/build_standalone.py` (2.98 MB), `tests/e2e/desktop.mjs` off/on. `tests/e2e/smoke.mjs` stopped at
     unrelated `navigation-preview.mjs` (4/257,928 px off by 1 on Chrome 158 ANGLE RTX 4070 D3D11; verified in GitHub CI). Not measured
     locally: macOS, Linux (checked via GitHub CI on push).
-- [ ] **M8.5.8a - Core requests wait in the page** (waits for Z1).
+- [x] **M8.5.8a - Core requests wait in the page** (done 27 Nov 2026, development gate; [CHANGELOG](../CHANGELOG.md#unreleased)).
+  - *As built (27 Nov 2026; most capable / medium sub-agent, every line reviewed by the director):* pure module `app/js/corejobs.js`
+    (`createCoreJobGate`: first in, first out, `limit` holders, an aborted waiter leaves the queue with an `AbortError`, a release frees one
+    place once); `engineages.js` option `gate`, held from after the snapshots through both uploads, the run and its retries, released in a
+    `finally`; one gate (limit 2) wired in `app.js`. **Before** (desktop step, 20 generated cores, engine on, unchanged code): 2 ready,
+    18 `error BUSY`. **After:** engine on 20 ready, engine off 20 in JavaScript; ages within 1e-9 and 159 missing rows identical in both.
+    Tests: `tests/app/corejobs.test.mjs` (4), `engine-ages.test.mjs` (+2, fail with the gate removed), `tests/e2e/desktop.mjs` step
+    `manyCoreAges(20)`. Checks (Windows): `npm test` 708/708, typecheck, `build_standalone.py`, `desktop.mjs` engine on and off, ruff.
+    `app.js` 4,602 → 4,602 lines.
   - *Goal:* with the engine experiment on, a project with many cores never gets `BUSY` because the page sent too many core-scope jobs at
     once: core jobs wait in the page, at most 2 in flight, so section analyses keep room in the engine's queue; results do not change.
   - *Read first:* contract §9.4; `app/js/engineages.js` (`request`, `runCoreAges`, `restartAndRetry`, `releaseAll`); `app/js/engineclient.js::run`;

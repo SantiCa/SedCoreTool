@@ -5,11 +5,11 @@ import { effectiveClassId, effectiveClassIndex, computeSectionBins, binsFromRowC
 import { createEngineClient } from './engineclient.js';
 import { createEngineAnalysis } from './engineanalysis.js';
 import { createEngineAges } from './engineages.js';
+import { createCoreJobGate } from './corejobs.js';
 import { createMaskChanges, indexRangeOfPairs } from './maskchanges.js';
 import { createPixelBudget, createPixelLoader, lruPush, pixelSourceKind } from './pixelbudget.js';
 export { pxPerCm, depthAtRow, rowAtDepth };
 import { withProvenance, ageModelText, bioturbationTable, objectsTable } from './exportio.js';
-
 import { DEFAULT_FILTERS, FILTER_PRESETS, DEFAULT_DETECT, traceSeparation, localSeparability, applyFilters, detectMask, components, regionGrow, polygonPixels, objectStats, features, rotate90, downsampleRGBA, autoLevels, gammaForMedian, factorThatFits, workingBytes, WORKING_MEMORY_LIMIT } from './imageproc.js';
 import { parseTable, decodeText, invertModel, toAxis, abbrevs, traceSymbolPath, validHexColor } from './log.js';
 import { storageAvailable, listProjects, getProject, putProject, putMeta, deleteProject, getPref, setPref, putLite, listLite, getMeta, putImage, getImage, gcImages, forgetSections } from './storage.js';
@@ -1244,7 +1244,7 @@ const scheduleEngineRefresh = () => { clearTimeout(engineRefresh); engineRefresh
 const engineBridge = /** @type {any} */ (window).corantoolDesktop?.engine;
 const engineClient = engineBridge?.enabled === true ? createEngineClient(engineBridge) : null;
 const engineAnalysis = engineClient ? createEngineAnalysis({ client: engineClient, project: analysisProject, maskChanges, onNotice: (key) => toast(t(key), 6000), onChange: scheduleEngineRefresh }) : null;
-const engineAges = engineClient ? createEngineAges({ client: engineClient, onNotice: (key) => toast(t(key), 6000), onPublish: (c) => { applyCellEdits(c); applyComputedColumns(c); if (geoRT) geoRT.dirty = true; scheduleEngineRefresh(); } }) : null;
+const coreJobGate = engineClient ? createCoreJobGate({ limit: 2 }) : null, engineAges = engineClient ? createEngineAges({ client: engineClient, gate: coreJobGate, onNotice: (key) => toast(t(key), 6000), onPublish: (c) => { applyCellEdits(c); applyComputedColumns(c); if (geoRT) geoRT.dirty = true; scheduleEngineRefresh(); } }) : null;
 export const settleCoreAges = (cores = S.cores) => (engineAges ? engineAges.all(cores) : Promise.resolve()), retryCoreAges = (cores = S.cores) => (engineAges ? engineAges.restartAndRetry(cores) : Promise.resolve());
 export function analyzeSections(sections) {
   const maskless = (s) => s.frozen === 'engine' || s.frozen === 'store';   // no masks here: D2 of card M8.4.18; a missing stored version (M8.4.27)

@@ -124,6 +124,40 @@ async function compareWithReference() {
   return outcome;
 }
 
+/**
+ * Runs in the page (card M8.5.8a): adds `count` generated cores (depth-only imported data and an age model each; nothing is read from a
+ * file), refreshes them back to back as opening a project does, waits for their ages and compares each with the JavaScript reference
+ * (1e-9, missing values exact). The generated cores are removed again so that the rest of the test sees the example project unchanged.
+ */
+async function manyCoreAges(count) {
+  const I = window.ichantool, { makeCore } = await import('app://corantool/app/js/app.js');
+  const cores = [];
+  for (let k = 0; k < count; k++) {
+    const depth = Array.from({ length: 40 }, (_, i) => k * 0.01 + i * 0.25);                  // 0 to about 10 m; the model ends at 8 m
+    const core = makeCore({ name: `M8.5.8a ${k}`, units: 'm', imp: { depth, age: depth.map(() => null), proxies: {} },
+      age: { text: `0,${k}\n4,${100 + k}\n8,${250 + 2 * k}`, units: 'ka' } });
+    I.S.cores.push(core); cores.push(core);
+  }
+  try {
+    for (const core of cores) I.refreshCoreData(core);
+    await I.settleCoreAges(cores);
+    const states = {}, mismatches = [];
+    cores.forEach((core, k) => {
+      const a = core.ageAnalysis, key = a ? (a.state === 'error' ? `error ${a.code}` : a.state) : 'none';
+      states[key] = (states[key] || 0) + 1;
+      const actual = core.age, expected = I.referenceCoreAges(core);
+      if (!Array.isArray(actual) || !Array.isArray(expected) || actual.length !== expected.length) { mismatches.push(`core ${k}: length ${actual?.length} vs ${expected?.length}`); return; }
+      for (let i = 0; i < actual.length; i++) {
+        const x = actual[i], e = expected[i];
+        if ((x == null) !== (e == null) || (x != null && Math.abs(x - e) > 1e-9)) mismatches.push(`core ${k} row ${i}: ${x} vs ${e}`);
+      }
+    });
+    return { states, missing: cores.reduce((n, c) => n + (c.age || []).filter((v) => v == null).length, 0), mismatches: mismatches.slice(0, 10) };
+  } finally {
+    I.S.cores.splice(I.S.cores.indexOf(cores[0]), count);
+  }
+}
+
 let run;
 try {
   run = await start();
@@ -284,6 +318,12 @@ try {
   assert.deepEqual(ageParity.mismatches, [], 'M8.5.8: core row ages match the JavaScript reference within 1e-9');
   assert.ok(ageParity.rows > 100, `M8.5.8: enough core rows compared (${ageParity.rows})`);
   assert.equal(ageParity.state, engineOn ? 'ready' : null, engineOn ? 'M8.5.8: core ages came from the engine' : 'M8.5.8: without the experiment core ages stay in JavaScript');
+  // Card M8.5.8a: twenty cores asking for engine ages at once wait in the page instead of being refused with `BUSY`.
+  const many = await p.evaluate(manyCoreAges, 20);
+  console.log('M8.5.8a: 20 generated cores:', JSON.stringify(many));
+  assert.deepEqual(many.mismatches, [], 'M8.5.8a: the ages of 20 cores equal the JavaScript reference within 1e-9, missing values exactly');
+  assert.deepEqual(many.states, engineOn ? { ready: 20 } : { none: 20 }, 'M8.5.8a: every generated core has its ages');
+  assert.ok(many.missing > 0, 'M8.5.8a: rows below the age model stay missing');
   // An edit immediately followed by close exercises the desktop's deferred beforeunload save.
   const deleted = await p.evaluate(() => {
     const I = window.ichantool, s = I.S.sections[I.S.cur], id = s.objects.keys().next().value;

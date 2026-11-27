@@ -180,3 +180,109 @@ test('M8.5.8: automatic recovery on INVALID_BUFFER and ENGINE_UNAVAILABLE, plus 
   await pending;
   assert.equal(c2.age, null, 'cancelled job after releaseAll does not publish');
 });
+
+// Card M8.5.8a: core jobs wait in the page behind one gate (corejobs.js).
+import { createCoreJobGate } from '../../app/js/corejobs.js';
+
+const abortable = (signal, work) => new Promise((resolve, reject) => {
+  const onAbort = () => reject(Object.assign(new Error('cancelled'), { name: 'AbortError' }));
+  if (signal?.aborted) return onAbort();
+  signal?.addEventListener('abort', onAbort, { once: true });
+  work(resolve, reject);
+});
+const agesOf = (n) => ({ tables: { ages: [{ name: 'age', unit: 'ka', values: Array.from({ length: n }, (_, i) => i * 10) }] }, summary: { rows: n, outside: 0 } });
+const plainRequest = (k) => ({ depths: [0, 1, 2], importedAges: [null, null, null], model: { depth: [0, 10], age: [k, 100 + k] } });
+
+/** A fake engine that keeps at most 5 jobs (one running, four waiting) and answers `BUSY` beyond, as `server.py::WaitingJobs` does. */
+function busyEngine() {
+  let inFlight = 0, most = 0, busy = 0;
+  const { client, stats } = fakeClient((_method, req, opts) => {
+    if (inFlight >= 5) { busy++; return Promise.reject(Object.assign(new Error('busy'), { code: 'BUSY', field: null })); }
+    inFlight++; most = Math.max(most, inFlight);
+    return abortable(opts.signal, (resolve) => setTimeout(() => resolve(agesOf(req.inputs ? 3 : 0)), 2))
+      .finally(() => { inFlight--; });
+  });
+  return { client, stats: () => ({ ...stats(), most, busy }) };
+}
+
+test('M8.5.8a: 20 cores against an engine that answers BUSY beyond 5 jobs: all ready with the gate, refused without it', async () => {
+  const cores = Array.from({ length: 20 }, () => makeCore(null));
+
+  const bare = busyEngine();
+  const without = createEngineAges({ client: bare.client });
+  await Promise.all(cores.map((core, k) => without.request(core, plainRequest(k))));
+  const refused = cores.filter((core) => core.ageAnalysis.state === 'error' && core.ageAnalysis.code === 'BUSY').length;
+  assert.ok(refused > 0, `without the gate some cores are refused (${refused})`);
+
+  const gated = busyEngine();
+  const gate = createCoreJobGate({ limit: 2 });
+  const withGate = createEngineAges({ client: gated.client, gate });
+  const fresh = Array.from({ length: 20 }, () => makeCore(null));
+  await Promise.all(fresh.map((core, k) => withGate.request(core, plainRequest(k))));
+  assert.deepEqual(fresh.map((core) => core.ageAnalysis.state), Array(20).fill('ready'));
+  assert.deepEqual(fresh[7].age, [0, 10, 20]);
+  assert.equal(gated.stats().busy, 0);
+  assert.ok(gated.stats().most <= 2, `never more than 2 core jobs in flight (${gated.stats().most})`);
+  assert.equal(gated.stats().runCalls, 20);
+  assert.deepEqual(gate.stats(), { holders: 0, waiting: 0 });
+});
+
+test('M8.5.8a: superseded, failed, cleared and released jobs give their place back; a cleared waiter never runs', async () => {
+  const gate = createCoreJobGate({ limit: 1 });
+  const ran = [], resolvers = new Map();
+  const { client } = fakeClient((_method, req, opts) => {
+    ran.push(`${req.target}:${req.revision}`);
+    if (req.inputs && resolvers.has('fail')) { resolvers.delete('fail'); return Promise.reject(Object.assign(new Error('bad'), { code: 'INVALID_INPUT', field: 'age_model' })); }
+    return abortable(opts.signal, (resolve) => resolvers.set(`${req.target}:${req.revision}`, () => resolve(agesOf(3))));
+  });
+  const engineAges = createEngineAges({ client, gate });
+  const [a, b, c] = [makeCore(null), makeCore(null), makeCore(null)];
+
+  const a1 = engineAges.request(a, plainRequest(1));
+  const b1 = engineAges.request(b, plainRequest(2));
+  await until(() => ran.length === 1, 'core a holds the only place');
+  assert.deepEqual(gate.stats(), { holders: 1, waiting: 1 });
+
+  // Superseding a's running job frees its place; b runs next and a's new revision waits behind it.
+  const a2 = engineAges.request(a, plainRequest(3));
+  await a1;
+  await until(() => ran.length === 2, 'core b got the freed place');
+  assert.equal(a.ageAnalysis.state, 'pending');
+  await until(() => gate.stats().waiting === 1, 'the new revision of core a waits for a place');
+  assert.deepEqual(gate.stats(), { holders: 1, waiting: 1 });
+
+  // A waiter that is cleared before its turn never reaches the engine.
+  engineAges.clear(a);
+  await a2;
+  assert.deepEqual(gate.stats(), { holders: 1, waiting: 0 }, 'the cleared waiter left the queue');
+  resolvers.get(ran[1])();
+  await b1;
+  assert.equal(b.ageAnalysis.state, 'ready');
+  assert.deepEqual(gate.stats(), { holders: 0, waiting: 0 });
+  assert.equal(ran.length, 2, 'a\'s cleared revision never ran');
+
+  // A failed job releases its place.
+  resolvers.set('fail', true);
+  await engineAges.request(c, plainRequest(4));
+  assert.deepEqual(c.ageAnalysis, { state: 'error', code: 'INVALID_INPUT', field: 'age_model' });
+  assert.deepEqual(gate.stats(), { holders: 0, waiting: 0 });
+
+  // Restart and retry runs the failed core again through the gate and releases.
+  resolvers.clear();
+  const retried = engineAges.restartAndRetry([c]);
+  await until(() => resolvers.size === 1, 'the retry reached the engine');
+  [...resolvers.values()][0]();
+  await retried;
+  assert.equal(c.ageAnalysis.state, 'ready');
+  assert.deepEqual(gate.stats(), { holders: 0, waiting: 0 });
+
+  // releaseAll frees the holder and every waiter.
+  resolvers.clear();
+  const pending = [makeCore(null), makeCore(null), makeCore(null)].map((core, k) => engineAges.request(core, plainRequest(10 + k)));
+  await until(() => resolvers.size === 1 && gate.stats().waiting === 2, 'one holder running, two waiting');
+  assert.deepEqual(gate.stats(), { holders: 1, waiting: 2 });
+  engineAges.releaseAll();
+  await Promise.all(pending);
+  assert.deepEqual(gate.stats(), { holders: 0, waiting: 0 });
+  assert.equal(resolvers.size, 1, 'the released waiters never ran');
+});
