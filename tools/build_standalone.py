@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "app"
-ORDER = ["core.js", "sectiondepth.js", "sectionanalysis.js", "maskchanges.js", "pixelbudget.js", "residentstore.js", "sectionpixels.js", "tablesnapshot.js", "engineclient.js", "engineanalysis.js", "engineages.js", "edit.js", "imageproc.js", "learn.js", "mlsettings.js", "unet.js", "unetmodel.js", "vision.js", "log.js", "storage.js", "zip.js", "tiff.js", "tiledsection.js", "tiledrecord.js", "tilecache.js", "tiledmasks.js", "tiledit.js", "tiledsplit.js", "tiledcounts.js", "tiledcache.js", "tiledbackup.js", "tiledsync.js", "tiledundo.js", "singleflight.js", "figsize.js", "pngmeta.js", "taxa.js", "coremerge.js", "coredata.js", "i18n.js", "diagnostics.js", "state.js", "geo.js", "locmap.js", "interp.js", "plot.js", "sheet.js", "dataedit.js", "exportio.js", "tableview.js", "figview.js", "navpreview.js", "columns.js", "panels.js", "datatab.js", "figures.js", "multiproxy.js", "tiledsource.js", "tiledstate.js", "tiledtools.js", "tiledview.js", "tiledproject.js", "tiledsplitui.js", "folderversion.js", "app.js"]
+ORDER = ["core.js", "sectiondepth.js", "sectionanalysis.js", "maskchanges.js", "pixelbudget.js", "residentstore.js", "sectionpixels.js", "tablesnapshot.js", "engineclient.js", "engineanalysis.js", "corejobs.js", "engineages.js", "edit.js", "imageproc.js", "learn.js", "mlsettings.js", "unet.js", "unetmodel.js", "vision.js", "log.js", "storage.js", "zip.js", "tiff.js", "tiledsection.js", "tiledrecord.js", "tilecache.js", "tiledmasks.js", "tiledit.js", "tiledsplit.js", "tiledcounts.js", "tiledcache.js", "tiledbackup.js", "tiledsync.js", "tiledundo.js", "singleflight.js", "figsize.js", "pngmeta.js", "taxa.js", "coremerge.js", "coredata.js", "i18n.js", "diagnostics.js", "state.js", "geo.js", "locmap.js", "interp.js", "plot.js", "sheet.js", "dataedit.js", "exportio.js", "tableview.js", "figview.js", "navpreview.js", "columns.js", "panels.js", "datatab.js", "figures.js", "multiproxy.js", "tiledsource.js", "tiledstate.js", "tiledtools.js", "tiledview.js", "tiledproject.js", "tiledsplitui.js", "folderversion.js", "app.js"]
 EXAMPLES = ROOT / "examples"
 # Files the app loads with fetchAsset(path); embedded so the single file works offline.
 # V0.50: no sample data in the download (no test core, example images, demos nor tutorial): only the public-domain
@@ -27,7 +27,10 @@ TOP_DECL = re.compile(r"^(?:export\s+)?(?:async\s+)?(?:function\*?|class|const|l
 
 
 def strip_module(src: str) -> str:
-    src = re.sub(r"^import\s[^;]*;\s*$", "", src, flags=re.M)
+    # One or more import statements filling a line (several may share it); anything left would break the single file.
+    src = re.sub(r"^(?:import\s[^;]*;[ \t]*)+$", "", src, flags=re.M)
+    if re.search(r"^\s*import\s", src, flags=re.M):
+        raise ValueError("Unsupported import: imports must end with a semicolon and share their lines only with other imports")
     # Local unaliased export lists preserve the original bindings in the concatenated scope.
     ident = r"[A-Za-z_$][\w$]*"
     src = re.sub(rf"^export\s+\{{\s*{ident}(?:\s*,\s*{ident})*\s*,?\s*\}};\s*$", "", src, flags=re.M)
