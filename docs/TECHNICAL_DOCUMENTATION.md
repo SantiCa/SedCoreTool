@@ -252,7 +252,7 @@ client, page bridge, framing and bundled-runtime verification; §26.2–§26.3),
 §26.3), `trainer.js` and `model-store.js` (U-Net training and model generations; §9.3), `diagnostics.js` (§26.1)
 and `scripts/` (preparation, build and package checks).
 
-Tools (`tools/`): `check_all.py` runs the end-of-session checks of the development guide §3 one after another and prints one line per check; the full output of each goes to a log file, and the exit code is non-zero if a check failed or a tool is missing (tests: `tests/test_check_all.py`). `make_core_ages_fixtures.mjs` writes the reference fixtures of `core.ages/1` to `tests/fixtures/core_ages/` from `core.js` (§31.1).
+Tools (`tools/`): `check_all.py` runs the end-of-session checks of the development guide §3 one after another and prints one line per check; the full output of each goes to a log file, and the exit code is non-zero if a check failed or a tool is missing (tests: `tests/test_check_all.py`). `make_core_ages_fixtures.mjs` writes the reference fixtures of `core.ages/1` to `tests/fixtures/core_ages/` from `core.js` (§31.1); `make_core_depths_fixtures.mjs` writes those of `core.depths/1` to `tests/fixtures/core_depths/` from `log.js::invertModel` and `toAxis` (contract §9.10).
 
 ### 1.5 Names and compatibility
 

@@ -763,3 +763,31 @@ and for a missing depth; `interpAgeRange` interpolates the minimum and the maxim
 range or the depth is outside it; with age reversals both still interpolate linearly between neighbouring rows. The program leaves a
 non-finite depth to the caller (`interpAge(model, NaN)` is `NaN`, not `null`): the client sends a missing depth as missing, and no fixture
 asks for `NaN`.
+
+### 9.9 Reserved: `multiproxy.samples/1` (card M8.5.10)
+
+### 9.10 Method `core.depths/1`
+
+**State: specified on 27 November 2026 (card M8.5.8b); not implemented in the engine yet (card M8.5.8c), not used by the interface.** It gives
+the depth of each age through the inverted age model, as `log.js::invertModel` and `toAxis(v, 'age', 'depth', model)` do today (used by
+`coredata.js::collectCoreParts` for records on the age axis). Reference fixtures made by that JavaScript: `tests/fixtures/core_depths/`
+(generator `tools/make_core_depths_fixtures.mjs`).
+
+| Item | Rule |
+|---|---|
+| Name, scope, priority | `core.depths/1`; scope `core` (§9.1); priority `interactive` only (`batch` is refused, §9.2). |
+| `settings` | `utf8json` `{"version": 1}`, nothing else. |
+| `age_model` (table) | Exactly as §9.8 (the same resident table that `core.ages/1` uses). Range columns `age_min`, `age_max` are accepted and not used. |
+| `query` (table) | One column `age`, 1 or more rows; a missing age (`query_valid` 0) is allowed. |
+| The inverse | The pairs (`age`, `depth`) of the model sorted by age with a stable sort: ages that are equal keep the order of their depths (increasing). Ages need not increase downwards; where they do not, the inverse is not a function of the age and the result is what the rules below give, as JavaScript does. |
+| Output table `depths` | One row per `query` row, in the same order; one column `depth`. A slot is missing where the age is missing or lies outside `[first, last]` of the inverse ages (the smallest and the largest age of the model): there is no extrapolation. Otherwise `lo` is the last index of the inverse whose age is ≤ the query age, at most n − 2 (n = model rows), `hi` = `lo` + 1, `span` = age[`hi`] − age[`lo`], and `depth` = `span` ? depth[`lo`] + ((a − age[`lo`]) / span) × (depth[`hi`] − depth[`lo`]) : depth[`lo`], evaluated in exactly this order of operations. The largest age itself belongs to the model (`lo` = n − 2). |
+| `summary` | `{"rows": <query rows>, "outside": <query ages present and outside the model>}`; a missing age is not counted in `outside`. |
+| Dimensions | `rows` = the number of query rows (at least 1). |
+| Tolerance (decision Z4) | Exact: `depth` bit-identical to the JavaScript result (same IEEE-754 operations in the same order, no fused multiply-add) and the missing pattern and `summary` exact. |
+| Refusals | As §9.8 for `age_model` and `settings`, and §4 "Tables": the field is named. `INVALID_REQUEST`: `query.columns.name` (no `age` column or another column) and `query.columns` (none). |
+
+Behaviour of the JavaScript that the fixtures record: the inverse is built by `Array.prototype.sort` with the comparator `a - b` on the
+ages (stable since ES2019); `interpAge` finds `lo` by bisection, which on an inverse sorted by age gives the last index with age ≤ the
+query, and `n − 2` for the largest age; with two equal ages around the query `span` is 0 and the depth of `lo` is returned (the deeper
+of two equal-age rows is never returned by interpolation). A non-finite age is left to the caller (`NaN` is not treated as outside); the
+client sends a missing age as missing and no fixture asks for `NaN`.

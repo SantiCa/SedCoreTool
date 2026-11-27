@@ -7,3 +7,7 @@ app/vendor/xlsx.full.min.js -text
 # Binary columns of the core.ages reference fixtures: never normalise line endings.
 tests/fixtures/core_ages/*.f64le binary
 tests/fixtures/core_ages/*.u8 binary
+
+# Binary columns of the core.depths reference fixtures: never normalise line endings.
+tests/fixtures/core_depths/*.f64le binary
+tests/fixtures/core_depths/*.u8 binary

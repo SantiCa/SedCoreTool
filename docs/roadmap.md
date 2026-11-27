@@ -30,7 +30,7 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
   capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
 - **Design card A2 done (27 Nov 2026):** cards **M8.5.8a-M8.5.8o** of the rest of slice (a) written before M8.5.9, with decisions
-  **Z1-Z17** ([block](#decisions-for-the-rest-of-slice-a-a2)). Z1-Z17 approved as recommended (27 Nov 2026). **M8.5.8a** done; next **M8.5.8b** (fast, medium).
+  **Z1-Z17** ([block](#decisions-for-the-rest-of-slice-a-a2)). Z1-Z17 approved as recommended (27 Nov 2026). **M8.5.8a** and **M8.5.8b** done; next **M8.5.8c** (fast, medium).
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.8 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
   long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 and Z1-Z17 is approved.
@@ -893,7 +893,14 @@ after. The order is the order of this list; cards written later go before the ga
     cores ready, ages equal to engine off within 1e-9 and the missing pattern exact. `npm test`, `npm run typecheck`, `python
     tools/build_standalone.py`, `tests/e2e/desktop.mjs` engine on and off.
   - *Done when:* development gate; *As built* records the before/after evidence and the lines of `app.js`.
-- [ ] **M8.5.8b - Contract and reference fixtures of `core.depths/1`** (waits for Z2-Z4).
+- [x] **M8.5.8b - Contract and reference fixtures of `core.depths/1`** (done 27 Nov 2026, development gate).
+  - *As built (27 Nov 2026; fast / medium sub-agent, sampled review by the director):* contract §9.10 (and a §9.9 placeholder reserved for
+    M8.5.10); `tools/make_core_depths_fixtures.mjs` (seeded, `--check`, `--out`, calls the real `invertModel`/`toAxis`) writes 11 cases
+    (3.0 MB; the 100,000-age case as binary `f64le`/`u8`) to `tests/fixtures/core_depths/`: models of 2 and 1,000 rows, reversals, equal
+    ages (span 0), range; queries at knots, midpoints, ends, just outside, missing and random. The card's rule text matched the code (stable
+    sort since ES2019, bisection giving the last index ≤ the query and n − 2 at the largest age); `NaN` ages are the caller's to send as
+    missing. `tests/app/core-depths-fixtures.test.mjs` (4: determinism, `--out`, `Object.is` against `toAxis`, an independent scan of the
+    rule). Checks (Windows): `npm test` 712/712, typecheck. `app.js` unchanged.
   - *Goal:* the contract describes `core.depths/1`, the depth of each age through the inverted age model (`log.js::invertModel` and
     `toAxis(v, 'age', 'depth', …)`, used by `coredata.js::collectCoreParts` for age-axis records), and fixtures made by today's JavaScript fix
     its results.
