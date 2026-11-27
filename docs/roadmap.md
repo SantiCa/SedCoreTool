@@ -1145,6 +1145,9 @@ after. The order is the order of this list; cards written later go before the ga
   - *Done when:* development gate; `app.js` lines before and after recorded.
 - [ ] **M8.5.8n - Computed columns from the engine** (engine experiment; waits for Z9-Z13 and for M8.5.8i's `columns` and `chain` results;
   after M8.5.8j).
+  - *Also (found in M8.5.8f, added 28 Nov 2026):* in the free sheet `COL("constructor")` (and other prototype names) resolves through
+    `datatab.js::cellResults` by a prototype lookup of `c.proxies[name]` (no code runs; reads as missing). Look the name up as an own
+    property and give `noCol`, as column formulas do since M8.5.8f; a test that fails before the fix.
   - *Goal:* with the engine experiment on, `computedcolumns.js` requests `core.columns/1` for each core (after the core's ages and record
     depths are published when a formula names `age` or uses them), publishes by the rule of §9.4, writes each column's `error` text with
     `fxText` from the summary's key and argument, and the Data tab, exports and Multiproxy wait while it is pending (as M8.5.8 did for
