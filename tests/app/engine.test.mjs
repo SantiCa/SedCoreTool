@@ -135,7 +135,7 @@ test('the handshake has its own deadline: a slow start succeeds although it take
 
 test('actual isolated Python transfers multiple bounded chunks and runs the diagnostic', { skip: !python }, async (t) => {
   const client = await clientFixture(t);
-  assert.deepEqual(client.status().methods, ['buffer.digest/1', 'section.intervals/1', 'core.ages/1']);
+  assert.deepEqual(client.status().methods, ['buffer.digest/1', 'section.intervals/1', 'core.ages/1', 'core.depths/1']);
   const data = Buffer.alloc(MAX_CHUNK * 2 + 137, 93), handle = await upload(client, data);
   assert.deepEqual(await client.request('buffer.digest', { handle }), { sha256: digest(data), byte_length: data.length });
   assert.deepEqual(await client.request('buffer.release', { handles: [handle] }), { released: [handle] });

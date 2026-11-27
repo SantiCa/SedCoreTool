@@ -30,7 +30,7 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
   capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
 - **Design card A2 done (27 Nov 2026):** cards **M8.5.8a-M8.5.8o** of the rest of slice (a) written before M8.5.9, with decisions
-  **Z1-Z17** ([block](#decisions-for-the-rest-of-slice-a-a2)). Z1-Z17 approved as recommended (27 Nov 2026). **M8.5.8a** and **M8.5.8b** done; next **M8.5.8c** (fast, medium).
+  **Z1-Z17** ([block](#decisions-for-the-rest-of-slice-a-a2)). Z1-Z17 approved as recommended (27 Nov 2026). **M8.5.8a-c** done; next **M8.5.8d** (most capable, medium). V0.155 waits for more cards (maintainer, 27 Nov 2026).
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.8 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
   long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 and Z1-Z17 is approved.
@@ -921,7 +921,14 @@ after. The order is the order of this list; cards written later go before the ga
     with a range; queries at every knot age, at both ends, just outside, missing, and 100,000 random ages.
   - *Tests:* the generator gives the same bytes twice; the Node test re-checks every fixture with `toAxis`.
   - *Done when:* contract entry and fixtures committed; development gate.
-- [ ] **M8.5.8c - Method `core.depths/1`** (after M8.5.8b).
+- [x] **M8.5.8c - Method `core.depths/1`** (done 27 Nov 2026, development gate).
+  - *As built (27 Nov 2026; fast / medium sub-agent, sampled review by the director):* `kernels/ages.py::interpolate_depth` (stable
+    argsort by age, `searchsorted(side='right') - 1` clipped to [0, n − 2], `interpAge`'s operation order, span 0 gives depth[lo];
+    `interpolate_age` unchanged); `methods/core_depths.py` (reuses `core_ages._model`/`_settings`; an overflowing interpolation is refused
+    `UNSUPPORTED_INPUT`, `age_model`); registered and advertised (`registry.py`, `specs.py`, `engine.js`, `engine-ipc.js`). All 11 fixtures
+    bit-identical (float64 bit patterns; 0 mismatches over 111,690 present depths), also through the real coordinator and worker; the kernel
+    bit-identical to a transcription of `interpAge` on 40 seeded models with repeated ages. `tests/test_core_depths.py` (75). Checks
+    (Windows): pytest 1120/9 skipped, `npm test` 712/712, ruff, `desktop.mjs` engine off and on. `app.js` unchanged.
   - *Goal:* the engine computes `core.depths/1` equal to the fixtures within Z4, through `method.run`.
   - *Read first:* contract §9.10; ARCHITECTURE §5.1 steps 3-5; `methods/core_ages.py`, `methods/validation.py::table`, `methods/registry.py`,
     `engine/specs.py`, `kernels/ages.py`.

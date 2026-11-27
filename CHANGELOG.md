@@ -23,6 +23,7 @@ Technical details of every method are in [docs/TECHNICAL_DOCUMENTATION.md](docs/
 - Design card A2: roadmap cards M8.5.8a-M8.5.8o for the rest of slice (a) of the engine migration, and decisions Z1-Z17 for the
   maintainer.
 - Card M8.5.8b: engine contract and reference fixtures of `core.depths/1` (depth of each age through the inverted age model).
+- Card M8.5.8c: engine method `core.depths/1`, bit-identical to the JavaScript conversion; not used by the interface yet.
 
 ## V0.154 — 2026-11-26
 

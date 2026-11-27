@@ -7,7 +7,7 @@ const os = require('node:os');
 const { controlFrame, frame, ControlReader } = require('./engine-protocol');
 
 // Methods the engine may advertise in its handshake; anything else makes the engine unavailable.
-const ADVERTISED_METHODS = new Set(['buffer.digest/1', 'section.intervals/1', 'core.ages/1']);
+const ADVERTISED_METHODS = new Set(['buffer.digest/1', 'section.intervals/1', 'core.ages/1', 'core.depths/1']);
 // The tile-store operations (contract §8) are main-process only: engine-ipc.js never forwards them, and `pyramid.build` carries a path.
 const OPERATIONS = new Set(['hello', 'buffer.begin', 'buffer.derive', 'buffer.chunk', 'buffer.commit', 'buffer.release', 'buffer.read', 'buffer.digest', 'section.analyze', 'method.run', 'job.cancel', 'shutdown',
   'pyramid.build', 'pyramid.info', 'tile.read', 'mask.begin', 'mask.put', 'mask.commit', 'mask.discard', 'mask.read', 'mask.retain', 'mask.info', 'mask.copy', 'mask.slice', 'mask.forget', 'mask.derived.put', 'mask.derived.get', 'mask.export', 'mask.import']);

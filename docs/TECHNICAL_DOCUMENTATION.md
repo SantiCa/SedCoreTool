@@ -237,8 +237,8 @@ float32 NCHW tensors adapt to the existing tiling engine. The module has strict 
 import of app.js or access to browser globals; it is included after unet.js in the standalone build.
 
 Python package (`src/sedcoretool/`): `io.py` (images and masks), `segmentation.py` (masks from a threshold, a
-colour palette or a U-Net), `kernels/` (pure array primitives: intervals, counting, index tiers, age interpolation; §25.2),
-`methods/` (versioned scientific methods for the engine, for now `section.intervals/1` and `core.ages/1`, and in `validation.py` the strict input checks they
+colour palette or a U-Net), `kernels/` (pure array primitives: intervals, counting, index tiers, age interpolation and its inverse; §25.2),
+`methods/` (versioned scientific methods for the engine, for now `section.intervals/1`, `core.ages/1` and `core.depths/1`, and in `validation.py` the strict input checks they
 share, including `table`, the decoder of record tables of card M8.4.10; §25.2),
 `pipeline.py` (intervals, percentages, indices), `indices.py` (BI and ii schemes),
 `depth.py` (depth and age), `export.py` (CSV and Excel), `plotting.py` (matplotlib figure), `cli.py` (command line),
@@ -1229,6 +1229,8 @@ external records and interval bands, in depth or age.
   not drawn.
 - To go from age to depth the inverted model is used (age→depth pairs sorted by age), which **assumes that age
   increases with depth**.
+- The engine method `core.depths/1` ([contract §9.10](roadmap-engine-contract.md), `methods/core_depths.py`) implements this inverse
+  and reproduces the program's results bit for bit; the interface does not request it yet.
 
 ### 15.3 Window
 The user chooses from–to on the active axis. Intervals overlapping the window are drawn and everything is clipped
@@ -2712,6 +2714,8 @@ needed. See [validation and measured scope](#311-automated-tests).
 
 `methods/core_ages.py` implements `core.ages/1` ([contract §9.8](roadmap-engine-contract.md)): `parse` refuses, naming the field, a model that is not strictly increasing in depth, has fewer than two rows, a missing value, one range column without the other or a range that does not contain the age; `run` interpolates linearly with `kernels/ages.py::interpolate_age` (no extrapolation) and returns the table `ages` (`age`, plus `age_min` and `age_max` with a range) and the summary `{rows, outside}`. It reproduces the 8 reference fixtures: missing patterns and summary exactly, ages within 1e-9 (largest measured 2.3e-13).
 
+`methods/core_depths.py` implements `core.depths/1` ([contract §9.10](roadmap-engine-contract.md)): `parse` validates the age model exactly as `core.ages/1` does (it reuses its checks; a range is accepted and not used) and the query (one column `age`); `run` calls `kernels/ages.py::interpolate_depth`, which inverts the model with a stable sort by age and then follows `core.js::interpAge` operation by operation (last knot with age <= query by `searchsorted`, at most n - 2; `span` = x[hi] - x[lo]; `y[lo] + ((q - x[lo]) / span) * (y[hi] - y[lo])`, or `y[lo]` when `span` is 0; `np.interp` is not used because it is undefined for equal knots), and returns the table `depths` (one column `depth`, in the unit of the model's depth) and the summary `{rows, outside}`. It reproduces the 11 reference fixtures of `tests/fixtures/core_depths/` bit for bit (decision Z4): depths compared as float64 bit patterns, missing patterns and summary exactly (`tests/test_core_depths.py`, which also compares the kernel with a plain-Python transcription of `interpAge` on seeded random models with equal ages and reversals).
+
 #### Image loading budget
 
 `load_image` and `load_mask` use a fixed budget of **768 MiB** for estimated pixel buffers per load. They
@@ -3023,7 +3027,7 @@ outputs, deadline). The coordinator checks the request's fields in the contract'
 method and target (a waiting one is answered `cancelled`, a running one is asked to cancel), and answers with `inputs_key` (SHA-256 of
 the method, scope and verified input hashes), the declared dimensions (0 allowed), one packed result buffer (none when every column
 is empty), the descriptions of the table outputs, whose cells are the columns `<name>_values` and `<name>_valid` (the table format of
-contract §4), and a summary of at most 8 KiB (larger is `INTERNAL`). `section.intervals/1` (still requested through `section.analyze` by the interface) and `core.ages/1` (not yet requested by the interface) are in the table.
+contract §4), and a summary of at most 8 KiB (larger is `INTERNAL`). `section.intervals/1` (still requested through `section.analyze` by the interface), `core.ages/1` and `core.depths/1` (the latter not yet requested by the interface) are in the table.
 
 From the page (card M8.5.3), `desktop/engine-ipc.js::runMethod` takes `{requestKey, method, scope, target, revision, priority,
 settings_hash, inputs}` and nothing else, and checks every field against `METHODS`, the main process's mirror of `METHOD_SPECS` (a test

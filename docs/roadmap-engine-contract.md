@@ -768,7 +768,7 @@ asks for `NaN`.
 
 ### 9.10 Method `core.depths/1`
 
-**State: specified on 27 November 2026 (card M8.5.8b); not implemented in the engine yet (card M8.5.8c), not used by the interface.** It gives
+**State: specified on 27 November 2026 (card M8.5.8b); implemented in the engine (card M8.5.8c), not used by the interface.** It gives
 the depth of each age through the inverted age model, as `log.js::invertModel` and `toAxis(v, 'age', 'depth', model)` do today (used by
 `coredata.js::collectCoreParts` for records on the age axis). Reference fixtures made by that JavaScript: `tests/fixtures/core_depths/`
 (generator `tools/make_core_depths_fixtures.mjs`).

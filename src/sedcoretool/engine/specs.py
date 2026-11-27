@@ -8,6 +8,7 @@ from typing import NamedTuple
 
 SECTION_INTERVALS = 'section.intervals/1'
 CORE_AGES = 'core.ages/1'
+CORE_DEPTHS = 'core.depths/1'
 
 # name -> (dtype, rank, required). utf8json buffers are decoded tables; the numeric ones are C-order little-endian arrays.
 METHOD_INPUTS = {
@@ -23,6 +24,15 @@ METHOD_INPUTS = {
         'manual_indices': ('utf8json', 1, True),
     },
     CORE_AGES: {
+        'settings': ('utf8json', 1, True),
+        'age_model': ('utf8json', 1, True),
+        'age_model_values': ('f64le', 2, True),
+        'age_model_valid': ('u8', 2, True),
+        'query': ('utf8json', 1, True),
+        'query_values': ('f64le', 2, True),
+        'query_valid': ('u8', 2, True),
+    },
+    CORE_DEPTHS: {
         'settings': ('utf8json', 1, True),
         'age_model': ('utf8json', 1, True),
         'age_model_values': ('f64le', 2, True),
@@ -84,4 +94,5 @@ METHOD_SPECS = {
     SECTION_INTERVALS: MethodSpec(SECTION_INTERVALS, 'section', METHOD_INPUTS[SECTION_INTERVALS],
                                   dimensions=('bins', 'classes', 'schemes'), same_shape=(('labels', 'exclude'),)),
     CORE_AGES: MethodSpec(CORE_AGES, 'core', METHOD_INPUTS[CORE_AGES], dimensions=('rows',), tables=('ages',)),
+    CORE_DEPTHS: MethodSpec(CORE_DEPTHS, 'core', METHOD_INPUTS[CORE_DEPTHS], dimensions=('rows',), tables=('depths',)),
 }

@@ -168,7 +168,7 @@ try {
     const engine = await p.evaluate(() => window.corantoolDesktop.engine.status());
     assert.equal(engine.state, 'ready', 'experimental engine must start from the selected runtime');
     assert.equal(engine.protocol, 1);
-    assert.deepEqual(engine.methods, ['buffer.digest/1', 'section.intervals/1', 'core.ages/1'], 'the engine advertises its diagnostic and the first scientific method; the interface does not call it yet');
+    assert.deepEqual(engine.methods, ['buffer.digest/1', 'section.intervals/1', 'core.ages/1', 'core.depths/1'], 'the engine advertises its diagnostic and the first scientific method; the interface does not call it yet');
     assert.equal(engine.runtime, process.env.SEDCORETOOL_ENGINE_PYTHON ? 'unverified-development' : 'bundled-verified');
     const outcome = await p.evaluate(bridgeRoundTrip, fixture);
     assert.deepEqual(outcome.operations, BRIDGE_OPERATIONS, 'the page sees exactly the documented engine bridge');
