@@ -189,7 +189,7 @@ def test_hello_advertises_the_diagnostic_and_the_scientific_methods():
     coordinator, session = new_coordinator()
     try:
         hello = next(iter(frames(coordinator)[0].values()))
-        assert hello["result"]["methods"] == ["buffer.digest/1", METHOD, "core.ages/1", "core.depths/1"]
+        assert hello["result"]["methods"] == ["buffer.digest/1", METHOD, "core.ages/1", "core.depths/1", "core.age_model/1", "core.bacon/1"]
     finally:
         coordinator.close()
 

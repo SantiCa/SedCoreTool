@@ -31,6 +31,12 @@ const METHODS = deepFreeze({
     scope: 'core', required: ['settings', 'age_model', 'age_model_values', 'age_model_valid', 'query', 'query_values', 'query_valid'], optional: [], families: [],
     priorities: ['interactive'], dimensions: ['rows'], tables: ['depths'],
   },
+  'core.age_model/1': {
+    scope: 'core', required: ['settings', 'text'], optional: [], families: [], priorities: ['interactive'], dimensions: ['rows'], tables: ['model'],
+  },
+  'core.bacon/1': {
+    scope: 'core', required: ['settings', 'table_text'], optional: [], families: [], priorities: ['interactive'], dimensions: ['rows'], tables: ['rows'],
+  },
 });
 // Mirrors FAMILY_KINDS, MAX_FAMILY_MEMBERS and MAX_REQUEST_INPUTS of specs.py: a member `<prefix><k>` of kind `table` brings three buffers.
 const FAMILY_BUFFERS = deepFreeze({ table: ['', '_values', '_valid'] });

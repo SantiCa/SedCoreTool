@@ -237,8 +237,8 @@ float32 NCHW tensors adapt to the existing tiling engine. The module has strict 
 import of app.js or access to browser globals; it is included after unet.js in the standalone build.
 
 Python package (`src/sedcoretool/`): `io.py` (images and masks), `segmentation.py` (masks from a threshold, a
-colour palette or a U-Net), `kernels/` (pure array primitives: intervals, counting, index tiers, age interpolation and its inverse; §25.2),
-`methods/` (versioned scientific methods for the engine, for now `section.intervals/1`, `core.ages/1` and `core.depths/1`, and in `validation.py` the strict input checks they
+colour palette or a U-Net), `kernels/` (pure array primitives: intervals, counting, index tiers, age interpolation and its inverse, and in `jstext.py` the ECMAScript rules of `Number()`, `trim`, `split` and `toPrecision(8)`; §25.2),
+`methods/` (versioned scientific methods for the engine, for now `section.intervals/1`, `core.ages/1`, `core.depths/1`, `core.age_model/1` and `core.bacon/1`, and in `validation.py` the strict input checks they
 share, including `table`, the decoder of record tables of card M8.4.10; §25.2),
 `pipeline.py` (intervals, percentages, indices), `indices.py` (BI and ii schemes),
 `depth.py` (depth and age), `export.py` (CSV and Excel), `plotting.py` (matplotlib figure), `cli.py` (command line),
@@ -473,6 +473,10 @@ finite pairs. Age reversals remain flagged by the program rather than silently c
 Implementation: `depth.py::depth_to_age` (Python) and `core.js::parseAgeModel, interpAge, interpAgeRange,
 baconToAgeText` (program); engine method `core.ages/1` (`methods/core_ages.py`, [contract §9.8](roadmap-engine-contract.md)), which applies a
 validated model to a table of depths without extrapolation and matches the program's reference fixtures within 1e-9 age units. The interface does not request it yet.
+Engine methods `core.age_model/1` (`methods/core_age_model.py`) and `core.bacon/1` (`methods/core_bacon.py`, [contract §9.11](roadmap-engine-contract.md))
+read the age-model text and convert a Bacon table as `parseAgeModelDetailed` and `baconToAgeText` do, with the ECMAScript number, whitespace
+and `toPrecision(8)` rules of `kernels/jstext.py`; they reproduce the 65 reference fixtures of `tests/fixtures/age_model/` bit for bit. The
+interface does not request them yet.
 
 - **Input:** pairs `(depth, age)`, sorted by depth. Separators may be comma, semicolon, tab or space; lines that
   are not numeric and lines starting with `#` are ignored. If a line uses `;` or tab, the comma is the decimal
@@ -3027,7 +3031,7 @@ outputs, deadline). The coordinator checks the request's fields in the contract'
 method and target (a waiting one is answered `cancelled`, a running one is asked to cancel), and answers with `inputs_key` (SHA-256 of
 the method, scope and verified input hashes), the declared dimensions (0 allowed), one packed result buffer (none when every column
 is empty), the descriptions of the table outputs, whose cells are the columns `<name>_values` and `<name>_valid` (the table format of
-contract §4), and a summary of at most 8 KiB (larger is `INTERNAL`). `section.intervals/1` (still requested through `section.analyze` by the interface), `core.ages/1` and `core.depths/1` (the latter not yet requested by the interface) are in the table.
+contract §4), and a summary of at most 8 KiB (larger is `INTERNAL`). `section.intervals/1` (still requested through `section.analyze` by the interface), `core.ages/1`, `core.depths/1`, `core.age_model/1` and `core.bacon/1` (the latter four not yet requested by the interface) are in the table.
 
 From the page (card M8.5.3), `desktop/engine-ipc.js::runMethod` takes `{requestKey, method, scope, target, revision, priority,
 settings_hash, inputs}` and nothing else, and checks every field against `METHODS`, the main process's mirror of `METHOD_SPECS` (a test

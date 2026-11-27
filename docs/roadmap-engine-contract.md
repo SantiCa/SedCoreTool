@@ -794,7 +794,7 @@ client sends a missing age as missing and no fixture asks for `NaN`.
 
 ### 9.11 Methods `core.age_model/1` and `core.bacon/1`
 
-**State: specified on 27 November 2026 (card M8.5.8d); not yet in the engine (card M8.5.8e), not used by the interface.** They read a
+**State: specified on 27 November 2026 (card M8.5.8d); implemented in the engine (card M8.5.8e), not used by the interface.** They read a
 core's age-model text, as `core.js::parseAgeModelDetailed` does today, and convert a Bacon age-depth table into the numbers of the
 age-model text, as `core.js::baconToAgeText` does (decisions Z5-Z8). Reference fixtures made by that JavaScript: `tests/fixtures/age_model/`
 (generator `tools/make_age_model_fixtures.mjs`), which also record ECMAScript `Number()` and `toPrecision(8)` for the engine's port.
@@ -853,7 +853,7 @@ sign), `Infinity` with an optional sign, or an unsigned `0x`/`0X`, `0b`/`0B`, `0
 | Item | Rule |
 |---|---|
 | Tolerance (decision Y4) | Exact: every output value bit-identical to the JavaScript result (`-0` included), the missing pattern and `summary` exactly. |
-| Refusals | As §9.2: the field is named. `UNSUPPORTED_INPUT`: `text` or `table_text` not valid UTF-8; `settings` of another version. `LIMIT_EXCEEDED`: `text` or `table_text` longer than 4 MiB. `INVALID_REQUEST`: `settings` with another field or not an object; `settings.center`, `settings.depth_unit` or `settings.age_divisor` missing or of another value. A wrong dtype or rank of `text` or `table_text` is `INVALID_BUFFER` naming the input (§9.2); an empty buffer cannot be made (§3: shapes are positive). Malformed lines and cells are never refusals: they are dropped as above, as JavaScript does. |
+| Refusals | As §9.2: the field is named. `UNSUPPORTED_INPUT`: `text` or `table_text` not valid UTF-8; `settings` of another version (a `version` that is not the integer 1, a boolean included). `LIMIT_EXCEEDED`: `text` or `table_text` longer than 4 MiB; `text` (`core.age_model/1`) or `table_text` (`core.bacon/1`) when the output table would exceed the §4 table limits (more than 1,048,576 rows, or more than 8 MiB of cells at 9 bytes per cell: at most 233,016 rows with four columns), checked before the result is built, so the coordinator never answers `INTERNAL` for it. `INVALID_REQUEST`: `settings` with another field, without `version`, or not an object; then, for `core.bacon/1` and in this order, `settings.center`, `settings.depth_unit` or `settings.age_divisor` missing or of another value (`age_divisor` a JSON number equal to 1, 1000 or 1000000, an integer or a float; a boolean is refused). A wrong dtype or rank of `text` or `table_text` is `INVALID_BUFFER` naming the input (§9.2); an empty buffer cannot be made (§3: shapes are positive). Malformed lines and cells are never refusals: they are dropped as above, as JavaScript does. |
 | Saved fields (decision Z8) | A malformed project can hold a non-text `age.text` or `age.bacon`, or a `center` other than `median`/`mean`; interface card M8.5.8m normalises them on load in both modes, so the methods never receive another `center`. |
 
 Behaviour of `core.js` that the fixtures record, so that the contract and the program agree: `parseAgeModelDetailed` returns

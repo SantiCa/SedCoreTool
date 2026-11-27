@@ -197,7 +197,8 @@ def unpinned(coordinator):
 # ---- the method table ---------------------------------------------------------------------------------------------------------
 
 def test_each_method_module_agrees_with_its_method_table_entry():
-    assert set(specs.METHOD_SPECS) == set(registry.METHODS) == {specs.SECTION_INTERVALS, specs.CORE_AGES, specs.CORE_DEPTHS}
+    assert set(specs.METHOD_SPECS) == set(registry.METHODS) == {specs.SECTION_INTERVALS, specs.CORE_AGES, specs.CORE_DEPTHS,
+                                                                 specs.CORE_AGE_MODEL, specs.CORE_BACON}
     for name, spec in specs.METHOD_SPECS.items():
         method = registry.METHODS[name]
         assert spec.name == name == method.NAME
@@ -225,11 +226,11 @@ def test_hello_advertises_the_methods_of_the_method_table_only(probes):
     production, other = new_coordinator()
     try:
         hello = [value for value in frames(production)[0].values() if value["op"] == "hello"][0]
-        assert hello["result"]["methods"] == ["buffer.digest/1", "section.intervals/1", "core.ages/1", "core.depths/1"]
+        assert hello["result"]["methods"] == ["buffer.digest/1", "section.intervals/1", "core.ages/1", "core.depths/1", "core.age_model/1", "core.bacon/1"]
     finally:
         production.close()
     hello = [value for value in frames(coordinator)[0].values() if value["op"] == "hello"][0]
-    assert hello["result"]["methods"] == ["buffer.digest/1", "section.intervals/1", "core.ages/1", "core.depths/1", *PROBES]
+    assert hello["result"]["methods"] == ["buffer.digest/1", "section.intervals/1", "core.ages/1", "core.depths/1", "core.age_model/1", "core.bacon/1", *PROBES]
 
 
 # ---- one probe per scope, through the real coordinator and worker --------------------------------------------------------------

@@ -9,6 +9,8 @@ from typing import NamedTuple
 SECTION_INTERVALS = 'section.intervals/1'
 CORE_AGES = 'core.ages/1'
 CORE_DEPTHS = 'core.depths/1'
+CORE_AGE_MODEL = 'core.age_model/1'
+CORE_BACON = 'core.bacon/1'
 
 # name -> (dtype, rank, required). utf8json buffers are decoded tables; the numeric ones are C-order little-endian arrays.
 METHOD_INPUTS = {
@@ -40,6 +42,14 @@ METHOD_INPUTS = {
         'query': ('utf8json', 1, True),
         'query_values': ('f64le', 2, True),
         'query_valid': ('u8', 2, True),
+    },
+    CORE_AGE_MODEL: {
+        'settings': ('utf8json', 1, True),
+        'text': ('u8', 1, True),                  # the UTF-8 bytes of the age-model text, 1 byte to 4 MiB (contract §9.11)
+    },
+    CORE_BACON: {
+        'settings': ('utf8json', 1, True),
+        'table_text': ('u8', 1, True),            # the UTF-8 bytes of the Bacon table, 1 byte to 4 MiB (contract §9.11)
     },
 }
 SETTINGS_INPUT = 'settings'     # its buffer hash is the request's settings_hash
@@ -95,4 +105,6 @@ METHOD_SPECS = {
                                   dimensions=('bins', 'classes', 'schemes'), same_shape=(('labels', 'exclude'),)),
     CORE_AGES: MethodSpec(CORE_AGES, 'core', METHOD_INPUTS[CORE_AGES], dimensions=('rows',), tables=('ages',)),
     CORE_DEPTHS: MethodSpec(CORE_DEPTHS, 'core', METHOD_INPUTS[CORE_DEPTHS], dimensions=('rows',), tables=('depths',)),
+    CORE_AGE_MODEL: MethodSpec(CORE_AGE_MODEL, 'core', METHOD_INPUTS[CORE_AGE_MODEL], dimensions=('rows',), tables=('model',)),
+    CORE_BACON: MethodSpec(CORE_BACON, 'core', METHOD_INPUTS[CORE_BACON], dimensions=('rows',), tables=('rows',)),
 }

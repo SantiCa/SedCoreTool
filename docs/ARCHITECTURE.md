@@ -32,7 +32,8 @@ describe a planned part as available. When you build a planned part, change its 
                     private stdin/stdout pipes, `SCE1` frames, no network port
 ┌─────────────── Engine process: src/sedcoretool run by the bundled CPython 3.12 ───────────┐
 │  engine/    transport only: frames, buffers, coordinator, job runner, method worker script │
-│  methods/   one module per versioned scientific method (built: section.intervals/1, core.ages/1, core.depths/1) │
+│  methods/   one module per versioned scientific method (built: section.intervals/1,        │
+│             core.ages/1, core.depths/1, core.age_model/1, core.bacon/1)                    │
 │  kernels/   pure NumPy primitives shared by every caller (built)                           │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
    Python API and command line (pipeline.py, cli.py, batch.py …) call kernels/methods in-process.
@@ -54,11 +55,12 @@ calculates everything itself; with it on, the interval table of each section com
 | Python package: intervals, indices, age, export, batch, CLI, U-Net | built | `src/sedcoretool/` |
 | Engine process: frames, bounded buffers, queue, cancellation, isolated worker | built, off by default | `src/sedcoretool/engine/`, `desktop/engine*.js` |
 | Bundled Python runtime, verified at launch | built (Windows measured; macOS/Linux not yet run) | `desktop/runtime-lock.json`, `tools/prepare_engine_runtime.py` |
-| Engine methods: `buffer.digest/1` (a transport diagnostic), `section.intervals/1` (the first scientific method) and `core.ages/1` and `core.depths/1` | built | `engine/worker.py`, `engine/method_worker.py` |
-| `kernels/` package: binning, counting, classification, age interpolation (`interpolate_age`, and `interpolate_depth` for the inverse); `tests/test_architecture.py` | built (M8.3.3) | §3.1 |
+| Engine methods: `buffer.digest/1` (a transport diagnostic), `section.intervals/1` (the first scientific method), `core.ages/1`, `core.depths/1`, `core.age_model/1` and `core.bacon/1` | built | `engine/worker.py`, `engine/method_worker.py` |
+| `kernels/` package: binning, counting, classification, age interpolation (`interpolate_age`, and `interpolate_depth` for the inverse), `jstext` (ECMAScript `Number()`, `trim`, `split` and `toPrecision(8)`, standard library only); `tests/test_architecture.py` | built (M8.3.3) | §3.1 |
 | `methods/` package with the registry and `section.intervals/1`, called directly | built (M8.3.4) | §3.1 |
 | Engine method `core.ages/1` (a core's age model applied to depths) through `method.run`; the interface does not request it yet | built (M8.5.5) | contract §9.8 |
 | Engine method `core.depths/1` (the depth of each age through the inverted age model, bit-identical to JavaScript) through `method.run`; the interface does not request it yet | built (M8.5.8c) | contract §9.10 |
+| Engine methods `core.age_model/1` (a core's age model read from its age-model text) and `core.bacon/1` (a Bacon age-depth table converted to age-model numbers), bit-identical to JavaScript, through `method.run`; the interface does not request them yet | built (M8.5.8e) | contract §9.11 |
 | Job runner in the engine process: `section.analyze` runs a registered method in the engine's long-lived worker process (one job at a time, replaced after any anomaly), results are adopted as committed buffers and downloaded with `buffer.read` | built (M8.3.5) | §3.1, §4 |
 | Renderer-facing engine bridge (`engine-ipc.js`, `engineclient.js`, `engineanalysis.js`) | **built, experimental, off by default** (M8.3.6–M8.3.7) | §3.2, §3.3 |
 | Section intervals calculated by the engine (`section.intervals/1`) and shown by the interface | **built, experimental, off by default** (M8.3.7); slower than JavaScript, see the M8.3.8 evidence | contract §4–§5 |
@@ -79,7 +81,7 @@ import, the code is in the wrong layer: move the code, do not break the rule.
 
 | Layer | Path | Contains | May import | Must not |
 |---|---|---|---|---|
-| Kernels (built, M8.3.3) | `kernels/` | Pure array functions: bin edges and sums, row/class counts from labels, layers and overlap stacks, tier classification, age interpolation and its inverse | `numpy`, standard library | pandas, Pillow, file or network IO, environment variables, global state, anything from `engine/` or `methods/` |
+| Kernels (built, M8.3.3) | `kernels/` | Pure array functions: bin edges and sums, row/class counts from labels, layers and overlap stacks, tier classification, age interpolation and its inverse, ECMAScript number and text rules (`jstext`) | `numpy`, standard library | pandas, Pillow, file or network IO, environment variables, global state, anything from `engine/` or `methods/` |
 | Methods (built, M8.3.4) | `methods/` | One module per versioned method. Each has `NAME` (for example `"section.intervals/1"`), `parse(inputs) -> snapshot` that validates everything, and `run(snapshot, report, cancelled) -> dict` of named NumPy columns. `registry.py` maps names to modules | `kernels`, `numpy`, standard library | pandas, IO, transport details (frames, handles, sessions) |
 | Engine transport | `engine/` | `protocol.py` frames and strict JSON, `buffers.py` staged buffers, `server.py` coordinator, `worker.py` process wrappers (`DigestJob`; `MethodRunner`, the long-lived method worker, and `MethodJob`, one job on it) and the digest script, `specs.py` the method table (`METHOD_SPECS`, contract §9.6), `method_worker.py` the script that runs a method, `lifetime.py` | Coordinator: standard library only. Only the script `method_worker.py` imports `numpy`, `kernels` and `methods` (it runs in its own process and registers the package without running its `__init__`, so pandas and Pillow are not loaded); nothing else may import it | The coordinator must never import NumPy or a method (start-up stays fast and control requests stay responsive). No scientific formulas in this layer |
 | Tile store (pixel pyramids built, M8.4.14; mask tiles stored, M8.4.16) | `store/` | `format.py` (layout, Zarr v2 metadata, `pyramid.json`), `tiles.py` (verified tile reads, cache) and `masks.py` (mask tiles, tables and manifests of tiled sections, contract §8.7), standard library only; `source.py` (sources read in bands with libvips) and `pyramid.py` (the band-by-band build); `identity.py` (the record that finds an existing pyramid without hashing its source again; standard library) | `format`/`tiles`/`masks`/`identity`: the standard library; `source`/`pyramid`: also `numpy`, `pyvips`, `methods.errors` | importing the engine or the public API; the coordinator imports only `format`, `tiles` and `masks`, the method worker the whole store |

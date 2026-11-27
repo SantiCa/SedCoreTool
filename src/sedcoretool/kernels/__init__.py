@@ -8,4 +8,6 @@ enforces them.
 - ``counting``: per-row valid, bioturbated and per-class pixel counts from class masks, class layers or object labels.
 - ``classification``: index tiers with first-match or last-match precedence.
 - ``ages``: linear interpolation of an age model.
+- ``jstext``: ECMAScript ``Number()``, ``trim``, ``split`` and ``toPrecision(8)``, for readers of text that must equal the program's
+  JavaScript (standard library only).
 """
