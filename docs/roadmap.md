@@ -27,10 +27,10 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
 - **Found, not done:** **Q19** (intermittent macOS "window: labels"; most
   capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
-- **Run authorised 26 Nov 2026:** Q16, Q11 and V0.154 integration (all done). Next, not yet authorised: design the remaining slice (a) cards before **M8.5.9** (`log.js::toAxis`, `sheet.js` computed columns,
-  `parseAgeModelDetailed`/`baconToAgeText`, Y7; most capable, high).
+- **Design card A2 done (27 Nov 2026):** cards **M8.5.8a-M8.5.8o** of the rest of slice (a) written before M8.5.9, with decisions
+  **Z1-Z17** ([block](#decisions-for-the-rest-of-slice-a-a2)). Next: the maintainer answers Z1-Z17; then **M8.5.8a** (most capable, medium).
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.8 done (including M8.5.6b).
-- **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
+- **Decisions waiting for the maintainer:** Z1-Z17 (A2); promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
   long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 is approved.
 - **Open pull requests (Dependabot, against `master`, not merged):** #26 Electron 45.2.2 → 45.3.4, #24 `softprops/action-gh-release` 2 → 3.
   They wait for the maintainer (AGENTS §5.1).
@@ -566,11 +566,115 @@ Collected by design card A1 (22 Nov 2026) so that they are answered once (AGENTS
   mulberry32 generator and seeds, so results do not change (ARCHITECTURE §5.1); (b) scikit-learn implementations (a new dependency, AGENTS
   §3.9, and changed results); (c) (a), with scikit-learn as an independent reference in tests only. *Recommended: (a).*
 
+#### Decisions for the rest of slice (a) (A2)
+
+Collected by design card A2 (27 Nov 2026), which wrote cards M8.5.8a-M8.5.8o, so that they are answered once (AGENTS §6). Y1-Y11 still
+apply (Y4 parity, Y7 public functions, Y9 the form of timing targets). Each card names the decisions it waits for.
+**Waiting for the maintainer.**
+
+- **Z1 - Too many core requests at once.** `engineages.js::request` sends one `core.ages/1` job per core with no limit in the page; the
+  engine keeps 1 running and 4 waiting jobs per priority (shared with section analyses) and the page allows 9 runs (`engine-ipc.js`
+  `MAX_RUNS_PER_PAGE`), so opening a project with more than about 5 cores that need engine ages probably shows `BUSY` on some of them (not
+  measured: the M8.5.8 desktop test has one core). Every new core path would add to it. (a) Card M8.5.8a first: one page-side gate shared by
+  every core-scope engine module, at most 2 core jobs in flight, the others wait in the page in order (a superseded or aborted waiter leaves
+  the queue), so section analyses keep room; (b) a larger engine queue (more memory held by waiting jobs, the same flood); (c) nothing.
+  *Recommended: (a)*, measured before and after on a generated 20-core project.
+- **Z2 - Order of the paths.** (a) The gate (Z1), then record depths (`core.depths/1`, the smallest), age-model text and Bacon tables,
+  computed columns (the largest and riskiest, after their JavaScript fixes of Z9), one timing card for all of them, then the interface
+  cards and the public functions; (b) computed columns first; (c) each path through its interface before the next starts. *Recommended:
+  (a)*: the timing card can measure the chain ages → computed columns (Z14), which only exists when every method exists.
+- **Z3 - Which conversions of `log.js::toAxis` move.** The age → depth conversion of age-axis records feeds the merged core table (Data tab,
+  exports, Multiproxy: `coredata.js::collectCoreParts`); about fifteen drawing sites (`columns.js`, `figures.js`, `app.js`, `multiproxy.js`)
+  convert positions on every render and must stay synchronous. (a) The data path only, by a method `core.depths/1`; the drawing sites keep
+  `interpAge`/`toAxis` as display helpers, and M8.6 decides whether they are presentation or are fed from a cache; (b) every site, through
+  a per-core cache of converted record axes filled by the engine (pending states in every figure; `app.js` extraction first). The depth →
+  age direction needs no new method: row ages already come from `core.ages/1`. *Recommended: (a).*
+- **Z4 - Tolerance of `core.depths/1`.** (a) Exact (bit-identical) depths and missing pattern, as Y4 says for converted depths and ages, by a
+  kernel that repeats the binary search and operation order of `core.js::interpAge` on the inverted model (`np.interp` is undefined for the
+  equal ages that `invertModel` can produce, so `kernels/ages.py::interpolate_age` cannot be reused); (b) 1e-9 age/depth units as
+  `core.ages/1`. `core.ages/1` keeps its 1e-9 in both cases. *Recommended: (a).*
+- **Z5 - Age-model text in the engine.** `parseAgeModelDetailed` runs at every keystroke in the age box and for every core at opening.
+  (a) With the flag on, `core.age_model/1` parses it; while a new parse is pending the core keeps its last published model (contract §9.4:
+  a pending job changes nothing) and the age status says so; at opening a core has no model until its first result; (b) as (a), but no
+  model while pending (the age axis and ages disappear while typing); (c) no engine method: the Python port is only a kernel and a public
+  function checked against the same fixtures, and the program keeps parsing in JavaScript until M8.6 (two implementations). *Recommended:
+  (a)*: the parsing rules (header, range, repeated depth) are scientific rules documented in TECHNICAL §5.
+- **Z6 - How text reaches the engine.** `utf8json` strings are limited to 4,096 bytes (contract §3), and age-model texts and Bacon tables
+  are longer. (a) An input of dtype `u8`, rank 1, holding UTF-8 bytes (1 byte to 4 MiB, the metadata cap), decoded strictly by the method;
+  an empty text is not sent (no model, as today); a larger text is refused visibly; (b) a `utf8json` list of lines (each ≤ 4,096 bytes,
+  ≤ 65,536 lines; a longer line refused); (c) text inside `settings` (too small). *Recommended: (a).*
+- **Z7 - Bacon tables and the saved text.** `baconToAgeText` writes the age-model text that is saved in the project (`age.text`), from
+  numbers rounded with `toPrecision(8)` (ties away from zero on the exact binary value; Python's formatting rounds ties to even).
+  (a) `core.bacon/1` returns the rounded numbers, exactly; the page writes the text with today's template, so the saved text is
+  byte-identical; (b) the engine returns the text (a Python port of the JavaScript number-to-text rules). *Recommended: (a).*
+- **Z8 - Saved age-model fields on load.** The parsed model is never saved: it is derived from `age.text` at every opening. A malformed
+  project can still hold a non-text `age.text`/`age.bacon` or a `center` that names another column (`center: "depth"` makes
+  `baconToAgeText` use the depths as ages). (a) Nothing changes; the engine path sends `String(text)` and maps an unknown `center` to
+  `median`, so modes differ only for malformed files; (b) on load, a `center` other than `median`/`mean` becomes `median` and a non-text
+  `text`/`bacon` becomes empty, in both modes (malformed files only; the next save writes the normalised values). *Recommended: (b).*
+- **Z9 - Quirks of the formula language** (`sheet.js`, text from project files). Found: (1) function names are looked up through the object
+  prototype (`constructor(x)` works); (2) so are column names (`[toString]`, `[__proto__]` resolve instead of `noCol`); (3) a lone `.` throws
+  a TypeError; (4) a column where a number is expected (`round(x, y)` rounds to integers, `movavg(x, y)` gives all missing); (5) a number
+  where a column is expected (`movavg(3)`, `diff(3)`, `cumsum(3)`, `corr(3, x)`) and `round(x, 101)` throw errors whose browser text is shown
+  and saved in `col.error`; (6) text results (`if(c, "a", "b")`) put strings into numeric columns; (7) no bound on nesting or on the cost of
+  `movavg`. Kept on purpose, because results would change: `log` is the natural logarithm (undocumented), `mean(a, b)` uses only `a` while
+  `sum(a, b)` uses both, `movavg(x, n)` averages 2⌊n/2⌋+1 rows (TECHNICAL §17.3 says n), `sum()` of nothing is 0, and a text or missing
+  scalar condition of `if` picks by truthiness. (a) Port every quirk exactly (impossible for the browser's messages); (b) well-formed
+  formulas keep their results exactly; (1)-(3) give `unkFn`, `noCol`, `badChar`, (4)-(5) a new key `argKind`, any other thrown error
+  `invalid`, (6) missing values, (7) Z10; fixed in JavaScript first (card M8.5.8f, CHANGELOG "For users"), so both implementations agree;
+  (c) the engine refuses the quirks and JavaScript stays as it is (modes differ). *Recommended: (b).*
+- **Z10 - Bounds of the formula evaluator** (hostile input). (a) In both implementations: a formula of at most 4,096 UTF-8 bytes and 1,024
+  tokens, nesting (parentheses, calls, unary minus, `^`) at most 64 deep, at most 64 arguments per call, at most 256 computed columns per
+  core, and `movavg` at most 10⁸ element additions (rows × window); each excess is a named formula error of that column; (b) the same bounds
+  in the engine only; (c) none beyond the 120 s job deadline. Python evaluates with an explicit depth counter and a fixed function table:
+  never `eval`, `exec`, `compile` or attribute lookup by name. *Recommended: (a).*
+- **Z11 - Parity of computed columns** (Y4 applied to each function). (a) Exact: `+ − × ÷`, comparisons, `abs`, `sqrt`, `round`, `min`,
+  `max`, `count`, `sum`, `cumsum`, `diff`, `median`, `norm01`, `if`, the linear filling of `fillLinear`, the missing pattern, the error
+  keys and their arguments; 2 units in the last place: `log10`, `ln`/`log`, `exp`, `pow`, `^`; |Δ| ≤ 1e-12 · max(1, |reference|): `mean`,
+  `std`, `zscore`, `movavg`, `corr` and any value computed from a value of the last two groups. A comparison, `round` or `if` result that
+  differs on a fixture is shown to the maintainer with its inputs, never accepted by the card (as Y4's labels). Sums follow row order (no
+  pairwise summation). (b) Bit-identical everywhere; a card that cannot reach it stops. *Recommended: (a).*
+- **Z12 - Inputs and outputs of `core.columns/1`.** (a) One table `data` with an axis column `x` (the core's depths, or ages for an
+  age-only core: what `fillLinear` uses) and positional columns `c0…` for the columns the formulas name (the page collects the names with
+  `sheet.js::formulaRefs`, syntax only; a name it misses is `noCol`, visible), `depth` and `age` only when named; user text (column names,
+  formulas) only in `settings`, never as table column names; output table `columns` with positional `f0…`, all missing for a formula with
+  an error; summary `{rows, errors: [{index, key, arg}]}`, the argument cut to 128 UTF-8 bytes so that it stays within 8 KiB. A core whose
+  named columns exceed the 8 MiB table limit (about 7 columns at 100,000 rows) is refused visibly (`LIMIT_EXCEEDED`) until Y8's measurement;
+  (b) the whole merged table of the core (refused for many more cores); (c) one table per named column (a core-scope family: a contract
+  change). *Recommended: (a).*
+- **Z13 - Saved computed columns on load.** `sheet.columns` is read from the project without checks; a column named `__proto__` replaces
+  the prototype of the core's `proxies` object in `app.js::applyComputedColumns` (no code runs, but later lookups are corrupted).
+  (a) On load, keep entries whose `name` is non-empty text of at most 256 UTF-8 bytes and not `__proto__`, `formula` text, `core` text or
+  absent, `interp` boolean or absent; drop the others and say how many (malformed files only; the next save writes what was kept); `error`
+  is recomputed, never trusted; (b) only the engine path refuses them. *Recommended: (a).*
+- **Z14 - Timing targets, fixed before measuring** (primary reference host, warm, request to the decoded result; the matched formula still
+  reported). (a) `core.depths/1`, 100,000 ages: p95 ≤ 150 ms; `core.age_model/1`, a 10,000-line text: p95 ≤ 150 ms; `core.bacon/1`, a
+  10,000-row table: p95 ≤ 300 ms (a file opened or the centre changed); `core.columns/1`, 100,000 rows and 5 formulas including
+  `movavg(x, 11)`: p95 ≤ 150 ms; the chain `core.ages/1` → `core.columns/1` after one value changes, 100,000 rows: p95 ≤ 300 ms. A failed
+  target stops that path's interface card until the maintainer decides; (b) other numbers. *Recommended: (a).*
+- **Z15 - The free sheet** (`sheet.js::evalCells`, cells across cores with `COL()`, kept only for projects that use it). (a) It stays in
+  JavaScript during slice (a) (it shares the fixes of Z9); M8.6 decides whether to retire it or port it as a project-scope method;
+  (b) port it now as `project.cells/1`. *Recommended: (a).*
+- **Z16 - The record reader** (`log.js::parseTable`). Y2 did not choose it. (a) Not in slice (a): it stays the program's import boundary in
+  JavaScript (what it reads is saved in the project as record series and reaches the engine as tables); M8.6's inventory names it, and a
+  Python reader with the same rules for scripts is a separate card if wanted; (b) port it now (large; most capable, because its rules decide
+  what is imported and saved). *Recommended: (a).*
+- **Z17 - Public functions of slice (a)** (Y7; an addition, nothing breaks; not added to `sedcoretool.__all__`). (a) Module
+  `sedcoretool.records`: `AgeModel` (frozen dataclass: `depth`, `age`, `age_min`, `age_max` NumPy arrays, the last two `None` without a
+  range; `reversals`, `range_ignored`, `bacon`); `parse_age_model(text: str) -> AgeModel` (`ValueError` naming the depth when a depth has
+  two ages, or when fewer than two rows remain); `bacon_age_model(text: str, *, center="median", depth_unit="cm", age_unit="ka") ->
+  AgeModel` (the model the program reads from the converted text); `ages_at(model, depths) -> pandas.DataFrame` (`age`, and `age_min`,
+  `age_max` with a range; NaN outside the model); `depths_at(model, ages) -> numpy.ndarray` (NaN outside). Module `sedcoretool.formulas`:
+  `Formula(name, text, interpolate=True)` and `computed_columns(data: pandas.DataFrame, formulas, *, axis="depth") -> tuple[DataFrame,
+  dict[str, str]]` (the computed columns, and each failed column's error key). Each calls the kernels and methods; no second copy of a
+  formula. (b) Only `ages_at` and `depths_at`; (c) other names. *Recommended: (a).*
+
 #### M8.5 cards
 
 Written by design card A1 from [contract §9](roadmap-engine-contract.md#9-methods-of-section-core-and-project-scope-methodrun-card-a1).
 Every behaviour change is behind the existing engine experiment flag (no new flag); every card records the lines of `app.js` before and
-after. The order is the order of this list; cards written later take the next free number and go before the gate card of their slice.
+after. The order is the order of this list; cards written later go before the gate card of their slice and take the number of the card they follow with a letter suffix
+(M8.5.6b, M8.5.8a-o), so that numbers named elsewhere stay valid.
 
 - [x] **M8.5.1 - Operation table in the coordinator** (done 22 Nov 2026, development gate).
   - *Goal:* `Coordinator.dispatch` looks operations up in a table (contract §9.5) instead of a chain of conditions; nothing changes on the
@@ -759,10 +863,260 @@ after. The order is the order of this list; cards written later take the next fr
     (691/691), `npm run typecheck`, `tools/build_standalone.py` (2.98 MB), `tests/e2e/desktop.mjs` off/on. `tests/e2e/smoke.mjs` stopped at
     unrelated `navigation-preview.mjs` (4/257,928 px off by 1 on Chrome 158 ANGLE RTX 4070 D3D11; verified in GitHub CI). Not measured
     locally: macOS, Linux (checked via GitHub CI on push).
-- [ ] **M8.5.9 - Milestone gate of slice (a).** Before it come the remaining cards of slice (a), written after M8.5.6: record axis
-  conversion (`log.js::toAxis`), computed columns (`sheet.js`, a restricted evaluator, never Python `eval`), age-model text and Bacon
-  tables (`parseAgeModelDetailed`, `baconToAgeText`), the record reader if Y2 asks for it, and the public functions of Y7.
-  - *Goal:* the milestone gate on one commit, with the desktop end-to-end steps of every slice (a) path, engine on and off.
+- [ ] **M8.5.8a - Core requests wait in the page** (waits for Z1).
+  - *Goal:* with the engine experiment on, a project with many cores never gets `BUSY` because the page sent too many core-scope jobs at
+    once: core jobs wait in the page, at most 2 in flight, so section analyses keep room in the engine's queue; results do not change.
+  - *Read first:* contract §9.4; `app/js/engineages.js` (`request`, `runCoreAges`, `restartAndRetry`, `releaseAll`); `app/js/engineclient.js::run`;
+    `desktop/engine-ipc.js` (`MAX_RUNS_PER_PAGE`); `engine/server.py::WaitingJobs`; `app/js/app.js` (where `createEngineAges` is wired);
+    `tests/app/engine-ages.test.mjs`.
+  - *Change:* new pure module `app/js/corejobs.js` (a first-in, first-out gate: `acquire(signal)` resolves to a release function, at most
+    `limit` holders; a waiter aborted before its turn leaves the queue); `engineages.js` holds the gate around `ensureTable` and `run`
+    (option `gate`, none by default); one gate created in `app.js` (wiring only) for every core-scope engine module; `ORDER` in
+    `tools/build_standalone.py`, `tsconfig.strict.json`, ARCHITECTURE §3.2, TECHNICAL_DOCUMENTATION §1.4; tests; a `tests/e2e/desktop.mjs` step.
+  - *Do not touch:* engine queue sizes, `MAX_RUNS_PER_PAGE`, section analyses, the ages computed.
+  - *Model:* most capable, effort medium (concurrency, cancellation and publication that every later core path reuses).
+  - *Steps:* (1) Evidence first: a desktop step that builds a project of 20 generated cores (depth-only data and an age model each, made by
+    the test, no file committed), engine on, and records each core's age state; record the result before the change in *As built*.
+    (2) The gate and its Node tests. (3) `engineages.js` uses it. (4) The desktop step must now end with every core ready.
+  - *Tests:* Node: never more than `limit` holders; order kept; an aborted waiter never runs and frees its place; a superseded or failed job
+    releases; `engine-ages.test.mjs` with 20 cores and a fake engine that answers `BUSY` beyond 5 waiting jobs: all 20 ready. Desktop: the 20
+    cores ready, ages equal to engine off within 1e-9 and the missing pattern exact. `npm test`, `npm run typecheck`, `python
+    tools/build_standalone.py`, `tests/e2e/desktop.mjs` engine on and off.
+  - *Done when:* development gate; *As built* records the before/after evidence and the lines of `app.js`.
+- [ ] **M8.5.8b - Contract and reference fixtures of `core.depths/1`** (waits for Z2-Z4).
+  - *Goal:* the contract describes `core.depths/1`, the depth of each age through the inverted age model (`log.js::invertModel` and
+    `toAxis(v, 'age', 'depth', …)`, used by `coredata.js::collectCoreParts` for age-axis records), and fixtures made by today's JavaScript fix
+    its results.
+  - *Read first:* contract §4 "Tables", §9.8; TECHNICAL_DOCUMENTATION §15.2, §17.1; `log.js` (`invertModel`, `toAxis`); `core.js::interpAge`;
+    `coredata.js::collectCoreParts`; `tools/make_core_ages_fixtures.mjs` (pattern).
+  - *Change:* contract §9.10 (new; §9.9 stays reserved for `multiproxy.samples/1`, card M8.5.10); `tools/make_core_depths_fixtures.mjs`;
+    `tests/fixtures/core_depths/`; `tests/app/core-depths-fixtures.test.mjs`.
+  - *Do not touch:* `log.js`, `core.js`, `coredata.js`.
+  - *Model:* fast, effort medium.
+  - *Steps:* (1) Contract: scope `core`, priority `interactive`; `settings` `{version:1}`; `age_model` exactly as §9.8 (the same resident
+    table that `core.ages/1` uses; range columns accepted and not used); table `query` (one column `age`, missing allowed); output table
+    `depths` (column `depth`), summary `{rows, outside}`, dimension `rows`. Rules stated exactly: the inverse is the (age, depth) pairs
+    sorted by age with a stable sort (equal ages keep depth order); a slot is missing where the age is missing or outside [first, last
+    inverse age]; otherwise `lo` = the last index whose inverse age ≤ the query, at most n − 2, `hi` = `lo` + 1, `span` = age[hi] − age[lo],
+    and depth = `span` ? depth[lo] + ((a − age[lo]) / span) × (depth[hi] − depth[lo]) : depth[lo], in this order of operations. Tolerance
+    Z4. Refusals as §9.8, plus `query.columns.name` without `age`. (2) Fixtures (seeded, `--check`, `--out`): models of 2 and 1,000 rows,
+    with reversals (the inverse is then not a function: the fixtures record what JavaScript gives), with equal neighbouring ages (span 0),
+    with a range; queries at every knot age, at both ends, just outside, missing, and 100,000 random ages.
+  - *Tests:* the generator gives the same bytes twice; the Node test re-checks every fixture with `toAxis`.
+  - *Done when:* contract entry and fixtures committed; development gate.
+- [ ] **M8.5.8c - Method `core.depths/1`** (after M8.5.8b).
+  - *Goal:* the engine computes `core.depths/1` equal to the fixtures within Z4, through `method.run`.
+  - *Read first:* contract §9.10; ARCHITECTURE §5.1 steps 3-5; `methods/core_ages.py`, `methods/validation.py::table`, `methods/registry.py`,
+    `engine/specs.py`, `kernels/ages.py`.
+  - *Change:* `kernels/ages.py`: a new function with the lookup and operation order of `core.js::interpAge` for non-decreasing knots (the
+    existing `interpolate_age` unchanged); `methods/core_depths.py`; `registry.py`, `specs.py`, `desktop/engine.js` (`ADVERTISED_METHODS`),
+    the mirror in `engine-ipc.js`; `tests/test_core_depths.py`; TECHNICAL_DOCUMENTATION §15.2 (implementation line) and §1.4; ARCHITECTURE §2
+    and the kernels row of §3.1.
+  - *Do not touch:* `interpolate_age` and its tests; `core_ages.py`; `log.js`.
+  - *Model:* fast, effort medium.
+  - *Tests:* every fixture (bit-identical values when Z4 (a), else its tolerance; missing pattern and summary exact); the new kernel against a
+    plain-Python transcription of `interpAge` on seeded random models with repeated ages; refusals naming the field; transport through the
+    real coordinator and worker, with cancel and superseding. `pytest`, `ruff`, `npm test`.
+  - *Done when:* development gate.
+- [ ] **M8.5.8d - Contract and reference fixtures of `core.age_model/1` and `core.bacon/1`** (waits for Z5-Z8).
+  - *Goal:* the contract describes the age-model text reader (`core.js::parseAgeModelDetailed`) and the Bacon table conversion (the numbers
+    of `core.js::baconToAgeText`), and fixtures made by today's JavaScript fix their results.
+  - *Read first:* contract §3 (buffer dtypes, metadata limits), §4 "Tables", §9.2, §9.8; TECHNICAL_DOCUMENTATION §5; `core.js`
+    (`parseAgeModelDetailed`, `baconToAgeText`, `UNIT_TO_CM`); `app.js` (`setAge`, the `ageFile` and `ageCenter` handlers, `makeCore`),
+    only to see what is sent and what is saved.
+  - *Change:* contract §9.11 (new); `tools/make_age_model_fixtures.mjs`; `tests/fixtures/age_model/`; `tests/app/age-model-fixtures.test.mjs`.
+  - *Do not touch:* `core.js`, `app.js`.
+  - *Model:* most capable, effort medium (text from project and imported files is hostile; the Bacon output becomes the saved `age.text`).
+  - *Steps:* (1) `core.age_model/1`: scope `core`, `interactive`; input `text` as Z6; `settings` `{version:1}`. State exactly: lines split
+    on `\r?\n`; the ECMAScript whitespace and line-terminator set used by `trim` and `\s` (listed by code point); `#` lines; cell splitting
+    (with `;` or tab: all whitespace inside a cell removed and its first comma made a point; else commas; else whitespace); header detection
+    and column choice by the regular expressions of the code; numbers read by ECMAScript `StringToNumber` (`0x`, `0b`, `0o`, `Infinity`,
+    ASCII digits only; no `_`, `nan` or `inf`; an empty cell is missing); sort by (depth, age); identical rows merged (missing range cells
+    equal) from the end; a depth with two different rows → issue `dupDepth`; fewer than 2 rows → no model; the range rule; `range_ignored`,
+    `bacon` and `reversals`. Output table `model` (`depth`, `age`, and `age_min`, `age_max` when the range is kept; 0 rows when there is no
+    model); summary `{rows, reversals, range_ignored, bacon, issue, issue_depth}` (`issue_depth`, the depth the interface names, is the only
+    cell value in the summary). `core.bacon/1`: input `table_text` as Z6; `settings` `{version:1, center: "median"|"mean", depth_unit:
+    "mm"|"cm"|"m", age_divisor: 1|1000|1000000}`; header and rows as the code (quotes removed, lower case, split on `[,;\t ]+`; the centre
+    column falls back to `median`, then `mean`); a row is kept when its four cells are finite; depth × (1 / cm per unit), the ages ÷ divisor,
+    each rounded as ECMAScript `toPrecision(8)` (Z7); output table `rows` (`depth`, `age`, `age_min`, `age_max`, file order); fewer than 2
+    rows or a missing column → 0 rows (the program then reads the file as plain age text, as today). Tolerance: exact (Y4), missing pattern
+    and summary exact. Refusals naming the field (invalid UTF-8, an empty or oversized text, unknown settings). (2) Fixtures (seeded,
+    `--check`, `--out`): headers in English and Spanish, no header, `;` and tab with decimal commas, Unicode spaces (U+00A0, U+FEFF, U+2028),
+    CRLF, comments, `0x1A`, `Infinity`, `1e3`, `.5`, `5.`, repeated identical rows, a depth with two ages, a range kept and ignored (named and
+    unnamed), minimum and maximum swapped, reversals, one row; generated Bacon tables (no real core's data) with median and mean, each unit
+    and divisor, a value whose 8-digit rounding is a tie (123456785), a row with `NA`, a table without the centre column; a 10,000-line text
+    and a 10,000-row Bacon table for M8.5.8i.
+  - *Tests:* the generator gives the same bytes twice; the Node test re-checks every fixture with `core.js`.
+  - *Done when:* contract entry and fixtures committed; development gate.
+- [ ] **M8.5.8e - Methods `core.age_model/1` and `core.bacon/1`** (after M8.5.8d).
+  - *Goal:* the engine computes both methods equal to the fixtures, exactly, through `method.run`.
+  - *Read first:* contract §9.11 and §3 (metadata limits); ARCHITECTURE §5.1 steps 3-5; `methods/core_ages.py`, `methods/validation.py`,
+    `engine/specs.py`.
+  - *Change:* new `kernels/jstext.py` (standard library only: ECMAScript `StringToNumber`, its whitespace set and `trim`, `toPrecision`
+    rounding with `decimal`); `methods/core_age_model.py`, `methods/core_bacon.py`; `registry.py`, `specs.py` (inputs `text` and `table_text`,
+    `u8`, rank 1), `ADVERTISED_METHODS`, the mirror; tests; TECHNICAL_DOCUMENTATION §5 (implementation line) and §1.4; ARCHITECTURE §2 and §3.1.
+  - *Do not touch:* `depth.py::depth_to_age` and its tests; `core.js`.
+  - *Model:* most capable, effort medium (a parser of hostile text in the engine).
+  - *Tests:* every fixture exactly; `jstext` against a table of strings and their ECMAScript `Number()` and `toPrecision(8)` results written
+    by the fixture tool; hostile input: invalid UTF-8, 4 MiB + 1 byte, one 4 MiB line, NUL bytes, 100,000 header-like lines, each refused or
+    parsed within the interactive deadline (time recorded); transport with cancel and superseding. `pytest`, `ruff`, `npm test`.
+  - *Done when:* development gate.
+- [ ] **M8.5.8f - Formula language: fixes and bounds in JavaScript** (waits for Z9, Z10, Z13).
+  - *Goal:* before fixtures are made, `sheet.js` behaves as the contract of M8.5.8g will say: the quirks of Z9 give named errors or missing
+    values, the bounds of Z10 apply, saved computed columns are checked on load (Z13); well-formed formulas give exactly the results they
+    give today.
+  - *Read first:* TECHNICAL_DOCUMENTATION §17.3-§17.4; `app/js/sheet.js`; `app.js::applyComputedColumns` and the project load that reads
+    `S.sheet`; the `fx.*` keys in `i18n.js`; `datatab.js` (where a typed formula is checked with `parseFormula`); `tests/app/sheet.test.mjs`.
+  - *Change:* `sheet.js` (own-property lookups of functions and columns; a lone `.` → `badChar`; argument kinds → `argKind`; any other thrown
+    error → `invalid`; non-numeric result cells → missing; the bounds of Z10 with their keys); a pure `sheet.js::cleanSheetColumns(value) →
+    {columns, dropped}` and one wiring line at load in `app.js`; `i18n.js` (new keys, Spanish and English); TECHNICAL_DOCUMENTATION §17.3 (the
+    rules and bounds; `log` is the natural logarithm; `mean` uses its first argument; `movavg` averages 2⌊n/2⌋+1 rows); tests.
+  - *Do not touch:* results of well-formed formulas; `evalCells` except through the shared evaluator; `applyCellEdits`; `fillLinear`.
+  - *Model:* most capable, effort medium (it changes what some user formulas give, and the text comes from project files).
+  - *Steps:* (1) A regression corpus first: about 60 well-formed formulas over generated cores with missing values, their results stored
+    before any change; it passes before and after. (2) One failing test per quirk and bound, then its fix. (3) The load check. (4) Documents.
+  - *Tests:* the corpus (exact); each quirk and bound (fails before, passes after); `cleanSheetColumns` with `__proto__`, non-text and
+    oversized fields; `npm test`, `npm run typecheck`, `python tools/build_standalone.py`, `tests/e2e/smoke.mjs`.
+  - *Done when:* development gate; the director writes the CHANGELOG "For users" entry.
+- [ ] **M8.5.8g - Contract and reference fixtures of `core.columns/1`** (waits for Z9-Z12; after M8.5.8f).
+  - *Goal:* the contract describes the formula language of computed columns and the method that evaluates a core's computed columns in
+    order; fixtures made by `sheet.js` (as fixed by M8.5.8f) fix their results.
+  - *Read first:* contract §3 (metadata limits), §4 "Tables", §9; TECHNICAL_DOCUMENTATION §17.1, §17.3; `sheet.js` (`tokenize`, `parseFormula`,
+    `evalAst`, `FUN`, `evalColumn`, `formulaRefs`, `fillLinear`); `app.js::applyComputedColumns` (order, the `core` filter, `interp`, the
+    error path).
+  - *Change:* contract §9.12 (new); `tools/make_core_columns_fixtures.mjs`; `tests/fixtures/core_columns/`; `tests/app/core-columns-fixtures.test.mjs`.
+  - *Do not touch:* `sheet.js`, `app.js`.
+  - *Model:* most capable, effort high (grammar and semantics of an evaluator of hostile text; parity rules).
+  - *Steps:* (1) Contract: scope `core`, `interactive`; inputs and outputs as Z12; `settings` `{version:1, formulas: [{name, formula,
+    interp}], columns: [{name}]}` (formulas in evaluation order, at most 256; the names of `c0…`). The grammar as EBNF (tokens, the
+    whitespace set, numbers, `[names]`, strings, identifiers with `.` and `$`, precedence: comparison < `+ −` < `× ÷` < unary minus < `^`
+    (right-associative), a minus in a primary binding to `^`); every function with its scalar and column behaviour, missing values,
+    division by 0, sums in row order, sample standard deviation, `median`, `movavg` windows, `round` ties away from zero on the exact
+    binary value, `if`, `corr` (at least 3 pairs), two-column `min`/`max`; each result visible to later formulas by its name; `depth` and
+    `age`; `interp` (`fillLinear`, its order of operations) on the named columns, earlier computed ones included; scalars broadcast; the
+    error keys with their arguments; a failed formula leaves its column absent for later formulas (`noCol`); the bounds of Z10. Tolerances
+    Z11. (2) Fixtures: every operator and function with scalars, columns, missing values, zero divisors, `round` ties, negative bases of
+    `^`, comparisons, chains of formulas, `interp` on and off across gaps, an age-only core, a column named `depth`, each error key, each
+    bound at and beyond its limit; a seeded generator of about 2,000 random well-formed formulas over random cores; one 100,000-row case.
+  - *Tests:* the generator gives the same bytes twice; the Node test re-checks every fixture with `sheet.js`.
+  - *Done when:* contract entry and fixtures committed; development gate.
+- [ ] **M8.5.8h - Method `core.columns/1`** (after M8.5.8g).
+  - *Goal:* the engine evaluates computed columns equal to the fixtures within Z11, through `method.run`, with a restricted evaluator:
+    never `eval`, `exec`, `compile`, `getattr` or any lookup of Python objects by a name taken from the formula.
+  - *Read first:* contract §9.12; ARCHITECTURE §3.1 and §5.1 steps 3-5; `methods/core_ages.py`, `methods/validation.py`, `engine/specs.py`.
+  - *Change:* new `kernels/formula.py` (tokenizer; recursive-descent parser with an explicit depth counter; an AST of plain tuples;
+    evaluator over NumPy arrays with row-order sums; a fixed table of the contract's functions; `fillLinear`); `methods/core_columns.py`;
+    `registry.py`, `specs.py`, `ADVERTISED_METHODS`, the mirror; tests; a check in `tests/test_architecture.py` that `kernels/formula.py`
+    names none of `eval`, `exec`, `compile`, `__import__`, `getattr`; TECHNICAL_DOCUMENTATION §17.3 (implementation line) and §1.4;
+    ARCHITECTURE §2 and §3.1.
+  - *Do not touch:* `sheet.js`; other methods.
+  - *Model:* most capable, effort high (hostile input evaluated in the engine; many interacting semantics).
+  - *Tests:* every fixture and the random corpus within Z11 (exact groups exact); each bound at its limit accepted and beyond it refused with
+    its key; 10,000 nested parentheses refused without `RecursionError`; names such as `__class__`, `__proto__`, `constructor` are plain
+    names (`noCol`, `unkFn`); the worst accepted formula finishes within the interactive deadline (time recorded); transport with cancel and
+    superseding. `pytest`, `ruff`, `npm test`.
+  - *Done when:* development gate.
+- [ ] **M8.5.8i - Timing of the new paths of slice (a)** (after M8.5.8c, M8.5.8e, M8.5.8h; waits for Z14).
+  - *Goal:* the end-to-end times of `core.depths/1`, `core.age_model/1`, `core.bacon/1`, `core.columns/1` and of the chain `core.ages/1` →
+    `core.columns/1` are measured against Z14 before any of their interface cards (lesson of M8.3).
+  - *Read first:* contract §7; `tools/measure_engine_analysis.mjs` (phase `ages`); the *As built* of M8.5.6 and M8.5.6b.
+  - *Change:* `tools/measure_engine_analysis.mjs` (phases `depths`, `agemodel`, `bacon`, `columns`, `chain`); `docs/validation/M8.5.8i-slice-a-windows.json`;
+    the card's *As built*.
+  - *Do not touch:* the program's behaviour.
+  - *Model:* fast, effort medium.
+  - *Steps:* cases: 1,000, 10,000 and 100,000 ages on a 200-knot model with reversals; a 100-line and the 10,000-line age text; the
+    10,000-row Bacon table; 1,000, 10,000 and 100,000 rows with the 5 formulas of Z14 and `interp` on; the chain at 100,000 rows. First
+    request, the same again, one value changed; one warm-up and six alternating runs (§7); stages reported separately; JavaScript times with
+    the engine off reported (the matched formula reported, not gating); parity checked on every sample.
+  - *Done when:* the result is recorded with its host (development gate; macOS and Linux not measured); a failed target records the
+    measurement and the narrowest next correction, and that path's interface card waits for the maintainer.
+- [ ] **M8.5.8j - Computed columns and cell edits out of `app.js`.**
+  - *Goal:* `applyCellEdits` and `applyComputedColumns` move to a pure module without changing behaviour (ARCHITECTURE §5.2), so that M8.5.8n
+    changes only where computed values come from.
+  - *Read first:* ARCHITECTURE §5.2; `app.js` (`applyCellEdits`, `applyComputedColumns`, `refreshCoreData`, the `onPublish` of
+    `createEngineAges`); `coredata.js::mergeCoreData` (`afterMerge`); TECHNICAL_DOCUMENTATION §17.2-§17.3.
+  - *Change:* new `app/js/computedcolumns.js` (the sheet columns and the error-text function passed in; no import of `i18n.js`); one-line
+    wrappers in `app.js`; `ORDER`; `tsconfig.strict.json`; `APP_JS_CEILING`; ARCHITECTURE §3.2; TECHNICAL_DOCUMENTATION §1.4;
+    `tests/app/computedcolumns.test.mjs`.
+  - *Do not touch:* behaviour; saved fields; `sheet.js`.
+  - *Model:* fast, effort medium.
+  - *Tests:* Node: edits applied before formulas; formulas in order, a later one using an earlier one; an error keeps the others; `interp`
+    on and off; the `core` filter (`all`, an identifier); `npm test`, `npm run typecheck`, `python tools/build_standalone.py`, `tests/e2e/smoke.mjs`.
+  - *Done when:* `app.js` is shorter and the checks pass; development gate.
+- [ ] **M8.5.8k - The age-model workflow out of `app.js`.**
+  - *Goal:* the non-DOM logic of `setAge` (the status of a parsed model: key, values, warning) and of the `ageFile` and `ageCenter` handlers
+    (a Bacon table turned into the age-box text with its comment header) moves to a pure module without changing behaviour, so that
+    M8.5.8m changes only where the model and the Bacon numbers come from.
+  - *Read first:* ARCHITECTURE §5.2; `app.js` (`setAge`, `renderAgeCenter`, the `ageFile` and `ageCenter` handlers, `makeCore`, `activateCore`).
+  - *Change:* new `app/js/agemodel.js` (`describeAgeModel(parsed)`, `baconAgeText(raw, options, labels)`); wrappers in `app.js` (the DOM stays);
+    `ORDER`; `tsconfig.strict.json`; `APP_JS_CEILING`; ARCHITECTURE §3.2; TECHNICAL_DOCUMENTATION §1.4; `tests/app/agemodel.test.mjs`.
+  - *Do not touch:* behaviour; saved fields; `core.js`.
+  - *Model:* fast, effort medium.
+  - *Tests:* Node: status for a model, reversals, a pasted Bacon table, an ignored range, a repeated depth, no model; the Bacon text byte-equal
+    to today's for median and mean; `npm test`, `npm run typecheck`, `python tools/build_standalone.py`, `tests/e2e/smoke.mjs`.
+  - *Done when:* `app.js` is shorter and the checks pass; development gate.
+- [ ] **M8.5.8l - Record depths from the engine** (engine experiment; waits for Z3 and for M8.5.8i's `depths` result).
+  - *Goal:* with the engine experiment on, `coredata.js::collectCoreParts` takes the depths of age-axis record series from `core.depths/1`
+    (one request per core with all its age-axis series, through the M8.5.8a gate, cached by inputs, superseded by the core's revision);
+    while pending, those series are absent from the merged table and the core shows the pending state; a failure is visible; with the flag
+    off nothing changes; drawing sites keep `toAxis` (Z3).
+  - *Read first:* `coredata.js`; `engineages.js` (the pattern); `tablesnapshot.js`; contract §9.4, §9.10; `datatab.js` (the pending banner).
+  - *Change:* new pure module `app/js/enginedepths.js` (code shared with `engineages.js` may move into one tested helper, with no change of
+    `engineages.js` behaviour); a hook in `coredata.js::mergeCoreData` beside `resolveAges`; wiring in `app.js`; `i18n.js` if a message is
+    new; `ORDER`, `tsconfig.strict.json`, ARCHITECTURE §3.2, TECHNICAL_DOCUMENTATION §1.4 and §17.1; tests; a `tests/e2e/desktop.mjs` step.
+  - *Do not touch:* `log.js::toAxis`, `columns.js`, `figures.js`, `geo.js`; saved fields.
+  - *Model:* most capable, effort medium (asynchronous publication into the merged data that every analysis reads).
+  - *Tests:* Node: pending, ready, error, superseded, unchanged inputs not sent again, restart once; desktop: a core with an age-axis record,
+    merged table engine on equal to off within Z4. `npm test`, typecheck, standalone build, `tests/e2e/desktop.mjs` on and off.
+  - *Done when:* development gate; `app.js` lines before and after recorded.
+- [ ] **M8.5.8m - Age model and Bacon tables from the engine** (engine experiment; waits for Z5-Z8 and for M8.5.8i's `agemodel` and `bacon`
+  results; after M8.5.8k).
+  - *Goal:* with the engine experiment on, a core's `ageModel.model` comes from `core.age_model/1` (age box, project opening, imported cores
+    of `multiproxy.js::addImported`) and an opened Bacon table from `core.bacon/1`; the pending rule of Z5; the text written from a Bacon
+    table is byte-identical to today's, so the saved `age.text` does not change (Z7); the load rule of Z8; a failure is visible; with the
+    flag off nothing changes.
+  - *Read first:* `agemodel.js` (M8.5.8k); `engineages.js`; `app.js` (`setAge`, `makeCore`, the handlers); `multiproxy.js::addImported`;
+    contract §9.4, §9.11.
+  - *Change:* new pure module `app/js/engineagemodel.js`; `agemodel.js`; wiring in `app.js` and `multiproxy.js`; `i18n.js`; `ORDER`,
+    `tsconfig.strict.json`, ARCHITECTURE §3.2, TECHNICAL_DOCUMENTATION §1.4 and §5; tests; a `tests/e2e/desktop.mjs` step.
+  - *Do not touch:* `geo.js` (it parses `ageText` itself; slice d, card M8.5.10); `core.js`; the format of the saved text.
+  - *Model:* most capable, effort medium (it writes the saved age-model text and changes when a core has a model).
+  - *Tests:* Node: keystrokes superseding each other, the last published model kept while pending, an error, the Bacon text equal to
+    `baconToAgeText` on every M8.5.8d fixture; desktop: type a model, open a generated Bacon table (median, then mean), save, reopen: the saved
+    project text byte-identical engine on and off, ages equal within 1e-9. `npm test`, typecheck, standalone build, `tests/e2e/desktop.mjs`
+    on and off, `tests/e2e/interrupted-saves.mjs`.
+  - *Done when:* development gate; `app.js` lines before and after recorded.
+- [ ] **M8.5.8n - Computed columns from the engine** (engine experiment; waits for Z9-Z13 and for M8.5.8i's `columns` and `chain` results;
+  after M8.5.8j).
+  - *Goal:* with the engine experiment on, `computedcolumns.js` requests `core.columns/1` for each core (after the core's ages and record
+    depths are published when a formula names `age` or uses them), publishes by the rule of §9.4, writes each column's `error` text with
+    `fxText` from the summary's key and argument, and the Data tab, exports and Multiproxy wait while it is pending (as M8.5.8 did for
+    ages); a failure is visible; with the flag off nothing changes.
+  - *Read first:* `computedcolumns.js` (M8.5.8j); `engineages.js`; `datatab.js`; `multiproxy.js` (where samples read `proxies`); contract §9.4, §9.12.
+  - *Change:* new pure module `app/js/enginecolumns.js`; `computedcolumns.js`; wiring in `app.js`; `datatab.js`, `multiproxy.js` (waits);
+    `i18n.js`; `ORDER`, `tsconfig.strict.json`, ARCHITECTURE §3.2, TECHNICAL_DOCUMENTATION §1.4 and §17.3; tests; a `tests/e2e/desktop.mjs` step.
+  - *Do not touch:* `sheet.js` semantics; `evalCells`; saved fields other than the recomputed `error` text.
+  - *Model:* most capable, effort medium (asynchronous publication into data that Multiproxy and exports read).
+  - *Tests:* Node: pending, ready, error, a chain waiting for ages, superseded edits; desktop: a core with 5 formulas (one failing), values
+    engine on equal to off within Z11 and the same error texts; the Data-tab CSV equal. `npm test`, typecheck, standalone build,
+    `tests/e2e/desktop.mjs` on and off.
+  - *Done when:* development gate; `app.js` lines before and after recorded.
+- [ ] **M8.5.8o - Public functions of slice (a)** (Y7; waits for Z17; after M8.5.8c, M8.5.8e, M8.5.8h).
+  - *Goal:* the functions of Z17 exist, are documented and tested, and call the kernels and methods (no second copy of a formula); nothing
+    existing changes.
+  - *Read first:* ARCHITECTURE §3.1 (public API layer); `depth.py`; `kernels/ages.py`, `kernels/jstext.py`, `kernels/formula.py`; contract
+    §9.8, §9.10-§9.12; TECHNICAL_DOCUMENTATION §25.
+  - *Change:* new `src/sedcoretool/records.py` and `src/sedcoretool/formulas.py`; tests; TECHNICAL_DOCUMENTATION §25 and §1.4; README (Python
+    section).
+  - *Do not touch:* `depth_to_age` and the other public functions; `sedcoretool.__all__`; the command line.
+  - *Model:* most capable, effort medium (a public interface is permanent).
+  - *Tests:* each function equals its method on the fixtures; argument errors (`ValueError`, `TypeError`) with their messages; the
+    architecture test; every existing test unchanged. `pytest`, `ruff`.
+  - *Done when:* development gate.
+- [ ] **M8.5.9 - Milestone gate of slice (a).** Before it come cards M8.5.8a-M8.5.8o (written by design card A2, 27 Nov 2026; decisions
+  Z1-Z17). The record reader is not part of slice (a) (Z16).
+  - *Goal:* the milestone gate on one commit, with the desktop end-to-end steps of every slice (a) path (`core.ages/1`, `core.depths/1`,
+    `core.age_model/1`, `core.bacon/1`, `core.columns/1`, the many-core step of M8.5.8a), engine on and off.
   - *Model:* fast, effort low (reading CI results).
   - *Done when:* `tests` and *Desktop builds* are green on Windows, macOS and Linux on one commit, or each failure is recorded with its
     message and a decision of the maintainer.
