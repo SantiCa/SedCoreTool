@@ -1071,7 +1071,9 @@ computed columns until the output.
    the method reports the whole character. A lone surrogate in a formula or a name reaches the method as U+FFFD (§9.11, `TextEncoder`).
    No fixture contains either.
 
-**Open point (found by card M8.5.8g; needs the maintainer).** Z12 cuts each argument to 128 bytes "so that the summary stays within
+**Decided 28 November 2026 by the maintainer: option (b)**, error keys and arguments as packed result buffers (card M8.5.8h writes the
+exact format into the `summary` and output rows above and replaces this paragraph); the token-text quirks of the parser are ported as
+they are. **The point as found by card M8.5.8g:** Z12 cuts each argument to 128 bytes "so that the summary stays within
 8 KiB", but 256 errors cannot fit: an entry such as `{"index":255,"key":"tooDeep","arg":null}` is 41 bytes (256 of them about 10.5 KiB
 without any argument) and one with a 128-byte argument 162 bytes (about 50 fit in 8 KiB); the coordinator answers `INTERNAL` to a larger
 summary (§9.3). Options: (a) a larger summary bound for this method only, with each argument cut to 128 bytes of escaped JSON (about

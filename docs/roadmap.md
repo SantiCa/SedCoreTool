@@ -30,7 +30,7 @@ not appended). Earlier status records, check logs and audit texts: [roadmap-hist
   capable, medium), **Q17** (spurious BUSY notices; most capable, medium).
 - **Decisions of 21 Nov 2026 after M8.4.19:** rule 6 keeps both paths (small sections stay on today's path); the tiled flag stays off until the release gate. Decisions X1-X4 approved and delivered (M8.4.41–M8.4.43).
 - **Design card A2 done (27 Nov 2026):** cards **M8.5.8a-M8.5.8o** of the rest of slice (a) written before M8.5.9, with decisions
-  **Z1-Z17** ([block](#decisions-for-the-rest-of-slice-a-a2)). Z1-Z17 approved as recommended (27 Nov 2026). **M8.5.8a-g** done; next **M8.5.8h** (most capable, high), waiting for the maintainer's choice on the `core.columns/1` error summary (contract §9.12 "Open point"). V0.155 waits for more cards (maintainer, 27 Nov 2026).
+  **Z1-Z17** ([block](#decisions-for-the-rest-of-slice-a-a2)). Z1-Z17 approved as recommended (27 Nov 2026). **M8.5.8a-g** done; **M8.5.8h** in progress (most capable, high); 28 Nov 2026 the maintainer chose packed result buffers for formula errors and porting the parser's token-text quirks as they are. V0.155 waits for more cards (maintainer, 27 Nov 2026).
 - **Where M8 stands:** M8.1-M8.4 done (M8.4 parts A, B, C). M8.5.1–M8.5.8 done (including M8.5.6b).
 - **Decisions waiting for the maintainer:** promote or remove the flags marked so in the [flag table](#flags); `Q5` part 3 (saved format of
   long series) only if a save benchmark shows a slow save. Every lettered decision up to Y11 and Z1-Z17 is approved.
@@ -1043,7 +1043,7 @@ after. The order is the order of this list; cards written later go before the ga
     = 8); `movavg` with a negative `n` uses `slice` wrap-around; `round(-0.4)` = −0; scalar results are not filtered for finiteness.
     TECHNICAL §17.3 corrected (`median` uses its first argument; overflow can leave ±Infinity/NaN cells). Bugs found outside the card moved
     into M8.5.8j, M8.5.8l and M8.5.8n ("Also" items). `tests/app/core-columns-fixtures.test.mjs` (6). Checks (Windows): `npm test` 738/738,
-    typecheck. **Open:** the summary of 256 errors cannot fit in 8 KiB (contract §9.12 "Open point"); M8.5.8h waits for that decision.
+    typecheck. The summary of 256 errors could not fit in 8 KiB: decided 28 Nov 2026, errors travel as packed result buffers (M8.5.8h).
   - *Goal:* the contract describes the formula language of computed columns and the method that evaluates a core's computed columns in
     order; fixtures made by `sheet.js` (as fixed by M8.5.8f) fix their results.
   - *Read first:* contract §3 (metadata limits), §4 "Tables", §9; TECHNICAL_DOCUMENTATION §17.1, §17.3; `sheet.js` (`tokenize`, `parseFormula`,
